@@ -166,7 +166,7 @@ CompressorDelay:parseInt($('cd'+i).value),
 Power:$('pw'+i).checked,
 TempControl:$('tc'+i).checked,
 ProfileNo:parseInt($('fp'+i).value),
-LiveTest:$('lt'+i).checked,
+LiveTest:$('lt'+i)?$('lt'+i).checked:false,
 BrewServices:bs};
 fetch('/fermenter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
 .then(r=>r.json()).then(function(d){msg('fm'+i,d.msg,d.status=='ok');dirty=false;setTimeout(loadFermenters,500)})
