@@ -1,0 +1,1453 @@
+#
+# HACS prerequisites (install via HACS → Frontend before using this file):
+#   • apexcharts-card      https://github.com/RomRider/apexcharts-card
+#   • lovelace-mushroom    https://github.com/piitaya/lovelace-mushroom
+#   • card-mod             https://github.com/thomasloven/lovelace-card-mod
+#
+
+views:
+  - type: sections
+    sections:
+      - cards:
+          - type: custom:mushroom-chips-card
+            chips:
+              - type: template
+                entity: sensor.ourbrewbot_f0_status
+                content: >
+                  {{ states('sensor.ourbrewbot_f0_name') | default('Fermenter 0',
+                  true) }}: {{ states('sensor.ourbrewbot_f0_status') | title }}
+                icon: mdi:thermometer
+                icon_color: >
+                  {% set s = states('sensor.ourbrewbot_f0_status') %} {% if s ==
+                  'heating' %} orange {% elif s == 'cooling' %} blue {% elif s
+                  == 'alarm' %} red {% else %} green {% endif %}
+              - type: template
+                entity: sensor.ourbrewbot_f1_status
+                content: >
+                  {{ states('sensor.ourbrewbot_f1_name') | default('Fermenter 1',
+                  true) }}: {{ states('sensor.ourbrewbot_f1_status') | title }}
+                icon: mdi:thermometer
+                icon_color: >
+                  {% set s = states('sensor.ourbrewbot_f1_status') %} {% if s ==
+                  'heating' %} orange {% elif s == 'cooling' %} blue {% elif s
+                  == 'alarm' %} red {% else %} green {% endif %}
+              - type: template
+                entity: sensor.ourbrewbot_f2_status
+                content: >
+                  {{ states('sensor.ourbrewbot_f2_name') | default('Fermenter 2',
+                  true) }}: {{ states('sensor.ourbrewbot_f2_status') | title }}
+                icon: mdi:thermometer
+                icon_color: >
+                  {% set s = states('sensor.ourbrewbot_f2_status') %} {% if s ==
+                  'heating' %} orange {% elif s == 'cooling' %} blue {% elif s
+                  == 'alarm' %} red {% else %} green {% endif %}
+              - type: template
+                entity: sensor.ourbrewbot_f3_status
+                content: >
+                  {{ states('sensor.ourbrewbot_f3_name') | default('Fermenter 3',
+                  true) }}: {{ states('sensor.ourbrewbot_f3_status') | title }}
+                icon: mdi:thermometer
+                icon_color: >
+                  {% set s = states('sensor.ourbrewbot_f3_status') %} {% if s ==
+                  'heating' %} orange {% elif s == 'cooling' %} blue {% elif s
+                  == 'alarm' %} red {% else %} green {% endif %}
+            grid_options:
+              columns: full
+            alignment: center
+        column_span: 4
+      - type: grid
+        cards:
+          - type: conditional
+            conditions:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity: sensor.ourbrewbot_f0_power
+                    state: 'ON'
+                  - condition: state
+                    entity: sensor.ourbrewbot_f0_free_heap
+                    state_not: unavailable
+            card:
+              type: vertical-stack
+              cards:
+                - type: custom:mushroom-title-card
+                  title: >
+                    {{ states('sensor.ourbrewbot_f0_name') | default('Fermenter 0',
+                    true) }}
+                  subtitle: >
+                    {% set beer  = states('sensor.ourbrewbot_f0_beer_name') %} {%
+                    set yeast = states('sensor.ourbrewbot_f0_yeast') %} {% if beer
+                    not in ['unavailable','unknown',''] and yeast not in
+                    ['unavailable','unknown',''] %}
+                      {{ beer }} · {{ yeast }}
+                    {% elif beer not in ['unavailable','unknown',''] %}
+                      {{ beer }}
+                    {% else %}
+                      No beer loaded
+                    {% endif %}
+                - type: custom:mushroom-chips-card
+                  chips:
+                    - type: template
+                      entity: sensor.ourbrewbot_f0_status
+                      content: '{{ states(''sensor.ourbrewbot_f0_status'') | title }}'
+                      icon: >
+                        {% set s = states('sensor.ourbrewbot_f0_status') %} {% if s
+                        == 'heating' %} mdi:fire {% elif s == 'cooling' %}
+                        mdi:snowflake {% elif s == 'alarm' %} mdi:alert {% else
+                        %} mdi:check-circle {% endif %}
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f0_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                      card_mod:
+                        style: >
+                          {% if states('sensor.ourbrewbot_f0_status') == 'alarm' %}
+                          ha-card {
+                            animation: brewbot-blink 1s step-start infinite;
+                          } @keyframes brewbot-blink { 50% { opacity: 0; } } {%
+                          endif %}
+                    - type: template
+                      entity: sensor.ourbrewbot_f0_power
+                      content: Power
+                      icon: mdi:power
+                      icon_color: >
+                        {{ 'green' if states('sensor.ourbrewbot_f0_power') == 'ON'
+                        else 'grey' }}
+                    - type: template
+                      entity: sensor.ourbrewbot_f0_temp_control
+                      content: Temp Ctrl
+                      icon: mdi:thermostat
+                      icon_color: >
+                        {{ 'blue' if states('sensor.ourbrewbot_f0_temp_control') ==
+                        'ON' else 'grey' }}
+                    - type: template
+                      entity: sensor.ourbrewbot_f0_profile_running
+                      content: Profile
+                      icon: mdi:chart-timeline-variant
+                      icon_color: >
+                        {{ 'purple' if
+                        states('sensor.ourbrewbot_f0_profile_running') == 'ON' else
+                        'grey' }}
+                - type: custom:apexcharts-card
+                  header:
+                    show: true
+                    title: Temperature — 7 Days
+                    show_states: true
+                    colorize_states: true
+                  graph_span: 7d
+                  apex_config:
+                    chart:
+                      height: 250
+                    legend:
+                      show: true
+                      position: bottom
+                    stroke:
+                      curve: smooth
+                      dashArray:
+                        - 0
+                        - 0
+                        - 6
+                        - 6
+                    fill:
+                      type:
+                        - gradient
+                        - solid
+                        - solid
+                        - solid
+                      opacity:
+                        - 0.15
+                        - 0
+                        - 0
+                        - 0
+                    tooltip:
+                      shared: true
+                      x:
+                        format: dd MMM HH:mm
+                    yaxis:
+                      - id: temp
+                        title:
+                          text: Temperature
+                        decimalsInFloat: 1
+                        forceNiceScale: true
+                  series:
+                    - entity: sensor.ourbrewbot_f0_beer_temperature
+                      name: Beer Temp
+                      yaxis_id: temp
+                      color: '#FF6B35'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f0_ambient_temperature
+                      name: Ambient Temp
+                      yaxis_id: temp
+                      color: '#9C27B0'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f0_ceiling_temperature
+                      name: Ceiling
+                      yaxis_id: temp
+                      color: '#4CAF50'
+                      stroke_width: 1
+                    - entity: sensor.ourbrewbot_f0_floor_temperature
+                      name: Floor
+                      yaxis_id: temp
+                      color: '#4CAF50'
+                      stroke_width: 1
+                - type: custom:apexcharts-card
+                  header:
+                    show: true
+                    title: Gravity — 7 Days
+                    show_states: true
+                    colorize_states: true
+                  graph_span: 7d
+                  apex_config:
+                    chart:
+                      height: 250
+                    legend:
+                      show: true
+                      position: bottom
+                    stroke:
+                      curve: smooth
+                      dashArray:
+                        - 0
+                        - 6
+                        - 6
+                    fill:
+                      type:
+                        - gradient
+                        - solid
+                        - solid
+                      opacity:
+                        - 0.15
+                        - 0
+                        - 0
+                    tooltip:
+                      shared: true
+                      x:
+                        format: dd MMM HH:mm
+                    yaxis:
+                      - id: gravity
+                        title:
+                          text: Gravity (SG)
+                        decimalsInFloat: 4
+                        forceNiceScale: true
+                  series:
+                    - entity: sensor.ourbrewbot_f0_gravity
+                      name: Current SG
+                      yaxis_id: gravity
+                      color: '#2196F3'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f0_og
+                      name: Original Gravity
+                      yaxis_id: gravity
+                      color: '#FF9800'
+                      stroke_width: 1
+                      data_generator: |
+                        const v = parseFloat(entity.state);
+                        if (isNaN(v) || v <= 0) return [];
+                        const now = new Date().getTime();
+                        return [[now - 7*24*3600*1000, v], [now, v]];
+                    - entity: sensor.ourbrewbot_f0_tg
+                      name: Target Gravity
+                      yaxis_id: gravity
+                      color: '#4CAF50'
+                      stroke_width: 1
+                      data_generator: |
+                        const v = parseFloat(entity.state);
+                        if (isNaN(v) || v <= 0) return [];
+                        const now = new Date().getTime();
+                        return [[now - 7*24*3600*1000, v], [now, v]];
+                - type: grid
+                  columns: 2
+                  square: false
+                  cards:
+                    - type: custom:mushroom-template-card
+                      primary: Status
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_status'') | title }}'
+                      icon: >
+                        {% set s = states('sensor.ourbrewbot_f0_status') %} {% if s
+                        == 'heating' %} mdi:fire {% elif s == 'cooling' %}
+                        mdi:snowflake {% elif s == 'alarm' %} mdi:alert-circle
+                        {% else %} mdi:check-circle-outline {% endif %}
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f0_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                    - type: custom:mushroom-template-card
+                      primary: Power
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_power'') }}'
+                      icon: mdi:power
+                      icon_color: >
+                        {{ 'green' if states('sensor.ourbrewbot_f0_power') == 'ON'
+                        else 'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Beer Temp
+                      secondary: >
+                        {% set t = states('sensor.ourbrewbot_f0_beer_temperature')
+                        %} {% set u =
+                        states('sensor.ourbrewbot_f0_temperature_unit') |
+                        default('C') %} {{ t }} °{{ u }}
+                      icon: mdi:thermometer
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f0_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                    - type: custom:mushroom-template-card
+                      primary: Temp Control
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_temp_control'') }}'
+                      icon: mdi:thermostat
+                      icon_color: >
+                        {{ 'blue' if states('sensor.ourbrewbot_f0_temp_control') ==
+                        'ON' else 'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Ambient Temp
+                      secondary: >
+                        {% set t =
+                        states('sensor.ourbrewbot_f0_ambient_temperature') %} {%
+                        set u = states('sensor.ourbrewbot_f0_temperature_unit') |
+                        default('C') %} {{ t }} °{{ u }}
+                      icon: mdi:home-thermometer-outline
+                      icon_color: purple
+                    - type: custom:mushroom-template-card
+                      primary: Profile
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_profile_running'') }}'
+                      icon: mdi:chart-timeline-variant
+                      icon_color: >
+                        {{ 'purple' if
+                        states('sensor.ourbrewbot_f0_profile_running') == 'ON' else
+                        'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Temp Range
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_temp_range'') }}'
+                      icon: mdi:thermometer-lines
+                      icon_color: green
+                    - type: custom:mushroom-template-card
+                      primary: Comp Delay
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_compressor_delay'') }} min'
+                      icon: mdi:timer-outline
+                      icon_color: grey
+                    - type: custom:mushroom-template-card
+                      primary: Hysteresis
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_hysteresis'') }} °'
+                      icon: mdi:swap-vertical
+                      icon_color: grey
+                    - type: custom:mushroom-template-card
+                      primary: OG
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_og'') }}'
+                      icon: mdi:cup-water
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Current SG
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_gravity'') }}'
+                      icon: mdi:water
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Target SG
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_tg'') }}'
+                      icon: mdi:target
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Attenuation
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_attenuation'') }} %'
+                      icon: mdi:trending-down
+                      icon_color: teal
+                    - type: custom:mushroom-template-card
+                      primary: Est. ABV
+                      secondary: '{{ states(''sensor.ourbrewbot_f0_est_abv'') }} %'
+                      icon: mdi:beer
+                      icon_color: amber
+                    - type: custom:mushroom-template-card
+                      primary: Progress
+                      secondary: >-
+                        {{ states('sensor.ourbrewbot_f0_fermentation_progress') }}
+                        %
+                      icon: mdi:progress-clock
+                      icon_color: >
+                        {% set p =
+                        states('sensor.ourbrewbot_f0_fermentation_progress') |
+                        float(-1) %} {% if p < 0 %} grey {% elif p < 50 %}
+                        orange {% elif p < 90 %} yellow {% else %} green {%
+                        endif %}
+                - type: entities
+                  entities:
+                    - entity: sensor.ourbrewbot_f0_rssi
+                      name: Signal (RSSI)
+                    - entity: sensor.ourbrewbot_f0_free_heap
+                      name: Free Heap
+                    - type: custom:mushroom-template-card
+                      primary: Last Seen
+                      secondary: >
+                        {% set lu =
+                        states.sensor.ourbrewbot_f0_free_heap.last_updated %} {% if
+                        lu %}
+                          {{ relative_time(lu) }} ago
+                        {% else %}
+                          unknown
+                        {% endif %}
+                      icon: mdi:clock-outline
+                      icon_color: grey
+                - type: conditional
+                  conditions:
+                    - condition: state
+                      entity: binary_sensor.ourbrewbot_f0_online
+                      state: 'off'
+                  card:
+                    type: custom:mushroom-template-card
+                    primary: Device Offline
+                    secondary: >
+                      {{ states('sensor.ourbrewbot_f0_name') | default('Fermenter
+                      0', true) }} has not published in the last 3 minutes.
+                      Check power and Wi-Fi.
+                    icon: mdi:wifi-off
+                    icon_color: red
+                    card_mod:
+                      style: |
+                        ha-card {
+                          border: 2px solid var(--error-color);
+                          animation: brewbot-blink 1s step-start infinite;
+                        }
+                        @keyframes brewbot-blink { 50% { opacity: 0.4; } }
+      - type: grid
+        cards:
+          - type: conditional
+            conditions:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity: sensor.ourbrewbot_f1_power
+                    state: 'ON'
+                  - condition: state
+                    entity: sensor.ourbrewbot_f1_free_heap
+                    state_not: unavailable
+            card:
+              type: vertical-stack
+              cards:
+                - type: custom:mushroom-title-card
+                  title: >
+                    {{ states('sensor.ourbrewbot_f1_name') | default('Fermenter 0',
+                    true) }}
+                  subtitle: >
+                    {% set beer  = states('sensor.ourbrewbot_f1_beer_name') %} {%
+                    set yeast = states('sensor.ourbrewbot_f1_yeast') %} {% if beer
+                    not in ['unavailable','unknown',''] and yeast not in
+                    ['unavailable','unknown',''] %}
+                      {{ beer }} · {{ yeast }}
+                    {% elif beer not in ['unavailable','unknown',''] %}
+                      {{ beer }}
+                    {% else %}
+                      No beer loaded
+                    {% endif %}
+                - type: custom:mushroom-chips-card
+                  chips:
+                    - type: template
+                      entity: sensor.ourbrewbot_f1_status
+                      content: '{{ states(''sensor.ourbrewbot_f1_status'') | title }}'
+                      icon: >
+                        {% set s = states('sensor.ourbrewbot_f1_status') %} {% if s
+                        == 'heating' %} mdi:fire {% elif s == 'cooling' %}
+                        mdi:snowflake {% elif s == 'alarm' %} mdi:alert {% else
+                        %} mdi:check-circle {% endif %}
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f1_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                      card_mod:
+                        style: >
+                          {% if states('sensor.ourbrewbot_f1_status') == 'alarm' %}
+                          ha-card {
+                            animation: brewbot-blink 1s step-start infinite;
+                          } @keyframes brewbot-blink { 50% { opacity: 0; } } {%
+                          endif %}
+                    - type: template
+                      entity: sensor.ourbrewbot_f1_power
+                      content: Power
+                      icon: mdi:power
+                      icon_color: >
+                        {{ 'green' if states('sensor.ourbrewbot_f1_power') == 'ON'
+                        else 'grey' }}
+                    - type: template
+                      entity: sensor.ourbrewbot_f1_temp_control
+                      content: Temp Ctrl
+                      icon: mdi:thermostat
+                      icon_color: >
+                        {{ 'blue' if states('sensor.ourbrewbot_f1_temp_control') ==
+                        'ON' else 'grey' }}
+                    - type: template
+                      entity: sensor.ourbrewbot_f1_profile_running
+                      content: Profile
+                      icon: mdi:chart-timeline-variant
+                      icon_color: >
+                        {{ 'purple' if
+                        states('sensor.ourbrewbot_f1_profile_running') == 'ON' else
+                        'grey' }}
+                - type: custom:apexcharts-card
+                  header:
+                    show: true
+                    title: Temperature — 7 Days
+                    show_states: true
+                    colorize_states: true
+                  graph_span: 7d
+                  apex_config:
+                    chart:
+                      height: 250
+                    legend:
+                      show: true
+                      position: bottom
+                    stroke:
+                      curve: smooth
+                      dashArray:
+                        - 0
+                        - 0
+                        - 6
+                        - 6
+                    fill:
+                      type:
+                        - gradient
+                        - solid
+                        - solid
+                        - solid
+                      opacity:
+                        - 0.15
+                        - 0
+                        - 0
+                        - 0
+                    tooltip:
+                      shared: true
+                      x:
+                        format: dd MMM HH:mm
+                    yaxis:
+                      - id: temp
+                        title:
+                          text: Temperature
+                        decimalsInFloat: 1
+                        forceNiceScale: true
+                  series:
+                    - entity: sensor.ourbrewbot_f1_beer_temperature
+                      name: Beer Temp
+                      yaxis_id: temp
+                      color: '#FF6B35'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f1_ambient_temperature
+                      name: Ambient Temp
+                      yaxis_id: temp
+                      color: '#9C27B0'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f1_ceiling_temperature
+                      name: Ceiling
+                      yaxis_id: temp
+                      color: '#4CAF50'
+                      stroke_width: 1
+                    - entity: sensor.ourbrewbot_f1_floor_temperature
+                      name: Floor
+                      yaxis_id: temp
+                      color: '#4CAF50'
+                      stroke_width: 1
+                - type: custom:apexcharts-card
+                  header:
+                    show: true
+                    title: Gravity — 7 Days
+                    show_states: true
+                    colorize_states: true
+                  graph_span: 7d
+                  apex_config:
+                    chart:
+                      height: 250
+                    legend:
+                      show: true
+                      position: bottom
+                    stroke:
+                      curve: smooth
+                      dashArray:
+                        - 0
+                        - 6
+                        - 6
+                    fill:
+                      type:
+                        - gradient
+                        - solid
+                        - solid
+                      opacity:
+                        - 0.15
+                        - 0
+                        - 0
+                    tooltip:
+                      shared: true
+                      x:
+                        format: dd MMM HH:mm
+                    yaxis:
+                      - id: gravity
+                        title:
+                          text: Gravity (SG)
+                        decimalsInFloat: 4
+                        forceNiceScale: true
+                  series:
+                    - entity: sensor.ourbrewbot_f1_gravity
+                      name: Current SG
+                      yaxis_id: gravity
+                      color: '#2196F3'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f1_og
+                      name: Original Gravity
+                      yaxis_id: gravity
+                      color: '#FF9800'
+                      stroke_width: 1
+                      data_generator: |
+                        const v = parseFloat(entity.state);
+                        if (isNaN(v) || v <= 0) return [];
+                        const now = new Date().getTime();
+                        return [[now - 7*24*3600*1000, v], [now, v]];
+                    - entity: sensor.ourbrewbot_f1_tg
+                      name: Target Gravity
+                      yaxis_id: gravity
+                      color: '#4CAF50'
+                      stroke_width: 1
+                      data_generator: |
+                        const v = parseFloat(entity.state);
+                        if (isNaN(v) || v <= 0) return [];
+                        const now = new Date().getTime();
+                        return [[now - 7*24*3600*1000, v], [now, v]];
+                - type: grid
+                  columns: 2
+                  square: false
+                  cards:
+                    - type: custom:mushroom-template-card
+                      primary: Status
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_status'') | title }}'
+                      icon: >
+                        {% set s = states('sensor.ourbrewbot_f1_status') %} {% if s
+                        == 'heating' %} mdi:fire {% elif s == 'cooling' %}
+                        mdi:snowflake {% elif s == 'alarm' %} mdi:alert-circle
+                        {% else %} mdi:check-circle-outline {% endif %}
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f1_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                    - type: custom:mushroom-template-card
+                      primary: Power
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_power'') }}'
+                      icon: mdi:power
+                      icon_color: >
+                        {{ 'green' if states('sensor.ourbrewbot_f1_power') == 'ON'
+                        else 'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Beer Temp
+                      secondary: >
+                        {% set t = states('sensor.ourbrewbot_f1_beer_temperature')
+                        %} {% set u =
+                        states('sensor.ourbrewbot_f1_temperature_unit') |
+                        default('C') %} {{ t }} °{{ u }}
+                      icon: mdi:thermometer
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f1_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                    - type: custom:mushroom-template-card
+                      primary: Temp Control
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_temp_control'') }}'
+                      icon: mdi:thermostat
+                      icon_color: >
+                        {{ 'blue' if states('sensor.ourbrewbot_f1_temp_control') ==
+                        'ON' else 'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Ambient Temp
+                      secondary: >
+                        {% set t =
+                        states('sensor.ourbrewbot_f1_ambient_temperature') %} {%
+                        set u = states('sensor.ourbrewbot_f1_temperature_unit') |
+                        default('C') %} {{ t }} °{{ u }}
+                      icon: mdi:home-thermometer-outline
+                      icon_color: purple
+                    - type: custom:mushroom-template-card
+                      primary: Profile
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_profile_running'') }}'
+                      icon: mdi:chart-timeline-variant
+                      icon_color: >
+                        {{ 'purple' if
+                        states('sensor.ourbrewbot_f1_profile_running') == 'ON' else
+                        'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Temp Range
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_temp_range'') }}'
+                      icon: mdi:thermometer-lines
+                      icon_color: green
+                    - type: custom:mushroom-template-card
+                      primary: Comp Delay
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_compressor_delay'') }} min'
+                      icon: mdi:timer-outline
+                      icon_color: grey
+                    - type: custom:mushroom-template-card
+                      primary: Hysteresis
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_hysteresis'') }} °'
+                      icon: mdi:swap-vertical
+                      icon_color: grey
+                    - type: custom:mushroom-template-card
+                      primary: OG
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_og'') }}'
+                      icon: mdi:cup-water
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Current SG
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_gravity'') }}'
+                      icon: mdi:water
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Target SG
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_tg'') }}'
+                      icon: mdi:target
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Attenuation
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_attenuation'') }} %'
+                      icon: mdi:trending-down
+                      icon_color: teal
+                    - type: custom:mushroom-template-card
+                      primary: Est. ABV
+                      secondary: '{{ states(''sensor.ourbrewbot_f1_est_abv'') }} %'
+                      icon: mdi:beer
+                      icon_color: amber
+                    - type: custom:mushroom-template-card
+                      primary: Progress
+                      secondary: >-
+                        {{ states('sensor.ourbrewbot_f1_fermentation_progress') }}
+                        %
+                      icon: mdi:progress-clock
+                      icon_color: >
+                        {% set p =
+                        states('sensor.ourbrewbot_f1_fermentation_progress') |
+                        float(-1) %} {% if p < 0 %} grey {% elif p < 50 %}
+                        orange {% elif p < 90 %} yellow {% else %} green {%
+                        endif %}
+                - type: entities
+                  entities:
+                    - entity: sensor.ourbrewbot_f1_rssi
+                      name: Signal (RSSI)
+                    - entity: sensor.ourbrewbot_f1_free_heap
+                      name: Free Heap
+                    - type: custom:mushroom-template-card
+                      primary: Last Seen
+                      secondary: >
+                        {% set lu =
+                        states.sensor.ourbrewbot_f1_free_heap.last_updated %} {% if
+                        lu %}
+                          {{ relative_time(lu) }} ago
+                        {% else %}
+                          unknown
+                        {% endif %}
+                      icon: mdi:clock-outline
+                      icon_color: grey
+                - type: conditional
+                  conditions:
+                    - condition: state
+                      entity: binary_sensor.ourbrewbot_f1_online
+                      state: 'off'
+                  card:
+                    type: custom:mushroom-template-card
+                    primary: Device Offline
+                    secondary: >
+                      {{ states('sensor.ourbrewbot_f1_name') | default('Fermenter
+                      1', true) }} has not published in the last 3 minutes.
+                      Check power and Wi-Fi.
+                    icon: mdi:wifi-off
+                    icon_color: red
+                    card_mod:
+                      style: |
+                        ha-card {
+                          border: 2px solid var(--error-color);
+                          animation: brewbot-blink 1s step-start infinite;
+                        }
+                        @keyframes brewbot-blink { 50% { opacity: 0.4; } }
+      - type: grid
+        cards:
+          - type: conditional
+            conditions:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity: sensor.ourbrewbot_f2_power
+                    state: 'ON'
+                  - condition: state
+                    entity: sensor.ourbrewbot_f2_free_heap
+                    state_not: unavailable
+            card:
+              type: vertical-stack
+              cards:
+                - type: custom:mushroom-title-card
+                  title: >
+                    {{ states('sensor.ourbrewbot_f2_name') | default('Fermenter 0',
+                    true) }}
+                  subtitle: >
+                    {% set beer  = states('sensor.ourbrewbot_f2_beer_name') %} {%
+                    set yeast = states('sensor.ourbrewbot_f2_yeast') %} {% if beer
+                    not in ['unavailable','unknown',''] and yeast not in
+                    ['unavailable','unknown',''] %}
+                      {{ beer }} · {{ yeast }}
+                    {% elif beer not in ['unavailable','unknown',''] %}
+                      {{ beer }}
+                    {% else %}
+                      No beer loaded
+                    {% endif %}
+                - type: custom:mushroom-chips-card
+                  chips:
+                    - type: template
+                      entity: sensor.ourbrewbot_f2_status
+                      content: '{{ states(''sensor.ourbrewbot_f2_status'') | title }}'
+                      icon: >
+                        {% set s = states('sensor.ourbrewbot_f2_status') %} {% if s
+                        == 'heating' %} mdi:fire {% elif s == 'cooling' %}
+                        mdi:snowflake {% elif s == 'alarm' %} mdi:alert {% else
+                        %} mdi:check-circle {% endif %}
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f2_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                      card_mod:
+                        style: >
+                          {% if states('sensor.ourbrewbot_f2_status') == 'alarm' %}
+                          ha-card {
+                            animation: brewbot-blink 1s step-start infinite;
+                          } @keyframes brewbot-blink { 50% { opacity: 0; } } {%
+                          endif %}
+                    - type: template
+                      entity: sensor.ourbrewbot_f2_power
+                      content: Power
+                      icon: mdi:power
+                      icon_color: >
+                        {{ 'green' if states('sensor.ourbrewbot_f2_power') == 'ON'
+                        else 'grey' }}
+                    - type: template
+                      entity: sensor.ourbrewbot_f2_temp_control
+                      content: Temp Ctrl
+                      icon: mdi:thermostat
+                      icon_color: >
+                        {{ 'blue' if states('sensor.ourbrewbot_f2_temp_control') ==
+                        'ON' else 'grey' }}
+                    - type: template
+                      entity: sensor.ourbrewbot_f2_profile_running
+                      content: Profile
+                      icon: mdi:chart-timeline-variant
+                      icon_color: >
+                        {{ 'purple' if
+                        states('sensor.ourbrewbot_f2_profile_running') == 'ON' else
+                        'grey' }}
+                - type: custom:apexcharts-card
+                  header:
+                    show: true
+                    title: Temperature — 7 Days
+                    show_states: true
+                    colorize_states: true
+                  graph_span: 7d
+                  apex_config:
+                    chart:
+                      height: 250
+                    legend:
+                      show: true
+                      position: bottom
+                    stroke:
+                      curve: smooth
+                      dashArray:
+                        - 0
+                        - 0
+                        - 6
+                        - 6
+                    fill:
+                      type:
+                        - gradient
+                        - solid
+                        - solid
+                        - solid
+                      opacity:
+                        - 0.15
+                        - 0
+                        - 0
+                        - 0
+                    tooltip:
+                      shared: true
+                      x:
+                        format: dd MMM HH:mm
+                    yaxis:
+                      - id: temp
+                        title:
+                          text: Temperature
+                        decimalsInFloat: 1
+                        forceNiceScale: true
+                  series:
+                    - entity: sensor.ourbrewbot_f2_beer_temperature
+                      name: Beer Temp
+                      yaxis_id: temp
+                      color: '#FF6B35'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f2_ambient_temperature
+                      name: Ambient Temp
+                      yaxis_id: temp
+                      color: '#9C27B0'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f2_ceiling_temperature
+                      name: Ceiling
+                      yaxis_id: temp
+                      color: '#4CAF50'
+                      stroke_width: 1
+                    - entity: sensor.ourbrewbot_f2_floor_temperature
+                      name: Floor
+                      yaxis_id: temp
+                      color: '#4CAF50'
+                      stroke_width: 1
+                - type: custom:apexcharts-card
+                  header:
+                    show: true
+                    title: Gravity — 7 Days
+                    show_states: true
+                    colorize_states: true
+                  graph_span: 7d
+                  apex_config:
+                    chart:
+                      height: 250
+                    legend:
+                      show: true
+                      position: bottom
+                    stroke:
+                      curve: smooth
+                      dashArray:
+                        - 0
+                        - 6
+                        - 6
+                    fill:
+                      type:
+                        - gradient
+                        - solid
+                        - solid
+                      opacity:
+                        - 0.15
+                        - 0
+                        - 0
+                    tooltip:
+                      shared: true
+                      x:
+                        format: dd MMM HH:mm
+                    yaxis:
+                      - id: gravity
+                        title:
+                          text: Gravity (SG)
+                        decimalsInFloat: 4
+                        forceNiceScale: true
+                  series:
+                    - entity: sensor.ourbrewbot_f2_gravity
+                      name: Current SG
+                      yaxis_id: gravity
+                      color: '#2196F3'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f2_og
+                      name: Original Gravity
+                      yaxis_id: gravity
+                      color: '#FF9800'
+                      stroke_width: 1
+                      data_generator: |
+                        const v = parseFloat(entity.state);
+                        if (isNaN(v) || v <= 0) return [];
+                        const now = new Date().getTime();
+                        return [[now - 7*24*3600*1000, v], [now, v]];
+                    - entity: sensor.ourbrewbot_f2_tg
+                      name: Target Gravity
+                      yaxis_id: gravity
+                      color: '#4CAF50'
+                      stroke_width: 1
+                      data_generator: |
+                        const v = parseFloat(entity.state);
+                        if (isNaN(v) || v <= 0) return [];
+                        const now = new Date().getTime();
+                        return [[now - 7*24*3600*1000, v], [now, v]];
+                - type: grid
+                  columns: 2
+                  square: false
+                  cards:
+                    - type: custom:mushroom-template-card
+                      primary: Status
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_status'') | title }}'
+                      icon: >
+                        {% set s = states('sensor.ourbrewbot_f2_status') %} {% if s
+                        == 'heating' %} mdi:fire {% elif s == 'cooling' %}
+                        mdi:snowflake {% elif s == 'alarm' %} mdi:alert-circle
+                        {% else %} mdi:check-circle-outline {% endif %}
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f2_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                    - type: custom:mushroom-template-card
+                      primary: Power
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_power'') }}'
+                      icon: mdi:power
+                      icon_color: >
+                        {{ 'green' if states('sensor.ourbrewbot_f2_power') == 'ON'
+                        else 'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Beer Temp
+                      secondary: >
+                        {% set t = states('sensor.ourbrewbot_f2_beer_temperature')
+                        %} {% set u =
+                        states('sensor.ourbrewbot_f2_temperature_unit') |
+                        default('C') %} {{ t }} °{{ u }}
+                      icon: mdi:thermometer
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f2_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                    - type: custom:mushroom-template-card
+                      primary: Temp Control
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_temp_control'') }}'
+                      icon: mdi:thermostat
+                      icon_color: >
+                        {{ 'blue' if states('sensor.ourbrewbot_f2_temp_control') ==
+                        'ON' else 'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Ambient Temp
+                      secondary: >
+                        {% set t =
+                        states('sensor.ourbrewbot_f2_ambient_temperature') %} {%
+                        set u = states('sensor.ourbrewbot_f2_temperature_unit') |
+                        default('C') %} {{ t }} °{{ u }}
+                      icon: mdi:home-thermometer-outline
+                      icon_color: purple
+                    - type: custom:mushroom-template-card
+                      primary: Profile
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_profile_running'') }}'
+                      icon: mdi:chart-timeline-variant
+                      icon_color: >
+                        {{ 'purple' if
+                        states('sensor.ourbrewbot_f2_profile_running') == 'ON' else
+                        'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Temp Range
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_temp_range'') }}'
+                      icon: mdi:thermometer-lines
+                      icon_color: green
+                    - type: custom:mushroom-template-card
+                      primary: Comp Delay
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_compressor_delay'') }} min'
+                      icon: mdi:timer-outline
+                      icon_color: grey
+                    - type: custom:mushroom-template-card
+                      primary: Hysteresis
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_hysteresis'') }} °'
+                      icon: mdi:swap-vertical
+                      icon_color: grey
+                    - type: custom:mushroom-template-card
+                      primary: OG
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_og'') }}'
+                      icon: mdi:cup-water
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Current SG
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_gravity'') }}'
+                      icon: mdi:water
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Target SG
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_tg'') }}'
+                      icon: mdi:target
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Attenuation
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_attenuation'') }} %'
+                      icon: mdi:trending-down
+                      icon_color: teal
+                    - type: custom:mushroom-template-card
+                      primary: Est. ABV
+                      secondary: '{{ states(''sensor.ourbrewbot_f2_est_abv'') }} %'
+                      icon: mdi:beer
+                      icon_color: amber
+                    - type: custom:mushroom-template-card
+                      primary: Progress
+                      secondary: >-
+                        {{ states('sensor.ourbrewbot_f2_fermentation_progress') }}
+                        %
+                      icon: mdi:progress-clock
+                      icon_color: >
+                        {% set p =
+                        states('sensor.ourbrewbot_f2_fermentation_progress') |
+                        float(-1) %} {% if p < 0 %} grey {% elif p < 50 %}
+                        orange {% elif p < 90 %} yellow {% else %} green {%
+                        endif %}
+                - type: entities
+                  entities:
+                    - entity: sensor.ourbrewbot_f2_rssi
+                      name: Signal (RSSI)
+                    - entity: sensor.ourbrewbot_f2_free_heap
+                      name: Free Heap
+                    - type: custom:mushroom-template-card
+                      primary: Last Seen
+                      secondary: >
+                        {% set lu =
+                        states.sensor.ourbrewbot_f2_free_heap.last_updated %} {% if
+                        lu %}
+                          {{ relative_time(lu) }} ago
+                        {% else %}
+                          unknown
+                        {% endif %}
+                      icon: mdi:clock-outline
+                      icon_color: grey
+                - type: conditional
+                  conditions:
+                    - condition: state
+                      entity: binary_sensor.ourbrewbot_f2_online
+                      state: 'off'
+                  card:
+                    type: custom:mushroom-template-card
+                    primary: Device Offline
+                    secondary: >
+                      {{ states('sensor.ourbrewbot_f2_name') | default('Fermenter
+                      3', true) }} has not published in the last 3 minutes.
+                      Check power and Wi-Fi.
+                    icon: mdi:wifi-off
+                    icon_color: red
+                    card_mod:
+                      style: |
+                        ha-card {
+                          border: 2px solid var(--error-color);
+                          animation: brewbot-blink 1s step-start infinite;
+                        }
+                        @keyframes brewbot-blink { 50% { opacity: 0.4; } }
+      - type: grid
+        cards:
+          - type: conditional
+            conditions:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity: sensor.ourbrewbot_f3_power
+                    state: 'ON'
+                  - condition: state
+                    entity: sensor.ourbrewbot_f3_free_heap
+                    state_not: unavailable
+            card:
+              type: vertical-stack
+              cards:
+                - type: custom:mushroom-title-card
+                  title: >
+                    {{ states('sensor.ourbrewbot_f3_name') | default('Fermenter 0',
+                    true) }}
+                  subtitle: >
+                    {% set beer  = states('sensor.ourbrewbot_f3_beer_name') %} {%
+                    set yeast = states('sensor.ourbrewbot_f3_yeast') %} {% if beer
+                    not in ['unavailable','unknown',''] and yeast not in
+                    ['unavailable','unknown',''] %}
+                      {{ beer }} · {{ yeast }}
+                    {% elif beer not in ['unavailable','unknown',''] %}
+                      {{ beer }}
+                    {% else %}
+                      No beer loaded
+                    {% endif %}
+                - type: custom:mushroom-chips-card
+                  chips:
+                    - type: template
+                      entity: sensor.ourbrewbot_f3_status
+                      content: '{{ states(''sensor.ourbrewbot_f3_status'') | title }}'
+                      icon: >
+                        {% set s = states('sensor.ourbrewbot_f3_status') %} {% if s
+                        == 'heating' %} mdi:fire {% elif s == 'cooling' %}
+                        mdi:snowflake {% elif s == 'alarm' %} mdi:alert {% else
+                        %} mdi:check-circle {% endif %}
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f3_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                      card_mod:
+                        style: >
+                          {% if states('sensor.ourbrewbot_f3_status') == 'alarm' %}
+                          ha-card {
+                            animation: brewbot-blink 1s step-start infinite;
+                          } @keyframes brewbot-blink { 50% { opacity: 0; } } {%
+                          endif %}
+                    - type: template
+                      entity: sensor.ourbrewbot_f3_power
+                      content: Power
+                      icon: mdi:power
+                      icon_color: >
+                        {{ 'green' if states('sensor.ourbrewbot_f3_power') == 'ON'
+                        else 'grey' }}
+                    - type: template
+                      entity: sensor.ourbrewbot_f3_temp_control
+                      content: Temp Ctrl
+                      icon: mdi:thermostat
+                      icon_color: >
+                        {{ 'blue' if states('sensor.ourbrewbot_f3_temp_control') ==
+                        'ON' else 'grey' }}
+                    - type: template
+                      entity: sensor.ourbrewbot_f3_profile_running
+                      content: Profile
+                      icon: mdi:chart-timeline-variant
+                      icon_color: >
+                        {{ 'purple' if
+                        states('sensor.ourbrewbot_f3_profile_running') == 'ON' else
+                        'grey' }}
+                - type: custom:apexcharts-card
+                  header:
+                    show: true
+                    title: Temperature — 7 Days
+                    show_states: true
+                    colorize_states: true
+                  graph_span: 7d
+                  apex_config:
+                    chart:
+                      height: 250
+                    legend:
+                      show: true
+                      position: bottom
+                    stroke:
+                      curve: smooth
+                      dashArray:
+                        - 0
+                        - 0
+                        - 6
+                        - 6
+                    fill:
+                      type:
+                        - gradient
+                        - solid
+                        - solid
+                        - solid
+                      opacity:
+                        - 0.15
+                        - 0
+                        - 0
+                        - 0
+                    tooltip:
+                      shared: true
+                      x:
+                        format: dd MMM HH:mm
+                    yaxis:
+                      - id: temp
+                        title:
+                          text: Temperature
+                        decimalsInFloat: 1
+                        forceNiceScale: true
+                  series:
+                    - entity: sensor.ourbrewbot_f3_beer_temperature
+                      name: Beer Temp
+                      yaxis_id: temp
+                      color: '#FF6B35'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f3_ambient_temperature
+                      name: Ambient Temp
+                      yaxis_id: temp
+                      color: '#9C27B0'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f3_ceiling_temperature
+                      name: Ceiling
+                      yaxis_id: temp
+                      color: '#4CAF50'
+                      stroke_width: 1
+                    - entity: sensor.ourbrewbot_f3_floor_temperature
+                      name: Floor
+                      yaxis_id: temp
+                      color: '#4CAF50'
+                      stroke_width: 1
+                - type: custom:apexcharts-card
+                  header:
+                    show: true
+                    title: Gravity — 7 Days
+                    show_states: true
+                    colorize_states: true
+                  graph_span: 7d
+                  apex_config:
+                    chart:
+                      height: 250
+                    legend:
+                      show: true
+                      position: bottom
+                    stroke:
+                      curve: smooth
+                      dashArray:
+                        - 0
+                        - 6
+                        - 6
+                    fill:
+                      type:
+                        - gradient
+                        - solid
+                        - solid
+                      opacity:
+                        - 0.15
+                        - 0
+                        - 0
+                    tooltip:
+                      shared: true
+                      x:
+                        format: dd MMM HH:mm
+                    yaxis:
+                      - id: gravity
+                        title:
+                          text: Gravity (SG)
+                        decimalsInFloat: 4
+                        forceNiceScale: true
+                  series:
+                    - entity: sensor.ourbrewbot_f3_gravity
+                      name: Current SG
+                      yaxis_id: gravity
+                      color: '#2196F3'
+                      stroke_width: 2
+                    - entity: sensor.ourbrewbot_f3_og
+                      name: Original Gravity
+                      yaxis_id: gravity
+                      color: '#FF9800'
+                      stroke_width: 1
+                      data_generator: |
+                        const v = parseFloat(entity.state);
+                        if (isNaN(v) || v <= 0) return [];
+                        const now = new Date().getTime();
+                        return [[now - 7*24*3600*1000, v], [now, v]];
+                    - entity: sensor.ourbrewbot_f3_tg
+                      name: Target Gravity
+                      yaxis_id: gravity
+                      color: '#4CAF50'
+                      stroke_width: 1
+                      data_generator: |
+                        const v = parseFloat(entity.state);
+                        if (isNaN(v) || v <= 0) return [];
+                        const now = new Date().getTime();
+                        return [[now - 7*24*3600*1000, v], [now, v]];
+                - type: grid
+                  columns: 2
+                  square: false
+                  cards:
+                    - type: custom:mushroom-template-card
+                      primary: Status
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_status'') | title }}'
+                      icon: >
+                        {% set s = states('sensor.ourbrewbot_f3_status') %} {% if s
+                        == 'heating' %} mdi:fire {% elif s == 'cooling' %}
+                        mdi:snowflake {% elif s == 'alarm' %} mdi:alert-circle
+                        {% else %} mdi:check-circle-outline {% endif %}
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f3_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                    - type: custom:mushroom-template-card
+                      primary: Power
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_power'') }}'
+                      icon: mdi:power
+                      icon_color: >
+                        {{ 'green' if states('sensor.ourbrewbot_f3_power') == 'ON'
+                        else 'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Beer Temp
+                      secondary: >
+                        {% set t = states('sensor.ourbrewbot_f3_beer_temperature')
+                        %} {% set u =
+                        states('sensor.ourbrewbot_f3_temperature_unit') |
+                        default('C') %} {{ t }} °{{ u }}
+                      icon: mdi:thermometer
+                      icon_color: >
+                        {% set s = states('sensor.ourbrewbot_f3_status') %} {% if s
+                        == 'heating' %} orange {% elif s == 'cooling' %} blue {%
+                        elif s == 'alarm' %} red {% else %} green {% endif %}
+                    - type: custom:mushroom-template-card
+                      primary: Temp Control
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_temp_control'') }}'
+                      icon: mdi:thermostat
+                      icon_color: >
+                        {{ 'blue' if states('sensor.ourbrewbot_f3_temp_control') ==
+                        'ON' else 'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Ambient Temp
+                      secondary: >
+                        {% set t =
+                        states('sensor.ourbrewbot_f3_ambient_temperature') %} {%
+                        set u = states('sensor.ourbrewbot_f3_temperature_unit') |
+                        default('C') %} {{ t }} °{{ u }}
+                      icon: mdi:home-thermometer-outline
+                      icon_color: purple
+                    - type: custom:mushroom-template-card
+                      primary: Profile
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_profile_running'') }}'
+                      icon: mdi:chart-timeline-variant
+                      icon_color: >
+                        {{ 'purple' if
+                        states('sensor.ourbrewbot_f3_profile_running') == 'ON' else
+                        'grey' }}
+                    - type: custom:mushroom-template-card
+                      primary: Temp Range
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_temp_range'') }}'
+                      icon: mdi:thermometer-lines
+                      icon_color: green
+                    - type: custom:mushroom-template-card
+                      primary: Comp Delay
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_compressor_delay'') }} min'
+                      icon: mdi:timer-outline
+                      icon_color: grey
+                    - type: custom:mushroom-template-card
+                      primary: Hysteresis
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_hysteresis'') }} °'
+                      icon: mdi:swap-vertical
+                      icon_color: grey
+                    - type: custom:mushroom-template-card
+                      primary: OG
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_og'') }}'
+                      icon: mdi:cup-water
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Current SG
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_gravity'') }}'
+                      icon: mdi:water
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Target SG
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_tg'') }}'
+                      icon: mdi:target
+                      icon_color: blue
+                    - type: custom:mushroom-template-card
+                      primary: Attenuation
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_attenuation'') }} %'
+                      icon: mdi:trending-down
+                      icon_color: teal
+                    - type: custom:mushroom-template-card
+                      primary: Est. ABV
+                      secondary: '{{ states(''sensor.ourbrewbot_f3_est_abv'') }} %'
+                      icon: mdi:beer
+                      icon_color: amber
+                    - type: custom:mushroom-template-card
+                      primary: Progress
+                      secondary: >-
+                        {{ states('sensor.ourbrewbot_f3_fermentation_progress') }}
+                        %
+                      icon: mdi:progress-clock
+                      icon_color: >
+                        {% set p =
+                        states('sensor.ourbrewbot_f3_fermentation_progress') |
+                        float(-1) %} {% if p < 0 %} grey {% elif p < 50 %}
+                        orange {% elif p < 90 %} yellow {% else %} green {%
+                        endif %}
+                - type: entities
+                  entities:
+                    - entity: sensor.ourbrewbot_f3_rssi
+                      name: Signal (RSSI)
+                    - entity: sensor.ourbrewbot_f3_free_heap
+                      name: Free Heap
+                    - type: custom:mushroom-template-card
+                      primary: Last Seen
+                      secondary: >
+                        {% set lu =
+                        states.sensor.ourbrewbot_f3_free_heap.last_updated %} {% if
+                        lu %}
+                          {{ relative_time(lu) }} ago
+                        {% else %}
+                          unknown
+                        {% endif %}
+                      icon: mdi:clock-outline
+                      icon_color: grey
+                - type: conditional
+                  conditions:
+                    - condition: state
+                      entity: binary_sensor.ourbrewbot_f3_online
+                      state: 'off'
+                  card:
+                    type: custom:mushroom-template-card
+                    primary: Device Offline
+                    secondary: >
+                      {{ states('sensor.ourbrewbot_f3_name') | default('Fermenter
+                      4', true) }} has not published in the last 3 minutes.
+                      Check power and Wi-Fi.
+                    icon: mdi:wifi-off
+                    icon_color: red
+                    card_mod:
+                      style: |
+                        ha-card {
+                          border: 2px solid var(--error-color);
+                          animation: brewbot-blink 1s step-start infinite;
+                        }
+                        @keyframes brewbot-blink { 50% { opacity: 0.4; } }
