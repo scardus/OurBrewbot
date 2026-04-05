@@ -45,6 +45,7 @@ static int s_missedReads[MAX_TILTS] = {0};
 
 // BLE module state
 static bool s_bleReady = false;
+bool g_bleSniffActive = false;           // set by BLE sniff page to pause Tilt scanning
 #define BLE_BUF_SIZE 320          // longest AT+DISI? response observed ~280 chars
 static char  s_bleBuf[BLE_BUF_SIZE];
 static int   s_bleBufLen = 0;
@@ -139,6 +140,9 @@ static void parseDiscLine(const char* line) {
 }
 
 void checkTilt() {
+  // Skip Tilt scanning when BLE sniff page is active
+  if (g_bleSniffActive) return;
+
   if (!s_bleReady) {
     // Still increment missed reads for timeout
     for (int i = 0; i < MAX_TILTS; i++) {

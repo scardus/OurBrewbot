@@ -16,6 +16,9 @@
 // BLE serial port (defined in Tilt.cpp)
 extern SoftwareSerial g_bleSerial;
 
+// BLE sniff mode flag — pauses Tilt scanning when active
+extern bool g_bleSniffActive;
+
 // Initialise BLE module — call once in setup()
 void initBLE();
 

@@ -159,6 +159,7 @@ void setup() {
 // ============================================================
 void loop() {
   g_webServer.handleClient();
+  checkBLESniffTimeout();
   MDNS.update();
   mqttLoop();
 

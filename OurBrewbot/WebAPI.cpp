@@ -11,9 +11,15 @@
 #include "SmartPlugs.h"
 #include "Pins.h"
 #include "Profile.h"
+#include "Tilt.h"
 
 // Forward refs to global server (defined in .ino)
 extern ESP8266WebServer g_webServer;
+
+// Forward declarations for handlers defined later in this file
+void handleBLESniff(ESP8266WebServer& server);
+void handleBLESniffPoll(ESP8266WebServer& server);
+void handleBLESniffSend(ESP8266WebServer& server);
 
 // ============================================================
 // SERVER SETUP — register all routes
@@ -62,6 +68,9 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/smartplug/test",HTTP_POST, [&server]() { handleSmartPlugTest(server); });
   server.on("/rf/sniff",     HTTP_GET,  [&server]() { handleRFSniff(server); });
   server.on("/rf/sniff/poll",HTTP_GET,  [&server]() { handleRFSniffPoll(server); });
+  server.on("/ble/sniff",      HTTP_GET,  [&server]() { handleBLESniff(server); });
+  server.on("/ble/sniff/poll", HTTP_GET,  [&server]() { handleBLESniffPoll(server); });
+  server.on("/ble/sniff/send", HTTP_POST, [&server]() { handleBLESniffSend(server); });
   server.on("/brewservices",      HTTP_GET,  [&server]() { handleBrewServices(server); });
   server.on("/brewservices",      HTTP_POST, [&server]() { handleBrewServicesPost(server); });
   server.on("/brewservices/test", HTTP_POST, [&server]() { handleBrewServiceTest(server); });
@@ -749,6 +758,144 @@ void handleRFSniff(ESP8266WebServer& server) {
     "}).catch(function(){});}"
     "function clearLog(){log.innerHTML='<div style=\"color:#888\">Waiting for RF signals...</div>';first=true;}"
     "setInterval(poll,500);"
+    "</script>"
+    "<br><a href='/admin'>Back to Admin</a>"
+    "</body></html>");
+  server.send(200, "text/html", html);
+}
+
+// ============================================================
+// BLE SNIFFER — AT command debug console for HM-10 module
+// ============================================================
+
+// Ring buffer for BLE serial data between polls
+#define BLE_SNIFF_BUF_SIZE 512
+static char  s_bleSniffBuf[BLE_SNIFF_BUF_SIZE];
+static int   s_bleSniffLen = 0;
+static unsigned long s_bleSniffLastPoll = 0;
+
+// Called from main loop to auto-deactivate sniff mode after 10s of no polls
+void checkBLESniffTimeout() {
+  if (g_bleSniffActive && s_bleSniffLastPoll > 0 && millis() - s_bleSniffLastPoll > 10000) {
+    g_bleSniffActive = false;
+    s_bleSniffLastPoll = 0;
+    s_bleSniffLen = 0;
+  }
+}
+
+void handleBLESniffPoll(ESP8266WebServer& server) {
+  // Activate sniff mode (pauses Tilt scanning)
+  g_bleSniffActive = true;
+  s_bleSniffLastPoll = millis();
+
+  // Read any available bytes from BLE serial into ring buffer
+  while (g_bleSerial.available() && s_bleSniffLen < BLE_SNIFF_BUF_SIZE - 1) {
+    s_bleSniffBuf[s_bleSniffLen++] = (char)g_bleSerial.read();
+  }
+  s_bleSniffBuf[s_bleSniffLen] = '\0';
+
+  DynamicJsonDocument doc(BLE_SNIFF_BUF_SIZE + 64);
+  doc["data"] = s_bleSniffBuf;
+  doc["len"]  = s_bleSniffLen;
+
+  // Clear buffer after sending
+  s_bleSniffLen = 0;
+
+  String out;
+  serializeJson(doc, out);
+  sendJsonResponse(server, out);
+}
+
+void handleBLESniffSend(ESP8266WebServer& server) {
+  g_bleSniffActive = true;
+  s_bleSniffLastPoll = millis();
+
+  DynamicJsonDocument doc(256);
+  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
+    return;
+  }
+  const char* cmd = doc["cmd"] | "";
+  if (strlen(cmd) == 0) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Empty command\"}"), 400);
+    return;
+  }
+
+  g_bleSerial.print(cmd);
+  logMsg("[BLE SNIFF] Sent: %s", cmd);
+
+  DynamicJsonDocument resp(128);
+  resp["status"] = "ok";
+  resp["cmd"]    = cmd;
+  String out;
+  serializeJson(resp, out);
+  sendJsonResponse(server, out);
+}
+
+void handleBLESniff(ESP8266WebServer& server) {
+  // Reset sniff state
+  s_bleSniffLen = 0;
+  g_bleSniffActive = true;
+  s_bleSniffLastPoll = millis();
+
+  String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<title>BLE AT Console</title>"
+    "<style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui,sans-serif;padding:16px}"
+    "h2{color:#e94560}a{color:#53d8fb}"
+    ".info{background:#16213e;padding:12px;border-radius:6px;margin:12px 0;font-size:14px}"
+    ".log{background:#0a0a1a;border:1px solid #333;border-radius:6px;padding:12px;margin:12px 0;"
+    "font-family:monospace;font-size:13px;min-height:200px;max-height:400px;overflow-y:auto;"
+    "white-space:pre-wrap;word-break:break-all}"
+    ".sent{color:#e94560;font-weight:bold}"
+    ".recv{color:#53d8fb}"
+    ".btn{display:inline-block;background:#e94560;color:#fff;padding:8px 16px;border-radius:4px;"
+    "cursor:pointer;border:none;font-size:14px;margin:4px}"
+    ".btn:hover{background:#c73650}"
+    ".btn-at{background:#0f3460;color:#53d8fb;border:1px solid #53d8fb;padding:6px 12px;"
+    "border-radius:4px;cursor:pointer;font-size:13px;margin:2px}"
+    ".btn-at:hover{background:#1a4a8a}"
+    ".cmd-row{display:flex;gap:8px;margin:12px 0;align-items:center}"
+    ".cmd-row input{flex:1;background:#0f3460;border:1px solid #444;color:#e0e0e0;padding:8px 12px;"
+    "border-radius:4px;font-family:monospace;font-size:14px}"
+    ".status{font-size:14px;margin:8px 0}"
+    ".on{color:#4f4}.off{color:#f44}"
+    "</style></head><body>"
+    "<h2>BLE AT Command Console</h2>"
+    "<div class='info'>"
+    "<p>Send AT commands to the HM-10 Bluetooth module. Tilt scanning is paused while this page is open.</p>"
+    "<p>Common commands: AT (test), AT+VERS? (firmware), AT+ROLE? (role), AT+DISI? (iBeacon scan ~3s)</p></div>"
+    "<div class='status'>HM-10 on GPIO12/13 (D6/D7): <span id='st' class='on'>Connected</span></div>"
+    "<div style='margin:8px 0'>"
+    "<button class='btn-at' onclick=\"sendCmd('AT')\">AT</button>"
+    "<button class='btn-at' onclick=\"sendCmd('AT+VERS?')\">AT+VERS?</button>"
+    "<button class='btn-at' onclick=\"sendCmd('AT+ROLE?')\">AT+ROLE?</button>"
+    "<button class='btn-at' onclick=\"sendCmd('AT+IMME?')\">AT+IMME?</button>"
+    "<button class='btn-at' onclick=\"sendCmd('AT+DISI?')\">AT+DISI?</button>"
+    "<button class='btn-at' onclick=\"sendCmd('AT+ADDR?')\">AT+ADDR?</button>"
+    "<button class='btn-at' onclick=\"sendCmd('AT+BAUD?')\">AT+BAUD?</button>"
+    "</div>"
+    "<div class='cmd-row'>"
+    "<input type='text' id='cmd' placeholder='Type AT command...' onkeydown='if(event.key==\"Enter\")sendManual()'>"
+    "<button class='btn' onclick='sendManual()'>Send</button>"
+    "<button class='btn' onclick='clearLog()' style='background:#333'>Clear</button>"
+    "</div>"
+    "<div id='log' class='log'><span style='color:#888'>Waiting for data...</span></div>"
+    "<script>"
+    "var log=document.getElementById('log'),first=true;"
+    "function appendLog(html){"
+    "if(first){log.innerHTML='';first=false;}"
+    "log.innerHTML+=html;log.scrollTop=log.scrollHeight;}"
+    "function sendCmd(c){"
+    "appendLog('<div class=\"sent\">&gt; '+c+'</div>');"
+    "fetch('/ble/sniff/send',{method:'POST',headers:{'Content-Type':'application/json'},"
+    "body:JSON.stringify({cmd:c})}).catch(function(e){appendLog('<div style=\"color:#f44\">Send error: '+e+'</div>')});}"
+    "function sendManual(){var i=document.getElementById('cmd');if(i.value){sendCmd(i.value);i.value='';}}"
+    "function poll(){"
+    "fetch('/ble/sniff/poll').then(function(r){return r.json()}).then(function(d){"
+    "if(d.len>0){appendLog('<span class=\"recv\">'+d.data.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</span>');}"
+    "}).catch(function(){});}"
+    "function clearLog(){log.innerHTML='<span style=\"color:#888\">Waiting for data...</span>';first=true;}"
+    "setInterval(poll,300);"
     "</script>"
     "<br><a href='/admin'>Back to Admin</a>"
     "</body></html>");

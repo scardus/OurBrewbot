@@ -25,6 +25,7 @@ New/Updated Features:
 - Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation
 - mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
 - LittleFS file browser in admin page for inspecting config files
+- BLE AT command console for debugging HM-10 Bluetooth module
 
 Not yet implemented / tested:
 - iSpindel HTTP receiver  
@@ -40,7 +41,7 @@ Removed:
 
 ## How this was done
 
-The hardware connections were traced with a simple multimeter.  Analysis of the previous firmware image was performed by Claude Code.  Reverse engineering of the machine code was unfeasable, so instead we pulled generic information from the JSON configuration files and any function names/symbols it could find.  From this, it was possible to build a basic framework to iterate upon and re-build features.
+The hardware connections were traced with a simple multimeter.  Analysis of the previous firmware image was performed by Claude Code.  Reverse engineering of the machine code was unfeasable, so instead we pulled generic information from the JSON configuration files and any function name strings/symbols it could find.  From this, it was possible to build a basic framework to iterate upon and re-build features.
 
 ---
 
@@ -143,6 +144,9 @@ These should be auto-detected and used if you flash this firmware to the same de
 | POST   | /smartplug/test    | Test smart plug RF on/off     |
 | GET    | /rf/sniff          | RF sniff page                 |
 | GET    | /rf/sniff/poll     | Poll RF sniff results         |
+| GET    | /ble/sniff         | BLE AT command console page   |
+| GET    | /ble/sniff/poll    | Poll BLE serial data          |
+| POST   | /ble/sniff/send    | Send AT command to HM-10      |
 | GET    | /brewservices      | Brew service config           |
 | POST   | /brewservices      | Update brew service config    |
 | POST   | /brewservices/test | Test brew service connection  |

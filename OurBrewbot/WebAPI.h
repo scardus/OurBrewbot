@@ -19,6 +19,7 @@
 #include <ESP8266httpUpdate.h>
 
 void setupWebServer(ESP8266WebServer& server);
+void checkBLESniffTimeout();
 
 // Route handlers (called by server)
 void handleRoot(ESP8266WebServer& server);
