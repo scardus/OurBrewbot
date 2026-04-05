@@ -554,9 +554,76 @@ bool savePlaatoConfig() {
   return saveJsonFileSafe(FILE_PLAATO, FILE_PLAATO_BKP, json);
 }
 
-// Tilt config stub (full BLE implementation in Tilt.cpp)
-bool loadTiltConfig()  { return true; }
-bool saveTiltConfig()  { return true; }
+// ============================================================
+// TILT CONFIG
+// 4-slot format matching original firmware jsonTilt.txt:
+//   {"Address":[c,c,c,c],"Function":[...],"Fermenter":[...],
+//    "Temp_Adjust":[...],"SG_Adjust":[...],"MBB":[...]}
+// where Address = colour index (0-7) or 99 = unassigned slot
+// ============================================================
+
+bool loadTiltConfig() {
+  initDefaultTiltConfig();  // start from known defaults
+
+  String json = loadJsonFileSafe(FILE_TILT, FILE_TILT_BKP);
+  if (json.length() < 2) return false;
+
+  DynamicJsonDocument doc(512);
+  if (deserializeJson(doc, json)) {
+    logMsg("[CFG] Tilt JSON parse error");
+    return false;
+  }
+
+  // Each slot has a colour (Address). Populate the colour-indexed g_tilts entry.
+  for (int i = 0; i < MAX_TILT_SLOTS; i++) {
+    uint8_t colour = doc["Address"][i] | PROBE_UNASSIGNED;
+    if (colour >= MAX_TILTS) continue;  // skip unassigned or out-of-range
+    g_tilts[colour].colour     = colour;
+    g_tilts[colour].function   = doc["Function"][i]    | PROBE_UNASSIGNED;
+    g_tilts[colour].fermenter  = doc["Fermenter"][i]   | PROBE_UNASSIGNED;
+    g_tilts[colour].tempAdjust = doc["Temp_Adjust"][i] | 0.0f;
+    g_tilts[colour].sgAdjust   = doc["SG_Adjust"][i]   | 0.0f;
+    g_tilts[colour].mbb        = doc["MBB"][i]         | 0;
+  }
+  return true;
+}
+
+bool saveTiltConfig() {
+  DynamicJsonDocument doc(512);
+  JsonArray addrArr = doc.createNestedArray("Address");
+  JsonArray fnArr   = doc.createNestedArray("Function");
+  JsonArray fermArr = doc.createNestedArray("Fermenter");
+  JsonArray taArr   = doc.createNestedArray("Temp_Adjust");
+  JsonArray saArr   = doc.createNestedArray("SG_Adjust");
+  JsonArray mbbArr  = doc.createNestedArray("MBB");
+
+  // Write configured colours (colour != PROBE_UNASSIGNED) first, pad to MAX_TILT_SLOTS
+  int count = 0;
+  for (int c = 0; c < MAX_TILTS && count < MAX_TILT_SLOTS; c++) {
+    if (g_tilts[c].colour != PROBE_UNASSIGNED) {
+      addrArr.add(g_tilts[c].colour);
+      fnArr.add(g_tilts[c].function);
+      fermArr.add(g_tilts[c].fermenter);
+      taArr.add(g_tilts[c].tempAdjust);
+      saArr.add(g_tilts[c].sgAdjust);
+      mbbArr.add(g_tilts[c].mbb);
+      count++;
+    }
+  }
+  // Pad remaining slots with sentinel values
+  for (; count < MAX_TILT_SLOTS; count++) {
+    addrArr.add(PROBE_UNASSIGNED);
+    fnArr.add(PROBE_UNASSIGNED);
+    fermArr.add(PROBE_UNASSIGNED);
+    taArr.add(0.0f);
+    saArr.add(0.0f);
+    mbbArr.add(0);
+  }
+
+  String json;
+  serializeJson(doc, json);
+  return saveJsonFileSafe(FILE_TILT, FILE_TILT_BKP, json);
+}
 
 // ============================================================
 // BREW SERVICE CONFIG (multiple service slots)
@@ -766,6 +833,21 @@ void initDefaultProfileConfig() {
   memset(g_profileSteps, 0, sizeof(g_profileSteps));
 }
 
+void initDefaultTiltConfig() {
+  for (int i = 0; i < MAX_TILTS; i++) {
+    g_tilts[i].colour     = PROBE_UNASSIGNED;
+    g_tilts[i].function   = PROBE_UNASSIGNED;
+    g_tilts[i].fermenter  = PROBE_UNASSIGNED;
+    g_tilts[i].tempAdjust = 0.0f;
+    g_tilts[i].sgAdjust   = 0.0f;
+    g_tilts[i].mbb        = 0;
+    g_tilts[i].sg         = 0.0f;
+    g_tilts[i].temperature = 0.0f;
+    g_tilts[i].active     = false;
+    g_tilts[i].lastSeen   = 0;
+  }
+}
+
 void initDefaultiSpindelConfig() {
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     strlcpy(g_iSpindels[i].name, "None", sizeof(g_iSpindels[i].name));
@@ -812,6 +894,7 @@ void resetAllConfig() {
   initDefaultProbeConfig();
   initDefaultSmartPlugConfig();
   initDefaultProfileConfig();
+  initDefaultTiltConfig();
   initDefaultiSpindelConfig();
   initDefaultPlaatoConfig();
   initDefaultBrewServiceConfig();

@@ -46,6 +46,7 @@
 // ============================================================
 #define INTERVAL_TEMPS_MS       5000    // Temperature polling
 #define INTERVAL_FERMENTER_MS   10000   // Fermenter control loop
+#define INTERVAL_TILT_MS        30000   // Tilt BLE scan interval
 #define INTERVAL_CLOUD_MS       900000  // Cloud/service reporting (15 min)
 #define INTERVAL_MQTT_MS        60000   // MQTT publish interval (60s)
 #define INTERVAL_TEN_MIN_MS     600000  // 10-minute periodic tasks
@@ -76,6 +77,7 @@ unsigned long g_lastMqttTime    = 0;
 unsigned long g_lastTenMinTime  = 0;
 unsigned long g_lastUptimeTime  = 0;
 unsigned long g_lastProbeScanTime = 0;
+unsigned long g_lastTiltTime    = 0;
 bool g_wifiConnected = false;
 String g_rebootReason = "Power On";
 
@@ -194,6 +196,12 @@ void loop() {
       if (now - g_lastProbeScanTime >= INTERVAL_PROBE_SCAN_MS) {
         g_lastProbeScanTime = now;
         periodicProbeScan();
+      }
+
+      // Tilt BLE scanning
+      if (now - g_lastTiltTime >= INTERVAL_TILT_MS) {
+        g_lastTiltTime = now;
+        checkTilt();
       }
 
       // Fermenter control loop

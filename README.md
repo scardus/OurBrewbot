@@ -26,10 +26,10 @@ New/Updated Features:
 - mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
 - LittleFS file browser in admin page for inspecting config files
 - BLE AT command console for debugging HM-10 Bluetooth module
+- Tilt hydrometer support via HM-10 BLE module — iBeacon scanning every 30s with auto-discovery, per-colour fermenter assignment, and SG/temperature calibration offsets
 
 Not yet implemented / tested:
 - iSpindel HTTP receiver  
-- Tilt hydrometer support via HM-10 BLE module (iBeacon scanning)
 - OTA firmware update via web browser
 - Black temperature probe jack is currently disabled, due to it causing crashes on boot
 
@@ -168,6 +168,8 @@ These should be auto-detected and used if you flash this firmware to the same de
 | GET    | /reboot            | Reboot device                 |
 | GET    | /fs/files          | List LittleFS files           |
 | GET    | /fs/file           | Read LittleFS file content    |
+| GET    | /tilts             | Tilt hydrometer config + live data |
+| POST   | /tilt              | Update Tilt config (fermenter, function, SG/temp adjust) |
 
 ---
 

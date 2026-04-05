@@ -84,6 +84,10 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/profile",           HTTP_POST, [&server]() { handleProfilePost(server); });
   server.on("/fermenter/profile", HTTP_POST, [&server]() { handleFermenterProfile(server); });
 
+  // Tilt hydrometer config
+  server.on("/tilts", HTTP_GET,  [&server]() { handleTilts(server); });
+  server.on("/tilt",  HTTP_POST, [&server]() { handleTiltPost(server); });
+
   // Filesystem browser
   server.on("/fs/files", HTTP_GET, [&server]() { handleFsFiles(server); });
   server.on("/fs/file",  HTTP_GET, [&server]() { handleFsFile(server); });
@@ -143,6 +147,8 @@ void handleRoot(ESP8266WebServer& server) {
     "<li><span class='method'>GET</span><a href='/status'>/status</a><span class='desc'> &mdash; quick status</span></li>"
     "<li><span class='method'>GET</span><a href='/probes'>/probes</a><span class='desc'> &mdash; temperature probes</span></li>"
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/probes</span><span class='desc'> &mdash; update probe config</span></li>"
+    "<li><span class='method'>GET</span><a href='/tilts'>/tilts</a><span class='desc'> &mdash; Tilt hydrometer config &amp; live data</span></li>"
+    "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/tilt</span><span class='desc'> &mdash; update Tilt config</span></li>"
     "<li><span class='method'>GET</span><a href='/health'>/health</a><span class='desc'> &mdash; system health</span></li>"
     "<li><span class='method'>GET</span><a href='/smartplugs'>/smartplugs</a><span class='desc'> &mdash; smart plug config</span></li>"
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/smartplug</span><span class='desc'> &mdash; update smart plug</span></li>"
@@ -1193,6 +1199,74 @@ void handleFsFile(ESP8266WebServer& server) {
   sendCORSHeaders(server);
   server.send(200, "text/plain", f.readString());
   f.close();
+}
+
+// ============================================================
+// TILTS — GET /tilts
+// Returns all Tilt colour slots that are configured or have been seen.
+// ============================================================
+
+void handleTilts(ESP8266WebServer& server) {
+  DynamicJsonDocument doc(2048);
+  JsonArray arr = doc.createNestedArray("tilts");
+  for (int i = 0; i < MAX_TILTS; i++) {
+    // Include slots that are configured (colour set) or actively seen
+    if (g_tilts[i].colour == PROBE_UNASSIGNED && !g_tilts[i].active) continue;
+    JsonObject t = arr.createNestedObject();
+    t["colour"]      = i;
+    t["colourName"]  = getTiltColourName(i);
+    t["function"]    = g_tilts[i].function;
+    t["fermenter"]   = g_tilts[i].fermenter;
+    t["tempAdjust"]  = g_tilts[i].tempAdjust;
+    t["sgAdjust"]    = g_tilts[i].sgAdjust;
+    t["mbb"]         = g_tilts[i].mbb;
+    t["active"]      = g_tilts[i].active;
+    t["sg"]          = g_tilts[i].sg;
+    t["temperature"] = toDisplayTemp(g_tilts[i].temperature);
+  }
+  String out;
+  serializeJson(doc, out);
+  sendJsonResponse(server, out);
+}
+
+// ============================================================
+// TILT CONFIG — POST /tilt
+// Body: {"colour":0,"function":4,"fermenter":0,"tempAdjust":0.0,"sgAdjust":0.0}
+// ============================================================
+
+void handleTiltPost(ESP8266WebServer& server) {
+  DynamicJsonDocument doc(256);
+  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
+    return;
+  }
+  int colour = doc["colour"] | -1;
+  if (colour < 0 || colour >= MAX_TILTS) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid colour index (0-7)\"}"), 400);
+    return;
+  }
+
+  // Clear flag: remove this Tilt from persisted config
+  if (doc["_clear"] | false) {
+    g_tilts[colour].colour    = PROBE_UNASSIGNED;
+    g_tilts[colour].function  = PROBE_UNASSIGNED;
+    g_tilts[colour].fermenter = PROBE_UNASSIGNED;
+    g_tilts[colour].tempAdjust = 0.0f;
+    g_tilts[colour].sgAdjust   = 0.0f;
+    g_tilts[colour].mbb        = 0;
+    saveTiltConfig();
+    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Tilt slot cleared\"}"));
+    return;
+  }
+
+  // Mark the slot as configured so saveTiltConfig() includes it
+  g_tilts[colour].colour = (uint8_t)colour;
+  if (doc.containsKey("function"))   g_tilts[colour].function   = doc["function"];
+  if (doc.containsKey("fermenter"))  g_tilts[colour].fermenter  = doc["fermenter"];
+  if (doc.containsKey("tempAdjust")) g_tilts[colour].tempAdjust = doc["tempAdjust"];
+  if (doc.containsKey("sgAdjust"))   g_tilts[colour].sgAdjust   = doc["sgAdjust"];
+  saveTiltConfig();
+  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Tilt updated\"}"));
 }
 
 // ============================================================

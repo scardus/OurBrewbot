@@ -20,7 +20,8 @@
 #define MAX_PROFILES        4
 #define MAX_STEPS_PER_PROFILE 15  // Steps per profile (4 profiles × 15 = 60)
 #define MAX_ISPINDELS       4
-#define MAX_TILTS           8       // 8 Tilt colours supported
+#define MAX_TILTS           8       // 8 Tilt colours supported (indexed by colour)
+#define MAX_TILT_SLOTS      4       // Configurable Tilt slots persisted in jsonTilt.txt
 #define PROBE_UNASSIGNED    99      // Sentinel value from original firmware
 #define PROBE_FAIL_THRESHOLD 6      // Consecutive failed reads before marking inactive (~30s at 5s poll)
 
@@ -277,13 +278,20 @@ struct ProfileConfig {
 
 // ============================================================
 // STRUCT: TiltConfig
-// Persisted in jsonTilt.txt — supports up to 8 Tilt hydrometers (one per colour)
+// Persisted in jsonTilt.txt — supports up to MAX_TILT_SLOTS (4) simultaneously
+// configured Tilts. Array is indexed by colour (0-7), config loaded by Address.
 // ============================================================
 struct TiltConfig {
-  uint8_t colour;               // TiltColour enum
-  float   sg;                   // current specific gravity reading
-  float   temperature;          // Tilt temperature reading
-  uint8_t fermenter;            // assigned fermenter
+  // Persisted fields (jsonTilt.txt keys: Address, Function, Fermenter, Temp_Adjust, SG_Adjust, MBB)
+  uint8_t colour;               // TiltColour enum (99 = unconfigured slot)
+  uint8_t function;             // probe-like function code (PROBE_FN_xxx or 99=unassigned)
+  uint8_t fermenter;            // assigned fermenter (0-3 or 99=unassigned)
+  float   tempAdjust;           // temperature calibration offset °C
+  float   sgAdjust;             // SG calibration offset
+  uint8_t mbb;                  // MyBrewBuddy placeholder (unused)
+  // Runtime data (not persisted)
+  float   sg;                   // current specific gravity reading (with sgAdjust applied)
+  float   temperature;          // Tilt temperature reading (with tempAdjust applied)
   bool    active;               // Tilt has been seen recently
   uint32_t lastSeen;            // millis() of last reading
 };
@@ -410,6 +418,7 @@ void initDefaultFermenterConfig();
 void initDefaultProbeConfig();
 void initDefaultSmartPlugConfig();
 void initDefaultProfileConfig();
+void initDefaultTiltConfig();
 void initDefaultiSpindelConfig();
 void initDefaultPlaatoConfig();
 void initDefaultBrewServiceConfig();

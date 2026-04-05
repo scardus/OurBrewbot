@@ -242,14 +242,23 @@ void checkTilt() {
 
 void processTiltReading(uint8_t colour, float sg, float tempC) {
   if (colour >= MAX_TILTS) return;
-  g_tilts[colour].sg          = sg;
-  g_tilts[colour].temperature = tempC;
+
+  // Mark colour so saveTiltConfig() includes this slot (first time seen)
+  if (g_tilts[colour].colour == PROBE_UNASSIGNED) {
+    g_tilts[colour].colour = colour;
+  }
+
+  // Apply calibration offsets from stored config
+  g_tilts[colour].sg          = sg    + g_tilts[colour].sgAdjust;
+  g_tilts[colour].temperature = tempC + g_tilts[colour].tempAdjust;
   g_tilts[colour].active      = true;
   g_tilts[colour].lastSeen    = millis();
   s_missedReads[colour]       = 0;
 
-  logMsg("[TILT] %s: SG=%.4f T=%.1fC",
-    getTiltColourName(colour), sg, tempC);
+  logMsg("[TILT] %s: SG=%.4f (raw %.4f) T=%.1fC (raw %.1f)",
+    getTiltColourName(colour),
+    g_tilts[colour].sg, sg,
+    g_tilts[colour].temperature, tempC);
 }
 
 const char* getTiltUUID(uint8_t colour) {
