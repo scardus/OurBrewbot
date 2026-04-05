@@ -5,6 +5,7 @@
 
 #include "Config.h"
 #include "Log.h"
+#include <user_interface.h>     // rst_info struct, REASON_EXCEPTION_RST
 
 // ============================================================
 // GLOBAL INSTANCES
@@ -924,11 +925,18 @@ void recordReboot(const String& reason) {
   JsonArray log = doc.containsKey("log") ? doc["log"].as<JsonArray>()
                                          : doc.createNestedArray("log");
 
+  struct rst_info *ri = ESP.getResetInfoPtr();
+
   DynamicJsonDocument entry(256);
-  entry["reason"]  = reason;
-  entry["uptime"]  = g_globalConfig.lastUptime;
-  entry["heap"]    = ESP.getFreeHeap();
-  entry["rsn_code"]= ESP.getResetReason();
+  entry["reason"]   = reason;
+  entry["uptime"]   = g_globalConfig.lastUptime;
+  entry["heap"]     = ESP.getFreeHeap();
+  entry["rsn_code"] = ri->reason;
+  if (ri->reason == REASON_EXCEPTION_RST) {
+    entry["exccause"]  = ri->exccause;
+    entry["epc1"]      = ri->epc1;
+    entry["excvaddr"]  = ri->excvaddr;
+  }
 
   if (log.size() >= 10) log.remove(0);
   log.add(entry.as<JsonObject>());

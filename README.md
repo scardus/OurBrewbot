@@ -27,6 +27,7 @@ New/Updated Features:
 - LittleFS file browser in admin page for inspecting config files
 - BLE AT command console for debugging HM-10 Bluetooth module
 - Tilt hydrometer support via HM-10 BLE module — iBeacon scanning every 30s with auto-discovery, per-colour fermenter assignment, and SG/temperature calibration offsets
+- Detailed reboot reason logging on startup — logs reset cause string and numeric code to serial; on exception crashes also logs cause register, EPC1, and EXCVADDR; persists numeric code and exception registers to the reboot log file
 
 Not yet implemented / tested:
 - iSpindel HTTP receiver  

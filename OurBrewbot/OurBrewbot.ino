@@ -79,7 +79,7 @@ unsigned long g_lastUptimeTime  = 0;
 unsigned long g_lastProbeScanTime = 0;
 unsigned long g_lastTiltTime    = 0;
 bool g_wifiConnected = false;
-String g_rebootReason = "Power On";
+String g_rebootReason = ESP.getResetReason();
 
 // Hardware objects
 ESP8266WebServer g_webServer(80);
@@ -95,6 +95,16 @@ void setup() {
   logMsg("=================================");
   logMsg("OurBrewbot Firmware %s", FW_VERSION);
   logMsg("=================================");
+
+  // Log reboot reason with full rst_info detail
+  {
+    struct rst_info *ri = ESP.getResetInfoPtr();
+    logMsg("[SYS] Reset reason: %s (code %u)", ESP.getResetReason().c_str(), ri->reason);
+    if (ri->reason == REASON_EXCEPTION_RST) {
+      logMsg("[SYS] Exception cause: %u, EPC1: 0x%08x, EXCVADDR: 0x%08x",
+        ri->exccause, ri->epc1, ri->excvaddr);
+    }
+  }
 
   // LED setup
   pinMode(PIN_LED, OUTPUT);
