@@ -182,7 +182,7 @@ fetch('/fermenter/profile',{method:'POST',headers:{'Content-Type':'application/j
 // ---- PROFILES TAB ----
 var STYPES=[];
 // Fields relevant per step type: s=startTemp, e=endTemp, g=sgTrigger, d=days
-var SFIELDS={0:'segd',1:'sed',2:'d',3:'sg',4:'sg',5:'se',6:'sg',7:'sg',8:'segd',9:'sed'};
+var SFIELDS={0:'segd',1:'sed',2:'sed',3:'sgd',4:'sg',5:'se',6:'sg',7:'sg',8:'segd',9:'sed'};
 function stepFieldsEnabled(t){var f=SFIELDS[t]||'segd';return{s:f.indexOf('s')>=0,e:f.indexOf('e')>=0,g:f.indexOf('g')>=0,d:f.indexOf('d')>=0}}
 function onStepTypeChange(p,s){var t=parseInt($('pst'+p+'_'+s).value);var fl=stepFieldsEnabled(t);$('pss'+p+'_'+s).disabled=!fl.s;$('pse'+p+'_'+s).disabled=!fl.e;$('psg'+p+'_'+s).disabled=!fl.g;$('psd'+p+'_'+s).disabled=!fl.d}
 
@@ -203,7 +203,7 @@ h+='</select></td>';
 h+='<td><input type="number" step="0.1" id="pss'+p+'_'+s+'" value="'+st.startTemp+'" style="width:70px"'+(fl.s?'':' disabled')+'></td>';
 h+='<td><input type="number" step="0.1" id="pse'+p+'_'+s+'" value="'+st.endTemp+'" style="width:70px"'+(fl.e?'':' disabled')+'></td>';
 h+='<td><input type="number" step="0.001" id="psg'+p+'_'+s+'" value="'+st.sgTrigger+'" style="width:80px"'+(fl.g?'':' disabled')+'></td>';
-h+='<td><input type="number" id="psd'+p+'_'+s+'" value="'+st.days+'" style="width:60px"'+(fl.d?'':' disabled')+'></td></tr>';}
+h+='<td><input type="number" step="0.1" id="psd'+p+'_'+s+'" value="'+st.days+'" style="width:60px"'+(fl.d?'':' disabled')+'></td></tr>';}
 h+='</table>';
 h+='<button class="save" onclick="saveProfile('+p+')">Save Profile '+(p+1)+'</button> <span class="msg" id="ppm'+p+'"></span>';
 h+='</div>';}
@@ -213,7 +213,7 @@ $('t1').innerHTML=h;
 function saveProfile(p){
 var body={index:p,name:$('ppn'+p).value,steps:[]};
 for(var s=0;s<15;s++){
-body.steps.push({stepType:parseInt($('pst'+p+'_'+s).value)||0,startTemp:parseFloat($('pss'+p+'_'+s).value)||0,endTemp:parseFloat($('pse'+p+'_'+s).value)||0,sgTrigger:parseFloat($('psg'+p+'_'+s).value)||0,days:parseInt($('psd'+p+'_'+s).value)||0});}
+body.steps.push({stepType:parseInt($('pst'+p+'_'+s).value)||0,startTemp:parseFloat($('pss'+p+'_'+s).value)||0,endTemp:parseFloat($('pse'+p+'_'+s).value)||0,sgTrigger:parseFloat($('psg'+p+'_'+s).value)||0,days:parseFloat($('psd'+p+'_'+s).value)||0});}
 fetch('/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
 .then(function(r){return r.json()}).then(function(d){msg('ppm'+p,d.msg,d.status=='ok');dirty=false;setTimeout(loadProfiles,500)})
 .catch(function(e){msg('ppm'+p,'Error: '+e,false)})}

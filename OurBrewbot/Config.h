@@ -70,8 +70,8 @@
 // PROFILE STEP TYPES
 // ============================================================
 enum ProfileStepType {
-  STEP_TIME_OVER_TEMP    = 0,  // "Changes step after x days and temp at target."
-  STEP_TEMP_OVER_TIME    = 1,  // "Changes step after x days have run."
+  STEP_TEMP_OVER_TIME    = 0,  // "Changes step after x days and temp at target."
+  STEP_TIME_OVER_TEMP    = 1,  // "Changes step after x days have run."
   STEP_FREE_RISE         = 2,  // "Changes step after x days."
   STEP_SPECIFIC_GRAVITY  = 3,  // "Changes step when SG at target."
   STEP_ATTENUATION       = 4,  // "Changes step when Attn% at target."
@@ -267,7 +267,7 @@ struct ProfileStep {
   float   startTemp;            // starting temperature °C
   float   endTemp;              // target/ending temperature °C
   float   sgTrigger;            // SG trigger value
-  uint16_t days;                // days for time-based steps
+  float   days;                 // days for time-based steps (supports fractional)
   float   endSG;                // end gravity (alias for sgTrigger in some steps)
 };
 

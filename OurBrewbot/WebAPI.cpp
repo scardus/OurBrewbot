@@ -944,7 +944,7 @@ void handleProfilePost(ESP8266WebServer& server) {
         g_profileSteps[base + s].startTemp = st["startTemp"] | 0.0f;
         g_profileSteps[base + s].endTemp   = st["endTemp"]   | 0.0f;
         g_profileSteps[base + s].sgTrigger = st["sgTrigger"] | 0.0f;
-        g_profileSteps[base + s].days      = st["days"]      | 0;
+        g_profileSteps[base + s].days      = st["days"]      | 0.0f;
         g_profileSteps[base + s].stepNo    = s;
       } else {
         // Clear remaining steps

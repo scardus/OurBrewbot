@@ -51,7 +51,11 @@ void advanceProfileStep(uint8_t i) {
 
   // Update CeilingTemp/FloorTemp from current step's target
   float target = getProfileTargetTemp(i);
-  if (target > -100.0f) {
+  if (step.stepType == STEP_FREE_RISE) {
+    // Free Rise: use startTemp as floor and endTemp as ceiling
+    g_fermenters[i].floorTemp   = step.startTemp;
+    g_fermenters[i].ceilingTemp = step.endTemp;
+  } else if (target > -100.0f) {
     g_fermenters[i].floorTemp   = target - 0.5f;
     g_fermenters[i].ceilingTemp = target + 0.5f;
   }
@@ -83,7 +87,7 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
   float sg   = getCurrentSG(i);
   float attn = getAttenuation(i);
   uint16_t hours = g_fermenters[i].currentHour;
-  uint16_t daysInHours = step.days * 24;
+  uint16_t daysInHours = (uint16_t)(step.days * 24.0f);
 
   switch (step.stepType) {
     case STEP_TIME_OVER_TEMP:
@@ -105,7 +109,8 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
       return hours >= daysInHours;
 
     case STEP_SPECIFIC_GRAVITY:
-      // SG at or below trigger
+      // Minimum time must elapse, then SG at or below trigger
+      if (hours < daysInHours) return false;
       if (sg <= 0.5f) return false;
       if (sg <= step.sgTrigger) {
         logMsg("[PROF] SG Target reached: %.4f <= %.4f", sg, step.sgTrigger);
@@ -234,8 +239,8 @@ uint8_t countProfileSteps(uint8_t profileSlot) {
 
 const char* getStepTypeDescription(uint8_t stepType) {
   switch (stepType) {
-    case STEP_TIME_OVER_TEMP:   return "Time over Temperature Step";
     case STEP_TEMP_OVER_TIME:   return "Temperature over Time Step";
+    case STEP_TIME_OVER_TEMP:   return "Time over Temperature Step";
     case STEP_FREE_RISE:        return "Free Rise Step";
     case STEP_SPECIFIC_GRAVITY: return "Specific Gravity Step";
     case STEP_ATTENUATION:      return "Attenuation % Step";

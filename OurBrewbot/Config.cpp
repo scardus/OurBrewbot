@@ -447,7 +447,7 @@ bool loadProfileSteps() {
     g_profileSteps[i].startTemp = doc["StartTemp"][i] | 0.0f;
     g_profileSteps[i].endTemp   = doc["EndTemp"][i]   | 0.0f;
     g_profileSteps[i].sgTrigger = doc["SGTrigger"][i] | 0.0f;
-    g_profileSteps[i].days      = doc["Days"][i]      | 0;
+    g_profileSteps[i].days      = doc["Days"][i]      | 0.0f;
   }
   return true;
 }
