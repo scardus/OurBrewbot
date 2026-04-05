@@ -159,6 +159,8 @@ void checkTilt() {
     return;
   }
 
+  logMsg("[TILT]: Starting BLE discovery scan.");
+  
   // Start iBeacon discovery scan
   g_bleSerial.print("AT+DISI?");
 
