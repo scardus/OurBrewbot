@@ -383,14 +383,28 @@ $('t4').innerHTML=h;
 
 function loadSystemSettings(){
 markDirty();
-Promise.all([fetch('/controller').then(function(r){return r.json()}),fetch('/fs/files').then(function(r){return r.json()})]).then(function(res){
-var d=res[0],fs=res[1];
+Promise.all([fetch('/controller').then(function(r){return r.json()}),fetch('/fs/files').then(function(r){return r.json()}),fetch('/syslog').then(function(r){return r.json()})]).then(function(res){
+var d=res[0],fs=res[1],sl=res[2];
+var syslogFacilities=['0 Kernel','1 User','2 Mail','3 Daemon','4 Auth','5 Syslog','6 LPR','7 News','8 UUCP','9 Cron','10 Security','11 FTP','12 NTP','13 Audit','14 Alert','15 Clock','16 Local0','17 Local1','18 Local2','19 Local3','20 Local4','21 Local5','22 Local6','23 Local7'];
+var syslogLevels=['0 Emergency','1 Alert','2 Critical','3 Error','4 Warning','5 Notice','6 Info','7 Debug'];
 var h='<div class="card"><h3>Global Settings</h3>';
 h+='<div class="row"><label>Temp Unit</label><select id="su"><option value="1"'+(d.Unit==1?' selected':'')+'>Celsius</option><option value="2"'+(d.Unit==2?' selected':'')+'>Fahrenheit</option></select></div>';
 h+='<div class="row"><label>Resolution</label><select id="sres">';
 for(var r=9;r<=12;r++)h+='<option value="'+r+'"'+(d.Resolution==r?' selected':'')+'>'+r+'-bit</option>';
 h+='</select></div>';
 h+='<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
+h+='</div>';
+h+='<div class="card"><h3>Syslog</h3>';
+h+='<div class="row"><label>Enabled</label>'+sw('slen',sl.enabled||false)+'</div>';
+h+='<div class="row"><label>Host</label><input type="text" id="slhost" value="'+(sl.host||'')+'" style="width:220px"></div>';
+h+='<div class="row"><label>Port</label><input type="number" id="slport" value="'+(sl.port||514)+'" style="width:80px"></div>';
+h+='<div class="row"><label>Facility</label><select id="slfac">';
+for(var fi=0;fi<syslogFacilities.length;fi++)h+='<option value="'+fi+'"'+(fi==(sl.facility!=null?sl.facility:16)?' selected':'')+'>'+syslogFacilities[fi]+'</option>';
+h+='</select></div>';
+h+='<div class="row"><label>Min Log Level</label><select id="sllvl">';
+for(var li=0;li<syslogLevels.length;li++)h+='<option value="'+li+'"'+(li==(sl.minLevel!=null?sl.minLevel:7)?' selected':'')+'>'+syslogLevels[li]+'</option>';
+h+='</select></div>';
+h+='<button class="save" onclick="saveSyslog()">Save</button> <span class="msg" id="slm"></span>';
 h+='</div>';
 h+='<div class="info"><h3 style="color:#e94560;margin-bottom:8px">System Info</h3>';
 h+='<div class="r"><span>Firmware</span><span class="v">'+d.FirmwareVersion+'</span></div>';
@@ -451,6 +465,12 @@ var body={enabled:$('mqen').checked,host:$('mqhost').value,port:parseInt($('mqpo
 fetch('/mqtt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
 .then(function(r){return r.json()}).then(function(d){msg('mqm',d.msg,d.status=='ok');dirty=false})
 .catch(function(e){msg('mqm','Error: '+e,false)})}
+
+function saveSyslog(){
+var body={enabled:$('slen').checked,host:$('slhost').value,port:parseInt($('slport').value),facility:parseInt($('slfac').value),minLevel:parseInt($('sllvl').value)};
+fetch('/syslog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+.then(function(r){return r.json()}).then(function(d){msg('slm',d.msg,d.status=='ok');dirty=false})
+.catch(function(e){msg('slm','Error: '+e,false)})}
 
 function testMqtt(){
 msg('mqm','Testing...',true);

@@ -15,6 +15,7 @@ This firmware keeps your hardware working:
 - Fermentation profile runner preserved
 - Brewfather / Brewer's Friend integrations with per-fermenter toggles
 - All JSON config files 100% compatible with original (same field names)
+- Tilt hydrometer support via HM-10 BLE module
 
 New/Updated Features:
 - Brewfather integration uses the Custom Stream API
@@ -26,8 +27,6 @@ New/Updated Features:
 - mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
 - LittleFS file browser in admin page for inspecting config files
 - BLE AT command console for debugging HM-10 Bluetooth module
-- Tilt hydrometer support via HM-10 BLE module — iBeacon scanning every 30s with auto-discovery, per-colour fermenter assignment, and SG/temperature calibration offsets
-- Detailed reboot reason logging on startup — logs reset cause string and numeric code to serial; on exception crashes also logs cause register, EPC1, and EXCVADDR; persists numeric code and exception registers to the reboot log file
 
 Not yet implemented / tested:
 - iSpindel HTTP receiver  
@@ -171,6 +170,8 @@ These should be auto-detected and used if you flash this firmware to the same de
 | GET    | /fs/file           | Read LittleFS file content    |
 | GET    | /tilts             | Tilt hydrometer config + live data |
 | POST   | /tilt              | Update Tilt config (fermenter, function, SG/temp adjust) |
+| GET    | /syslog            | Syslog config |
+| POST   | /syslog            | Update syslog config (host, port, facility, minLevel) |
 
 ---
 

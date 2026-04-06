@@ -22,6 +22,7 @@ PlaatoConfig    g_plaato[MAX_ISPINDELS];
 WiFiConfig      g_wifiConfig;
 BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 MqttConfig        g_mqttConfig;
+SyslogConfig      g_syslogConfig;
 
 // ============================================================
 // FILE UTILITIES
@@ -729,6 +730,41 @@ bool saveMqttConfig() {
 }
 
 // ============================================================
+// SYSLOG CONFIG
+// ============================================================
+
+bool loadSyslogConfig() {
+  String json = loadJsonFileSafe(FILE_SYSLOG, FILE_SYSLOG_BKP);
+  if (json.length() < 2) {
+    initDefaultSyslogConfig();
+    return false;
+  }
+  DynamicJsonDocument doc(256);
+  if (deserializeJson(doc, json)) {
+    initDefaultSyslogConfig();
+    return false;
+  }
+  g_syslogConfig.enabled  = doc["enabled"]  | false;
+  g_syslogConfig.port     = doc["port"]     | 514;
+  g_syslogConfig.facility = doc["facility"] | 16;
+  g_syslogConfig.minLevel = doc["minLevel"] | 7;
+  strlcpy(g_syslogConfig.host, doc["host"] | "", sizeof(g_syslogConfig.host));
+  return true;
+}
+
+bool saveSyslogConfig() {
+  DynamicJsonDocument doc(256);
+  doc["enabled"]  = (bool)g_syslogConfig.enabled;
+  doc["host"]     = g_syslogConfig.host;
+  doc["port"]     = g_syslogConfig.port;
+  doc["facility"] = g_syslogConfig.facility;
+  doc["minLevel"] = g_syslogConfig.minLevel;
+  String json;
+  serializeJson(doc, json);
+  return saveJsonFileSafe(FILE_SYSLOG, FILE_SYSLOG_BKP, json);
+}
+
+// ============================================================
 // LOAD ALL / SAVE ALL
 // ============================================================
 
@@ -745,6 +781,7 @@ void loadAllConfig() {
   loadTiltConfig();
   loadBrewServiceConfig();
   loadMqttConfig();
+  loadSyslogConfig();
   logMsg("[CFG] All configuration loaded");
 }
 
@@ -759,6 +796,7 @@ void saveAllConfig() {
   savePlaatoConfig();
   saveBrewServiceConfig();
   saveMqttConfig();
+  saveSyslogConfig();
 }
 
 // ============================================================
@@ -884,6 +922,14 @@ void initDefaultMqttConfig() {
   strlcpy(g_mqttConfig.baseTopic, "ourbrewbot", sizeof(g_mqttConfig.baseTopic));
 }
 
+void initDefaultSyslogConfig() {
+  g_syslogConfig.enabled   = false;
+  g_syslogConfig.host[0]   = '\0';
+  g_syslogConfig.port      = 514;
+  g_syslogConfig.facility  = 16;  // local0
+  g_syslogConfig.minLevel  = 7;   // DEBUG
+}
+
 // ============================================================
 // FULL RESET
 // ============================================================
@@ -900,6 +946,7 @@ void resetAllConfig() {
   initDefaultPlaatoConfig();
   initDefaultBrewServiceConfig();
   initDefaultMqttConfig();
+  initDefaultSyslogConfig();
   saveAllConfig();
 
   // Remove WiFi config so WiFiManager re-runs the portal

@@ -20,6 +20,8 @@ extern ESP8266WebServer g_webServer;
 void handleBLESniff(ESP8266WebServer& server);
 void handleBLESniffPoll(ESP8266WebServer& server);
 void handleBLESniffSend(ESP8266WebServer& server);
+void handleSyslogConfig(ESP8266WebServer& server);
+void handleSyslogConfigPost(ESP8266WebServer& server);
 
 // ============================================================
 // SERVER SETUP — register all routes
@@ -78,6 +80,8 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/mqtt",             HTTP_POST, [&server]() { handleMqttConfigPost(server); });
   server.on("/mqtt/test",        HTTP_POST, [&server]() { handleMqttTest(server); });
   server.on("/mqtt/discover",    HTTP_POST, [&server]() { handleMqttDiscover(server); });
+  server.on("/syslog",           HTTP_GET,  [&server]() { handleSyslogConfig(server); });
+  server.on("/syslog",           HTTP_POST, [&server]() { handleSyslogConfigPost(server); });
 
   // Profile management
   server.on("/profiles",          HTTP_GET,  [&server]() { handleProfiles(server); });
@@ -162,6 +166,8 @@ void handleRoot(ESP8266WebServer& server) {
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt</span><span class='desc'> &mdash; update MQTT config</span></li>"
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt/test</span><span class='desc'> &mdash; test MQTT connection</span></li>"
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt/discover</span><span class='desc'> &mdash; trigger HA discovery</span></li>"
+    "<li><span class='method'>GET</span><a href='/syslog'>/syslog</a><span class='desc'> &mdash; syslog config</span></li>"
+    "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/syslog</span><span class='desc'> &mdash; update syslog config</span></li>"
     "<li><span class='method'>GET</span><a href='/profiles'>/profiles</a><span class='desc'> &mdash; fermentation profiles</span></li>"
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/profile</span><span class='desc'> &mdash; update profile</span></li>"
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter/profile</span><span class='desc'> &mdash; profile control (start/stop/pause/next/prev)</span></li>"
@@ -1267,6 +1273,38 @@ void handleTiltPost(ESP8266WebServer& server) {
   if (doc.containsKey("sgAdjust"))   g_tilts[colour].sgAdjust   = doc["sgAdjust"];
   saveTiltConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Tilt updated\"}"));
+}
+
+// ============================================================
+// SYSLOG CONFIG — GET/POST /syslog
+// ============================================================
+
+void handleSyslogConfig(ESP8266WebServer& server) {
+  DynamicJsonDocument doc(256);
+  doc["enabled"]  = g_syslogConfig.enabled;
+  doc["host"]     = g_syslogConfig.host;
+  doc["port"]     = g_syslogConfig.port;
+  doc["facility"] = g_syslogConfig.facility;
+  doc["minLevel"] = g_syslogConfig.minLevel;
+  String out;
+  serializeJson(doc, out);
+  sendJsonResponse(server, out);
+}
+
+void handleSyslogConfigPost(ESP8266WebServer& server) {
+  DynamicJsonDocument doc(256);
+  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
+    return;
+  }
+  if (doc.containsKey("enabled"))  g_syslogConfig.enabled  = doc["enabled"];
+  if (doc.containsKey("host"))     strlcpy(g_syslogConfig.host, doc["host"], sizeof(g_syslogConfig.host));
+  if (doc.containsKey("port"))     g_syslogConfig.port     = doc["port"];
+  if (doc.containsKey("facility")) g_syslogConfig.facility = doc["facility"];
+  if (doc.containsKey("minLevel")) g_syslogConfig.minLevel = doc["minLevel"];
+  saveSyslogConfig();
+  logInit();  // re-resolve host with new config
+  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Syslog config saved\"}"));
 }
 
 // ============================================================

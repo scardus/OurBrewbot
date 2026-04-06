@@ -150,6 +150,8 @@ enum ControllerVersion {
 #define FILE_BREWSVC_BKP    "/jsonBrewServicesbkup.txt"
 #define FILE_MQTT           "/jsonMqtt.txt"
 #define FILE_MQTT_BKP       "/jsonMqttbkup.txt"
+#define FILE_SYSLOG         "/jsonSyslog.txt"
+#define FILE_SYSLOG_BKP     "/jsonSyslogbkup.txt"
 #define FILE_REBOOT         "/jsonReBoot.txt"
 #define FILE_REBOOT_BKP     "/jsonReBootbkup.txt"
 #define FILE_CHART_SERIES   "/jsonchartSeries.txt"
@@ -352,6 +354,17 @@ struct BrewServiceConfig {
 };
 
 // ============================================================
+// STRUCT: SyslogConfig
+// ============================================================
+struct SyslogConfig {
+  bool     enabled;        // syslog on/off
+  char     host[64];       // syslog server hostname or IP
+  uint16_t port;           // UDP port (default 514)
+  uint8_t  facility;       // syslog facility (0–23, default 16 = local0)
+  uint8_t  minLevel;       // minimum severity to send (0=EMERG … 7=DEBUG)
+};
+
+// ============================================================
 // STRUCT: MqttConfig
 // ============================================================
 struct MqttConfig {
@@ -379,6 +392,7 @@ extern PlaatoConfig    g_plaato[MAX_ISPINDELS];
 extern WiFiConfig      g_wifiConfig;
 extern BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 extern MqttConfig        g_mqttConfig;
+extern SyslogConfig      g_syslogConfig;
 
 // ============================================================
 // FUNCTION DECLARATIONS
@@ -411,6 +425,8 @@ bool loadBrewServiceConfig();
 bool saveBrewServiceConfig();
 bool loadMqttConfig();
 bool saveMqttConfig();
+bool loadSyslogConfig();
+bool saveSyslogConfig();
 
 // Defaults / factory reset
 void initDefaultGlobalConfig();
@@ -423,6 +439,7 @@ void initDefaultiSpindelConfig();
 void initDefaultPlaatoConfig();
 void initDefaultBrewServiceConfig();
 void initDefaultMqttConfig();
+void initDefaultSyslogConfig();
 void resetAllConfig();
 
 // Utility

@@ -296,6 +296,9 @@ void setupWiFi() {
   g_wifiConnected = true;
   logMsg("[WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
 
+  // Re-initialise log system now that WiFi is up so syslog host can be resolved
+  logInit();
+
   // mDNS: register as ourbrewbot-CHIPID.local
   String mdnsName = "ourbrewbot-" + String(ESP.getChipId(), HEX);
   mdnsName.toLowerCase();
