@@ -31,7 +31,6 @@ New/Updated Features:
 
 Not yet implemented / tested:
 - OTA firmware update via web browser
-- Black temperature probe jack is currently disabled, due to it causing crashes on boot
 
 Removed:
 - mybrewbot.co.uk cloud backend (server gone)
@@ -48,14 +47,12 @@ The hardware connections were traced with a simple multimeter.  Analysis of the 
 ## Hardware
 
 Pin assignments are in `Pins.h` using raw GPIO numbers (compatible with both
-NodeMCU and generic ESP8266 board targets). Bus 2 is currently disabled by default
-because GPIO9/SD2 conflicts with the SPI flash on ESP-12E/F modules, causing
-a crash on boot.
+NodeMCU and generic ESP8266 board targets). 
 
 | Function       | GPIO  | NodeMCU Pin | Label          |
 |----------------|-------|-------------|----------------|
 | Probe Bus 1    | GPIO0 | D3          | Green Jack     |
-| Probe Bus 2    | GPIO9 | SD2         | Black Jack (disabled by default) |
+| Probe Bus 2    | GPIO2 | D4          | Black Jack     |
 | RF Transmitter | GPIO4 | D2          | FS1000A TX     |
 | RF Receiver    | GPIO14 | D5          | MX-RM-5V RX    |
 | BLE (ESP TX)   | GPIO12| D6          | HM-10 BT 4.0 RX ← ESP TX |
