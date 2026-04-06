@@ -16,20 +16,20 @@ This firmware keeps your hardware working:
 - Brewfather / Brewer's Friend integrations with per-fermenter toggles
 - All JSON config files 100% compatible with original (same field names)
 - Tilt hydrometer support via HM-10 BLE module
+- iSpindel HTTP receiver
+- Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation
 
 New/Updated Features:
 - Brewfather integration uses the Custom Stream API
 - MQTT support for publishing fermenter data to any MQTT broker
 - Home Assistant MQTT Discovery — auto-creates HA entities with no YAML needed (optional, per-broker toggle)
 - Full local REST API
-- Web-based admin page for configuring probes, fermenters, plugs, and services
-- Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation
+- Web-based admin page for configuring probes, fermenters, Tilts, iSpindels, plugs, and services
 - mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
 - LittleFS file browser in admin page for inspecting config files
 - BLE AT command console for debugging HM-10 Bluetooth module
 
 Not yet implemented / tested:
-- iSpindel HTTP receiver  
 - OTA firmware update via web browser
 - Black temperature probe jack is currently disabled, due to it causing crashes on boot
 
