@@ -124,6 +124,9 @@ void setup() {
   // Load all config from flash
   loadAllConfig();
 
+  // Record startup (must be after loadAllConfig so lastUptime is available)
+  recordReboot(g_rebootReason);
+
   // Reset uptime counter — this tracks minutes since boot, not cumulative
   g_globalConfig.lastUptime = 0;
 
@@ -155,9 +158,6 @@ void setup() {
   setupWebServer(g_webServer);
   g_webServer.begin();
   logMsg("[WEB] Server started on port 80");
-
-  // Record startup
-  recordReboot(g_rebootReason);
 
   // MQTT client setup
   initMqtt();
