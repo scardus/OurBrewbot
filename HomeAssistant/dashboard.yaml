@@ -12,6 +12,44 @@ views:
           - type: custom:mushroom-chips-card
             chips:
               - type: template
+                entity: sensor.ourbrewbot_firmware_version
+                content: '{{ states(''sensor.ourbrewbot_firmware_version'') }}'
+                icon: mdi:tag
+                icon_color: grey
+              - type: template
+                entity: sensor.ourbrewbot_ip_address
+                content: '{{ states(''sensor.ourbrewbot_ip_address'') }}'
+                icon: mdi:ip-network
+                icon_color: grey
+              - type: template
+                entity: sensor.ourbrewbot_uptime
+                content: >
+                  {% set m = states('sensor.ourbrewbot_uptime') | int(0) %}
+                  {% set d = (m // 1440) %}
+                  {% set h = ((m % 1440) // 60) %}
+                  {% set mn = m % 60 %}
+                  {% if d > 0 %}{{ d }}d {{ h }}h {{ mn }}m{% elif h > 0 %}{{ h }}h {{ mn }}m{% else %}{{ mn }}m{% endif %}
+                icon: mdi:clock-outline
+                icon_color: grey
+              - type: template
+                entity: sensor.ourbrewbot_rssi
+                content: '{{ states(''sensor.ourbrewbot_rssi'') }} dBm'
+                icon: mdi:wifi
+                icon_color: >
+                  {% set r = states('sensor.ourbrewbot_rssi') | int(-100) %}
+                  {% if r > -60 %} green {% elif r > -75 %} orange {% else %} red {% endif %}
+              - type: template
+                entity: sensor.ourbrewbot_free_heap
+                content: >
+                  {{ (states('sensor.ourbrewbot_free_heap') | int(0) / 1024) | round(1) }} KB
+                icon: mdi:memory
+                icon_color: grey
+            grid_options:
+              columns: full
+            alignment: center
+          - type: custom:mushroom-chips-card
+            chips:
+              - type: template
                 entity: sensor.ourbrewbot_f0_status
                 content: >
                   {{ states('sensor.ourbrewbot_f0_name') | default('Fermenter 0',
@@ -65,7 +103,7 @@ views:
                     entity: sensor.ourbrewbot_f0_power
                     state: 'ON'
                   - condition: state
-                    entity: sensor.ourbrewbot_f0_free_heap
+                    entity: sensor.ourbrewbot_f0_status
                     state_not: unavailable
             card:
               type: vertical-stack
@@ -367,15 +405,11 @@ views:
                         endif %}
                 - type: entities
                   entities:
-                    - entity: sensor.ourbrewbot_f0_rssi
-                      name: Signal (RSSI)
-                    - entity: sensor.ourbrewbot_f0_free_heap
-                      name: Free Heap
                     - type: custom:mushroom-template-card
                       primary: Last Seen
                       secondary: >
                         {% set lu =
-                        states.sensor.ourbrewbot_f0_free_heap.last_updated %} {% if
+                        states.sensor.ourbrewbot_f0_status.last_updated %} {% if
                         lu %}
                           {{ relative_time(lu) }} ago
                         {% else %}
@@ -414,7 +448,7 @@ views:
                     entity: sensor.ourbrewbot_f1_power
                     state: 'ON'
                   - condition: state
-                    entity: sensor.ourbrewbot_f1_free_heap
+                    entity: sensor.ourbrewbot_f1_status
                     state_not: unavailable
             card:
               type: vertical-stack
@@ -716,15 +750,11 @@ views:
                         endif %}
                 - type: entities
                   entities:
-                    - entity: sensor.ourbrewbot_f1_rssi
-                      name: Signal (RSSI)
-                    - entity: sensor.ourbrewbot_f1_free_heap
-                      name: Free Heap
                     - type: custom:mushroom-template-card
                       primary: Last Seen
                       secondary: >
                         {% set lu =
-                        states.sensor.ourbrewbot_f1_free_heap.last_updated %} {% if
+                        states.sensor.ourbrewbot_f1_status.last_updated %} {% if
                         lu %}
                           {{ relative_time(lu) }} ago
                         {% else %}
@@ -763,7 +793,7 @@ views:
                     entity: sensor.ourbrewbot_f2_power
                     state: 'ON'
                   - condition: state
-                    entity: sensor.ourbrewbot_f2_free_heap
+                    entity: sensor.ourbrewbot_f2_status
                     state_not: unavailable
             card:
               type: vertical-stack
@@ -1065,15 +1095,11 @@ views:
                         endif %}
                 - type: entities
                   entities:
-                    - entity: sensor.ourbrewbot_f2_rssi
-                      name: Signal (RSSI)
-                    - entity: sensor.ourbrewbot_f2_free_heap
-                      name: Free Heap
                     - type: custom:mushroom-template-card
                       primary: Last Seen
                       secondary: >
                         {% set lu =
-                        states.sensor.ourbrewbot_f2_free_heap.last_updated %} {% if
+                        states.sensor.ourbrewbot_f2_status.last_updated %} {% if
                         lu %}
                           {{ relative_time(lu) }} ago
                         {% else %}
@@ -1112,7 +1138,7 @@ views:
                     entity: sensor.ourbrewbot_f3_power
                     state: 'ON'
                   - condition: state
-                    entity: sensor.ourbrewbot_f3_free_heap
+                    entity: sensor.ourbrewbot_f3_status
                     state_not: unavailable
             card:
               type: vertical-stack
@@ -1414,15 +1440,11 @@ views:
                         endif %}
                 - type: entities
                   entities:
-                    - entity: sensor.ourbrewbot_f3_rssi
-                      name: Signal (RSSI)
-                    - entity: sensor.ourbrewbot_f3_free_heap
-                      name: Free Heap
                     - type: custom:mushroom-template-card
                       primary: Last Seen
                       secondary: >
                         {% set lu =
-                        states.sensor.ourbrewbot_f3_free_heap.last_updated %} {% if
+                        states.sensor.ourbrewbot_f3_status.last_updated %} {% if
                         lu %}
                           {{ relative_time(lu) }} ago
                         {% else %}
