@@ -1,14 +1,18 @@
 /*
- * Mqtt.cpp -- MQTT client for publishing fermenter data
+ * Mqtt.cpp -- MQTT client for publishing fermenter and device data
  *
  * Publishes each value on its own retained topic:
- *   <baseTopic>/Fermenter<N>/<key>
+ *   <baseTopic>/Fermenter<N>/<key>   — per-fermenter data
+ *   <baseTopic>/Device/<key>         — device-level diagnostics
  *
  * LWT: broker publishes <baseTopic>/availability = "offline" on unexpected disconnect.
  * On connect: publishes "online" to availability topic.
  *
  * HA Discovery: when haDiscovery is enabled, publishes Home Assistant MQTT discovery
  * config payloads on connect and whenever HA restarts (homeassistant/status = online).
+ * A device-level HA device (ourbrewbot_{CHIPID}) is published alongside the per-fermenter
+ * devices (ourbrewbot_{CHIPID}_f{N}), advertising firmware version, IP, mDNS name, WiFi
+ * SSID, RSSI, free heap, uptime, chip ID, reboot reason, and reboot code.
  */
 
 #include "Mqtt.h"
@@ -18,6 +22,8 @@
 #include "Log.h"
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
+
+extern String g_rebootReason;  // captured at boot in OurBrewbot.ino
 
 static WiFiClient   g_mqttWifi;
 static PubSubClient g_mqtt(g_mqttWifi);
@@ -108,6 +114,56 @@ static void publishOneEntity(
   yield();  // feed WDT between successive publishes
 }
 
+// Publish HA discovery entity configs for the device itself (not per-fermenter).
+// Uses device ID ourbrewbot_{CHIPID} and base topic {baseTopic}/Device.
+static void publishDeviceDiscovery() {
+  if (!g_mqtt.connected()) return;
+
+  char devId[24], devBase[64];
+  snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X",    ESP.getChipId());
+  snprintf(devBase, sizeof(devBase), "%s/Device",           g_mqttConfig.baseTopic);
+
+  DynamicJsonDocument doc(640);
+
+  // Static text diagnostics
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "firmware_version", "Firmware Version", "firmware_version",
+    nullptr, nullptr, "mdi:tag", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "ip_address", "IP Address", "ip_address",
+    nullptr, nullptr, "mdi:ip-network", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "mdns_name", "mDNS Name", "mdns_name",
+    nullptr, nullptr, "mdi:lan", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "wifi_ssid", "WiFi SSID", "wifi_ssid",
+    nullptr, nullptr, "mdi:wifi", "diagnostic", nullptr);
+
+  // Numeric diagnostics
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "rssi",      "RSSI",      "rssi",
+    "signal_strength", "dBm", nullptr, "diagnostic", "measurement");
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "free_heap", "Free Heap", "free_heap",
+    nullptr, "B", "mdi:memory", "diagnostic", "measurement");
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "uptime",    "Uptime",    "uptime",
+    "duration", "min", "mdi:clock-outline", "diagnostic", "measurement");
+
+  // Identity & reboot info
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "chip_id", "Chip ID", "chip_id",
+    nullptr, nullptr, "mdi:chip", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "reboot_reason", "Reboot Reason", "reboot_reason",
+    nullptr, nullptr, "mdi:restart", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
+    "reboot_code", "Reboot Code", "reboot_code",
+    nullptr, nullptr, "mdi:restart-alert", "diagnostic", "measurement");
+
+  logMsg("[MQTT] HA discovery published for device: base=%s", devBase);
+}
+
 // Publish all HA discovery entity configs for one fermenter.
 // objectId must exactly match the key used in the data topic so HA can find the state.
 static void publishHaDiscovery(int i) {
@@ -158,12 +214,6 @@ static void publishHaDiscovery(int i) {
     "yeast",            "Yeast",            "yeast",            nullptr, nullptr, "mdi:flask",         nullptr, nullptr);
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "compressor_delay", "Compressor Delay", "compressor_delay", nullptr, "min",   "mdi:timer-outline", nullptr, "measurement");
-
-  // System diagnostics — numeric
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "rssi",      "RSSI",      "rssi",      "signal_strength", "dBm", nullptr,      "diagnostic", "measurement");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "free_heap", "Free Heap", "free_heap", nullptr,           "B",   "mdi:memory", "diagnostic", "measurement");
 
   // ON/OFF state sensors
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
@@ -230,11 +280,30 @@ static void removeHaDiscovery(int i) {
   logMsg("[MQTT] HA discovery removed for F%d", i);
 }
 
-// Publish discovery for all MQTT-enabled fermenters.
+// Remove all HA discovery entities for the device itself.
+static void removeDeviceDiscovery() {
+  if (!g_mqtt.connected()) return;
+  char devId[24];
+  snprintf(devId, sizeof(devId), "ourbrewbot_%06X", ESP.getChipId());
+  removeOneEntity("sensor", devId, "firmware_version");
+  removeOneEntity("sensor", devId, "ip_address");
+  removeOneEntity("sensor", devId, "mdns_name");
+  removeOneEntity("sensor", devId, "wifi_ssid");
+  removeOneEntity("sensor", devId, "rssi");
+  removeOneEntity("sensor", devId, "free_heap");
+  removeOneEntity("sensor", devId, "uptime");
+  removeOneEntity("sensor", devId, "chip_id");
+  removeOneEntity("sensor", devId, "reboot_reason");
+  removeOneEntity("sensor", devId, "reboot_code");
+  logMsg("[MQTT] HA discovery removed for device");
+}
+
+// Publish discovery for all MQTT-enabled fermenters and the device itself.
 // Called on connect and whenever HA restarts.
 void publishAllHaDiscovery() {
   if (!g_mqttConfig.haDiscovery) return;
   if (!g_mqtt.connected()) return;
+  publishDeviceDiscovery();
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     if (g_fermenters[i].brewServices & (1 << MQTT_SERVICE_BIT)) {
       publishHaDiscovery(i);
@@ -245,6 +314,7 @@ void publishAllHaDiscovery() {
 // Remove all HA discovery entities (called when haDiscovery is disabled).
 void cleanupAllHaDiscovery() {
   if (!g_mqtt.connected()) return;
+  removeDeviceDiscovery();
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     removeHaDiscovery(i);
   }
@@ -351,6 +421,7 @@ bool forcePublishAllHaDiscovery() {
     }
   }
   logMsg("[MQTT] Discover: publishing all fermenters to base=%s", g_mqttConfig.baseTopic);
+  publishDeviceDiscovery();
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     publishHaDiscovery(i);
   }
@@ -380,6 +451,43 @@ void mqttLoop() {
 // ============================================================
 // REPORT — publish all enabled fermenter data
 // ============================================================
+
+// Publish current device-level diagnostics to {baseTopic}/Device/{key}.
+static void publishDeviceReport() {
+  char base[64];
+  snprintf(base, sizeof(base), "%s/Device", g_mqttConfig.baseTopic);
+
+  publishValue(base, "firmware_version", FW_VERSION);
+
+  // IP address
+  String ip = WiFi.localIP().toString();
+  publishValue(base, "ip_address", ip.c_str());
+
+  // mDNS name: ourbrewbot-{chipid_hex}.local
+  char mdns[32];
+  snprintf(mdns, sizeof(mdns), "ourbrewbot-%06x.local", ESP.getChipId());
+  publishValue(base, "mdns_name", mdns);
+
+  // WiFi SSID
+  String ssid = WiFi.SSID();
+  publishValue(base, "wifi_ssid", ssid.c_str());
+
+  publishInt(base, "rssi",      WiFi.RSSI());
+  publishInt(base, "free_heap", ESP.getFreeHeap());
+  publishInt(base, "uptime",    (int)(millis() / 60000UL));
+
+  // Chip ID as lowercase hex
+  char chipId[8];
+  snprintf(chipId, sizeof(chipId), "%06x", ESP.getChipId());
+  publishValue(base, "chip_id", chipId);
+
+  // Reboot info — captured once at boot, static for the session
+  publishValue(base, "reboot_reason", g_rebootReason.c_str());
+  struct rst_info* ri = ESP.getResetInfoPtr();
+  publishInt(base, "reboot_code", ri->reason);
+
+  logMsg("[MQTT] Published device report: base=%s", base);
+}
 
 void reportMqtt() {
   if (!g_mqttConfig.enabled) return;
@@ -437,12 +545,10 @@ void reportMqtt() {
     publishInt(base, "compressor_delay", g_fermenters[i].compressorDelay);
     publishBool(base, "profile_running", g_fermenters[i].profileRunning);
 
-    // System
-    publishInt(base, "rssi", WiFi.RSSI());
-    publishInt(base, "free_heap", ESP.getFreeHeap());
-
     logMsg("[MQTT] Published F%d (%s)", i, g_fermenters[i].fermenterName);
   }
+
+  publishDeviceReport();
 }
 
 // ============================================================
