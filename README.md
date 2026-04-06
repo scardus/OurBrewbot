@@ -57,7 +57,7 @@ a crash on boot.
 | Probe Bus 1    | GPIO0 | D3          | Green Jack     |
 | Probe Bus 2    | GPIO9 | SD2         | Black Jack (disabled by default) |
 | RF Transmitter | GPIO4 | D2          | FS1000A TX     |
-| RF Receiver    | GPIO4 | D5          | MX-RM-5V RX    |
+| RF Receiver    | GPIO14 | D5          | MX-RM-5V RX    |
 | BLE (ESP TX)   | GPIO12| D6          | HM-10 BT 4.0 RX ← ESP TX |
 | BLE (ESP RX)   | GPIO13| D7          | HM-10 BT 4.0 TX → ESP RX |
 
