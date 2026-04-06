@@ -68,6 +68,10 @@ void handleFsFile(ESP8266WebServer& server);
 void handleTilts(ESP8266WebServer& server);
 void handleTiltPost(ESP8266WebServer& server);
 
+// iSpindel config
+void handleiSpindels(ESP8266WebServer& server);
+void handleiSpindelConfigPost(ESP8266WebServer& server);
+
 // Helpers
 void sendCORSHeaders(ESP8266WebServer& server);
 void sendJsonResponse(ESP8266WebServer& server, const String& json, int code = 200);

@@ -65,10 +65,11 @@ button.danger{background:#600;color:#faa;border:1px solid #a33;padding:6px 16px;
 <button onclick="showTab(0)" id="tb0" class="active">Fermenters</button>
 <button onclick="showTab(1)" id="tb1">Profiles</button>
 <button onclick="showTab(2)" id="tb2">Probes</button>
-<button onclick="showTab(3)" id="tb3">Smart Plugs</button>
-<button onclick="showTab(4)" id="tb4">Reporting</button>
-<button onclick="showTab(5)" id="tb5">System Settings</button>
-<button onclick="showTab(6)" id="tb6">Tilts</button>
+<button onclick="showTab(3)" id="tb3">Tilts</button>
+<button onclick="showTab(4)" id="tb4">iSpindels</button>
+<button onclick="showTab(5)" id="tb5">Smart Plugs</button>
+<button onclick="showTab(6)" id="tb6">Reporting</button>
+<button onclick="showTab(7)" id="tb7">System Settings</button>
 </div>
 <div id="t0" class="tab active"></div>
 <div id="t1" class="tab"></div>
@@ -77,11 +78,12 @@ button.danger{background:#600;color:#faa;border:1px solid #a33;padding:6px 16px;
 <div id="t4" class="tab"></div>
 <div id="t5" class="tab"></div>
 <div id="t6" class="tab"></div>
+<div id="t7" class="tab"></div>
 
 <script>
 var T=0,R=null,dirty=false,dirtyTimer=null;
 function markDirty(){dirty=true;if(dirtyTimer)clearTimeout(dirtyTimer);dirtyTimer=setTimeout(function(){dirty=false},30000)}
-function showTab(n){T=n;dirty=false;for(var i=0;i<7;i++){document.getElementById('t'+i).className='tab'+(i==n?' active':'');document.getElementById('tb'+i).className=i==n?'active':''}loadTab()}
+function showTab(n){T=n;dirty=false;for(var i=0;i<8;i++){document.getElementById('t'+i).className='tab'+(i==n?' active':'');document.getElementById('tb'+i).className=i==n?'active':''}loadTab()}
 function $(s){return document.getElementById(s)}
 function msg(id,t,ok){var e=$(id);if(e){e.textContent=t;e.className='msg '+(ok?'ok':'err')}}
 
@@ -89,10 +91,11 @@ function loadTab(){
 if(T==0)loadFermenters();
 else if(T==1)loadProfiles();
 else if(T==2)loadProbes();
-else if(T==3)loadPlugs();
-else if(T==4)loadReporting();
-else if(T==5)loadSystemSettings();
-else if(T==6)loadTilts();
+else if(T==3)loadTilts();
+else if(T==4)loadISpindels();
+else if(T==5)loadPlugs();
+else if(T==6)loadReporting();
+else if(T==7)loadSystemSettings();
 }
 
 function statusBadge(s,pwr){
@@ -322,7 +325,7 @@ h+='<button class="test" onclick="testPlug('+i+',\'off\')">Test Off</button>';
 h+='</div><div class="msg" id="sm'+i+'m"></div>';
 h+='</div>';
 }
-$('t3').innerHTML=h;
+$('t5').innerHTML=h;
 })}
 
 function savePlug(i){
@@ -378,7 +381,7 @@ h+='<button class="test" onclick="testMqtt()">Test</button> ';
 h+='<button class="test" onclick="discoverMqtt()">Discover</button> ';
 h+='<span class="msg" id="mqm"></span>';
 h+='</div>';
-$('t4').innerHTML=h;
+$('t6').innerHTML=h;
 })}
 
 function loadSystemSettings(){
@@ -438,8 +441,8 @@ h+='<h3 id="sysfc_title"></h3>';
 h+='<textarea id="sysfc" readonly style="width:100%;height:140px;background:#0a1628;border:1px solid #333;color:#e0e0e0;font-family:monospace;font-size:12px;padding:6px;border-radius:3px;resize:vertical"></textarea>';
 h+='<div style="margin-top:6px"><button class="save" onclick="downloadFile()">Download</button></div>';
 h+='</div>';
-$('t5').innerHTML=h;
-}).catch(function(e){$('t5').innerHTML='<div class="card"><p style="color:#f44">Error: '+e+'</p></div>'})}
+$('t7').innerHTML=h;
+}).catch(function(e){$('t7').innerHTML='<div class="card"><p style="color:#f44">Error: '+e+'</p></div>'})}
 
 function saveSettings(){
 var body={Unit:parseInt($('su').value),
@@ -504,8 +507,8 @@ for(var c=0;c<8;c++){h+=buildTiltCard(c,null);}
 var seen={};for(var i=0;i<ts.length;i++)seen[ts[i].colour]=ts[i];
 for(var c=0;c<8;c++){h+=buildTiltCard(c,seen[c]||null);}
 }
-$('t6').innerHTML=h;
-}).catch(function(e){$('t6').innerHTML='<div class="card"><p style="color:#f44">Error loading Tilt data: '+e+'</p></div>'})}
+$('t3').innerHTML=h;
+}).catch(function(e){$('t3').innerHTML='<div class="card"><p style="color:#f44">Error loading Tilt data: '+e+'</p></div>'})}
 
 function buildTiltCard(colour,t){
 var dot='<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+tiltDotColours[colour]+';margin-right:6px;vertical-align:middle"></span>';
@@ -537,6 +540,51 @@ var body={colour:colour,function:99,fermenter:99,tempAdjust:0,sgAdjust:0,_clear:
 fetch('/tilt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
 .then(function(r){return r.json()}).then(function(d){msg('tlm'+colour,d.msg,d.status=='ok');dirty=false;if(d.status=='ok')setTimeout(loadTilts,500)})
 .catch(function(e){msg('tlm'+colour,'Error: '+e,false)})}
+
+// ---- iSpindels Tab ----
+var iSpindelUnitNames={0:'SG',1:'Plato'};
+function loadISpindels(){
+fetch('/ispindels').then(function(r){return r.json()}).then(function(d){
+var ds=d.ispindels||[];
+var h='';
+if(ds.length==0){h='<div class="card"><p style="color:#888">No iSpindel slots configured.</p></div>';}
+for(var i=0;i<ds.length;i++){h+=buildISpindelCard(i,ds[i]);}
+$('t4').innerHTML=h;
+}).catch(function(e){$('t4').innerHTML='<div class="card"><p style="color:#f44">Error loading iSpindel data: '+e+'</p></div>'})}
+
+function buildISpindelCard(idx,s){
+var empty=(s.name=='None'||s.name=='');
+var hasData=(s.sg>0||s.temperature>0);
+var h='<div class="card"><h3>Slot '+idx;
+if(!empty)h+=': '+s.name;
+if(hasData&&!empty)h+=' <span class="badge badge-idle">Active</span>';
+h+='</h3>';
+if(!empty){
+h+='<div class="live">';
+if(hasData)h+='SG: '+s.sg.toFixed(4)+' &nbsp; Temp: '+s.temperature.toFixed(1)+'&deg; &nbsp; Batt: '+s.battery.toFixed(2)+'V &nbsp; RSSI: '+s.rssi+'dBm';
+h+='</div>';
+h+='<div class="row"><label>Device ID</label><span style="color:#53d8fb;font-size:13px">'+(s.id||'—')+'</span></div>';
+}
+h+='<div class="row"><label>Unit</label><select id="isu'+idx+'"><option value="0"'+(s.unit==0?' selected':'')+'>SG</option><option value="1"'+(s.unit==1?' selected':'')+'>Plato</option></select></div>';
+h+='<div class="row"><label>Collect Data</label><label class="sw"><input type="checkbox" id="isc'+idx+'"'+(s.collectData?' checked':'')+'><span class="sl"></span></label></div>';
+h+='<div class="row"><label>Fermenter</label><select id="isf'+idx+'">'+fermOpts(s.fermenter)+'</select></div>';
+h+='<button class="save" onclick="saveISpindel('+idx+')">Save</button>';
+if(!empty)h+=' <button class="test" onclick="clearISpindel('+idx+')" style="background:#333">Clear</button>';
+h+=' <span class="msg" id="ism'+idx+'"></span></div>';
+return h}
+
+function saveISpindel(idx){
+var body={index:idx,collectData:$('isc'+idx).checked,fermenter:parseInt($('isf'+idx).value),unit:parseInt($('isu'+idx).value)};
+fetch('/ispindel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+.then(function(r){return r.json()}).then(function(d){msg('ism'+idx,d.msg,d.status=='ok');dirty=false;if(d.status=='ok')setTimeout(loadISpindels,500)})
+.catch(function(e){msg('ism'+idx,'Error: '+e,false)})}
+
+function clearISpindel(idx){
+if(!confirm('Reset iSpindel slot '+idx+'?'))return;
+var body={index:idx,_clear:true};
+fetch('/ispindel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+.then(function(r){return r.json()}).then(function(d){msg('ism'+idx,d.msg,d.status=='ok');dirty=false;if(d.status=='ok')setTimeout(loadISpindels,500)})
+.catch(function(e){msg('ism'+idx,'Error: '+e,false)})}
 
 var sysFn='';
 

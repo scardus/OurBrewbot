@@ -43,6 +43,8 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/WiFi",          HTTP_GET,  [&server]() { handleConfigPage(server); });
 
   server.on("/iSpindel",      HTTP_POST, [&server]() { handleiSpindel(server); });
+  server.on("/ispindels",      HTTP_GET,  [&server]() { handleiSpindels(server); });
+  server.on("/ispindel/config",HTTP_POST, [&server]() { handleiSpindelConfigPost(server); });
 
   // OTA upload handler
   server.on("/update", HTTP_POST,
@@ -173,6 +175,8 @@ void handleRoot(ESP8266WebServer& server) {
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter/profile</span><span class='desc'> &mdash; profile control (start/stop/pause/next/prev)</span></li>"
     "<li><span class='method'>GET</span><a href='/board_info.json'>/board_info.json</a><span class='desc'> &mdash; board info</span></li>"
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/iSpindel</span><span class='desc'> &mdash; iSpindel gravity data</span></li>"
+    "<li><span class='method'>GET</span><a href='/ispindels'>/ispindels</a><span class='desc'> &mdash; iSpindel config &amp; live data</span></li>"
+    "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/ispindel/config</span><span class='desc'> &mdash; update iSpindel config</span></li>"
     "<li><span class='method'>GET</span><a href='/config'>/config</a><span class='desc'> &mdash; WiFi config page</span></li>"
     "<li><span class='method'>GET</span><a href='/update'>/update</a><span class='desc'> &mdash; OTA firmware update</span></li>"
     "<li><span class='method'>GET</span><a href='/reset'>/reset</a><span class='desc'> &mdash; reset configuration</span></li>"
@@ -517,12 +521,77 @@ void handleOTAUpload(ESP8266WebServer& server) {
 }
 
 // ============================================================
-// ISPINDEL — POST /iSpindel
+// ISPINDEL — POST /iSpindel (data reception from device)
 // ============================================================
 
 void handleiSpindel(ESP8266WebServer& server) {
   handleiSpindelPost(server.arg("plain"));
   sendJsonResponse(server, F("{\"status\":\"ok\"}"));
+}
+
+// ============================================================
+// ISPINDELS — GET /ispindels (config + live data for admin UI)
+// ============================================================
+
+void handleiSpindels(ESP8266WebServer& server) {
+  DynamicJsonDocument doc(1024);
+  JsonArray arr = doc.createNestedArray("ispindels");
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    JsonObject s = arr.createNestedObject();
+    s["index"]       = i;
+    s["name"]        = g_iSpindels[i].name;
+    s["id"]          = g_iSpindels[i].id;
+    s["collectData"] = g_iSpindels[i].collectData;
+    s["fermenter"]   = g_iSpindels[i].fermenter;
+    s["unit"]        = g_iSpindels[i].unit;
+    s["sg"]          = g_iSpindels[i].sg;
+    s["temperature"] = toDisplayTemp(g_iSpindels[i].temperature);
+    s["battery"]     = g_iSpindels[i].battery;
+    s["rssi"]        = g_iSpindels[i].rssi;
+  }
+  String out;
+  serializeJson(doc, out);
+  sendJsonResponse(server, out);
+}
+
+// ============================================================
+// ISPINDEL CONFIG — POST /ispindel/config
+// Body: {"index":0,"collectData":true,"fermenter":0}
+// Clear: {"index":0,"_clear":true}
+// ============================================================
+
+void handleiSpindelConfigPost(ESP8266WebServer& server) {
+  DynamicJsonDocument doc(256);
+  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
+    return;
+  }
+  int idx = doc["index"] | -1;
+  if (idx < 0 || idx >= MAX_ISPINDELS) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid index (0-3)\"}"), 400);
+    return;
+  }
+
+  if (doc["_clear"] | false) {
+    strlcpy(g_iSpindels[idx].name, "None", sizeof(g_iSpindels[idx].name));
+    g_iSpindels[idx].id          = 0;
+    g_iSpindels[idx].collectData = false;
+    g_iSpindels[idx].fermenter   = PROBE_UNASSIGNED;
+    g_iSpindels[idx].unit        = 0;
+    g_iSpindels[idx].sg          = 0.0f;
+    g_iSpindels[idx].temperature = 0.0f;
+    g_iSpindels[idx].battery     = 0.0f;
+    g_iSpindels[idx].rssi        = 0;
+    saveiSpindelConfig();
+    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"iSpindel slot cleared\"}"));
+    return;
+  }
+
+  if (doc.containsKey("collectData")) g_iSpindels[idx].collectData = doc["collectData"];
+  if (doc.containsKey("fermenter"))   g_iSpindels[idx].fermenter   = doc["fermenter"];
+  if (doc.containsKey("unit"))        g_iSpindels[idx].unit        = doc["unit"];
+  saveiSpindelConfig();
+  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"iSpindel updated\"}"));
 }
 
 // ============================================================

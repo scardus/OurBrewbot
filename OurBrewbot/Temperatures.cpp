@@ -254,16 +254,9 @@ void allocateProbeTemperatures() {
           // Ambient probe for fridge/chamber monitoring
           break;
         case PROBE_FN_TILT:
-          // Temperature from Tilt hydrometer
-          // Check Tilt data in g_tilts[]
           break;
         case PROBE_FN_ISPINDEL:
-          // Temperature from iSpindel
-          for (int s = 0; s < MAX_ISPINDELS; s++) {
-            if (g_iSpindels[s].fermenter == f) {
-              g_probes[p].temperature = g_iSpindels[s].temperature;
-            }
-          }
+          // iSpindel temp handled via getBeerTemp() fallback chain — don't overwrite probe reading
           break;
         default:
           break;
