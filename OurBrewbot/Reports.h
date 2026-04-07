@@ -21,6 +21,3 @@ int testBrewService(uint8_t svcIndex);
 
 // Health check — free heap, uptime etc.
 void reportHealth();
-
-// iSpindel receive handler (called from WebAPI)
-void handleiSpindelPost(const String& body);

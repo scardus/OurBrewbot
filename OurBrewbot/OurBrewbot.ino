@@ -107,8 +107,8 @@ void setup() {
   }
 
   // LED setup
-  pinMode(PIN_LED, OUTPUT);
-  digitalWrite(PIN_LED, HIGH); // active low
+  //pinMode(PIN_LED, OUTPUT);
+  //digitalWrite(PIN_LED, HIGH); // active low
 
   // RF transmitter setup via RCSwitch
   g_rcSwitch.enableTransmit(PIN_RF_TRANSMIT);
@@ -178,11 +178,11 @@ void loop() {
   unsigned long now = millis();
 
   // LED: steady ON when WiFi connected, flashing when disconnected (active low)
-  if (WiFi.isConnected()) {
-    digitalWrite(PIN_LED, LOW);
-  } else {
-    digitalWrite(PIN_LED, (now / 500) & 1);  // toggle every 500ms
-  }
+  //if (WiFi.isConnected()) {
+  //  digitalWrite(PIN_LED, LOW);
+  //} else {
+  //  digitalWrite(PIN_LED, (now / 500) & 1);  // toggle every 500ms
+  //}
 
   switch (g_state) {
     case RUNNING:

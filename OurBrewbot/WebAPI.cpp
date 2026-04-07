@@ -8,6 +8,7 @@
 #include "Fermenter.h"
 #include "Temperatures.h"
 #include "Reports.h"
+#include "iSpindel.h"
 #include "SmartPlugs.h"
 #include "Pins.h"
 #include "Profile.h"

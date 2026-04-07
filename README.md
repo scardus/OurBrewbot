@@ -186,6 +186,7 @@ OurBrewbot/
   SmartPlugs.h/.cpp    RF smart plug control
   Profile.h/.cpp       Fermentation profile runner
   Reports.h/.cpp       Brewfather / Brewer's Friend reporting
+  iSpindel.h/.cpp      iSpindel WiFi hydrometer receive and registration
   Mqtt.h/.cpp          MQTT client for fermenter data publishing
   WebAPI.h/.cpp        REST API web server
   WebAdmin.cpp         Admin configuration page (PROGMEM HTML)
