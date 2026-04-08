@@ -127,6 +127,80 @@ void sendJsonResponse(ESP8266WebServer& server, const String& json, int code) {
 // ROOT / HOME
 // ============================================================
 
+
+static const char ROOT_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
+    <html><head><meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width,initial-scale=1'>
+    <title>OurBrewbot</title>
+    <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}
+    h2{color:#e94560;margin:0 0 16px}
+    a{color:#53d8fb;text-decoration:none}
+    a:hover{text-decoration:underline}
+    .card{background:#16213e;border:1px solid #333;border-radius:6px;padding:16px;margin-bottom:12px}
+    .card h3{color:#e94560;margin-bottom:10px;font-size:15px}
+    .btn{display:inline-block;background:#e94560;color:#fff;padding:10px 24px;border-radius:4px;font-size:16px;font-weight:bold;margin-bottom:16px}
+    .btn:hover{background:#c73650;text-decoration:none}
+    ul{list-style:none;padding:0}
+    li{padding:6px 0;border-bottom:1px solid #222;font-size:14px}
+    li:last-child{border-bottom:none}
+    li a{font-family:monospace;font-size:13px}
+    .method{display:inline-block;width:40px;color:#e94560;font-weight:bold;font-family:monospace;font-size:13px}
+    .desc{color:#aaa;margin-left:8px}
+    </style></head><body>
+    <h2>OurBrewbot</h2>
+    <a class='btn' href='/admin'>Open Admin Dashboard</a>
+    <div class='card'><h3>REST API</h3><ul>
+    <li><span class='method'>GET</span><a href='/board_info.json'>/board_info.json</a><span class='desc'> &mdash; board info</span></li>
+    <li><span class='method'>GET</span><a href='/brewservices'>/brewservices</a><span class='desc'> &mdash; brew service config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/brewservices</span><span class='desc'> &mdash; update brew service</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/brewservices/test</span><span class='desc'> &mdash; test brew service</span></li>
+    <li><span class='method'>GET</span><a href='/config'>/config</a><span class='desc'> &mdash; WiFi reset page</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/wifi/reset</span><span class='desc'> &mdash; clear WiFi settings and reboot into setup portal</span></li>
+    <li><span class='method'>GET</span><a href='/controller'>/controller</a><span class='desc'> &mdash; controller config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/controller</span><span class='desc'> &mdash; update global config</span></li>
+    <li><span class='method'>GET</span><a href='/fermenters'>/fermenters</a><span class='desc'> &mdash; all fermenter data</span></li>
+    <li><span class='method'>GET</span><a href='/fermenter?id=0'>/fermenter?id=N</a><span class='desc'> &mdash; single fermenter</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter</span><span class='desc'> &mdash; update fermenter config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter/profile</span><span class='desc'> &mdash; profile control (start/stop/pause/next/prev)</span></li>
+    <li><span class='method'>GET</span><a href='/fs/files'>/fs/files</a><span class='desc'> &mdash; list LittleFS files</span></li>
+    <li><span class='method'>GET</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/file?name=...</span><span class='desc'> &mdash; read file content</span></li>
+    <li><span class='method'>GET</span><a href='/health'>/health</a><span class='desc'> &mdash; system health</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/iSpindel</span><span class='desc'> &mdash; iSpindel gravity data</span></li>
+    <li><span class='method'>GET</span><a href='/ispindels'>/ispindels</a><span class='desc'> &mdash; iSpindel config &amp; live data</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/ispindel/config</span><span class='desc'> &mdash; update iSpindel config</span></li>
+    <li><span class='method'>GET</span><a href='/mqtt'>/mqtt</a><span class='desc'> &mdash; MQTT config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt</span><span class='desc'> &mdash; update MQTT config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt/test</span><span class='desc'> &mdash; test MQTT connection</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt/discover</span><span class='desc'> &mdash; trigger HA discovery</span></li>
+    <li><span class='method'>GET</span><a href='/probes'>/probes</a><span class='desc'> &mdash; temperature probes</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/probes</span><span class='desc'> &mdash; update probe config</span></li>
+    <li><span class='method'>GET</span><a href='/profiles'>/profiles</a><span class='desc'> &mdash; fermentation profiles</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/profile</span><span class='desc'> &mdash; update profile</span></li>
+    <li><span class='method'>GET</span><a href='/reboot'>/reboot</a><span class='desc'> &mdash; reboot device</span></li>
+    <li><span class='method'>GET</span><a href='/reset'>/reset</a><span class='desc'> &mdash; reset configuration</span></li>
+    <li><span class='method'>GET</span><a href='/rf/sniff'>/rf/sniff</a><span class='desc'> &mdash; RF sniff page</span></li>
+    <li><span class='method'>GET</span><a href='/rf/sniff/poll'>/rf/sniff/poll</a><span class='desc'> &mdash; poll RF sniff results</span></li>
+    <li><span class='method'>GET</span><a href='/smartplugs'>/smartplugs</a><span class='desc'> &mdash; smart plug config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/smartplug</span><span class='desc'> &mdash; update smart plug</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/smartplug/test</span><span class='desc'> &mdash; test smart plug RF</span></li>
+    <li><span class='method'>GET</span><a href='/status'>/status</a><span class='desc'> &mdash; quick status</span></li>
+    <li><span class='method'>GET</span><a href='/syslog'>/syslog</a><span class='desc'> &mdash; syslog config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/syslog</span><span class='desc'> &mdash; update syslog config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/tilt</span><span class='desc'> &mdash; update Tilt config</span></li>
+    <li><span class='method'>GET</span><a href='/tilts'>/tilts</a><span class='desc'> &mdash; Tilt hydrometer config &amp; live data</span></li>
+    <li><span class='method'>GET</span><a href='/update'>/update</a><span class='desc'> &mdash; OTA firmware update</span></li>
+    </ul></div>
+    </body></html>)rawliteral";
+
+void handleRoot(ESP8266WebServer& server) {
+  server.setContentLength(strlen_P(ROOT_PAGE));
+  server.send(200, "text/html", "");
+  server.sendContent_P(ROOT_PAGE);
+}
+
+/*
 void handleRoot(ESP8266WebServer& server) {
   String html = F(
     "<!DOCTYPE html><html><head><meta charset='utf-8'>"
@@ -196,6 +270,7 @@ void handleRoot(ESP8266WebServer& server) {
   );
   server.send(200, "text/html", html);
 }
+*/
 
 // ============================================================
 // FERMENTERS — GET /fermenters
