@@ -136,7 +136,7 @@ void setup() {
 
   g_sensors2.begin();
   g_sensors2.setResolution(g_globalConfig.resolution);
-  
+
   logMsg("[TEMP] Bus1: %d probes, Bus2: %d probes",
     g_sensors1.getDeviceCount(), g_sensors2.getDeviceCount());
 
@@ -278,6 +278,22 @@ void setupWiFi() {
   WiFiManager wifiManager;
   wifiManager.setConnectTimeout(20);
   wifiManager.setConfigPortalTimeout(180);
+
+  wifiManager.setTitle("OurBrewbot Setup");
+  wifiManager.setCustomHeadElement(
+    "<style>"
+    "body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui,sans-serif}"
+    "h1,h2,h3{color:#e94560}"
+    "input[type=text],input[type=password]{"
+      "background:#16213e;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:8px}"
+    "input[type=submit]{"
+      "background:#e94560;color:#fff;border:none;padding:10px 24px;"
+      "border-radius:4px;font-weight:bold;cursor:pointer}"
+    "input[type=submit]:hover{background:#c73650}"
+    ".wrap{background:#16213e;border:1px solid #333;border-radius:6px}"
+    "a{color:#e0e0e0}.q a{color:#fff}"
+    "</style>"
+  );
 
   // Use chip ID in AP name to make it unique per device
   String apName = "OurBrewbot-" + String(ESP.getChipId(), HEX);
