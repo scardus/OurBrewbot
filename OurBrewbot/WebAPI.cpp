@@ -296,21 +296,21 @@ void handleFermenter(ESP8266WebServer& server) {
     // Update fermenter config from POST body
     DynamicJsonDocument doc(1024);
     if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
-      int idx = doc["Fermenter"] | 0;
+      int idx = doc["Fermenter"] | -1;
       if (idx >= 0 && idx < MAX_FERMENTERS) {
-        if (doc.containsKey("CeilingTemp"))     g_fermenters[idx].ceilingTemp     = doc["CeilingTemp"];
-        if (doc.containsKey("FloorTemp"))       g_fermenters[idx].floorTemp       = doc["FloorTemp"];
+        if (doc.containsKey("CeilingTemp"))     { float v = doc["CeilingTemp"];        if (v >= -20.0f && v <= 50.0f)   g_fermenters[idx].ceilingTemp     = v; }
+        if (doc.containsKey("FloorTemp"))       { float v = doc["FloorTemp"];          if (v >= -20.0f && v <= 50.0f)   g_fermenters[idx].floorTemp       = v; }
         if (doc.containsKey("Power"))           g_fermenters[idx].power           = doc["Power"];
         if (doc.containsKey("TempControl"))     g_fermenters[idx].tempControl     = doc["TempControl"];
         if (doc.containsKey("BeerName"))        strlcpy(g_fermenters[idx].beerName,      doc["BeerName"],      sizeof(g_fermenters[0].beerName));
         if (doc.containsKey("FermenterName"))   strlcpy(g_fermenters[idx].fermenterName, doc["FermenterName"], sizeof(g_fermenters[0].fermenterName));
         if (doc.containsKey("YeastName"))       strlcpy(g_fermenters[idx].yeastName,     doc["YeastName"],     sizeof(g_fermenters[0].yeastName));
-        if (doc.containsKey("Hysteresis"))      g_fermenters[idx].hysteresis      = doc["Hysteresis"];
-        if (doc.containsKey("CompressorDelay")) g_fermenters[idx].compressorDelay = doc["CompressorDelay"];
+        if (doc.containsKey("Hysteresis"))      { float v = doc["Hysteresis"];         if (v >= 0.0f && v <= 10.0f)     g_fermenters[idx].hysteresis      = v; }
+        if (doc.containsKey("CompressorDelay")) { uint16_t v = doc["CompressorDelay"]; if (v <= 1440)                   g_fermenters[idx].compressorDelay = v; }
         if (doc.containsKey("BrewServices"))    g_fermenters[idx].brewServices    = doc["BrewServices"];
         if (doc.containsKey("OG"))              g_fermenters[idx].og              = doc["OG"];
         if (doc.containsKey("TG"))              g_fermenters[idx].tg              = doc["TG"];
-        if (doc.containsKey("ProfileNo"))       g_fermenters[idx].profileNo       = doc["ProfileNo"];
+        if (doc.containsKey("ProfileNo"))       { int v = doc["ProfileNo"];            if (v >= 0 && v <= MAX_PROFILES) g_fermenters[idx].profileNo       = (uint8_t)v; }
         if (doc.containsKey("LiveTest"))        g_fermenters[idx].liveTest        = doc["LiveTest"];
         saveFermenterConfig();
         sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Configuration saved\"}"));
@@ -375,8 +375,8 @@ void handleController(ESP8266WebServer& server) {
   if (server.method() == HTTP_POST) {
     DynamicJsonDocument doc(2048);
     if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
-      if (doc.containsKey("Unit"))          g_globalConfig.unit          = doc["Unit"];
-      if (doc.containsKey("Resolution"))    g_globalConfig.resolution    = doc["Resolution"];
+      if (doc.containsKey("Unit"))       { uint8_t v = doc["Unit"];       if (v == UNIT_CELSIUS || v == UNIT_FAHRENHEIT) g_globalConfig.unit       = v; }
+      if (doc.containsKey("Resolution")) { uint8_t v = doc["Resolution"]; if (v >= 9 && v <= 12)                        g_globalConfig.resolution = v; }
       if (doc.containsKey("NotifyOn"))      g_globalConfig.notifyOn      = doc["NotifyOn"];
       if (doc.containsKey("BrewService"))   g_globalConfig.brewService   = doc["BrewService"];
       if (doc.containsKey("BrewServiceId")) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"], sizeof(g_globalConfig.brewServiceId));
@@ -633,7 +633,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
   }
 
   if (doc.containsKey("collectData")) g_iSpindels[idx].collectData = doc["collectData"];
-  if (doc.containsKey("fermenter"))   g_iSpindels[idx].fermenter   = doc["fermenter"];
+  if (doc.containsKey("fermenter"))   { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_iSpindels[idx].fermenter = v; }
   if (doc.containsKey("unit"))        g_iSpindels[idx].unit        = doc["unit"];
   saveiSpindelConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"iSpindel updated\"}"));
@@ -710,7 +710,7 @@ void handleProbePost(ESP8266WebServer& server) {
   }
   if (doc.containsKey("name"))       strlcpy(g_probes[idx].probeName, doc["name"], sizeof(g_probes[0].probeName));
   if (doc.containsKey("function"))   g_probes[idx].function   = doc["function"];
-  if (doc.containsKey("fermenter"))  g_probes[idx].fermenter  = doc["fermenter"];
+  if (doc.containsKey("fermenter"))  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_probes[idx].fermenter = v; }
   if (doc.containsKey("tempAdjust")) g_probes[idx].tempAdjust = doc["tempAdjust"];
   saveProbeConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Probe updated\"}"));
@@ -758,14 +758,14 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid plug index\"}"), 400);
     return;
   }
-  if (doc.containsKey("function"))     g_smartPlugs[idx].function    = doc["function"];
-  if (doc.containsKey("fermenter"))    g_smartPlugs[idx].fermenter   = doc["fermenter"];
+  if (doc.containsKey("function"))     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           g_smartPlugs[idx].function    = v; }
+  if (doc.containsKey("fermenter"))    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_smartPlugs[idx].fermenter   = v; }
   if (doc.containsKey("manufacturer")) strlcpy(g_smartPlugs[idx].manufacturer, doc["manufacturer"], sizeof(g_smartPlugs[0].manufacturer));
   if (doc.containsKey("model"))        strlcpy(g_smartPlugs[idx].model, doc["model"], sizeof(g_smartPlugs[0].model));
   if (doc.containsKey("onCode"))       g_smartPlugs[idx].onCode      = doc["onCode"];
   if (doc.containsKey("offCode"))      g_smartPlugs[idx].offCode     = doc["offCode"];
-  if (doc.containsKey("protocol"))     g_smartPlugs[idx].protocol    = doc["protocol"];
-  if (doc.containsKey("bits"))         g_smartPlugs[idx].bits        = doc["bits"];
+  if (doc.containsKey("protocol"))     { uint8_t v = doc["protocol"]; if (v >= 1)              g_smartPlugs[idx].protocol    = v; }
+  if (doc.containsKey("bits"))         { uint8_t v = doc["bits"];     if (v >= 1 && v <= 32)   g_smartPlugs[idx].bits        = v; }
   if (doc.containsKey("delay"))        g_smartPlugs[idx].delayLength = doc["delay"];
   if (doc.containsKey("codeset"))      g_smartPlugs[idx].codeset     = doc["codeset"];
   saveSmartPlugConfig();
@@ -943,6 +943,10 @@ void handleBLESniffSend(ESP8266WebServer& server) {
   const char* cmd = doc["cmd"] | "";
   if (strlen(cmd) == 0) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Empty command\"}"), 400);
+    return;
+  }
+  if (strlen(cmd) > 64) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Command too long (max 64 chars)\"}"), 400);
     return;
   }
 
@@ -1207,11 +1211,15 @@ void handleProfilePost(ESP8266WebServer& server) {
     for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
       if (s < (int)steps.size()) {
         JsonObject st = steps[s];
-        g_profileSteps[base + s].stepType  = st["stepType"]  | 0;
+        uint8_t stepType = st["stepType"] | 0;
+        float   days     = st["days"]     | 0.0f;
+        if (stepType > 9) stepType = 0;
+        if (days < 0.0f)  days    = 0.0f;
+        g_profileSteps[base + s].stepType  = stepType;
         g_profileSteps[base + s].startTemp = st["startTemp"] | 0.0f;
         g_profileSteps[base + s].endTemp   = st["endTemp"]   | 0.0f;
         g_profileSteps[base + s].sgTrigger = st["sgTrigger"] | 0.0f;
-        g_profileSteps[base + s].days      = st["days"]      | 0.0f;
+        g_profileSteps[base + s].days      = days;
         g_profileSteps[base + s].stepNo    = s;
       } else {
         // Clear remaining steps
@@ -1376,7 +1384,7 @@ void handleTiltPost(ESP8266WebServer& server) {
   // Mark the slot as configured so saveTiltConfig() includes it
   g_tilts[colour].colour = (uint8_t)colour;
   if (doc.containsKey("function"))   g_tilts[colour].function   = doc["function"];
-  if (doc.containsKey("fermenter"))  g_tilts[colour].fermenter  = doc["fermenter"];
+  if (doc.containsKey("fermenter"))  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_tilts[colour].fermenter = v; }
   if (doc.containsKey("tempAdjust")) g_tilts[colour].tempAdjust = doc["tempAdjust"];
   if (doc.containsKey("sgAdjust"))   g_tilts[colour].sgAdjust   = doc["sgAdjust"];
   saveTiltConfig();
@@ -1408,8 +1416,8 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
   if (doc.containsKey("enabled"))  g_syslogConfig.enabled  = doc["enabled"];
   if (doc.containsKey("host"))     strlcpy(g_syslogConfig.host, doc["host"], sizeof(g_syslogConfig.host));
   if (doc.containsKey("port"))     g_syslogConfig.port     = doc["port"];
-  if (doc.containsKey("facility")) g_syslogConfig.facility = doc["facility"];
-  if (doc.containsKey("minLevel")) g_syslogConfig.minLevel = doc["minLevel"];
+  if (doc.containsKey("facility")) { uint8_t v = doc["facility"]; if (v <= 23) g_syslogConfig.facility = v; }
+  if (doc.containsKey("minLevel")) { uint8_t v = doc["minLevel"]; if (v <= 7)  g_syslogConfig.minLevel = v; }
   saveSyslogConfig();
   logInit();  // re-resolve host with new config
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Syslog config saved\"}"));
