@@ -256,6 +256,25 @@ String buildFermenterJson(uint8_t i) {
   return out;
 }
 
+String buildProfileJson(int p) {
+  DynamicJsonDocument doc(1536);
+  doc["index"] = p;
+  doc["name"]  = g_profiles[p].profileName;
+  JsonArray steps = doc.createNestedArray("steps");
+  uint8_t base = p * MAX_STEPS_PER_PROFILE;
+  for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
+    JsonObject st = steps.createNestedObject();
+    st["stepType"]  = g_profileSteps[base + s].stepType;
+    st["startTemp"] = g_profileSteps[base + s].startTemp;
+    st["endTemp"]   = g_profileSteps[base + s].endTemp;
+    st["sgTrigger"] = g_profileSteps[base + s].sgTrigger;
+    st["days"]      = g_profileSteps[base + s].days;
+  }
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
 void handleFermenters(ESP8266WebServer& server) {
   // Send fermenter array using chunked transfer to avoid building
   // one large String in RAM (each fermenter JSON is ~500 bytes)
@@ -1140,33 +1159,28 @@ void handleMqttDiscover(ESP8266WebServer& server) {
 // ============================================================
 
 void handleProfiles(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(4096);
-  JsonArray profiles = doc.createNestedArray("profiles");
+  // Stream profiles using chunked transfer to avoid a single ~8KB heap spike.
+  // One profile at a time (~1536-byte doc) is built and freed each iteration.
+  sendCORSHeaders(server);
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  server.sendContent("{\"profiles\":[");
   for (int p = 0; p < MAX_PROFILES; p++) {
-    JsonObject prof = profiles.createNestedObject();
-    prof["index"] = p;
-    prof["name"]  = g_profiles[p].profileName;
-    JsonArray steps = prof.createNestedArray("steps");
-    uint8_t base = p * MAX_STEPS_PER_PROFILE;
-    for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
-      JsonObject st = steps.createNestedObject();
-      st["stepType"]  = g_profileSteps[base + s].stepType;
-      st["startTemp"] = g_profileSteps[base + s].startTemp;
-      st["endTemp"]   = g_profileSteps[base + s].endTemp;
-      st["sgTrigger"] = g_profileSteps[base + s].sgTrigger;
-      st["days"]      = g_profileSteps[base + s].days;
-    }
+    if (p > 0) server.sendContent(",");
+    server.sendContent(buildProfileJson(p));
   }
-  // Step type descriptions for UI dropdowns
-  JsonArray types = doc.createNestedArray("stepTypes");
+  server.sendContent("],\"stepTypes\":[");
   for (int t = 0; t <= 9; t++) {
-    JsonObject st = types.createNestedObject();
-    st["id"]   = t;
-    st["name"] = getStepTypeDescription(t);
+    if (t > 0) server.sendContent(",");
+    DynamicJsonDocument tDoc(128);
+    tDoc["id"]   = t;
+    tDoc["name"] = getStepTypeDescription(t);
+    String tJson;
+    serializeJson(tDoc, tJson);
+    server.sendContent(tJson);
   }
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  server.sendContent("]}");
+  server.sendContent("");  // end chunked transfer
 }
 
 // ============================================================
