@@ -6,11 +6,11 @@
  *   GET  /fermenters       → fermenter status + temp data
  *   GET  /probes           → probe list
  *   GET  /smartplugs       → smart plug list
+ *   POST /wifi/reset       → clear WiFi settings and reboot to setup portal
  *   POST /smartplug        → update a plug config
  *   POST /smartplug/test   → test RF transmission
  *   POST /update           → accept firmware binary upload
  *   POST /iSpindel         → receive iSpindel POST
- *   GET  /configMe         → save WiFi config (form GET)
  */
 
 #include "Config.h"
@@ -36,7 +36,7 @@ void handleOTAPage(ESP8266WebServer& server);
 void handleOTAUpload(ESP8266WebServer& server);
 void handleiSpindel(ESP8266WebServer& server);
 void handleConfigPage(ESP8266WebServer& server);
-void handleConfigMe(ESP8266WebServer& server);
+void handleWiFiReset(ESP8266WebServer& server);
 void handleNotFound(ESP8266WebServer& server);
 
 // Admin page

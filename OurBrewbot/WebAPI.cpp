@@ -40,7 +40,7 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/reboot",        HTTP_GET,  [&server]() { handleReboot(server); });
   server.on("/update",        HTTP_GET,  [&server]() { handleOTAPage(server); });
   server.on("/config",        HTTP_GET,  [&server]() { handleConfigPage(server); });
-  server.on("/configMe",      HTTP_GET,  [&server]() { handleConfigMe(server); });
+  server.on("/wifi/reset",    HTTP_POST, [&server]() { handleWiFiReset(server); });
   server.on("/WiFi",          HTTP_GET,  [&server]() { handleConfigPage(server); });
 
   server.on("/iSpindel",      HTTP_POST, [&server]() { handleiSpindel(server); });
@@ -184,7 +184,8 @@ void handleRoot(ESP8266WebServer& server) {
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/iSpindel</span><span class='desc'> &mdash; iSpindel gravity data</span></li>"
     "<li><span class='method'>GET</span><a href='/ispindels'>/ispindels</a><span class='desc'> &mdash; iSpindel config &amp; live data</span></li>"
     "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/ispindel/config</span><span class='desc'> &mdash; update iSpindel config</span></li>"
-    "<li><span class='method'>GET</span><a href='/config'>/config</a><span class='desc'> &mdash; WiFi config page</span></li>"
+    "<li><span class='method'>GET</span><a href='/config'>/config</a><span class='desc'> &mdash; WiFi reset page</span></li>"
+    "<li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/wifi/reset</span><span class='desc'> &mdash; clear WiFi settings and reboot into setup portal</span></li>"
     "<li><span class='method'>GET</span><a href='/update'>/update</a><span class='desc'> &mdash; OTA firmware update</span></li>"
     "<li><span class='method'>GET</span><a href='/reset'>/reset</a><span class='desc'> &mdash; reset configuration</span></li>"
     "<li><span class='method'>GET</span><a href='/reboot'>/reboot</a><span class='desc'> &mdash; reboot device</span></li>"
@@ -617,7 +618,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
 }
 
 // ============================================================
-// WIFI CONFIG PAGES
+// WIFI RESET PAGE + ACTION
 // ============================================================
 
 void handleConfigPage(ESP8266WebServer& server) {
@@ -625,56 +626,49 @@ void handleConfigPage(ESP8266WebServer& server) {
     "<!DOCTYPE html><html><head>"
     "<meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>OurBrewbot - WiFi Setup</title>"
+    "<title>OurBrewbot - Reset WiFi</title>"
     "<style>"
     "*{box-sizing:border-box;margin:0;padding:0}"
     "body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}"
     "h2{color:#e94560;margin:0 0 16px}"
     ".card{background:#16213e;border:1px solid #333;border-radius:6px;padding:16px;max-width:480px}"
-    ".row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center}"
-    ".row label{min-width:100px;font-size:13px;color:#aaa}"
-    ".row input{background:#0f3460;border:1px solid #444;color:#e0e0e0;padding:4px 8px;border-radius:3px;font-size:13px;flex:1;min-width:0}"
-    ".row input[name=port]{flex:0;width:70px}"
-    "input[type=submit]{background:#e94560;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px;margin-top:8px}"
-    "input[type=submit]:hover{background:#c73650}"
+    "p{margin-bottom:12px;font-size:14px;color:#aaa;line-height:1.5}"
+    ".warn{color:#ffd166}"
+    ".btn{background:#e94560;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px}"
+    ".btn:hover{background:#c73650}"
     "a{color:#53d8fb;text-decoration:none;font-size:13px}"
     "</style></head><body>"
-    "<h2>WiFi Setup</h2>"
+    "<h2>Reset WiFi Settings</h2>"
     "<div class='card'>"
-    "<form method='get' action='configMe'>"
-    "<div class='row'><label>WiFi SSID</label><input type='text' name='ssid' maxlength='64' required></div>"
-    "<div class='row'><label>Password</label><input type='text' name='pass' maxlength='64'></div>"
-    "<div class='row'><label>Auth token</label><input type='text' name='blynk' placeholder='a0b1c2d...' maxlength='32' required></div>"
-    "<div class='row'><label>Host</label><input type='text' name='host' value='104.248.10.162' maxlength='64'></div>"
-    "<div class='row'><label>Port</label><input type='number' name='port' value='8442' min='1' max='65535'></div>"
-    "<input type='submit' value='Apply'>"
-    "</form></div>"
-    "<p style='margin-top:12px'><a href='/'>&#8592; Cancel</a></p>"
+    "<p>WiFi credentials are managed by WiFiManager. This action clears the saved WiFi settings, reboots the controller, and reopens the setup portal on the next boot.</p>"
+    "<p class='warn'>Are you sure? The device will disconnect from the network until you reconnect it through the setup portal.</p>"
+    "<button class='btn' onclick='resetWiFi()'>Reset WiFi And Reboot</button>"
+    "</div>"
+    "<p id='msg' style='margin-top:12px;color:#aaa'></p>"
+    "<p style='margin-top:12px'><a href='/admin'>&#8592; Back to Admin</a></p>"
+    "<script>"
+    "function resetWiFi(){"
+    "if(!confirm('Are you sure you want to clear WiFi settings and reboot into the setup portal?'))return;"
+    "var msg=document.getElementById('msg');"
+    "msg.textContent='Resetting WiFi settings and rebooting...';"
+    "fetch('/wifi/reset',{method:'POST'})"
+    ".then(function(r){return r.json()})"
+    ".then(function(d){msg.textContent=d.msg||'Rebooting into setup portal...'})"
+    ".catch(function(e){msg.textContent='Error: '+e});"
+    "}"
+    "</script>"
     "</body></html>"
   ));
 }
 
-void handleConfigMe(ESP8266WebServer& server) {
-  // Process GET params from the WiFi config form
-  bool changed = false;
-
-  if (server.hasArg("ssid") && server.arg("ssid").length() > 0) {
-    // Note: changing WiFi requires restart — WiFiManager handles this
-    changed = true;
-  }
-  if (server.hasArg("blynk")) {
-    strlcpy(g_globalConfig.authCode, server.arg("blynk").c_str(), sizeof(g_globalConfig.authCode));
-    changed = true;
-  }
-
-  if (changed) {
-    saveGlobalConfig();
-    server.send(200, "application/json",
-      F("{\"status\":\"ok\",\"msg\":\"Configuration saved - Network Changed\"}"));
-  } else {
-    server.send(200, "application/json",
-      F("{\"status\":\"ok\",\"msg\":\"No changes\"}"));
-  }
+void handleWiFiReset(ESP8266WebServer& server) {
+  sendJsonResponse(server,
+    F("{\"status\":\"ok\",\"msg\":\"WiFi settings cleared. Rebooting into setup portal.\"}"));
+  delay(250);
+  WiFi.persistent(true);
+  WiFi.disconnect(true);
+  resetWiFiConfig();
+  ESP.restart();
 }
 
 // ============================================================

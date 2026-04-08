@@ -440,6 +440,7 @@ void initDefaultPlaatoConfig();
 void initDefaultBrewServiceConfig();
 void initDefaultMqttConfig();
 void initDefaultSyslogConfig();
+void resetWiFiConfig();
 void resetAllConfig();
 
 // Utility

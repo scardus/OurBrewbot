@@ -86,6 +86,10 @@ function markDirty(){dirty=true;if(dirtyTimer)clearTimeout(dirtyTimer);dirtyTime
 function showTab(n){T=n;dirty=false;for(var i=0;i<8;i++){document.getElementById('t'+i).className='tab'+(i==n?' active':'');document.getElementById('tb'+i).className=i==n?'active':''}loadTab()}
 function $(s){return document.getElementById(s)}
 function msg(id,t,ok){var e=$(id);if(e){e.textContent=t;e.className='msg '+(ok?'ok':'err')}}
+function resetWiFiSettings(){
+if(!confirm('Are you sure you want to clear WiFi settings? The controller will reboot and reopen the setup portal.'))return;
+fetch('/wifi/reset',{method:'POST'}).then(function(r){return r.json()}).then(function(d){alert(d.msg||'Rebooting into setup portal...')})
+.catch(function(e){alert('Error: '+e)})}
 
 function loadTab(){
 if(T==0)loadFermenters();
@@ -423,7 +427,7 @@ h+='<div class="card"><h3>Actions</h3>';
 h+='<button class="danger" onclick="if(confirm(\'Reboot device?\'))fetch(\'/reboot\').then(function(){alert(\'Rebooting...\')})">Reboot</button>';
 h+='<button class="danger" onclick="if(confirm(\'Reset ALL configuration to defaults?\'))fetch(\'/reset?target=config\').then(function(){alert(\'Resetting...\')})">Factory Reset</button>';
 h+='<button class="danger" onclick="window.location.href=\'/update\'">Firmware Update</button>';
-h+='<button class="danger" onclick="window.location.href=\'/config\'">WiFi Settings</button>';
+h+='<button class="danger" onclick="resetWiFiSettings()">Reset WiFi Settings</button>';
 h+='<button class="danger" onclick="window.location.href=\'/rf/sniff\'">RF Sniffer</button>';
 h+='<button class="danger" onclick="window.location.href=\'/ble/sniff\'">BT Sniffer</button>';
 h+='</div>';

@@ -930,6 +930,19 @@ void initDefaultSyslogConfig() {
   g_syslogConfig.minLevel  = 7;   // DEBUG
 }
 
+static void clearWiFiProvisioningArtifacts() {
+  if (LittleFS.exists(FILE_CONFIG))     LittleFS.remove(FILE_CONFIG);
+  if (LittleFS.exists(FILE_CONFIG_BKP)) LittleFS.remove(FILE_CONFIG_BKP);
+  if (LittleFS.exists(FILE_DRD))        LittleFS.remove(FILE_DRD);
+}
+
+void resetWiFiConfig() {
+  logMsg("[CFG] Resetting WiFi configuration");
+  memset(&g_wifiConfig, 0, sizeof(g_wifiConfig));
+  clearWiFiProvisioningArtifacts();
+  logMsg("[CFG] WiFi reset complete - restart required");
+}
+
 // ============================================================
 // FULL RESET
 // ============================================================
@@ -950,9 +963,7 @@ void resetAllConfig() {
   saveAllConfig();
 
   // Remove WiFi config so WiFiManager re-runs the portal
-  if (LittleFS.exists(FILE_CONFIG))     LittleFS.remove(FILE_CONFIG);
-  if (LittleFS.exists(FILE_CONFIG_BKP)) LittleFS.remove(FILE_CONFIG_BKP);
-  if (LittleFS.exists(FILE_DRD))        LittleFS.remove(FILE_DRD);
+  clearWiFiProvisioningArtifacts();
 
   logMsg("[CFG] Reset complete - restart required");
 }
