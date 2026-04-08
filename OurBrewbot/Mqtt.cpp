@@ -564,7 +564,7 @@ bool testMqtt() {
   g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
 
   char clientId[24];
-  snprintf(clientId, sizeof(clientId), "ourbrewbot-t-%06X", ESP.getChipId());
+  snprintf(clientId, sizeof(clientId), "ourbrewbot-%06X", ESP.getChipId());
 
   logMsg("[MQTT] Test connecting to %s:%d user=%s",
     g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.username);
