@@ -31,6 +31,7 @@ New/Updated Features:
 
 Not yet implemented / tested:
 - Tilt hydrometer support via HM-10 BLE module __Untested - awaiting hardware__
+- Pressure sensor - __Untested - No hardware__
 
 Removed:
 - mybrewbot.co.uk cloud backend (server gone)
@@ -57,7 +58,6 @@ NodeMCU and generic ESP8266 board targets).
 | RF Receiver    | GPIO14 | D5          | MX-RM-5V RX    |
 | BLE (ESP TX)   | GPIO12| D6          | HM-10 BT 4.0 RX ← ESP TX |
 | BLE (ESP RX)   | GPIO13| D7          | HM-10 BT 4.0 TX → ESP RX |
-
 
 ---
 
