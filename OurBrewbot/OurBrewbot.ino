@@ -133,15 +133,13 @@ void setup() {
   // Start temperature sensors and register probes
   g_sensors1.begin();
   g_sensors1.setResolution(g_globalConfig.resolution);
-#ifdef ENABLE_BUS2
+
   g_sensors2.begin();
   g_sensors2.setResolution(g_globalConfig.resolution);
+  
   logMsg("[TEMP] Bus1: %d probes, Bus2: %d probes",
     g_sensors1.getDeviceCount(), g_sensors2.getDeviceCount());
-#else
-  logMsg("[TEMP] Bus1: %d probes, Bus2: disabled",
-    g_sensors1.getDeviceCount());
-#endif
+
   scanBuses();
 
   // Clean up any duplicate probes from old truncated addresses

@@ -10,10 +10,10 @@
 // Hardware bus instances — defined here, declared extern in Temperatures.h
 OneWire        g_oneWireBus1(PIN_ONE_WIRE_BUS1);
 DallasTemperature g_sensors1(&g_oneWireBus1);
-#ifdef ENABLE_BUS2
+
 OneWire        g_oneWireBus2(PIN_ONE_WIRE_BUS2);
 DallasTemperature g_sensors2(&g_oneWireBus2);
-#endif
+
 
 // ============================================================
 // ADDRESS UTILITIES
@@ -94,15 +94,11 @@ void scanBuses() {
   int bus1Count = g_sensors1.getDeviceCount();
   logMsg("[TEMP] Bus1 (Green Jack): %d probe(s)", bus1Count);
 
-#ifdef ENABLE_BUS2
   // Scan Bus 2 (Black Jack)
   g_sensors2.begin();
   int bus2Count = g_sensors2.getDeviceCount();
   logMsg("[TEMP] Bus2 (Black Jack): %d probe(s)", bus2Count);
-#else
-  int bus2Count = 0;
-  logMsg("[TEMP] Bus2 (Black Jack): disabled (ENABLE_BUS2 not defined)");
-#endif
+
 
   // For each discovered probe, check if it's already in our config
   // If not, add it to the first empty slot
@@ -149,9 +145,7 @@ void scanBuses() {
   };
 
   registerProbe(g_sensors1, bus1Count, 1);
-#ifdef ENABLE_BUS2
   registerProbe(g_sensors2, bus2Count, 2);
-#endif
 }
 
 // ============================================================
@@ -162,10 +156,9 @@ void pollTemperatures() {
   // Request temperature conversion from all sensors simultaneously
   g_sensors1.setWaitForConversion(false);
   g_sensors1.requestTemperatures();
-#ifdef ENABLE_BUS2
+
   g_sensors2.setWaitForConversion(false);
   g_sensors2.requestTemperatures();
-#endif
 
   // Wait for conversion (depends on resolution setting)
   // Resolution 9=94ms, 10=188ms, 11=375ms, 12=750ms
@@ -183,11 +176,9 @@ void pollTemperatures() {
 
     // Try Bus 1 first, then Bus 2 if enabled
     temp = g_sensors1.getTempC(addr);
-#ifdef ENABLE_BUS2
     if (temp == DEVICE_DISCONNECTED_C) {
       temp = g_sensors2.getTempC(addr);
     }
-#endif
 
     if (temp != DEVICE_DISCONNECTED_C) {
       g_probes[i].rawTemperature = temp;
@@ -279,11 +270,11 @@ float getTempQuick(const char* addressStr) {
   if (!stringToAddress(addressStr, addr)) return -127.0f;
 
   float temp = g_sensors1.getTempC(addr);
-#ifdef ENABLE_BUS2
+
   if (temp == DEVICE_DISCONNECTED_C) {
     temp = g_sensors2.getTempC(addr);
   }
-#endif
+
   return (temp == DEVICE_DISCONNECTED_C) ? -127.0f : temp;
 }
 

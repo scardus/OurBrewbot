@@ -10,10 +10,9 @@
 // Hardware bus instances (defined in Temperatures.cpp)
 extern OneWire        g_oneWireBus1;
 extern DallasTemperature g_sensors1;
-#ifdef ENABLE_BUS2
+
 extern OneWire        g_oneWireBus2;
 extern DallasTemperature g_sensors2;
-#endif
 
 // Poll all connected DS18B20 probes and update g_probes[].temperature
 void pollTemperatures();

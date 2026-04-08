@@ -20,12 +20,6 @@
 #define PIN_ONE_WIRE_BUS1   0     // GPIO0  = D3 — Green Jack, primary bus
 #define PIN_ONE_WIRE_BUS2   2     // GPIO2  = D4 — Black Jack, secondary bus
 
-// Enable/disable Bus 2 (Black Jack). GPIO9/SD2 is wired to the SPI flash on
-// most ESP-12E/F modules and crashes the chip even in DIO flash mode.
-// Disable this until the actual pin is identified or hardware is modified.
-// Both probes can share Bus 1 (Green Jack) via OneWire multi-drop.
-#define ENABLE_BUS2
-
 // RF transmitter for 433MHz smart plugs (fs1000a antenna data line)
 #define PIN_RF_TRANSMIT     4     // GPIO4  = D2
 
