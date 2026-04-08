@@ -157,6 +157,16 @@ void setup() {
   g_webServer.begin();
   logMsg("[WEB] Server started on port 80");
 
+  // Re-send boot messages via syslog now that WiFi (and syslog host) is available
+  if (g_syslogConfig.enabled) {
+    struct rst_info *ri = ESP.getResetInfoPtr();
+    logMsg("DEFERRED [SYS] Reset reason: %s (code %u)", ESP.getResetReason().c_str(), ri->reason);
+    if (ri->reason == REASON_EXCEPTION_RST) {
+      logMsg("DEFERRED [SYS] Exception cause: %u, EPC1: 0x%08x, EXCVADDR: 0x%08x",
+        ri->exccause, ri->epc1, ri->excvaddr);
+    }
+  }
+
   // MQTT client setup
   initMqtt();
 
