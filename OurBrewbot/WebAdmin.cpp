@@ -422,6 +422,7 @@ h+='</div>';
 h+='<div class="card"><h3>Actions</h3>';
 h+='<button class="danger" onclick="if(confirm(\'Reboot device?\'))fetch(\'/reboot\').then(function(){alert(\'Rebooting...\')})">Reboot</button>';
 h+='<button class="danger" onclick="if(confirm(\'Reset ALL configuration to defaults?\'))fetch(\'/reset?target=config\').then(function(){alert(\'Resetting...\')})">Factory Reset</button>';
+h+='<button class="danger" onclick="window.location.href=\'/update\'">Firmware Update</button>';
 h+='<button class="danger" onclick="window.location.href=\'/config\'">WiFi Settings</button>';
 h+='<button class="danger" onclick="window.location.href=\'/rf/sniff\'">RF Sniffer</button>';
 h+='<button class="danger" onclick="window.location.href=\'/ble/sniff\'">BT Sniffer</button>';

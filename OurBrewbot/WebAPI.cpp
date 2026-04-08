@@ -51,11 +51,17 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/update", HTTP_POST,
     [&server]() {
       server.sendHeader("Connection", "close");
-      server.send(200, "text/html",
-        "<META http-equiv=\"refresh\" content=\"15;URL=/\">"
-        "Update Success! Rebooting OurBrewbot Controller...");
-      delay(500);
-      ESP.restart();
+      if (Update.hasError()) {
+        String err = "Update FAILED: ";
+        err += Update.getError();
+        server.send(500, "text/html", err);
+      } else {
+        server.send(200, "text/html",
+          "<META http-equiv=\"refresh\" content=\"10;URL=/\">"
+          "Update Success! Rebooting OurBrewbot Controller...");
+        delay(500);
+        ESP.restart();
+      }
     },
     [&server]() { handleOTAUpload(server); }
   );
@@ -487,14 +493,29 @@ void handleReboot(ESP8266WebServer& server) {
 
 void handleOTAPage(ESP8266WebServer& server) {
   server.send(200, "text/html", F(
-    "<!DOCTYPE HTML><html><head><title>OTA Update</title></head><body>"
-    "<h2>OurBrewbot Firmware Update</h2>"
-    "<p>You are loading new firmware. Press confirm to proceed</p>"
+    "<!DOCTYPE html><html><head>"
+    "<meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>OurBrewbot - Firmware Update</title>"
+    "<style>"
+    "*{box-sizing:border-box;margin:0;padding:0}"
+    "body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}"
+    "h2{color:#e94560;margin:0 0 16px}"
+    ".card{background:#16213e;border:1px solid #333;border-radius:6px;padding:16px;max-width:480px}"
+    "p{margin-bottom:12px;font-size:14px;color:#aaa}"
+    "input[type=file]{color:#e0e0e0;font-size:13px;margin-bottom:16px;display:block}"
+    "input[type=submit]{background:#e94560;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px}"
+    "input[type=submit]:hover{background:#c73650}"
+    "a{color:#53d8fb;text-decoration:none;font-size:13px}"
+    "</style></head><body>"
+    "<h2>Firmware Update</h2>"
+    "<div class='card'>"
+    "<p>Select a firmware .bin file and click Upload. The device will reboot automatically after a successful update.</p>"
     "<form method='POST' action='/update' enctype='multipart/form-data'>"
-    "<input type='file' name='firmware' accept='.bin'><br><br>"
+    "<input type='file' name='firmware' accept='.bin'>"
     "<input type='submit' value='Upload Firmware'>"
-    "</form>"
-    "<p><a href='/'>Cancel</a></p>"
+    "</form></div>"
+    "<p style='margin-top:12px'><a href='/'>&#8592; Cancel</a></p>"
     "</body></html>"
   ));
 }
@@ -601,29 +622,35 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
 
 void handleConfigPage(ESP8266WebServer& server) {
   server.send(200, "text/html", F(
-    "<!DOCTYPE HTML>\n<html>\n<head>\n  <title>WiFi setup</title>\n"
-    "  <style>\n  body { background-color: #fcfcfc; box-sizing: border-box; }\n"
-    "  body, input { font-family: Roboto, sans-serif; font-weight: 400; font-size: 16px; }\n"
-    "  .centered { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);\n"
-    "    padding: 20px; background-color: #ccc; border-radius: 4px; }\n"
-    "  td { padding:0 0 0 5px; } label { white-space:nowrap; }\n"
-    "  input { width: 20em; } input[name=\"port\"] { width: 5em; }\n"
-    "  input[type=\"submit\"], img { margin: auto; display: block; width: 30%; }\n"
-    "  </style>\n</head>\n<body>\n<div class=\"centered\">\n"
-    "  <form method=\"get\" action=\"configMe\">\n    <table>\n"
-    "    <tr><td><label for=\"ssid\">WiFi SSID:</label></td>"
-    "  <td><input type=\"text\" name=\"ssid\" length=64 required=\"required\" ></td></tr>\n"
-    "    <tr><td><label for=\"pass\">Password:</label></td>"
-    "   <td><input type=\"text\" name=\"pass\" length=64 ></td></tr>\n"
-    "    <tr><td><label for=\"blynk\">Auth token:</label></td>"
-    "<td><input type=\"text\" name=\"blynk\" placeholder=\"a0b1c2d...\""
-    "  maxlength=\"32\" required=\"required\" ></td></tr>\n"
-    "    <tr><td><label for=\"host\">Host:</label></td>"
-    "       <td><input type=\"text\" name=\"host\" value=\"104.248.10.162\" length=64></td></tr>\n"
-    "    <tr><td><label for=\"port\">Port:</label></td>"
-    "       <td><input type=\"number\" name=\"port\" value=\"8442\" min=\"1\" max=\"65535\"></td></tr>\n"
-    "    </table><br/>\n    <input type=\"submit\" value=\"Apply\">\n"
-    "  </form>\n</div>\n</body>\n</html>"
+    "<!DOCTYPE html><html><head>"
+    "<meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>OurBrewbot - WiFi Setup</title>"
+    "<style>"
+    "*{box-sizing:border-box;margin:0;padding:0}"
+    "body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}"
+    "h2{color:#e94560;margin:0 0 16px}"
+    ".card{background:#16213e;border:1px solid #333;border-radius:6px;padding:16px;max-width:480px}"
+    ".row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center}"
+    ".row label{min-width:100px;font-size:13px;color:#aaa}"
+    ".row input{background:#0f3460;border:1px solid #444;color:#e0e0e0;padding:4px 8px;border-radius:3px;font-size:13px;flex:1;min-width:0}"
+    ".row input[name=port]{flex:0;width:70px}"
+    "input[type=submit]{background:#e94560;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px;margin-top:8px}"
+    "input[type=submit]:hover{background:#c73650}"
+    "a{color:#53d8fb;text-decoration:none;font-size:13px}"
+    "</style></head><body>"
+    "<h2>WiFi Setup</h2>"
+    "<div class='card'>"
+    "<form method='get' action='configMe'>"
+    "<div class='row'><label>WiFi SSID</label><input type='text' name='ssid' maxlength='64' required></div>"
+    "<div class='row'><label>Password</label><input type='text' name='pass' maxlength='64'></div>"
+    "<div class='row'><label>Auth token</label><input type='text' name='blynk' placeholder='a0b1c2d...' maxlength='32' required></div>"
+    "<div class='row'><label>Host</label><input type='text' name='host' value='104.248.10.162' maxlength='64'></div>"
+    "<div class='row'><label>Port</label><input type='number' name='port' value='8442' min='1' max='65535'></div>"
+    "<input type='submit' value='Apply'>"
+    "</form></div>"
+    "<p style='margin-top:12px'><a href='/'>&#8592; Cancel</a></p>"
+    "</body></html>"
   ));
 }
 
