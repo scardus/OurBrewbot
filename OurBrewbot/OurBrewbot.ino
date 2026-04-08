@@ -256,7 +256,6 @@ void loop() {
       if (now - g_lastUptimeTime >= INTERVAL_UPTIME_MS) {
         g_lastUptimeTime = now;
         g_globalConfig.lastUptime++;
-        saveGlobalConfig();
       }
       break;
 
@@ -338,9 +337,6 @@ void setupWiFi() {
 // TEN MINUTE TIMER TASKS
 // ============================================================
 void onTenMinuteTimer() {
-  // OTA auto-update disabled by default — enable and set your own OTA URL if needed
-  // checkForFirmwareUpdate();
-
   // Health report to serial
   logMsg("[HEALTH] Free heap: %u bytes, Uptime: %lu min",
     ESP.getFreeHeap(), g_globalConfig.lastUptime);
