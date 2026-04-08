@@ -78,6 +78,10 @@ unsigned long g_lastTenMinTime  = 0;
 unsigned long g_lastUptimeTime  = 0;
 unsigned long g_lastProbeScanTime = 0;
 unsigned long g_lastTiltTime    = 0;
+
+// Async temperature conversion state
+bool          g_tempConversionPending = false;
+unsigned long g_tempRequestTime       = 0;
 bool g_wifiConnected = false;
 String g_rebootReason = ESP.getResetReason();
 
@@ -194,10 +198,21 @@ void loop() {
 
   switch (g_state) {
     case RUNNING:
-      // Temperature processing
+      // Temperature processing — async two-phase to avoid blocking the loop.
+      // Phase 1: fire conversion request and return immediately.
       if (now - g_lastTempTime >= INTERVAL_TEMPS_MS) {
         g_lastTempTime = now;
-        pollTemperatures();
+        requestTempConversion();
+        g_tempConversionPending = true;
+        g_tempRequestTime = now;
+      }
+
+      // Phase 2: read results once the conversion time has elapsed.
+      // Resolution 9=94ms, 10=188ms, 11=375ms, 12=750ms
+      if (g_tempConversionPending &&
+          now - g_tempRequestTime >= (94u << (g_globalConfig.resolution - 9))) {
+        g_tempConversionPending = false;
+        readTempResults();
         allocateProbeTemperatures();
 
         // Print probe temperatures to serial console

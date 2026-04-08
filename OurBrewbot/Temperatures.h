@@ -14,8 +14,12 @@ extern DallasTemperature g_sensors1;
 extern OneWire        g_oneWireBus2;
 extern DallasTemperature g_sensors2;
 
-// Poll all connected DS18B20 probes and update g_probes[].temperature
-void pollTemperatures();
+// Request DS18B20 conversion on all buses (returns immediately, no delay)
+void requestTempConversion();
+
+// Read conversion results — call only after the conversion time has elapsed
+// (94 << (resolution-9)) ms after requestTempConversion()
+void readTempResults();
 
 // Scan OneWire buses and register any new probes found
 void scanBuses();

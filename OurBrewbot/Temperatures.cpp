@@ -149,23 +149,23 @@ void scanBuses() {
 }
 
 // ============================================================
-// TEMPERATURE POLLING
+// TEMPERATURE POLLING (async, two-phase)
 // ============================================================
 
-void pollTemperatures() {
-  // Request temperature conversion from all sensors simultaneously
+// Phase 1: kick off conversion on both buses and return immediately.
+// The caller is responsible for waiting at least the conversion time
+// (94 << (resolution-9)) ms before calling readTempResults().
+void requestTempConversion() {
   g_sensors1.setWaitForConversion(false);
   g_sensors1.requestTemperatures();
 
   g_sensors2.setWaitForConversion(false);
   g_sensors2.requestTemperatures();
+}
 
-  // Wait for conversion (depends on resolution setting)
-  // Resolution 9=94ms, 10=188ms, 11=375ms, 12=750ms
-  uint16_t waitMs = 94 << (g_globalConfig.resolution - 9);
-  delay(waitMs);
-
-  // Read each registered probe
+// Phase 2: read completed conversion results from all registered probes.
+// Must be called only after the conversion time has elapsed.
+void readTempResults() {
   DeviceAddress addr;
   for (int i = 0; i < MAX_PROBES; i++) {
     if (strlen(g_probes[i].address) == 0) continue;
@@ -174,7 +174,7 @@ void pollTemperatures() {
 
     float temp = DEVICE_DISCONNECTED_C;
 
-    // Try Bus 1 first, then Bus 2 if enabled
+    // Try Bus 1 first, then Bus 2
     temp = g_sensors1.getTempC(addr);
     if (temp == DEVICE_DISCONNECTED_C) {
       temp = g_sensors2.getTempC(addr);
