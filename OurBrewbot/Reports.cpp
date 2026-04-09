@@ -38,7 +38,6 @@ void sendReports() {
       }
     }
   }
-  reportHealth();
 }
 
 // ============================================================
@@ -208,18 +207,4 @@ int testBrewService(uint8_t svcIndex) {
   logMsg("[RPT] Test service %d: HTTP %d", svcIndex, result);
   logMsg("[RPT] Response: %s", response.c_str());
   return result;
-}
-
-// ============================================================
-// HEALTH CHECK
-// ============================================================
-
-void reportHealth() {
-  uint32_t heap = ESP.getFreeHeap();
-  logMsg("[HEALTH] Heap: %u bytes free | Uptime: %lu min | WiFi RSSI: %d dBm",
-    heap, (unsigned long)(millis() / 60000UL), WiFi.RSSI());
-
-  if (heap < 8000) {
-    logMsg("[HEALTH] WARNING: Low heap memory");
-  }
 }

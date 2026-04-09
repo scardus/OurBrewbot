@@ -353,8 +353,8 @@ void setupWiFi() {
 // ============================================================
 void onTenMinuteTimer() {
   // Health report
-  logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%%, Uptime: %lu min",
-    ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), g_globalConfig.lastUptime);
+  logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%% | Uptime: %lu min | WiFi RSSI: %d dBm",
+    ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), g_globalConfig.lastUptime, WiFi.RSSI());
 
   // Increment currentHour for active profile steps (6 calls × 10 min = 1 hour)
   static uint8_t s_hourTick[MAX_FERMENTERS] = {0};
