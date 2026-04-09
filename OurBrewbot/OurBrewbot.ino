@@ -352,9 +352,9 @@ void setupWiFi() {
 // TEN MINUTE TIMER TASKS
 // ============================================================
 void onTenMinuteTimer() {
-  // Health report to serial
-  logMsg("[HEALTH] Free heap: %u bytes, Uptime: %lu min",
-    ESP.getFreeHeap(), g_globalConfig.lastUptime);
+  // Health report
+  logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%%, Uptime: %lu min",
+    ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), g_globalConfig.lastUptime);
 
   // Increment currentHour for active profile steps (6 calls × 10 min = 1 hour)
   static uint8_t s_hourTick[MAX_FERMENTERS] = {0};
