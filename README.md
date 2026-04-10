@@ -16,7 +16,6 @@ This firmware keeps your hardware working:
 - Brewfather / Brewer's Friend integrations with per-fermenter toggles
 - All JSON config files 100% compatible with original (same field names)
 - iSpindel HTTP receiver
-- Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation
 - OTA firmware update via web browser
 
 New/Updated Features:
@@ -32,8 +31,10 @@ New/Updated Features:
 Not yet implemented / tested:
 - Tilt hydrometer support via HM-10 BLE module __Untested - awaiting hardware__
 - Pressure sensor - __Untested - No hardware__
+- Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation __Untested__
 
 Removed:
+
 - mybrewbot.co.uk cloud backend (server gone)
 - Blynk dashboard (replaced with REST API + admin page)
 

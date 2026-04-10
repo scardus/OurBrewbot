@@ -182,12 +182,13 @@ void setup() {
 // MAIN LOOP
 // ============================================================
 void loop() {
+  unsigned long now = millis();
+
+  // Handle web server requests, BLE sniff mode timeout, mDNS, and MQTT client loop
   g_webServer.handleClient();
   checkBLESniffTimeout();
   MDNS.update();
   mqttLoop();
-
-  unsigned long now = millis();
 
   // LED: double-blink every 5s when WiFi connected, fast-flash when disconnected (active low)
   if (WiFi.isConnected()) {
@@ -289,7 +290,7 @@ void loop() {
 
     case ERROR:
       // Blink LED to indicate error
-      digitalWrite(PIN_LED, (millis() / 500) % 2);
+      digitalWrite(PIN_LED, (millis() / 100) % 2);
       break;
 
     default:

@@ -138,13 +138,13 @@ h+='<div class="row"><label>Temp Control</label>'+sw('tc'+i,f.TempControl)+'</di
 h+='<div class="row"><label>Profile</label><select id="fp'+i+'"><option value="0"'+(f.ProfileNo==0?' selected':'')+'>Standard</option>';
 for(var p=0;p<PNAMES.length;p++)h+='<option value="'+(p+1)+'"'+(f.ProfileNo==(p+1)?' selected':'')+'>'+PNAMES[p]+'</option>';
 h+='</select></div>';
-h+='<div class="row"><label>Profile Control</label>';
+if(f.ProfileNo>=1)h+='<div class="row"><label>Profile Control</label>';
 if(f.ProfileNo>=1&&!f.ProfileRunning)h+='<button class="test" onclick="profAction('+i+',\'start\')">Start</button> ';
 if(f.ProfileRunning)h+='<button class="test" onclick="profAction('+i+',\'pause\')">Pause</button> ';
 if(f.ProfileNo>=1)h+='<button class="test" onclick="profAction('+i+',\'stop\')">Stop</button> ';
 if(f.ProfileRunning){h+='<button class="test" onclick="profAction('+i+',\'prev\')">&laquo; Prev</button> ';
 h+='<button class="test" onclick="profAction('+i+',\'next\')">Next &raquo;</button>';}
-h+='</div>';
+if(f.ProfileNo>=1)h+='</div>';
 if(f.ProfileNo>=1)h+='<div class="row"><label>Test Mode</label>'+sw('lt'+i,f.LiveTest)+'</div>';
 var bs=f.BrewServices||0;
 var hasSvc=false;
