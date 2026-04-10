@@ -4,13 +4,17 @@
  * KeyeStudio Bluetooth 4.0 v2 (HM-10 / CC2541 compatible)
  * communicates via SoftwareSerial AT commands.
  *
- * AT+DISI? returns iBeacon advertisements in format:
- *   OK+DISC:00000000:00000000:4C000215A495BB10C5B14B44B5121370F02D74DE00E703F0C5
- *   Where: 4C000215 = iBeacon prefix
+ * AT+DISI? returns iBeacon advertisements in colon-delimited format:
+ *   OK+DISC:CompanyID:UUID:MajorMinorPower:MACAddr:RSSI
+ *   Example: OK+DISC:004C0215:A495BB10C5B14B44B5121370F02D74DE:0044041AF6:F42DC96DA4F2:-053
+ *   Where: 004C0215 = Apple iBeacon company ID
  *          A495BBx0...74DE = Tilt UUID (x = colour: 1=Red..8=Pink)
- *          00E7 = Major (temp °F)
- *          03F0 = Minor (SG × 10000)
- *          C5 = measured power (RSSI)
+ *          0044 = Major (temp °F, hex)
+ *          041A = Minor (SG × 1000, hex)
+ *          F6 = measured power (RSSI)
+ *
+ * Legacy concatenated format (older firmware) is also supported as a fallback:
+ *   OK+DISC:00000000:00000000:4C000215A495BB10C5B14B44B5121370F02D74DE00E703F0C5
  */
 
 #include "Tilt.h"
@@ -96,14 +100,23 @@ void initBLE() {
     s_bleReady = true;
     logMsg("[BLE] HM-10 module ready");
 
+
+    g_bleSerial.print("AT+MODE0");   // Transmission mode — required for AT+DISI? scanning
+    delay(200);
+    while (g_bleSerial.available()) g_bleSerial.read();
+
     // Set as central role for scanning (AT+ROLE1 on some firmware)
     // and enable iBeacon discovery
     g_bleSerial.print("AT+ROLE1");
     delay(200);
-    while (g_bleSerial.available()) g_bleSerial.read();  // flush
+    while (g_bleSerial.available()) g_bleSerial.read();
 
     g_bleSerial.print("AT+IMME1");  // Don't auto-connect
     delay(200);
+    while (g_bleSerial.available()) g_bleSerial.read();
+
+    g_bleSerial.print("AT+RESET");   // Apply all settings
+    delay(1000);
     while (g_bleSerial.available()) g_bleSerial.read();
   } else {
     s_bleReady = false;
@@ -111,31 +124,70 @@ void initBLE() {
   }
 }
 
-// Parse a single DISC response line for Tilt iBeacon data
+// Parse a single DISC response record for Tilt iBeacon data.
+// Handles two formats:
+//   Colon-delimited (newer firmware): OK+DISC:CompanyID:UUID:MajorMinorPower:MAC:RSSI
+//   Legacy concatenated (older firmware): ...4C000215A495BBx0...{major}{minor}{rssi}
 static void parseDiscLine(const char* line) {
-  // Format: OK+DISC:DevAddr:Reserved:iBeaconData
-  // iBeaconData = 4C000215 + 32-char UUID + 4-char Major + 4-char Minor + 2-char RSSI
-  // Total iBeacon hex = 8 + 32 + 4 + 4 + 2 = 50 chars
+  logMsg("[TILT] Parsing: %.80s", line);
 
+  // ---- Colon-delimited format ----
+  // OK+DISC:004C0215:A495BBx0...(32 chars):MajorMinorPower(10 chars):MAC:RSSI
+  const char* p = strstr(line, "OK+DISC:");
+  if (p) {
+    p += 8;  // skip "OK+DISC:"
+    // Field 1: CompanyID — must be Apple iBeacon prefix
+    if (strncasecmp(p, "004C0215", 8) == 0) {
+      p += 8;
+      if (*p == ':') p++;
+      // Field 2: UUID (32 hex chars) — check for Tilt A495BBx0 pattern
+      if (strlen(p) >= 32 && strncasecmp(p, "A495BB", 6) == 0) {
+        char colourChar = p[6];
+        int colour = -1;
+        for (int i = 0; i < MAX_TILTS; i++) {
+          if (colourChar == TILT_UUID_BYTES[i]) { colour = i; break; }
+        }
+        if (colour < 0) {
+          logMsg("[TILT] Tilt-like UUID but unknown colour byte: %c", colourChar);
+          return;
+        }
+        p += 32;
+        if (*p == ':') p++;
+        // Field 3: MajorMinorPower — 4 Major + 4 Minor + 2 Power = 10 chars
+        if (strlen(p) >= 8) {
+          uint16_t tempF = hexToU16(p);      // Major = temp in °F
+          uint16_t sgRaw = hexToU16(p + 4);  // Minor = SG × 1000
+          float tempC = ((float)tempF - 32.0f) * 5.0f / 9.0f;
+          float sg    = (float)sgRaw / 1000.0f;
+          logMsg("[TILT] PARSE: colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
+            colour, tempF, sgRaw, tempC, sg);
+          processTiltReading(colour, sg, tempC);
+          return;
+        }
+      } else {
+        logMsg("[TILT] Apple iBeacon found but not a Tilt UUID: %.32s", p);
+        return;
+      }
+    }
+  }
+
+  // ---- Legacy concatenated format ----
+  // ...4C000215A495BBx0{32-char-uuid}{4-major}{4-minor}{2-rssi}...
   const char* dataStart = strstr(line, "4C000215");
   if (!dataStart) return;
-
-  // Need at least 48 chars from the start of iBeacon data (8+32+4+4)
   if (strlen(dataStart) < 48) return;
 
-  const char* data = dataStart;
-
-  int colour = identifyTiltColour(data);
-  if (colour < 0) return;
-
-  // Major = temp in °F (4 hex chars after 8+32 = 40 offset)
-  uint16_t tempF = hexToU16(data + 40);
-  // Minor = SG × 10000 (4 hex chars after 44 offset)
-  uint16_t sgRaw = hexToU16(data + 44);
-
+  int colour = identifyTiltColour(dataStart);
+  if (colour < 0) {
+    logMsg("[TILT] iBeacon found (legacy fmt) but not a Tilt: %.16s...", dataStart + 8);
+    return;
+  }
+  uint16_t tempF = hexToU16(dataStart + 40);  // Major = temp in °F
+  uint16_t sgRaw = hexToU16(dataStart + 44);  // Minor = SG × 1000
   float tempC = ((float)tempF - 32.0f) * 5.0f / 9.0f;
-  float sg = (float)sgRaw / 10000.0f;
-
+  float sg    = (float)sgRaw / 1000.0f;
+  logMsg("[TILT] PARSE (legacy): colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
+    colour, tempF, sgRaw, tempC, sg);
   processTiltReading(colour, sg, tempC);
 }
 
@@ -185,6 +237,7 @@ void checkTilt() {
 
       // Check for end-of-scan marker
       if (s_bleBufLen >= 8 && strcmp(s_bleBuf + s_bleBufLen - 8, "OK+DISCE") == 0) {
+        logMsg("[TILT] RAW: OK+DISCE (scan complete)");
         scanDone = true;
         break;
       }
@@ -195,6 +248,7 @@ void checkTilt() {
         *nl = '\0';
         // Parse the line in-place (s_bleBuf up to nl)
         if (s_bleBuf[0] != '\0') {
+          logMsg("[TILT] RAW: %s", s_bleBuf); // Log the raw line for debugging
           parseDiscLine(s_bleBuf);
         }
         // Shift remainder forward
@@ -211,13 +265,14 @@ void checkTilt() {
 
   // Process any remaining data in buffer
   if (s_bleBufLen > 0) {
-    // Scan buffer for any iBeacon data markers
+    logMsg("[TILT] RAW (remain): %.120s", s_bleBuf);
+    // Walk buffer finding all OK+DISC: records and parse each one
     const char* pos = s_bleBuf;
     while (pos < s_bleBuf + s_bleBufLen) {
-      const char* found = strstr(pos, "4C000215");
+      const char* found = strstr(pos, "OK+DISC:");
       if (!found) break;
       parseDiscLine(found);
-      pos = found + 48;
+      pos = found + 8;  // advance past this record's prefix to find the next
     }
     s_bleBufLen = 0;
   }

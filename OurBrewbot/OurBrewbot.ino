@@ -46,7 +46,7 @@
 // ============================================================
 #define INTERVAL_TEMPS_MS       5000    // Temperature polling
 #define INTERVAL_FERMENTER_MS   10000   // Fermenter control loop
-#define INTERVAL_TILT_MS        30000   // Tilt BLE scan interval
+#define INTERVAL_TILT_MS        5000   // Tilt BLE scan interval
 #define INTERVAL_CLOUD_MS       900000  // Cloud/service reporting (15 min)
 #define INTERVAL_MQTT_MS        60000   // MQTT publish interval (60s)
 #define INTERVAL_TEN_MIN_MS     600000  // 10-minute periodic tasks
