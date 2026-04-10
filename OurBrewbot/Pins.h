@@ -24,7 +24,7 @@
 #define PIN_RF_TRANSMIT     4     // GPIO4  = D2
 
 // Built-in LED (active LOW on most ESP8266 boards)
-#define PIN_LED             2     // GPIO2  = D4 / LED_BUILTIN on NodeMCU
+#define PIN_LED             16     // LED_BUILTIN on NodeMCU
 
 // RF receiver for code learning (MX-RM-5V data line)
 #define PIN_RF_RECEIVE      14    // GPIO14 = D5
