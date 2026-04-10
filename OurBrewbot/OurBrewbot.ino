@@ -189,9 +189,11 @@ void loop() {
 
   unsigned long now = millis();
 
-  // LED: steady ON when WiFi connected, flashing when disconnected (active low)
+  // LED: double-blink every 5s when WiFi connected, fast-flash when disconnected (active low)
   if (WiFi.isConnected()) {
-    digitalWrite(PIN_LED, LOW);
+    uint32_t phase = now % 5000;
+    bool ledOn = (phase >= 100 && phase < 200) || (phase >= 300);
+    digitalWrite(PIN_LED, ledOn ? LOW : HIGH);
   } else {
     digitalWrite(PIN_LED, (now / 500) & 1);  // toggle every 500ms
   }
