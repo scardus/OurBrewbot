@@ -17,9 +17,10 @@ This firmware keeps your hardware working:
 - All JSON config files 100% compatible with original (same field names)
 - iSpindel HTTP receiver
 - OTA firmware update via web browser
-- Tilt hydrometer support via HM-10 BLE module
+- Tilt hydrometer support via HM-10 BLE module (standard and Tilt Pro)
 
 New/Updated Features:
+- Tilt Pro support — auto-detected by broadcast value magnitude; gravity and temperature decoded with correct Pro precision (÷10000 / ÷10), labelled "Pro" in the admin UI
 - Brewfather integration uses the Custom Stream API
 - MQTT support for publishing fermenter data to any MQTT broker
 - Home Assistant MQTT Discovery — auto-creates HA entities with no YAML needed (optional, per-broker toggle)

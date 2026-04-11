@@ -296,6 +296,7 @@ struct TiltConfig {
   float   temperature;          // Tilt temperature reading (with tempAdjust applied)
   bool    active;               // Tilt has been seen recently
   uint32_t lastSeen;            // millis() of last reading
+  bool    isPro;                // true if auto-detected as Tilt Pro (tempF > 212 raw)
 };
 
 // ============================================================

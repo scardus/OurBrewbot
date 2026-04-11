@@ -155,13 +155,16 @@ static void parseDiscLine(const char* line) {
         if (*p == ':') p++;
         // Field 3: MajorMinorPower — 4 Major + 4 Minor + 2 Power = 10 chars
         if (strlen(p) >= 8) {
-          uint16_t tempF = hexToU16(p);      // Major = temp in °F
-          uint16_t sgRaw = hexToU16(p + 4);  // Minor = SG × 1000
-          float tempC = ((float)tempF - 32.0f) * 5.0f / 9.0f;
-          float sg    = (float)sgRaw / 1000.0f;
-          logMsg("[TILT] PARSE: colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
-            colour, tempF, sgRaw, tempC, sg);
-          processTiltReading(colour, sg, tempC);
+          uint16_t tempF = hexToU16(p);      // Major = temp in °F (× 10 for Pro)
+          uint16_t sgRaw = hexToU16(p + 4);  // Minor = SG × 1000 (standard) or × 10000 (Pro)
+          bool isPro = (tempF > 212);         // Pro reports tenths; 212°F = boiling, impossible in use
+          float tempC = isPro ? ((float)tempF / 10.0f - 32.0f) * 5.0f / 9.0f
+                              : ((float)tempF - 32.0f) * 5.0f / 9.0f;
+          float sg    = isPro ? (float)sgRaw / 10000.0f
+                              : (float)sgRaw / 1000.0f;
+          logMsg("[TILT] PARSE (%s): colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
+            isPro ? "Pro" : "std", colour, tempF, sgRaw, tempC, sg);
+          processTiltReading(colour, sg, tempC, isPro);
           return;
         }
       } else {
@@ -182,13 +185,16 @@ static void parseDiscLine(const char* line) {
     logMsg("[TILT] iBeacon found (legacy fmt) but not a Tilt: %.16s...", dataStart + 8);
     return;
   }
-  uint16_t tempF = hexToU16(dataStart + 40);  // Major = temp in °F
-  uint16_t sgRaw = hexToU16(dataStart + 44);  // Minor = SG × 1000
-  float tempC = ((float)tempF - 32.0f) * 5.0f / 9.0f;
-  float sg    = (float)sgRaw / 1000.0f;
-  logMsg("[TILT] PARSE (legacy): colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
-    colour, tempF, sgRaw, tempC, sg);
-  processTiltReading(colour, sg, tempC);
+  uint16_t tempF = hexToU16(dataStart + 40);  // Major = temp in °F (× 10 for Pro)
+  uint16_t sgRaw = hexToU16(dataStart + 44);  // Minor = SG × 1000 (standard) or × 10000 (Pro)
+  bool isPro = (tempF > 212);
+  float tempC = isPro ? ((float)tempF / 10.0f - 32.0f) * 5.0f / 9.0f
+                      : ((float)tempF - 32.0f) * 5.0f / 9.0f;
+  float sg    = isPro ? (float)sgRaw / 10000.0f
+                      : (float)sgRaw / 1000.0f;
+  logMsg("[TILT] PARSE (legacy/%s): colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
+    isPro ? "Pro" : "std", colour, tempF, sgRaw, tempC, sg);
+  processTiltReading(colour, sg, tempC, isPro);
 }
 
 void checkTilt() {
@@ -298,7 +304,7 @@ void checkTilt() {
   }
 }
 
-void processTiltReading(uint8_t colour, float sg, float tempC) {
+void processTiltReading(uint8_t colour, float sg, float tempC, bool isPro) {
   if (colour >= MAX_TILTS) return;
 
   // Mark colour so saveTiltConfig() includes this slot (first time seen)
@@ -311,6 +317,7 @@ void processTiltReading(uint8_t colour, float sg, float tempC) {
   g_tilts[colour].temperature = tempC + g_tilts[colour].tempAdjust;
   g_tilts[colour].active      = true;
   g_tilts[colour].lastSeen    = millis();
+  g_tilts[colour].isPro       = isPro;
   s_missedReads[colour]       = 0;
 
   logMsg("[TILT] %s: SG=%.4f (raw %.4f) T=%.1fC (raw %.1f)",

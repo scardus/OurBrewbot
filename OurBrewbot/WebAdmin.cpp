@@ -518,8 +518,10 @@ $('t3').innerHTML=h;
 function buildTiltCard(colour,t){
 var dot='<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+tiltDotColours[colour]+';margin-right:6px;vertical-align:middle"></span>';
 var active=t&&t.active;
-var h='<div class="card"><h3>'+dot+tiltColourNames[colour]+' Tilt';
+var label=(t&&t.isPro)?'Tilt Pro':'Tilt';
+var h='<div class="card"><h3>'+dot+tiltColourNames[colour]+' '+label;
 if(active)h+=' <span class="badge badge-idle">Active</span>';
+if(t&&t.isPro)h+=' <span class="badge" style="background:#ff9800;color:#000">Pro</span>';
 h+='</h3>';
 if(active&&t){h+='<div class="live">SG: '+(t.sg>0?t.sg.toFixed(4):'--')+' &nbsp; Temp: '+(t.temperature>-100?t.temperature.toFixed(1)+'&deg;':'--')+'</div>';}
 var fn=t?t.function:99;var ferm=t?t.fermenter:99;var ta=t?t.tempAdjust:0;var sa=t?t.sgAdjust:0;

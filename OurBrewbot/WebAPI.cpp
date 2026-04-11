@@ -1345,6 +1345,7 @@ void handleTilts(ESP8266WebServer& server) {
     t["sgAdjust"]    = g_tilts[i].sgAdjust;
     t["mbb"]         = g_tilts[i].mbb;
     t["active"]      = g_tilts[i].active;
+    t["isPro"]       = g_tilts[i].isPro;
     t["sg"]          = g_tilts[i].sg;
     t["temperature"] = toDisplayTemp(g_tilts[i].temperature);
   }
