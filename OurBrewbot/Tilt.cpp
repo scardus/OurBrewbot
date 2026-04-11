@@ -216,7 +216,10 @@ void checkTilt() {
   // Start iBeacon discovery scan
   g_bleSerial.print("AT+DISI?");
 
-  // Read responses with timeout (scan takes ~2-3 seconds)
+  // Read responses with timeout (scan takes ~2-3 seconds).
+  // Records are parsed as soon as a second OK+DISC: delimiter is seen in the buffer,
+  // so the working buffer only ever holds ~2 records at a time regardless of how many
+  // devices are in range.  This prevents overflow losing the Tilt packet.
   unsigned long start = millis();
   s_bleBufLen = 0;
   bool scanDone = false;
@@ -225,9 +228,9 @@ void checkTilt() {
     while (g_bleSerial.available()) {
       char c = (char)g_bleSerial.read();
 
-      // Prevent buffer overflow — discard oldest data if full
+      // Prevent buffer overflow — should not normally be needed with the record-flush
+      // logic below, but kept as a safety net for malformed/unexpected responses.
       if (s_bleBufLen >= BLE_BUF_SIZE - 1) {
-        // Shift buffer left by half to make room
         int half = BLE_BUF_SIZE / 2;
         memmove(s_bleBuf, s_bleBuf + half, s_bleBufLen - half);
         s_bleBufLen -= half;
@@ -237,45 +240,43 @@ void checkTilt() {
 
       // Check for end-of-scan marker
       if (s_bleBufLen >= 8 && strcmp(s_bleBuf + s_bleBufLen - 8, "OK+DISCE") == 0) {
-        logMsg("[TILT] RAW: OK+DISCE (scan complete)");
+        // Strip the marker so the last record is cleanly processed below
+        s_bleBufLen -= 8;
+        s_bleBuf[s_bleBufLen] = '\0';
         scanDone = true;
         break;
       }
 
-      // Process complete lines as we receive them
-      char* nl = strchr(s_bleBuf, '\n');
-      if (nl) {
-        *nl = '\0';
-        // Parse the line in-place (s_bleBuf up to nl)
-        if (s_bleBuf[0] != '\0') {
-          logMsg("[TILT] RAW: %s", s_bleBuf); // Log the raw line for debugging
+      // When a second OK+DISC: appears in the buffer, the first record is complete.
+      // Save the char at the boundary, null-terminate, parse, then RESTORE before
+      // memmove — otherwise the 'O' of the next "OK+DISC:" is clobbered and lost.
+      char* second = strstr(s_bleBuf + 8, "OK+DISC:");
+      if (second) {
+        char saved = *second;
+        *second = '\0';
+        // Only parse actual DISC records — ignore scan start markers (OK+DISCS etc.)
+        if (strncmp(s_bleBuf, "OK+DISC:", 8) == 0) {
           parseDiscLine(s_bleBuf);
         }
-        // Shift remainder forward
-        int remain = s_bleBufLen - (int)(nl - s_bleBuf) - 1;
-        if (remain > 0) {
-          memmove(s_bleBuf, nl + 1, remain);
-        }
-        s_bleBufLen = remain > 0 ? remain : 0;
-        s_bleBuf[s_bleBufLen] = '\0';
+        *second = saved;  // restore 'O' before memmove
+        int firstLen = (int)(second - s_bleBuf);
+        int remain   = s_bleBufLen - firstLen;
+        memmove(s_bleBuf, second, remain + 1);
+        s_bleBufLen = remain;
       }
     }
     yield();
   }
 
-  // Process any remaining data in buffer
-  if (s_bleBufLen > 0) {
-    logMsg("[TILT] RAW (remain): %.120s", s_bleBuf);
-    // Walk buffer finding all OK+DISC: records and parse each one
-    const char* pos = s_bleBuf;
-    while (pos < s_bleBuf + s_bleBufLen) {
-      const char* found = strstr(pos, "OK+DISC:");
-      if (!found) break;
-      parseDiscLine(found);
-      pos = found + 8;  // advance past this record's prefix to find the next
-    }
-    s_bleBufLen = 0;
+  // Parse any record(s) remaining in the buffer after the scan ends
+  const char* pos = s_bleBuf;
+  while (pos < s_bleBuf + s_bleBufLen) {
+    const char* found = strstr(pos, "OK+DISC:");
+    if (!found) break;
+    parseDiscLine(found);
+    pos = found + 8;
   }
+  s_bleBufLen = 0;
 
   // Increment missed reads for active Tilts not seen this scan
   for (int i = 0; i < MAX_TILTS; i++) {
