@@ -17,6 +17,7 @@ This firmware keeps your hardware working:
 - All JSON config files 100% compatible with original (same field names)
 - iSpindel HTTP receiver
 - OTA firmware update via web browser
+- Tilt hydrometer support via HM-10 BLE module
 
 New/Updated Features:
 - Brewfather integration uses the Custom Stream API
@@ -27,7 +28,6 @@ New/Updated Features:
 - mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
 - LittleFS file browser in admin page for inspecting config files
 - BLE AT command console for debugging HM-10 Bluetooth module
-- Tilt hydrometer support via HM-10 BLE module — supports both colon-delimited (newer firmware) and legacy concatenated iBeacon formats; HM-10 mode/role auto-configured on boot
 
 Not yet implemented / tested:
 - Pressure sensor - __Untested - No hardware__
