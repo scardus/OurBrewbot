@@ -245,11 +245,13 @@ String buildFermenterJson(uint8_t i) {
   float ambientTemp = getAmbientTemp(i);
   float sg          = getCurrentSG(i);
 
-  doc["BeerTemp"]    = (beerTemp    > -100.0f) ? toDisplayTemp(beerTemp)    : 0.0f;
-  doc["AmbientTemp"] = (ambientTemp > -100.0f) ? toDisplayTemp(ambientTemp) : 0.0f;
-  doc["SG"]          = sg;
-  doc["Attenuation"] = getAttenuation(i);
-  doc["TempUnit"]    = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
+  doc["BeerTemp"]       = (beerTemp    > -100.0f) ? toDisplayTemp(beerTemp)    : 0.0f;
+  doc["AmbientTemp"]    = (ambientTemp > -100.0f) ? toDisplayTemp(ambientTemp) : 0.0f;
+  doc["SG"]             = sg;
+  doc["Attenuation"]    = getAttenuation(i);
+  doc["TempUnit"]       = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
+  doc["BeerTempSource"] = getBeerTempSource(i);
+  doc["GravitySource"]  = getGravitySource(i);
 
   String out;
   serializeJson(doc, out);

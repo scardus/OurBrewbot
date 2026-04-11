@@ -121,9 +121,9 @@ var profs=res[3].profiles||[];PNAMES=[];for(var p=0;p<profs.length;p++)PNAMES.pu
 var h='';
 for(var i=0;i<d.length;i++){var f=d[i];
 h+='<div class="card"><h3>Fermenter '+i+' '+statusBadge(f.Status,f.Power)+' '+(f.ProfileNo>=1?'<span class="badge badge-prof">'+f.ProfileName+'</span>':'<span class="badge badge-idle">Standard</span>')+'</h3>';
-h+='<div class="live">Beer: '+(f.BeerTemp>-100?f.BeerTemp.toFixed(1)+'&deg;'+f.TempUnit:'--')
+h+='<div class="live">Beer: '+(f.BeerTemp>-100?f.BeerTemp.toFixed(1)+'&deg;'+f.TempUnit+(f.BeerTempSource&&f.BeerTempSource!='None'?' ('+f.BeerTempSource+')':''):'--')
   +' &nbsp; Ambient: '+(f.AmbientTemp>-100?f.AmbientTemp.toFixed(1)+'&deg;'+f.TempUnit:'--')
-  +' &nbsp; SG: '+(f.SG>0?f.SG.toFixed(3):'--')
+  +' &nbsp; SG: '+(f.SG>0?f.SG.toFixed(3)+(f.GravitySource?' ('+f.GravitySource+')':''):'--')
   +(f.ProfileRunning?' &nbsp; Step: '+(f.CurrentStep+1)+'/'+f.TotalSteps+' &nbsp; Hour: '+f.CurrentHour:'')+'</div>';
 h+='<div class="row"><label>Name</label><input type="text" id="fn'+i+'" value="'+f.FermenterName+'"></div>';
 h+='<div class="row"><label>Beer</label><input type="text" id="bn'+i+'" value="'+f.BeerName+'"></div>';
