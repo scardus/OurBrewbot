@@ -132,7 +132,7 @@ h+='<div class="row"><label>Floor Temp</label><input type="number" step="0.1" id
 h+='<div class="row"><label>Hysteresis</label><input type="number" step="0.1" id="hy'+i+'" value="'+f.Hysteresis+'"></div>';
 h+='<div class="row"><label>Compressor Delay</label><input type="number" id="cd'+i+'" value="'+f.CompressorDelay+'"> min</div>';
 h+='<div class="row"><label>Yeast</label><input type="text" id="yn'+i+'" value="'+f.YeastName+'"></div>';
-h+='<div class="row"><label>OG</label><input type="number" step="1" id="og'+i+'" value="'+f.OG+'" style="width:80px"> <label style="min-width:auto">TG</label><input type="number" step="1" id="tg'+i+'" value="'+f.TG+'" style="width:80px"></div>';
+h+='<div class="row"><label>OG</label><input type="number" step="0.001" min="1.0" max="1.2" id="og'+i+'" value="'+f.OG+'" style="width:80px"> <label style="min-width:auto">TG</label><input type="number" step="0.001" min="1.0" max="1.2" id="tg'+i+'" value="'+f.TG+'" style="width:80px"></div>';
 h+='<div class="row"><label>Power</label>'+sw('pw'+i,f.Power)+'</div>';
 h+='<div class="row"><label>Temp Control</label>'+sw('tc'+i,f.TempControl)+'</div>';
 h+='<div class="row"><label>Profile</label><select id="fp'+i+'"><option value="0"'+(f.ProfileNo==0?' selected':'')+'>Standard</option>';

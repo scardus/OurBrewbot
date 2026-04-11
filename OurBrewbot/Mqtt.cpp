@@ -539,10 +539,10 @@ void reportMqtt() {
 
     // Gravity
     if (sg > 0.0f)
-      publishFloat(base, "gravity", sg / 1000.0f, 4);
+      publishFloat(base, "gravity", sg, 4);
     publishValue(base, "gravity_source", getGravitySource(i));
-    publishFloat(base, "og", g_fermenters[i].og / 1000.0f, 4);
-    publishFloat(base, "tg", g_fermenters[i].tg / 1000.0f, 4);
+    publishFloat(base, "og", g_fermenters[i].og, 4);
+    publishFloat(base, "tg", g_fermenters[i].tg, 4);
     publishFloat(base, "attenuation", getAttenuation(i));
 
     // State

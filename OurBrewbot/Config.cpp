@@ -164,8 +164,11 @@ bool loadFermenterConfig() {
     strlcpy(g_fermenters[i].bjcp,          doc["BJCP"][i]          | "BJCP",      sizeof(g_fermenters[i].bjcp));
     g_fermenters[i].ceilingTemp     = doc["CeilingTemp"][i]    | 20.0f;
     g_fermenters[i].floorTemp       = doc["FloorTemp"][i]      | 20.0f;
-    g_fermenters[i].og              = doc["OG"][i]             | 1050.0f;
-    g_fermenters[i].tg              = doc["TG"][i]             | 1010.0f;
+    g_fermenters[i].og              = doc["OG"][i]             | 1.050f;
+    g_fermenters[i].tg              = doc["TG"][i]             | 1.010f;
+    // Migrate old integer-format values (e.g. 1050 → 1.050)
+    if (g_fermenters[i].og > 2.0f) g_fermenters[i].og /= 1000.0f;
+    if (g_fermenters[i].tg > 2.0f) g_fermenters[i].tg /= 1000.0f;
     g_fermenters[i].hysteresis      = doc["Hysteresis"][i]     | 0.5f;
     g_fermenters[i].compressorDelay = doc["CompressorDelay"][i]| 10;
     g_fermenters[i].tempControl     = doc["TempControl"][i]    | true;
@@ -823,8 +826,8 @@ void initDefaultFermenterConfig() {
     strlcpy(g_fermenters[i].bjcp,      "BJCP",  sizeof(g_fermenters[i].bjcp));
     g_fermenters[i].ceilingTemp     = 20.0f;
     g_fermenters[i].floorTemp       = 20.0f;
-    g_fermenters[i].og              = 1050.0f;
-    g_fermenters[i].tg              = 1010.0f;
+    g_fermenters[i].og              = 1.050f;
+    g_fermenters[i].tg              = 1.010f;
     g_fermenters[i].hysteresis      = 0.5f;
     g_fermenters[i].compressorDelay = 10;
     g_fermenters[i].tempControl     = true;

@@ -196,8 +196,8 @@ struct FermenterConfig {
   char    bjcp[16];             // BJCP category code
   float   ceilingTemp;          // max temp °C
   float   floorTemp;            // min temp °C
-  float   og;                   // original gravity (e.g. 1047)
-  float   tg;                   // target gravity (e.g. 1010)
+  float   og;                   // original gravity in SG format (e.g. 1.047)
+  float   tg;                   // target gravity in SG format (e.g. 1.010)
   float   hysteresis;           // temp swing allowance (e.g. 0.1)
   uint16_t compressorDelay;     // minutes between cooling cycles (e.g. 10)
   bool    tempControl;          // temperature control active
