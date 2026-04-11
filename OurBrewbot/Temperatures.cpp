@@ -279,6 +279,15 @@ float getTempQuick(const char* addressStr) {
 }
 
 float getBeerTemp(uint8_t fermenterIndex) {
+  // Priority 1: Tilt assigned to this fermenter with Beer function
+  for (int i = 0; i < MAX_TILTS; i++) {
+    if (g_tilts[i].active &&
+        g_tilts[i].fermenter == fermenterIndex &&
+        g_tilts[i].function  == PROBE_FN_BEER) {
+      return g_tilts[i].temperature;
+    }
+  }
+  // Priority 2: DS18B20 Beer probe
   for (int i = 0; i < MAX_PROBES; i++) {
     if (g_probes[i].fermenter == fermenterIndex &&
         g_probes[i].function  == PROBE_FN_BEER &&
@@ -286,13 +295,7 @@ float getBeerTemp(uint8_t fermenterIndex) {
       return g_probes[i].temperature;
     }
   }
-  // Fallback: check Tilt for this fermenter
-  for (int i = 0; i < MAX_TILTS; i++) {
-    if (g_tilts[i].active && g_tilts[i].fermenter == fermenterIndex) {
-      return g_tilts[i].temperature;
-    }
-  }
-  // Fallback: check iSpindel
+  // Priority 3: iSpindel
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     if (g_iSpindels[i].collectData && g_iSpindels[i].fermenter == fermenterIndex) {
       return g_iSpindels[i].temperature;
