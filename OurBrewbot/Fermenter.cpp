@@ -234,6 +234,21 @@ float getCurrentSG(uint8_t i) {
   return estimateGravity(i);
 }
 
+const char* getGravitySource(uint8_t i) {
+  // Mirror getCurrentSG() priority chain exactly
+  for (int t = 0; t < MAX_TILTS; t++) {
+    if (g_tilts[t].active && g_tilts[t].fermenter == i) {
+      return "Tilt";
+    }
+  }
+  for (int s = 0; s < MAX_ISPINDELS; s++) {
+    if (g_iSpindels[s].collectData && g_iSpindels[s].fermenter == i) {
+      return "iSpindel";
+    }
+  }
+  return "Estimated";
+}
+
 float getAttenuation(uint8_t i) {
   float og = g_fermenters[i].og;
   float sg = getCurrentSG(i);

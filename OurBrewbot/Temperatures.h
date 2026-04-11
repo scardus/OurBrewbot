@@ -49,6 +49,9 @@ bool stringToAddress(const char* str, DeviceAddress& addr);
 // Get beer temperature for a fermenter (returns -127 if no probe assigned)
 float getBeerTemp(uint8_t fermenterIndex);
 
+// Get the source of the beer temperature reading ("Tilt", "Probe", "iSpindel", or "None")
+const char* getBeerTempSource(uint8_t fermenterIndex);
+
 // Get ambient/fridge temperature for a fermenter
 float getAmbientTemp(uint8_t fermenterIndex);
 

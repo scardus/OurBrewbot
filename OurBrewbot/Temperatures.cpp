@@ -304,6 +304,30 @@ float getBeerTemp(uint8_t fermenterIndex) {
   return -127.0f;
 }
 
+const char* getBeerTempSource(uint8_t fermenterIndex) {
+  // Mirror getBeerTemp() priority chain exactly
+  for (int i = 0; i < MAX_TILTS; i++) {
+    if (g_tilts[i].active &&
+        g_tilts[i].fermenter == fermenterIndex &&
+        g_tilts[i].function  == PROBE_FN_BEER) {
+      return "Tilt";
+    }
+  }
+  for (int i = 0; i < MAX_PROBES; i++) {
+    if (g_probes[i].fermenter == fermenterIndex &&
+        g_probes[i].function  == PROBE_FN_BEER &&
+        strlen(g_probes[i].address) > 0) {
+      return "Probe";
+    }
+  }
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    if (g_iSpindels[i].collectData && g_iSpindels[i].fermenter == fermenterIndex) {
+      return "iSpindel";
+    }
+  }
+  return "None";
+}
+
 float getAmbientTemp(uint8_t fermenterIndex) {
   for (int i = 0; i < MAX_PROBES; i++) {
     if (g_probes[i].fermenter == fermenterIndex &&

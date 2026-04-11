@@ -18,6 +18,7 @@
 #include "Mqtt.h"
 #include "Fermenter.h"
 #include "Temperatures.h"
+#include "Profile.h"
 #include "Version.h"
 #include "Log.h"
 #include <ESP8266WiFi.h>
@@ -183,6 +184,8 @@ static void publishHaDiscovery(int i) {
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "beer_temperature",    "Beer Temperature",    "beer_temperature",    "temperature", tempUnit, nullptr,           nullptr, "measurement");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
+    "beer_temperature_source", "Beer Temperature Source", "beer_temperature_source", nullptr, nullptr, "mdi:information-outline", nullptr, nullptr);
+  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "ambient_temperature", "Ambient Temperature", "ambient_temperature", "temperature", tempUnit, nullptr,           nullptr, "measurement");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "ceiling_temperature", "Ceiling Temperature", "ceiling_temperature", "temperature", tempUnit, nullptr,           nullptr, "measurement");
@@ -196,6 +199,8 @@ static void publishHaDiscovery(int i) {
   // Gravity sensors — numeric
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "gravity",     "Gravity",     "gravity",     nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
+  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
+    "gravity_source", "Gravity Source", "gravity_source", nullptr, nullptr, "mdi:information-outline", nullptr, nullptr);
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "og",          "OG",          "og",          nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
@@ -222,6 +227,10 @@ static void publishHaDiscovery(int i) {
     "temp_control",    "Temp Control",    "temp_control",    nullptr, nullptr, "mdi:thermostat",  nullptr, nullptr);
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "profile_running", "Profile Running", "profile_running", nullptr, nullptr, "mdi:play-circle", nullptr, nullptr);
+  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
+    "profile_step",  "Profile Step",  "profile_step",  nullptr, "#", "mdi:counter", nullptr, "measurement");
+  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
+    "profile_steps", "Profile Steps", "profile_steps", nullptr, "#", "mdi:counter", nullptr, "measurement");
 
   logMsg("[MQTT] HA discovery published for F%d: base=%s", i, fermBase);
 }
@@ -250,12 +259,14 @@ static void removeHaDiscovery(int i) {
 
   // Current full-name sensor IDs
   removeOneEntity("sensor", devId, "beer_temperature");
+  removeOneEntity("sensor", devId, "beer_temperature_source");
   removeOneEntity("sensor", devId, "ambient_temperature");
   removeOneEntity("sensor", devId, "ceiling_temperature");
   removeOneEntity("sensor", devId, "floor_temperature");
   removeOneEntity("sensor", devId, "temperature_unit");
   removeOneEntity("sensor", devId, "hysteresis");
   removeOneEntity("sensor", devId, "gravity");
+  removeOneEntity("sensor", devId, "gravity_source");
   removeOneEntity("sensor", devId, "og");
   removeOneEntity("sensor", devId, "tg");
   removeOneEntity("sensor", devId, "attenuation");
@@ -276,6 +287,8 @@ static void removeHaDiscovery(int i) {
   removeOneEntity("sensor", devId, "power");
   removeOneEntity("sensor", devId, "temp_control");
   removeOneEntity("sensor", devId, "profile_running");
+  removeOneEntity("sensor", devId, "profile_step");
+  removeOneEntity("sensor", devId, "profile_steps");
 
   logMsg("[MQTT] HA discovery removed for F%d", i);
 }
@@ -516,6 +529,7 @@ void reportMqtt() {
     // Temperatures
     if (beerTemp > -100.0f)
       publishFloat(base, "beer_temperature", toDisplayTemp(beerTemp));
+    publishValue(base, "beer_temperature_source", getBeerTempSource(i));
     if (ambientTemp > -100.0f)
       publishFloat(base, "ambient_temperature", toDisplayTemp(ambientTemp));
     publishFloat(base, "ceiling_temperature", g_fermenters[i].ceilingTemp);
@@ -526,6 +540,7 @@ void reportMqtt() {
     // Gravity
     if (sg > 0.0f)
       publishFloat(base, "gravity", sg / 1000.0f, 4);
+    publishValue(base, "gravity_source", getGravitySource(i));
     publishFloat(base, "og", g_fermenters[i].og / 1000.0f, 4);
     publishFloat(base, "tg", g_fermenters[i].tg / 1000.0f, 4);
     publishFloat(base, "attenuation", getAttenuation(i));
@@ -544,6 +559,13 @@ void reportMqtt() {
     publishValue(base, "yeast", g_fermenters[i].yeastName);
     publishInt(base, "compressor_delay", g_fermenters[i].compressorDelay);
     publishBool(base, "profile_running", g_fermenters[i].profileRunning);
+    if (g_fermenters[i].profileRunning) {
+      publishInt(base, "profile_step",  g_fermenters[i].currentStep + 1);
+      publishInt(base, "profile_steps", countProfileSteps(g_fermenters[i].profileNo - 1));
+    } else {
+      publishInt(base, "profile_step",  0);
+      publishInt(base, "profile_steps", 0);
+    }
 
     logMsg("[MQTT] Published F%d (%s)", i, g_fermenters[i].fermenterName);
   }

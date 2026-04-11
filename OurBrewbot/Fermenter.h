@@ -28,6 +28,9 @@ float estimateGravity(uint8_t index);
 // Get current SG (from Tilt/iSpindel/Plaato, or estimate)
 float getCurrentSG(uint8_t index);
 
+// Get the source of the current SG reading ("Tilt", "iSpindel", or "Estimated")
+const char* getGravitySource(uint8_t index);
+
 // Emergency off — all smart plugs off
 void switchOffAll();
 
