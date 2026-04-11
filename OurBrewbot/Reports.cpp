@@ -73,7 +73,7 @@ void reportBrewfather(uint8_t i, uint8_t svcIndex) {
   if (beerTemp > -100.0f)    doc["temp"]          = toDisplayTemp(beerTemp);
   if (ambientTemp > -100.0f) doc["aux_temp"]      = toDisplayTemp(ambientTemp);
   doc["temp_unit"]      = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
-  doc["temp_target"]    = g_fermenters[i].ceilingTemp;
+  doc["temp_target"]    = toDisplayTemp((g_fermenters[i].floorTemp + g_fermenters[i].ceilingTemp) / 2.0f);
   if (sg > 0.0f)             doc["gravity"]       = sg;
   doc["gravity_unit"]   = "G";
   if (g_fermenters[i].tg > 0.0f) doc["gravity_target"] = g_fermenters[i].tg;
@@ -129,7 +129,7 @@ void reportBrewersFriend(uint8_t i, uint8_t svcIndex) {
   if (beerTemp > -100.0f)    doc["temp"]          = toDisplayTemp(beerTemp);
   if (ambientTemp > -100.0f) doc["ambient"]        = toDisplayTemp(ambientTemp);
   doc["temp_unit"]      = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
-  doc["temp_target"]    = g_fermenters[i].ceilingTemp;
+  doc["temp_target"]    = toDisplayTemp((g_fermenters[i].floorTemp + g_fermenters[i].ceilingTemp) / 2.0f);
   if (sg > 0.0f)             doc["gravity"]       = sg;
   doc["gravity_unit"]   = "G";
   if (g_fermenters[i].tg > 0.0f) doc["gravity_target"] = g_fermenters[i].tg;
