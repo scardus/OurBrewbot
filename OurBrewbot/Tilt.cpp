@@ -157,7 +157,7 @@ static void parseDiscLine(const char* line) {
         if (strlen(p) >= 8) {
           uint16_t tempF = hexToU16(p);      // Major = temp in °F (× 10 for Pro)
           uint16_t sgRaw = hexToU16(p + 4);  // Minor = SG × 1000 (standard) or × 10000 (Pro)
-          bool isPro = (tempF > 212);         // Pro reports tenths; 212°F = boiling, impossible in use
+          bool isPro = (sgRaw > 8000);       // Pro reports gravity with one extra decimal place, so SG × 10000 > 8000 indicates Pro
           float tempC = isPro ? ((float)tempF / 10.0f - 32.0f) * 5.0f / 9.0f
                               : ((float)tempF - 32.0f) * 5.0f / 9.0f;
           float sg    = isPro ? (float)sgRaw / 10000.0f
@@ -187,7 +187,7 @@ static void parseDiscLine(const char* line) {
   }
   uint16_t tempF = hexToU16(dataStart + 40);  // Major = temp in °F (× 10 for Pro)
   uint16_t sgRaw = hexToU16(dataStart + 44);  // Minor = SG × 1000 (standard) or × 10000 (Pro)
-  bool isPro = (tempF > 212);
+  bool isPro = (sgRaw > 8000);       // Pro reports gravity with one extra decimal place, so SG × 10000 > 8000 indicates Pro
   float tempC = isPro ? ((float)tempF / 10.0f - 32.0f) * 5.0f / 9.0f
                       : ((float)tempF - 32.0f) * 5.0f / 9.0f;
   float sg    = isPro ? (float)sgRaw / 10000.0f
