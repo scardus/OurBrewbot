@@ -88,6 +88,10 @@ String g_rebootReason = ESP.getResetReason();
 // Hardware objects
 ESP8266WebServer g_webServer(80);
 
+// Functions
+void setupWiFi();
+void onTenMinuteTimer();
+
 // ============================================================
 // SETUP
 // ============================================================
@@ -356,7 +360,7 @@ void setupWiFi() {
 // ============================================================
 void onTenMinuteTimer() {
   // Health report
-  logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%% | Uptime: %lu min | WiFi RSSI: %d dBm",
+  logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%% | Uptime: %u min | WiFi RSSI: %d dBm",
     ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), g_globalConfig.lastUptime, WiFi.RSSI());
 
   // Increment currentHour for active profile steps (6 calls × 10 min = 1 hour)

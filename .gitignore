@@ -3,3 +3,5 @@
 .claude
 .github
 .vscode
+.pio
+.gitignore
