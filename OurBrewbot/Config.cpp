@@ -80,7 +80,7 @@ bool loadGlobalConfig() {
     return false;
   }
 
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
   DeserializationError err = deserializeJson(doc, json);
   if (err) {
     logMsg("[CFG] Global JSON parse error: %s", err.c_str());
@@ -112,7 +112,7 @@ bool loadGlobalConfig() {
 }
 
 bool saveGlobalConfig() {
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
   doc["authcode"]        = g_globalConfig.authCode;
   doc["unit"]            = g_globalConfig.unit;
   doc["notifyon"]        = g_globalConfig.notifyOn;
@@ -149,7 +149,7 @@ bool loadFermenterConfig() {
     return false;
   }
 
-  DynamicJsonDocument doc(6144);
+  JsonDocument doc;
   DeserializationError err = deserializeJson(doc, json);
   if (err) {
     logMsg("[CFG] Fermenter JSON error: %s", err.c_str());
@@ -184,7 +184,7 @@ bool loadFermenterConfig() {
     g_fermenters[i].status          = doc["Status"][i]         | 0;
     g_fermenters[i].profileRunning  = doc["ProfileRunning"][i] | false;
     // Backward compat: migrate old bool BrewServiceSend → bit 0 of new bitmask
-    if (doc.containsKey("BrewServices")) {
+    if (!doc["BrewServices"].isNull()) {
       g_fermenters[i].brewServices = doc["BrewServices"][i] | 0;
     } else {
       g_fermenters[i].brewServices = (doc["BrewServiceSend"][i] | 0) ? 1 : 0;
@@ -203,40 +203,40 @@ bool loadFermenterConfig() {
 }
 
 bool saveFermenterConfig() {
-  DynamicJsonDocument doc(6144);
+  JsonDocument doc;
 
-  JsonArray nameArr  = doc.createNestedArray("FermenterName");
-  JsonArray beerArr  = doc.createNestedArray("BeerName");
-  JsonArray yeastArr = doc.createNestedArray("YeastName");
-  JsonArray bjcpArr  = doc.createNestedArray("BJCP");
-  JsonArray ceilArr  = doc.createNestedArray("CeilingTemp");
-  JsonArray floorArr = doc.createNestedArray("FloorTemp");
-  JsonArray ogArr    = doc.createNestedArray("OG");
-  JsonArray tgArr    = doc.createNestedArray("TG");
-  JsonArray hystArr  = doc.createNestedArray("Hysteresis");
-  JsonArray compArr  = doc.createNestedArray("CompressorDelay");
-  JsonArray tcArr    = doc.createNestedArray("TempControl");
-  JsonArray sgcArr   = doc.createNestedArray("SGControl");
-  JsonArray pwrArr   = doc.createNestedArray("Power");
-  JsonArray alTolArr = doc.createNestedArray("AlarmTolerance");
-  JsonArray ambArr   = doc.createNestedArray("AmbientSG");
-  JsonArray almArr   = doc.createNestedArray("Alarm");
-  JsonArray profArr  = doc.createNestedArray("ProfileNo");
-  JsonArray csArr    = doc.createNestedArray("CurrentStep");
-  JsonArray hourArr  = doc.createNestedArray("CurrentHour");
-  JsonArray ltArr    = doc.createNestedArray("LiveTest");
-  JsonArray statArr  = doc.createNestedArray("Status");
-  JsonArray prRunArr = doc.createNestedArray("ProfileRunning");
-  JsonArray bsArr    = doc.createNestedArray("BrewServices");
-  JsonArray psiArr   = doc.createNestedArray("PSI_Collect");
-  JsonArray fnArr    = doc.createNestedArray("Function");
-  JsonArray s1Arr    = doc.createNestedArray("Series1");
-  JsonArray s2Arr    = doc.createNestedArray("Series2");
-  JsonArray s3Arr    = doc.createNestedArray("Series3");
-  JsonArray s4Arr    = doc.createNestedArray("Series4");
-  JsonArray sgcalArr = doc.createNestedArray("SGCalibration");
-  JsonArray mbbArr   = doc.createNestedArray("MyBrewBuddyPSI_Colle");
-  JsonArray smArr    = doc.createNestedArray("StartMillis");
+  JsonArray nameArr  = doc["FermenterName"].to<JsonArray>();
+  JsonArray beerArr  = doc["BeerName"].to<JsonArray>();
+  JsonArray yeastArr = doc["YeastName"].to<JsonArray>();
+  JsonArray bjcpArr  = doc["BJCP"].to<JsonArray>();
+  JsonArray ceilArr  = doc["CeilingTemp"].to<JsonArray>();
+  JsonArray floorArr = doc["FloorTemp"].to<JsonArray>();
+  JsonArray ogArr    = doc["OG"].to<JsonArray>();
+  JsonArray tgArr    = doc["TG"].to<JsonArray>();
+  JsonArray hystArr  = doc["Hysteresis"].to<JsonArray>();
+  JsonArray compArr  = doc["CompressorDelay"].to<JsonArray>();
+  JsonArray tcArr    = doc["TempControl"].to<JsonArray>();
+  JsonArray sgcArr   = doc["SGControl"].to<JsonArray>();
+  JsonArray pwrArr   = doc["Power"].to<JsonArray>();
+  JsonArray alTolArr = doc["AlarmTolerance"].to<JsonArray>();
+  JsonArray ambArr   = doc["AmbientSG"].to<JsonArray>();
+  JsonArray almArr   = doc["Alarm"].to<JsonArray>();
+  JsonArray profArr  = doc["ProfileNo"].to<JsonArray>();
+  JsonArray csArr    = doc["CurrentStep"].to<JsonArray>();
+  JsonArray hourArr  = doc["CurrentHour"].to<JsonArray>();
+  JsonArray ltArr    = doc["LiveTest"].to<JsonArray>();
+  JsonArray statArr  = doc["Status"].to<JsonArray>();
+  JsonArray prRunArr = doc["ProfileRunning"].to<JsonArray>();
+  JsonArray bsArr    = doc["BrewServices"].to<JsonArray>();
+  JsonArray psiArr   = doc["PSI_Collect"].to<JsonArray>();
+  JsonArray fnArr    = doc["Function"].to<JsonArray>();
+  JsonArray s1Arr    = doc["Series1"].to<JsonArray>();
+  JsonArray s2Arr    = doc["Series2"].to<JsonArray>();
+  JsonArray s3Arr    = doc["Series3"].to<JsonArray>();
+  JsonArray s4Arr    = doc["Series4"].to<JsonArray>();
+  JsonArray sgcalArr = doc["SGCalibration"].to<JsonArray>();
+  JsonArray mbbArr   = doc["MyBrewBuddyPSI_Colle"].to<JsonArray>();
+  JsonArray smArr    = doc["StartMillis"].to<JsonArray>();
 
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     nameArr.add(g_fermenters[i].fermenterName);
@@ -289,7 +289,7 @@ bool loadProbeConfig() {
     return false;
   }
 
-  DynamicJsonDocument doc(2048);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) {
     initDefaultProbeConfig();
     return false;
@@ -310,16 +310,16 @@ bool loadProbeConfig() {
 }
 
 bool saveProbeConfig() {
-  DynamicJsonDocument doc(2048);
+  JsonDocument doc;
 
-  JsonArray nameArr = doc.createNestedArray("Probe_Name");
-  JsonArray addrArr = doc.createNestedArray("Address");
-  JsonArray fnArr   = doc.createNestedArray("Function");
-  JsonArray fermArr = doc.createNestedArray("Fermenter");
-  JsonArray tempArr = doc.createNestedArray("Temperature");
-  JsonArray mbbArr  = doc.createNestedArray("MBB");
-  JsonArray taArr   = doc.createNestedArray("Temp_Adjust");
-  JsonArray saArr   = doc.createNestedArray("SG_Adjust");
+  JsonArray nameArr = doc["Probe_Name"].to<JsonArray>();
+  JsonArray addrArr = doc["Address"].to<JsonArray>();
+  JsonArray fnArr   = doc["Function"].to<JsonArray>();
+  JsonArray fermArr = doc["Fermenter"].to<JsonArray>();
+  JsonArray tempArr = doc["Temperature"].to<JsonArray>();
+  JsonArray mbbArr  = doc["MBB"].to<JsonArray>();
+  JsonArray taArr   = doc["Temp_Adjust"].to<JsonArray>();
+  JsonArray saArr   = doc["SG_Adjust"].to<JsonArray>();
 
   for (int i = 0; i < MAX_PROBES; i++) {
     nameArr.add(g_probes[i].probeName);
@@ -348,7 +348,7 @@ bool loadSmartPlugConfig() {
     return false;
   }
 
-  DynamicJsonDocument doc(4096);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) {
     initDefaultSmartPlugConfig();
     return false;
@@ -372,20 +372,20 @@ bool loadSmartPlugConfig() {
 }
 
 bool saveSmartPlugConfig() {
-  DynamicJsonDocument doc(4096);
+  JsonDocument doc;
 
-  JsonArray typeArr  = doc.createNestedArray("Type");
-  JsonArray csArr    = doc.createNestedArray("Codeset");
-  JsonArray prArr    = doc.createNestedArray("Protocol");
-  JsonArray bitsArr  = doc.createNestedArray("Bits");
-  JsonArray dlArr    = doc.createNestedArray("DelayLength");
-  JsonArray fnArr    = doc.createNestedArray("Function");
-  JsonArray fermArr  = doc.createNestedArray("Fermenter");
-  JsonArray onArr    = doc.createNestedArray("OnCode");
-  JsonArray offArr   = doc.createNestedArray("OffCode");
-  JsonArray mfgArr   = doc.createNestedArray("Manufacturer");
-  JsonArray modArr   = doc.createNestedArray("Model");
-  JsonArray pnArr    = doc.createNestedArray("PlugNo");
+  JsonArray typeArr  = doc["Type"].to<JsonArray>();
+  JsonArray csArr    = doc["Codeset"].to<JsonArray>();
+  JsonArray prArr    = doc["Protocol"].to<JsonArray>();
+  JsonArray bitsArr  = doc["Bits"].to<JsonArray>();
+  JsonArray dlArr    = doc["DelayLength"].to<JsonArray>();
+  JsonArray fnArr    = doc["Function"].to<JsonArray>();
+  JsonArray fermArr  = doc["Fermenter"].to<JsonArray>();
+  JsonArray onArr    = doc["OnCode"].to<JsonArray>();
+  JsonArray offArr   = doc["OffCode"].to<JsonArray>();
+  JsonArray mfgArr   = doc["Manufacturer"].to<JsonArray>();
+  JsonArray modArr   = doc["Model"].to<JsonArray>();
+  JsonArray pnArr    = doc["PlugNo"].to<JsonArray>();
 
   for (int i = 0; i < MAX_SMART_PLUGS; i++) {
     typeArr.add(g_smartPlugs[i].type);
@@ -417,7 +417,7 @@ bool loadProfileConfig() {
     initDefaultProfileConfig();
     return false;
   }
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) {
     initDefaultProfileConfig();
     return false;
@@ -429,8 +429,8 @@ bool loadProfileConfig() {
 }
 
 bool saveProfileConfig() {
-  DynamicJsonDocument doc(512);
-  JsonArray nameArr = doc.createNestedArray("ProfileName");
+  JsonDocument doc;
+  JsonArray nameArr = doc["ProfileName"].to<JsonArray>();
   for (int i = 0; i < MAX_PROFILES; i++) {
     nameArr.add(g_profiles[i].profileName);
   }
@@ -443,7 +443,7 @@ bool loadProfileSteps() {
   String json = loadJsonFileSafe(FILE_STEPS, FILE_STEPS_BKP);
   if (json.length() < 2) return false;
 
-  DynamicJsonDocument doc(8192);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) return false;
 
   for (int i = 0; i < MAX_PROFILE_STEPS; i++) {
@@ -458,13 +458,13 @@ bool loadProfileSteps() {
 }
 
 bool saveProfileSteps() {
-  DynamicJsonDocument doc(8192);
-  JsonArray snArr  = doc.createNestedArray("StepNo");
-  JsonArray stArr  = doc.createNestedArray("StepType");
-  JsonArray sTArr  = doc.createNestedArray("StartTemp");
-  JsonArray eTArr  = doc.createNestedArray("EndTemp");
-  JsonArray sgArr  = doc.createNestedArray("SGTrigger");
-  JsonArray dArr   = doc.createNestedArray("Days");
+  JsonDocument doc;
+  JsonArray snArr  = doc["StepNo"].to<JsonArray>();
+  JsonArray stArr  = doc["StepType"].to<JsonArray>();
+  JsonArray sTArr  = doc["StartTemp"].to<JsonArray>();
+  JsonArray eTArr  = doc["EndTemp"].to<JsonArray>();
+  JsonArray sgArr  = doc["SGTrigger"].to<JsonArray>();
+  JsonArray dArr   = doc["Days"].to<JsonArray>();
 
   for (int i = 0; i < MAX_PROFILE_STEPS; i++) {
     snArr.add(g_profileSteps[i].stepNo);
@@ -489,7 +489,7 @@ bool loadiSpindelConfig() {
     initDefaultiSpindelConfig();
     return false;
   }
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) {
     initDefaultiSpindelConfig();
     return false;
@@ -505,12 +505,12 @@ bool loadiSpindelConfig() {
 }
 
 bool saveiSpindelConfig() {
-  DynamicJsonDocument doc(1024);
-  JsonArray nameArr = doc.createNestedArray("iSpindelName");
-  JsonArray idArr   = doc.createNestedArray("ID");
-  JsonArray cdArr   = doc.createNestedArray("iSpindelCollectData");
-  JsonArray fiArr   = doc.createNestedArray("iSpindelFermenter");
-  JsonArray unArr   = doc.createNestedArray("Unit");
+  JsonDocument doc;
+  JsonArray nameArr = doc["iSpindelName"].to<JsonArray>();
+  JsonArray idArr   = doc["ID"].to<JsonArray>();
+  JsonArray cdArr   = doc["iSpindelCollectData"].to<JsonArray>();
+  JsonArray fiArr   = doc["iSpindelFermenter"].to<JsonArray>();
+  JsonArray unArr   = doc["Unit"].to<JsonArray>();
 
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     nameArr.add(g_iSpindels[i].name);
@@ -534,7 +534,7 @@ bool loadPlaatoConfig() {
     initDefaultPlaatoConfig();
     return false;
   }
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) {
     initDefaultPlaatoConfig();
     return false;
@@ -547,9 +547,9 @@ bool loadPlaatoConfig() {
 }
 
 bool savePlaatoConfig() {
-  DynamicJsonDocument doc(1024);
-  JsonArray acArr = doc.createNestedArray("AuthCode");
-  JsonArray gdArr = doc.createNestedArray("GetData");
+  JsonDocument doc;
+  JsonArray acArr = doc["AuthCode"].to<JsonArray>();
+  JsonArray gdArr = doc["GetData"].to<JsonArray>();
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     acArr.add(g_plaato[i].authCode);
     gdArr.add((bool)g_plaato[i].getData);
@@ -573,7 +573,7 @@ bool loadTiltConfig() {
   String json = loadJsonFileSafe(FILE_TILT, FILE_TILT_BKP);
   if (json.length() < 2) return false;
 
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) {
     logMsg("[CFG] Tilt JSON parse error");
     return false;
@@ -594,13 +594,13 @@ bool loadTiltConfig() {
 }
 
 bool saveTiltConfig() {
-  DynamicJsonDocument doc(512);
-  JsonArray addrArr = doc.createNestedArray("Address");
-  JsonArray fnArr   = doc.createNestedArray("Function");
-  JsonArray fermArr = doc.createNestedArray("Fermenter");
-  JsonArray taArr   = doc.createNestedArray("Temp_Adjust");
-  JsonArray saArr   = doc.createNestedArray("SG_Adjust");
-  JsonArray mbbArr  = doc.createNestedArray("MBB");
+  JsonDocument doc;
+  JsonArray addrArr = doc["Address"].to<JsonArray>();
+  JsonArray fnArr   = doc["Function"].to<JsonArray>();
+  JsonArray fermArr = doc["Fermenter"].to<JsonArray>();
+  JsonArray taArr   = doc["Temp_Adjust"].to<JsonArray>();
+  JsonArray saArr   = doc["SG_Adjust"].to<JsonArray>();
+  JsonArray mbbArr  = doc["MBB"].to<JsonArray>();
 
   // Write configured colours (colour != PROBE_UNASSIGNED) first, pad to MAX_TILT_SLOTS
   int count = 0;
@@ -651,7 +651,7 @@ bool loadBrewServiceConfig() {
     return false;
   }
 
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) {
     initDefaultBrewServiceConfig();
     return false;
@@ -679,10 +679,10 @@ bool loadBrewServiceConfig() {
 }
 
 bool saveBrewServiceConfig() {
-  DynamicJsonDocument doc(1024);
-  JsonArray enArr = doc.createNestedArray("Enabled");
-  JsonArray idArr = doc.createNestedArray("ServiceId");
-  JsonArray dnArr = doc.createNestedArray("DeviceName");
+  JsonDocument doc;
+  JsonArray enArr = doc["Enabled"].to<JsonArray>();
+  JsonArray idArr = doc["ServiceId"].to<JsonArray>();
+  JsonArray dnArr = doc["DeviceName"].to<JsonArray>();
   for (int i = 0; i < MAX_BREW_SERVICES; i++) {
     enArr.add((bool)g_brewServices[i].enabled);
     idArr.add(g_brewServices[i].serviceId);
@@ -703,7 +703,7 @@ bool loadMqttConfig() {
     initDefaultMqttConfig();
     return false;
   }
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) {
     initDefaultMqttConfig();
     return false;
@@ -719,7 +719,7 @@ bool loadMqttConfig() {
 }
 
 bool saveMqttConfig() {
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   doc["enabled"]     = (bool)g_mqttConfig.enabled;
   doc["haDiscovery"] = (bool)g_mqttConfig.haDiscovery;
   doc["host"]        = g_mqttConfig.host;
@@ -742,7 +742,7 @@ bool loadSyslogConfig() {
     initDefaultSyslogConfig();
     return false;
   }
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, json)) {
     initDefaultSyslogConfig();
     return false;
@@ -756,7 +756,7 @@ bool loadSyslogConfig() {
 }
 
 bool saveSyslogConfig() {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   doc["enabled"]  = (bool)g_syslogConfig.enabled;
   doc["host"]     = g_syslogConfig.host;
   doc["port"]     = g_syslogConfig.port;
@@ -976,19 +976,19 @@ void resetAllConfig() {
 // ============================================================
 
 void recordReboot(const String& reason) {
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
   String existing = loadJsonFile(FILE_REBOOT);
   if (existing.length() > 2) {
     deserializeJson(doc, existing);
   }
 
   // Keep a rolling log of last 10 reboots
-  JsonArray log = doc.containsKey("log") ? doc["log"].as<JsonArray>()
-                                         : doc.createNestedArray("log");
+  JsonArray log = !doc["log"].isNull() ? doc["log"].as<JsonArray>()
+                                       : doc["log"].to<JsonArray>();
 
   struct rst_info *ri = ESP.getResetInfoPtr();
 
-  DynamicJsonDocument entry(256);
+  JsonDocument entry;
   entry["reason"]   = reason;
   entry["uptime"]   = g_globalConfig.lastUptime;
   entry["heap"]     = ESP.getFreeHeap();

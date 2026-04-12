@@ -205,7 +205,7 @@ void handleRoot(ESP8266WebServer& server) {
 // ============================================================
 
 String buildFermenterJson(uint8_t i) {
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
 
   doc["Fermenter"]       = i;
   doc["FermenterName"]   = g_fermenters[i].fermenterName;
@@ -259,13 +259,13 @@ String buildFermenterJson(uint8_t i) {
 }
 
 String buildProfileJson(int p) {
-  DynamicJsonDocument doc(1536);
+  JsonDocument doc;
   doc["index"] = p;
   doc["name"]  = g_profiles[p].profileName;
-  JsonArray steps = doc.createNestedArray("steps");
+  JsonArray steps = doc["steps"].to<JsonArray>();
   uint8_t base = p * MAX_STEPS_PER_PROFILE;
   for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
-    JsonObject st = steps.createNestedObject();
+    JsonObject st = steps.add<JsonObject>();
     st["stepType"]  = g_profileSteps[base + s].stepType;
     st["startTemp"] = g_profileSteps[base + s].startTemp;
     st["endTemp"]   = g_profileSteps[base + s].endTemp;
@@ -296,24 +296,24 @@ void handleFermenters(ESP8266WebServer& server) {
 void handleFermenter(ESP8266WebServer& server) {
   if (server.method() == HTTP_POST) {
     // Update fermenter config from POST body
-    DynamicJsonDocument doc(1024);
+    JsonDocument doc;
     if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
       int idx = doc["Fermenter"] | -1;
       if (idx >= 0 && idx < MAX_FERMENTERS) {
-        if (doc.containsKey("CeilingTemp"))     { float v = doc["CeilingTemp"];        if (v >= -20.0f && v <= 50.0f)   g_fermenters[idx].ceilingTemp     = v; }
-        if (doc.containsKey("FloorTemp"))       { float v = doc["FloorTemp"];          if (v >= -20.0f && v <= 50.0f)   g_fermenters[idx].floorTemp       = v; }
-        if (doc.containsKey("Power"))           g_fermenters[idx].power           = doc["Power"];
-        if (doc.containsKey("TempControl"))     g_fermenters[idx].tempControl     = doc["TempControl"];
-        if (doc.containsKey("BeerName"))        strlcpy(g_fermenters[idx].beerName,      doc["BeerName"],      sizeof(g_fermenters[0].beerName));
-        if (doc.containsKey("FermenterName"))   strlcpy(g_fermenters[idx].fermenterName, doc["FermenterName"], sizeof(g_fermenters[0].fermenterName));
-        if (doc.containsKey("YeastName"))       strlcpy(g_fermenters[idx].yeastName,     doc["YeastName"],     sizeof(g_fermenters[0].yeastName));
-        if (doc.containsKey("Hysteresis"))      { float v = doc["Hysteresis"];         if (v >= 0.0f && v <= 10.0f)     g_fermenters[idx].hysteresis      = v; }
-        if (doc.containsKey("CompressorDelay")) { uint16_t v = doc["CompressorDelay"]; if (v <= 1440)                   g_fermenters[idx].compressorDelay = v; }
-        if (doc.containsKey("BrewServices"))    g_fermenters[idx].brewServices    = doc["BrewServices"];
-        if (doc.containsKey("OG"))              g_fermenters[idx].og              = doc["OG"];
-        if (doc.containsKey("TG"))              g_fermenters[idx].tg              = doc["TG"];
-        if (doc.containsKey("ProfileNo"))       { int v = doc["ProfileNo"];            if (v >= 0 && v <= MAX_PROFILES) g_fermenters[idx].profileNo       = (uint8_t)v; }
-        if (doc.containsKey("LiveTest"))        g_fermenters[idx].liveTest        = doc["LiveTest"];
+        if (!doc["CeilingTemp"].isNull())     { float v = doc["CeilingTemp"];        if (v >= -20.0f && v <= 50.0f)   g_fermenters[idx].ceilingTemp     = v; }
+        if (!doc["FloorTemp"].isNull())       { float v = doc["FloorTemp"];          if (v >= -20.0f && v <= 50.0f)   g_fermenters[idx].floorTemp       = v; }
+        if (!doc["Power"].isNull())           g_fermenters[idx].power           = doc["Power"];
+        if (!doc["TempControl"].isNull())     g_fermenters[idx].tempControl     = doc["TempControl"];
+        if (!doc["BeerName"].isNull())        strlcpy(g_fermenters[idx].beerName,      doc["BeerName"],      sizeof(g_fermenters[0].beerName));
+        if (!doc["FermenterName"].isNull())   strlcpy(g_fermenters[idx].fermenterName, doc["FermenterName"], sizeof(g_fermenters[0].fermenterName));
+        if (!doc["YeastName"].isNull())       strlcpy(g_fermenters[idx].yeastName,     doc["YeastName"],     sizeof(g_fermenters[0].yeastName));
+        if (!doc["Hysteresis"].isNull())      { float v = doc["Hysteresis"];         if (v >= 0.0f && v <= 10.0f)     g_fermenters[idx].hysteresis      = v; }
+        if (!doc["CompressorDelay"].isNull()) { uint16_t v = doc["CompressorDelay"]; if (v <= 1440)                   g_fermenters[idx].compressorDelay = v; }
+        if (!doc["BrewServices"].isNull())    g_fermenters[idx].brewServices    = doc["BrewServices"];
+        if (!doc["OG"].isNull())              g_fermenters[idx].og              = doc["OG"];
+        if (!doc["TG"].isNull())              g_fermenters[idx].tg              = doc["TG"];
+        if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"];            if (v >= 0 && v <= MAX_PROFILES) g_fermenters[idx].profileNo       = (uint8_t)v; }
+        if (!doc["LiveTest"].isNull())        g_fermenters[idx].liveTest        = doc["LiveTest"];
         saveFermenterConfig();
         sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Configuration saved\"}"));
         return;
@@ -335,7 +335,7 @@ void handleFermenter(ESP8266WebServer& server) {
 // ============================================================
 
 String buildControllerJson() {
-  DynamicJsonDocument doc(2048);
+  JsonDocument doc;
 
   doc["AuthCode"]      = g_globalConfig.authCode;
   doc["Unit"]          = g_globalConfig.unit;
@@ -357,10 +357,10 @@ String buildControllerJson() {
   doc["mDNSName"]      = mdnsName + ".local";
 
   // Smart plug summary
-  JsonArray plugs = doc.createNestedArray("SmartPlugs");
+  JsonArray plugs = doc["SmartPlugs"].to<JsonArray>();
   for (int i = 0; i < MAX_SMART_PLUGS; i++) {
     if (g_smartPlugs[i].onCode == 0) continue;
-    JsonObject p = plugs.createNestedObject();
+    JsonObject p = plugs.add<JsonObject>();
     p["PlugNo"]       = i;
     p["Function"]     = g_smartPlugs[i].function;
     p["Fermenter"]    = g_smartPlugs[i].fermenter;
@@ -375,13 +375,13 @@ String buildControllerJson() {
 
 void handleController(ESP8266WebServer& server) {
   if (server.method() == HTTP_POST) {
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
-      if (doc.containsKey("Unit"))       { uint8_t v = doc["Unit"];       if (v == UNIT_CELSIUS || v == UNIT_FAHRENHEIT) g_globalConfig.unit       = v; }
-      if (doc.containsKey("Resolution")) { uint8_t v = doc["Resolution"]; if (v >= 9 && v <= 12)                        g_globalConfig.resolution = v; }
-      if (doc.containsKey("NotifyOn"))      g_globalConfig.notifyOn      = doc["NotifyOn"];
-      if (doc.containsKey("BrewService"))   g_globalConfig.brewService   = doc["BrewService"];
-      if (doc.containsKey("BrewServiceId")) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"], sizeof(g_globalConfig.brewServiceId));
+      if (!doc["Unit"].isNull())       { uint8_t v = doc["Unit"];       if (v == UNIT_CELSIUS || v == UNIT_FAHRENHEIT) g_globalConfig.unit       = v; }
+      if (!doc["Resolution"].isNull()) { uint8_t v = doc["Resolution"]; if (v >= 9 && v <= 12)                        g_globalConfig.resolution = v; }
+      if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
+      if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
+      if (!doc["BrewServiceId"].isNull()) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"], sizeof(g_globalConfig.brewServiceId));
       saveGlobalConfig();
       sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Configuration saved\"}"));
       return;
@@ -397,7 +397,7 @@ void handleController(ESP8266WebServer& server) {
 // ============================================================
 
 String buildBoardInfoJson() {
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   doc["chip_id"]     = String(ESP.getChipId(), HEX);
   doc["flash_size"]  = ESP.getFlashChipSize();
   doc["free_heap"]   = ESP.getFreeHeap();
@@ -419,10 +419,10 @@ void handleBoardInfo(ESP8266WebServer& server) {
 // ============================================================
 
 void handleStatus(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(1024);
-  JsonArray fermenters = doc.createNestedArray("fermenters");
+  JsonDocument doc;
+  JsonArray fermenters = doc["fermenters"].to<JsonArray>();
   for (int i = 0; i < MAX_FERMENTERS; i++) {
-    JsonObject f = fermenters.createNestedObject();
+    JsonObject f = fermenters.add<JsonObject>();
     f["id"]          = i;
     f["name"]        = g_fermenters[i].fermenterName;
     f["beer"]        = g_fermenters[i].beerName;
@@ -446,11 +446,11 @@ void handleStatus(ESP8266WebServer& server) {
 // ============================================================
 
 void handleProbes(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(2048);
-  JsonArray arr = doc.createNestedArray("probes");
+  JsonDocument doc;
+  JsonArray arr = doc["probes"].to<JsonArray>();
   for (int i = 0; i < MAX_PROBES; i++) {
     if (strlen(g_probes[i].address) == 0) continue;
-    JsonObject p = arr.createNestedObject();
+    JsonObject p = arr.add<JsonObject>();
     p["index"]       = i;
     p["name"]        = g_probes[i].probeName;
     p["address"]     = g_probes[i].address;
@@ -469,7 +469,7 @@ void handleProbes(ESP8266WebServer& server) {
 // ============================================================
 
 void handleHealth(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   doc["freeHeap"]    = ESP.getFreeHeap();
   doc["uptime"]      = (uint32_t)(millis() / 60000UL);
   doc["rssi"]        = WiFi.RSSI();
@@ -581,10 +581,10 @@ void handleiSpindel(ESP8266WebServer& server) {
 // ============================================================
 
 void handleiSpindels(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(1024);
-  JsonArray arr = doc.createNestedArray("ispindels");
+  JsonDocument doc;
+  JsonArray arr = doc["ispindels"].to<JsonArray>();
   for (int i = 0; i < MAX_ISPINDELS; i++) {
-    JsonObject s = arr.createNestedObject();
+    JsonObject s = arr.add<JsonObject>();
     s["index"]       = i;
     s["name"]        = g_iSpindels[i].name;
     s["id"]          = g_iSpindels[i].id;
@@ -608,7 +608,7 @@ void handleiSpindels(ESP8266WebServer& server) {
 // ============================================================
 
 void handleiSpindelConfigPost(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -634,9 +634,9 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     return;
   }
 
-  if (doc.containsKey("collectData")) g_iSpindels[idx].collectData = doc["collectData"];
-  if (doc.containsKey("fermenter"))   { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_iSpindels[idx].fermenter = v; }
-  if (doc.containsKey("unit"))        g_iSpindels[idx].unit        = doc["unit"];
+  if (!doc["collectData"].isNull()) g_iSpindels[idx].collectData = doc["collectData"];
+  if (!doc["fermenter"].isNull())   { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_iSpindels[idx].fermenter = v; }
+  if (!doc["unit"].isNull())        g_iSpindels[idx].unit        = doc["unit"];
   saveiSpindelConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"iSpindel updated\"}"));
 }
@@ -700,7 +700,7 @@ void handleWiFiReset(ESP8266WebServer& server) {
 // ============================================================
 
 void handleProbePost(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -710,10 +710,10 @@ void handleProbePost(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid probe index\"}"), 400);
     return;
   }
-  if (doc.containsKey("name"))       strlcpy(g_probes[idx].probeName, doc["name"], sizeof(g_probes[0].probeName));
-  if (doc.containsKey("function"))   g_probes[idx].function   = doc["function"];
-  if (doc.containsKey("fermenter"))  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_probes[idx].fermenter = v; }
-  if (doc.containsKey("tempAdjust")) g_probes[idx].tempAdjust = doc["tempAdjust"];
+  if (!doc["name"].isNull())       strlcpy(g_probes[idx].probeName, doc["name"], sizeof(g_probes[0].probeName));
+  if (!doc["function"].isNull())   g_probes[idx].function   = doc["function"];
+  if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_probes[idx].fermenter = v; }
+  if (!doc["tempAdjust"].isNull()) g_probes[idx].tempAdjust = doc["tempAdjust"];
   saveProbeConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Probe updated\"}"));
 }
@@ -723,10 +723,10 @@ void handleProbePost(ESP8266WebServer& server) {
 // ============================================================
 
 void handleSmartPlugs(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(4096);
-  JsonArray arr = doc.createNestedArray("plugs");
+  JsonDocument doc;
+  JsonArray arr = doc["plugs"].to<JsonArray>();
   for (int i = 0; i < MAX_SMART_PLUGS; i++) {
-    JsonObject p = arr.createNestedObject();
+    JsonObject p = arr.add<JsonObject>();
     p["index"]        = i;
     p["manufacturer"] = g_smartPlugs[i].manufacturer;
     p["model"]        = g_smartPlugs[i].model;
@@ -750,7 +750,7 @@ void handleSmartPlugs(ESP8266WebServer& server) {
 // ============================================================
 
 void handleSmartPlugPost(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -760,16 +760,16 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid plug index\"}"), 400);
     return;
   }
-  if (doc.containsKey("function"))     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           g_smartPlugs[idx].function    = v; }
-  if (doc.containsKey("fermenter"))    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_smartPlugs[idx].fermenter   = v; }
-  if (doc.containsKey("manufacturer")) strlcpy(g_smartPlugs[idx].manufacturer, doc["manufacturer"], sizeof(g_smartPlugs[0].manufacturer));
-  if (doc.containsKey("model"))        strlcpy(g_smartPlugs[idx].model, doc["model"], sizeof(g_smartPlugs[0].model));
-  if (doc.containsKey("onCode"))       g_smartPlugs[idx].onCode      = doc["onCode"];
-  if (doc.containsKey("offCode"))      g_smartPlugs[idx].offCode     = doc["offCode"];
-  if (doc.containsKey("protocol"))     { uint8_t v = doc["protocol"]; if (v >= 1)              g_smartPlugs[idx].protocol    = v; }
-  if (doc.containsKey("bits"))         { uint8_t v = doc["bits"];     if (v >= 1 && v <= 32)   g_smartPlugs[idx].bits        = v; }
-  if (doc.containsKey("delay"))        g_smartPlugs[idx].delayLength = doc["delay"];
-  if (doc.containsKey("codeset"))      g_smartPlugs[idx].codeset     = doc["codeset"];
+  if (!doc["function"].isNull())     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           g_smartPlugs[idx].function    = v; }
+  if (!doc["fermenter"].isNull())    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_smartPlugs[idx].fermenter   = v; }
+  if (!doc["manufacturer"].isNull()) strlcpy(g_smartPlugs[idx].manufacturer, doc["manufacturer"], sizeof(g_smartPlugs[0].manufacturer));
+  if (!doc["model"].isNull())        strlcpy(g_smartPlugs[idx].model, doc["model"], sizeof(g_smartPlugs[0].model));
+  if (!doc["onCode"].isNull())       g_smartPlugs[idx].onCode      = doc["onCode"];
+  if (!doc["offCode"].isNull())      g_smartPlugs[idx].offCode     = doc["offCode"];
+  if (!doc["protocol"].isNull())     { uint8_t v = doc["protocol"]; if (v >= 1)              g_smartPlugs[idx].protocol    = v; }
+  if (!doc["bits"].isNull())         { uint8_t v = doc["bits"];     if (v >= 1 && v <= 32)   g_smartPlugs[idx].bits        = v; }
+  if (!doc["delay"].isNull())        g_smartPlugs[idx].delayLength = doc["delay"];
+  if (!doc["codeset"].isNull())      g_smartPlugs[idx].codeset     = doc["codeset"];
   saveSmartPlugConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Plug updated\"}"));
 }
@@ -779,7 +779,7 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
 // ============================================================
 
 void handleSmartPlugTest(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -818,7 +818,7 @@ void handleRFSniffPoll(ESP8266WebServer& server) {
     s_sniffActive = true;
   }
 
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (g_rcSwitch.available()) {
     unsigned long val = g_rcSwitch.getReceivedValue();
     doc["received"] = true;
@@ -921,7 +921,7 @@ void handleBLESniffPoll(ESP8266WebServer& server) {
   }
   s_bleSniffBuf[s_bleSniffLen] = '\0';
 
-  DynamicJsonDocument doc(BLE_SNIFF_BUF_SIZE + 64);
+  JsonDocument doc;
   doc["data"] = s_bleSniffBuf;
   doc["len"]  = s_bleSniffLen;
 
@@ -937,7 +937,7 @@ void handleBLESniffSend(ESP8266WebServer& server) {
   g_bleSniffActive = true;
   s_bleSniffLastPoll = millis();
 
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -955,7 +955,7 @@ void handleBLESniffSend(ESP8266WebServer& server) {
   g_bleSerial.print(cmd);
   logMsg("[BLE SNIFF] Sent: %s", cmd);
 
-  DynamicJsonDocument resp(128);
+  JsonDocument resp;
   resp["status"] = "ok";
   resp["cmd"]    = cmd;
   String out;
@@ -1039,11 +1039,11 @@ void handleBLESniff(ESP8266WebServer& server) {
 
 void handleBrewServices(ESP8266WebServer& server) {
   // Index: 0=Brewer's Friend, 1=Brewfather
-  DynamicJsonDocument doc(512);
-  JsonArray arr = doc.createNestedArray("services");
+  JsonDocument doc;
+  JsonArray arr = doc["services"].to<JsonArray>();
   const char* names[] = {"Brewer's Friend", "Brewfather"};
   for (int i = 0; i < MAX_BREW_SERVICES; i++) {
-    JsonObject s = arr.createNestedObject();
+    JsonObject s = arr.add<JsonObject>();
     s["index"]     = i;
     s["name"]      = names[i];
     s["enabled"]    = g_brewServices[i].enabled;
@@ -1056,7 +1056,7 @@ void handleBrewServices(ESP8266WebServer& server) {
 }
 
 void handleBrewServicesPost(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -1066,9 +1066,9 @@ void handleBrewServicesPost(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid service index\"}"), 400);
     return;
   }
-  if (doc.containsKey("enabled"))    g_brewServices[idx].enabled = doc["enabled"];
-  if (doc.containsKey("serviceId"))  strlcpy(g_brewServices[idx].serviceId, doc["serviceId"], sizeof(g_brewServices[0].serviceId));
-  if (doc.containsKey("deviceName")) strlcpy(g_brewServices[idx].deviceName, doc["deviceName"], sizeof(g_brewServices[0].deviceName));
+  if (!doc["enabled"].isNull())    g_brewServices[idx].enabled = doc["enabled"];
+  if (!doc["serviceId"].isNull())  strlcpy(g_brewServices[idx].serviceId, doc["serviceId"], sizeof(g_brewServices[0].serviceId));
+  if (!doc["deviceName"].isNull()) strlcpy(g_brewServices[idx].deviceName, doc["deviceName"], sizeof(g_brewServices[0].deviceName));
   saveBrewServiceConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Brew service saved\"}"));
 }
@@ -1078,7 +1078,7 @@ void handleBrewServicesPost(ESP8266WebServer& server) {
 // ============================================================
 
 void handleBrewServiceTest(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(128);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -1109,7 +1109,7 @@ void handleBrewServiceTest(ESP8266WebServer& server) {
 // ============================================================
 
 void handleMqttConfig(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   doc["enabled"]     = g_mqttConfig.enabled;
   doc["haDiscovery"] = g_mqttConfig.haDiscovery;
   doc["host"]        = g_mqttConfig.host;
@@ -1123,18 +1123,18 @@ void handleMqttConfig(ESP8266WebServer& server) {
 }
 
 void handleMqttConfigPost(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
   }
-  if (doc.containsKey("enabled"))   g_mqttConfig.enabled = doc["enabled"];
-  if (doc.containsKey("host"))      strlcpy(g_mqttConfig.host,      doc["host"],      sizeof(g_mqttConfig.host));
-  if (doc.containsKey("port"))      g_mqttConfig.port = doc["port"];
-  if (doc.containsKey("username"))  strlcpy(g_mqttConfig.username,  doc["username"],  sizeof(g_mqttConfig.username));
-  if (doc.containsKey("password"))  strlcpy(g_mqttConfig.password,  doc["password"],  sizeof(g_mqttConfig.password));
-  if (doc.containsKey("baseTopic")) strlcpy(g_mqttConfig.baseTopic, doc["baseTopic"], sizeof(g_mqttConfig.baseTopic));
-  if (doc.containsKey("haDiscovery")) {
+  if (!doc["enabled"].isNull())   g_mqttConfig.enabled = doc["enabled"];
+  if (!doc["host"].isNull())      strlcpy(g_mqttConfig.host,      doc["host"],      sizeof(g_mqttConfig.host));
+  if (!doc["port"].isNull())      g_mqttConfig.port = doc["port"];
+  if (!doc["username"].isNull())  strlcpy(g_mqttConfig.username,  doc["username"],  sizeof(g_mqttConfig.username));
+  if (!doc["password"].isNull())  strlcpy(g_mqttConfig.password,  doc["password"],  sizeof(g_mqttConfig.password));
+  if (!doc["baseTopic"].isNull()) strlcpy(g_mqttConfig.baseTopic, doc["baseTopic"], sizeof(g_mqttConfig.baseTopic));
+  if (!doc["haDiscovery"].isNull()) {
     bool newHa = doc["haDiscovery"];
     if (g_mqttConfig.haDiscovery && !newHa) cleanupAllHaDiscovery();
     g_mqttConfig.haDiscovery = newHa;
@@ -1178,7 +1178,7 @@ void handleProfiles(ESP8266WebServer& server) {
   server.sendContent("],\"stepTypes\":[");
   for (int t = 0; t <= 9; t++) {
     if (t > 0) server.sendContent(",");
-    DynamicJsonDocument tDoc(128);
+    JsonDocument tDoc;
     tDoc["id"]   = t;
     tDoc["name"] = getStepTypeDescription(t);
     String tJson;
@@ -1194,7 +1194,7 @@ void handleProfiles(ESP8266WebServer& server) {
 // ============================================================
 
 void handleProfilePost(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(2048);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -1204,10 +1204,10 @@ void handleProfilePost(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid profile index\"}"), 400);
     return;
   }
-  if (doc.containsKey("name")) {
+  if (!doc["name"].isNull()) {
     strlcpy(g_profiles[idx].profileName, doc["name"] | "Empty Profile", sizeof(g_profiles[0].profileName));
   }
-  if (doc.containsKey("steps")) {
+  if (!doc["steps"].isNull()) {
     JsonArray steps = doc["steps"];
     uint8_t base = idx * MAX_STEPS_PER_PROFILE;
     for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
@@ -1240,7 +1240,7 @@ void handleProfilePost(ESP8266WebServer& server) {
 // ============================================================
 
 void handleFermenterProfile(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -1287,11 +1287,11 @@ void handleFermenterProfile(ESP8266WebServer& server) {
 // ============================================================
 
 void handleFsFiles(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(2048);
-  JsonArray arr = doc.createNestedArray("files");
+  JsonDocument doc;
+  JsonArray arr = doc["files"].to<JsonArray>();
   Dir dir = LittleFS.openDir("/");
   while (dir.next()) {
-    JsonObject f = arr.createNestedObject();
+    JsonObject f = arr.add<JsonObject>();
     f["name"] = dir.fileName();
     f["size"] = (unsigned int)dir.fileSize();
   }
@@ -1331,12 +1331,12 @@ void handleFsFile(ESP8266WebServer& server) {
 // ============================================================
 
 void handleTilts(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(2048);
-  JsonArray arr = doc.createNestedArray("tilts");
+  JsonDocument doc;
+  JsonArray arr = doc["tilts"].to<JsonArray>();
   for (int i = 0; i < MAX_TILTS; i++) {
     // Include slots that are configured (colour set) or actively seen
     if (g_tilts[i].colour == PROBE_UNASSIGNED && !g_tilts[i].active) continue;
-    JsonObject t = arr.createNestedObject();
+    JsonObject t = arr.add<JsonObject>();
     t["colour"]      = i;
     t["colourName"]  = getTiltColourName(i);
     t["function"]    = g_tilts[i].function;
@@ -1360,7 +1360,7 @@ void handleTilts(ESP8266WebServer& server) {
 // ============================================================
 
 void handleTiltPost(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
@@ -1386,10 +1386,10 @@ void handleTiltPost(ESP8266WebServer& server) {
 
   // Mark the slot as configured so saveTiltConfig() includes it
   g_tilts[colour].colour = (uint8_t)colour;
-  if (doc.containsKey("function"))   g_tilts[colour].function   = doc["function"];
-  if (doc.containsKey("fermenter"))  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_tilts[colour].fermenter = v; }
-  if (doc.containsKey("tempAdjust")) g_tilts[colour].tempAdjust = doc["tempAdjust"];
-  if (doc.containsKey("sgAdjust"))   g_tilts[colour].sgAdjust   = doc["sgAdjust"];
+  if (!doc["function"].isNull())   g_tilts[colour].function   = doc["function"];
+  if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_tilts[colour].fermenter = v; }
+  if (!doc["tempAdjust"].isNull()) g_tilts[colour].tempAdjust = doc["tempAdjust"];
+  if (!doc["sgAdjust"].isNull())   g_tilts[colour].sgAdjust   = doc["sgAdjust"];
   saveTiltConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Tilt updated\"}"));
 }
@@ -1399,7 +1399,7 @@ void handleTiltPost(ESP8266WebServer& server) {
 // ============================================================
 
 void handleSyslogConfig(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   doc["enabled"]  = g_syslogConfig.enabled;
   doc["host"]     = g_syslogConfig.host;
   doc["port"]     = g_syslogConfig.port;
@@ -1411,16 +1411,16 @@ void handleSyslogConfig(ESP8266WebServer& server) {
 }
 
 void handleSyslogConfigPost(ESP8266WebServer& server) {
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
   }
-  if (doc.containsKey("enabled"))  g_syslogConfig.enabled  = doc["enabled"];
-  if (doc.containsKey("host"))     strlcpy(g_syslogConfig.host, doc["host"], sizeof(g_syslogConfig.host));
-  if (doc.containsKey("port"))     g_syslogConfig.port     = doc["port"];
-  if (doc.containsKey("facility")) { uint8_t v = doc["facility"]; if (v <= 23) g_syslogConfig.facility = v; }
-  if (doc.containsKey("minLevel")) { uint8_t v = doc["minLevel"]; if (v <= 7)  g_syslogConfig.minLevel = v; }
+  if (!doc["enabled"].isNull())  g_syslogConfig.enabled  = doc["enabled"];
+  if (!doc["host"].isNull())     strlcpy(g_syslogConfig.host, doc["host"], sizeof(g_syslogConfig.host));
+  if (!doc["port"].isNull())     g_syslogConfig.port     = doc["port"];
+  if (!doc["facility"].isNull()) { uint8_t v = doc["facility"]; if (v <= 23) g_syslogConfig.facility = v; }
+  if (!doc["minLevel"].isNull()) { uint8_t v = doc["minLevel"]; if (v <= 7)  g_syslogConfig.minLevel = v; }
   saveSyslogConfig();
   logInit();  // re-resolve host with new config
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Syslog config saved\"}"));

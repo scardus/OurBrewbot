@@ -68,7 +68,7 @@ static void publishBool(const char* base, const char* key, bool value) {
 // Build and publish a single HA entity discovery config.
 // Reuses the caller's JsonDocument (caller must call doc.clear() between calls).
 static void publishOneEntity(
-    DynamicJsonDocument& doc,
+    JsonDocument& doc,
     const char* component,      // "sensor" or "binary_sensor"
     const char* devId,          // e.g. "ourbrewbot_ABCDEF_f0"
     const char* fermBase,       // e.g. "ourbrewbot/Fermenter0"
@@ -124,7 +124,7 @@ static void publishDeviceDiscovery() {
   snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X",    ESP.getChipId());
   snprintf(devBase, sizeof(devBase), "%s/Device",           g_mqttConfig.baseTopic);
 
-  DynamicJsonDocument doc(640);
+  JsonDocument doc;
 
   // Static text diagnostics
   publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
@@ -176,7 +176,7 @@ static void publishHaDiscovery(int i) {
   snprintf(fermLabel, sizeof(fermLabel), "OurBrewbot F%d", i);  // stable — not user-editable name
   const char* tempUnit = (g_globalConfig.unit == UNIT_CELSIUS) ? "\xC2\xB0""C" : "\xC2\xB0""F";  // °C / °F
 
-  DynamicJsonDocument doc(640);
+  JsonDocument doc;
 
   // Temperature sensors — numeric, use state_class measurement
   // Entity names are the plain property names; HA prefixes them with dev.name ("OurBrewbot F0")

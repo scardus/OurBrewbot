@@ -65,7 +65,7 @@ void reportBrewfather(uint8_t i, uint8_t svcIndex) {
   float ambientTemp = getAmbientTemp(i);
   float sg          = getCurrentSG(i);
 
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   // "name" identifies the device in Brewfather (rate-limited per name)
   // Each fermenter gets its own identity; deviceName goes to device_source
   doc["name"]           = g_fermenters[i].fermenterName;
@@ -122,7 +122,7 @@ void reportBrewersFriend(uint8_t i, uint8_t svcIndex) {
   float ambientTemp = getAmbientTemp(i);
   float sg          = getCurrentSG(i);
 
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   // "name" identifies the device in Brewer's Friend (rate-limited per name)
   doc["name"]           = g_fermenters[i].fermenterName;
   doc["device_source"]  = g_brewServices[svcIndex].deviceName;
@@ -165,7 +165,7 @@ int testBrewService(uint8_t svcIndex) {
 
   int svcType = svcIndex + 1;  // index+1 = BREW_SERVICE_xxx
 
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   doc["name"] = "OurBrewbot Test";
   doc["device_source"] = strlen(g_brewServices[svcIndex].deviceName) > 0
     ? (const char*)g_brewServices[svcIndex].deviceName : "OurBrewbot";

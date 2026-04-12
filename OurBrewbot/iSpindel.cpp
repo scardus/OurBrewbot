@@ -16,7 +16,7 @@
 // ============================================================
 
 void handleiSpindelPost(const String& body) {
-  DynamicJsonDocument doc(1024);
+  JsonDocument doc;
   DeserializationError err = deserializeJson(doc, body);
 
   if (err) {

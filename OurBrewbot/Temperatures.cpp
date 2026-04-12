@@ -235,8 +235,6 @@ void allocateProbeTemperatures() {
       if (g_probes[p].fermenter != f) continue;
       if (strlen(g_probes[p].address) == 0) continue;
 
-      float temp = g_probes[p].temperature;
-
       switch (g_probes[p].function) {
         case PROBE_FN_BEER:
           // Beer probe drives the control loop
