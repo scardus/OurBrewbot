@@ -90,6 +90,68 @@ In `platformio.ini`, set `upload_port` and `monitor_port` to match your device's
 
 ---
 
+## Backing up your original firmware & settings
+
+Before flashing, back up the full 4 MB flash from your existing MyBrewbot device so you can restore it if needed.
+
+Your config files (probes, fermenters, etc.) live in the LittleFS partition and survive a firmware-only flash — but a full backup protects everything.
+
+### Put the device in bootloader mode
+
+Hold the **FLASH** button, press and release **RST**, then release **FLASH**. On NodeMCU boards the USB adapter usually handles this automatically via DTR/RTS when you connect it.
+
+### Option A — esptool.py (cross-platform)
+
+```bash
+pip install esptool
+esptool.py --port COM7 --baud 115200 read_flash 0x0 0x400000 mybrewbot_backup.bin
+```
+
+> `COM7` is an example — check Device Manager (Windows) or `ls /dev/ttyUSB*` (Linux/Mac) for your actual port.
+
+The result is a 4 MB `.bin` file — store it somewhere safe.
+
+### Option B — Espressif Flash Download Tool (Windows GUI)
+
+Download and install the tool from the [Espressif Flash Download Tool documentation](https://docs.espressif.com/projects/esp-test-tools/en/latest/esp8266/production_stage/tools/flash_download_tool.html).
+
+1. Run `flash_download_tool_x.x.x.exe`
+2. Select **ESP8266** / **Develop** / **UART**
+3. Open the **chipInfoDump** tab
+4. Set start address `0x0` and length `0x400000`
+5. Select your COM port and click **READ** — the tool saves the backup as a `.bin` automatically
+
+---
+
+## Flashing the new firmware
+
+Pre-built binaries are in the `bin/` folder of this repository. You do **not** need VS Code or PlatformIO installed — just the binary and one of the tools below.
+
+Put the device in bootloader mode as described above before flashing.
+
+### Option A — esptool.py (cross-platform)
+
+```bash
+esptool.py --port COM7 --baud 115200 write_flash -fm dout 0x0 OurBrewbot_x.x.x.bin
+```
+
+> Replace `COM7` with your actual port and `OurBrewbot_x.x.x.bin` with the filename from the `bin/` folder.
+
+### Option B — Espressif Flash Download Tool (Windows GUI)
+
+1. Run the tool, select **ESP8266** / **Develop** / **UART**
+2. Click the **SPIDownload** tab
+3. Tick the checkbox on the first row, click `...` to browse to `OurBrewbot_x.x.x.bin`, and set the address to `0x0`
+4. Set **SPI Speed** to `40MHz` and **SPI Mode** to `DOUT`
+5. Select your COM port and baud rate to 115200
+6. Click **START**
+
+### Option C — OTA (no cable, after initial flash)
+
+Once the firmware is running, navigate to `http://OurBrewbot-XXXXXX/update` in your browser and upload the `.bin` file directly.
+
+---
+
 ## First Run
 
 1. On first boot the device creates a WiFi access point named `OurBrewbot-XXXXXX` - __Make a note of this!__
