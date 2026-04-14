@@ -66,41 +66,27 @@ NodeMCU and generic ESP8266 board targets).
 
 ## Building
 
-### 1. Install Arduino IDE
+### 1. Install VS Code
 
-Download from https://www.arduino.cc/en/software
+Download and install from https://code.visualstudio.com/
 
-### 2. Install ESP8266 board support
+### 2. Install the PlatformIO IDE extension
 
-In Arduino IDE: File → Preferences → Additional Boards Manager URLs, add:
-```
-http://arduino.esp8266.com/stable/package_esp8266com_index.json
-```
-Then: Tools → Board → Boards Manager → search "esp8266" → Install
+In VS Code: open the Extensions panel (`Ctrl+Shift+X`), search for **PlatformIO IDE**, and install it. Restart VS Code when prompted.
 
-### 3. Install libraries
+### 3. Open the project
 
-Tools → Manage Libraries, install each:
-- **ArduinoJson** by Benoit Blanchon (v6.x)
-- **DallasTemperature** by Miles Burton
-- **OneWire** by Jim Studt
-- **WiFiManager** by tzapu
-- **rc-switch** by sui77
-- **PubSubClient** by Nick O'Leary
-- **SoftwareSerial** (included with ESP8266 core)
+Open the repository root folder in VS Code (`File → Open Folder`). PlatformIO will detect `platformio.ini` automatically and install all required libraries and the ESP8266 toolchain on first open.
 
-### 4. Board settings
+### 4. Configure the upload port
 
-- Board: **Generic ESP8266 Module** (or NodeMCU/Wemos D1 Mini — pins use raw GPIO numbers)
-- Flash Mode: **DIO**
-- Flash Size: **4MB (FS:2MB OTA:~1019KB)**
-- Crystal Frequency: 80 MHz
-- Reset Method: NodeMCU
-- Upload Speed: 115200
+In `platformio.ini`, set `upload_port` and `monitor_port` to match your device's COM port (currently `COM7`). Adjust if your port differs.
 
-### 5. Open and upload
+### 5. Build and upload
 
-Open `OurBrewbot.ino` from the `OurBrewbot/` folder, select your port, click Upload.
+- **Build only:** click the checkmark (✓) in the PlatformIO toolbar, or run `PlatformIO: Build` from the command palette (`Ctrl+Alt+B`).
+- **Build and upload:** click the right-arrow (→) in the toolbar, or run `PlatformIO: Upload` (`Ctrl+Alt+U`).
+- **Serial monitor:** click the plug icon in the toolbar, or run `PlatformIO: Monitor`.
 
 ---
 
