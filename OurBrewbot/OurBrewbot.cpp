@@ -101,7 +101,7 @@ void setup() {
 
   Serial.print("\r\n");
   logMsg("=================================");
-  logMsg("OurBrewbot Firmware %s", FW_VERSION);
+  logMsg("OurBrewbot Firmware %s - Built: %s", FW_VERSION, FW_BUILD_DATE);
   logMsg("=================================");
 
   // Log reboot reason with full rst_info detail
@@ -168,6 +168,7 @@ void setup() {
   // Re-send boot messages via syslog now that WiFi (and syslog host) is available
   if (g_syslogConfig.enabled) {
     struct rst_info *ri = ESP.getResetInfoPtr();
+    logMsg("DEFERRED [SYS] OurBrewbot Firmware %s - Built: %s", FW_VERSION, FW_BUILD_DATE);
     logMsg("DEFERRED [SYS] Reset reason: %s (code %u)", ESP.getResetReason().c_str(), ri->reason);
     if (ri->reason == REASON_EXCEPTION_RST) {
       logMsg("DEFERRED [SYS] Exception cause: %u, EPC1: 0x%08x, EXCVADDR: 0x%08x",
