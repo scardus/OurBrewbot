@@ -232,8 +232,10 @@ void loop() {
         }
       }
 
-      // Periodic probe scanning (hot-plug support)
-      if (now - g_lastProbeScanTime >= INTERVAL_PROBE_SCAN_MS) {
+      // Periodic probe scanning (hot-plug support).
+      // Guard: never run while a conversion is pending — scanBuses() calls begin()
+      // which sends a OneWire reset that cancels the in-progress conversion.
+      if (!g_tempConversionPending && now - g_lastProbeScanTime >= INTERVAL_PROBE_SCAN_MS) {
         g_lastProbeScanTime = now;
         periodicProbeScan();
       }

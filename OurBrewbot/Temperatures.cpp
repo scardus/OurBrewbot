@@ -209,6 +209,9 @@ void periodicProbeScan() {
   }
 
   scanBuses();
+  // begin() inside scanBuses() may reset the library's internal resolution — re-apply it.
+  g_sensors1.setResolution(g_globalConfig.resolution);
+  g_sensors2.setResolution(g_globalConfig.resolution);
 
   int newCount = 0;
   for (int i = 0; i < MAX_PROBES; i++) {
