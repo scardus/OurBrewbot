@@ -66,41 +66,89 @@ NodeMCU and generic ESP8266 board targets).
 
 ## Building
 
-### 1. Install Arduino IDE
+### 1. Install VS Code
 
-Download from https://www.arduino.cc/en/software
+Download and install from https://code.visualstudio.com/
 
-### 2. Install ESP8266 board support
+### 2. Install the PlatformIO IDE extension
 
-In Arduino IDE: File → Preferences → Additional Boards Manager URLs, add:
+In VS Code: open the Extensions panel (`Ctrl+Shift+X`), search for **PlatformIO IDE**, and install it. Restart VS Code when prompted.
+
+### 3. Open the project
+
+Open the repository root folder in VS Code (`File → Open Folder`). PlatformIO will detect `platformio.ini` automatically and install all required libraries and the ESP8266 toolchain on first open.
+
+### 4. Configure the upload port
+
+In `platformio.ini`, set `upload_port` and `monitor_port` to match your device's COM port (currently `COM7`). Adjust if your port differs.
+
+### 5. Build and upload
+
+- **Build only:** click the checkmark (✓) in the PlatformIO toolbar, or run `PlatformIO: Build` from the command palette (`Ctrl+Alt+B`).
+- **Build and upload:** click the right-arrow (→) in the toolbar, or run `PlatformIO: Upload` (`Ctrl+Alt+U`).
+- **Serial monitor:** click the plug icon in the toolbar, or run `PlatformIO: Monitor`.
+
+---
+
+## Backing up your original firmware & settings
+
+Before flashing, back up the full 4 MB flash from your existing MyBrewbot device so you can restore it if needed.
+
+Your config files (probes, fermenters, etc.) live in the LittleFS partition and survive a firmware-only flash — but a full backup protects everything.
+
+### Put the device in bootloader mode
+
+Hold the **FLASH** button, press and release **RST**, then release **FLASH**. On NodeMCU boards the USB adapter usually handles this automatically via DTR/RTS when you connect it.
+
+### Option A — esptool.py (cross-platform)
+
+```bash
+pip install esptool
+esptool.py --port COM7 --baud 115200 read_flash 0x0 0x400000 mybrewbot_backup.bin
 ```
-http://arduino.esp8266.com/stable/package_esp8266com_index.json
+
+> `COM7` is an example — check Device Manager (Windows) or `ls /dev/ttyUSB*` (Linux/Mac) for your actual port.
+
+The result is a 4 MB `.bin` file — store it somewhere safe.
+
+### Option B — Espressif Flash Download Tool (Windows GUI)
+
+Download and install the tool from the [Espressif Flash Download Tool documentation](https://docs.espressif.com/projects/esp-test-tools/en/latest/esp8266/production_stage/tools/flash_download_tool.html).
+
+1. Run `flash_download_tool_x.x.x.exe`
+2. Select **ESP8266** / **Develop** / **UART**
+3. Open the **chipInfoDump** tab
+4. Set start address `0x0` and length `0x400000`
+5. Select your COM port and click **READ** — the tool saves the backup as a `.bin` automatically
+
+---
+
+## Flashing the new firmware
+
+Pre-built binaries are in the `bin/` folder of this repository. You do **not** need VS Code or PlatformIO installed — just the binary and one of the tools below.
+
+Put the device in bootloader mode as described above before flashing.
+
+### Option A — esptool.py (cross-platform)
+
+```bash
+esptool.py --port COM7 --baud 115200 write_flash -fm dout 0x0 OurBrewbot_x.x.x.bin
 ```
-Then: Tools → Board → Boards Manager → search "esp8266" → Install
 
-### 3. Install libraries
+> Replace `COM7` with your actual port and `OurBrewbot_x.x.x.bin` with the filename from the `bin/` folder.
 
-Tools → Manage Libraries, install each:
-- **ArduinoJson** by Benoit Blanchon (v6.x)
-- **DallasTemperature** by Miles Burton
-- **OneWire** by Jim Studt
-- **WiFiManager** by tzapu
-- **rc-switch** by sui77
-- **PubSubClient** by Nick O'Leary
-- **SoftwareSerial** (included with ESP8266 core)
+### Option B — Espressif Flash Download Tool (Windows GUI)
 
-### 4. Board settings
+1. Run the tool, select **ESP8266** / **Develop** / **UART**
+2. Click the **SPIDownload** tab
+3. Tick the checkbox on the first row, click `...` to browse to `OurBrewbot_x.x.x.bin`, and set the address to `0x0`
+4. Set **SPI Speed** to `40MHz` and **SPI Mode** to `DOUT`
+5. Select your COM port and baud rate to 115200
+6. Click **START**
 
-- Board: **Generic ESP8266 Module** (or NodeMCU/Wemos D1 Mini — pins use raw GPIO numbers)
-- Flash Mode: **DIO**
-- Flash Size: **4MB (FS:2MB OTA:~1019KB)**
-- Crystal Frequency: 80 MHz
-- Reset Method: NodeMCU
-- Upload Speed: 115200
+### Option C — OTA (no cable, after initial flash)
 
-### 5. Open and upload
-
-Open `OurBrewbot.ino` from the `OurBrewbot/` folder, select your port, click Upload.
+Once the firmware is running, navigate to `http://OurBrewbot-XXXXXX/update` in your browser and upload the `.bin` file directly.
 
 ---
 
