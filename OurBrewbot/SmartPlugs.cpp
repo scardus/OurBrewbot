@@ -47,10 +47,10 @@ void smartPlugSwitch(uint8_t plugIndex, bool on) {
 
   if (code == 0) return;
 
+  rfTransmit(code, plug.bits, plug.delayLength, plug.protocol);
+
   logMsg("[PLUG] Plug %d %s (code 0x%06X, %d-bit, %dus)",
     plugIndex, on ? "ON" : "OFF", code, plug.bits, plug.delayLength);
-
-  rfTransmit(code, plug.bits, plug.delayLength, plug.protocol);
 
   s_plugState[plugIndex] = on;
 }
