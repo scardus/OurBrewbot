@@ -132,6 +132,10 @@ views:
             color_scheme: dutch_field
             title: >
               $fn ({ hass }) => hass.states['sensor.ourbrewbot_f0_name']?.state || 'Fermenter 0'
+            defaults:
+              entity:
+                filters:
+                  - force_numeric
             entities:
               - entity: sensor.ourbrewbot_f0_beer_temperature
                 name: Beer Temp
@@ -331,6 +335,10 @@ views:
             color_scheme: dutch_field
             title: >
               $fn ({ hass }) => hass.states['sensor.ourbrewbot_f1_name']?.state || 'Fermenter 0'
+            defaults:
+              entity:
+                filters:
+                - force_numeric
             entities:
               - entity: sensor.ourbrewbot_f1_beer_temperature
                 name: Beer Temp
@@ -530,6 +538,10 @@ views:
             color_scheme: dutch_field
             title: >
               $fn ({ hass }) => hass.states['sensor.ourbrewbot_f2_name']?.state || 'Fermenter 0'
+            defaults:
+              entity:
+                filters:
+                - force_numeric
             entities:
               - entity: sensor.ourbrewbot_f2_beer_temperature
                 name: Beer Temp
@@ -729,6 +741,10 @@ views:
             color_scheme: dutch_field
             title: >
               $fn ({ hass }) => hass.states['sensor.ourbrewbot_f3_name']?.state || 'Fermenter 0'
+            defaults:
+              entity:
+                filters:
+                - force_numeric
             entities:
               - entity: sensor.ourbrewbot_f3_beer_temperature
                 name: Beer Temp
