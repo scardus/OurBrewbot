@@ -33,6 +33,7 @@ New/Updated Features:
 Not yet implemented / tested:
 - Pressure sensor - __Untested - No hardware__
 - Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation __Untested__
+- Alarms - No mobile app or cloud service, so nothing to send alarms to. Web-hooks/alert providers may be a replacement?
 
 Removed:
 
