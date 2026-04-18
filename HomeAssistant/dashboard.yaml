@@ -225,6 +225,9 @@ views:
                       step: day
                     - count: 14
                       step: day
+              legend:
+                x: 0
+                y: -0.8
             autorange_after_scroll: true
           - type: custom:mushroom-template-card
             primary: Status
@@ -472,6 +475,9 @@ views:
                       step: day
                     - count: 14
                       step: day
+              legend:
+                x: 0
+                y: -0.8
             autorange_after_scroll: true
           - type: custom:mushroom-template-card
             primary: Status
@@ -719,6 +725,9 @@ views:
                       step: day
                     - count: 14
                       step: day
+              legend:
+                x: 0
+                y: -0.8
             autorange_after_scroll: true
           - type: custom:mushroom-template-card
             primary: Status
@@ -966,6 +975,9 @@ views:
                       step: day
                     - count: 14
                       step: day
+              legend:
+                x: 0
+                y: -0.8
             autorange_after_scroll: true
           - type: custom:mushroom-template-card
             primary: Status
