@@ -189,24 +189,27 @@ void checkFermenterAlarm(uint8_t i) {
 
 // ============================================================
 // GRAVITY ESTIMATION
-// Uses a simple attenuation model based on OG/TG
+// Uses a simple attenuation model based on time & OG/TG
+//
+// No change for the first 24 hours (lag phase), then a smooth drop over the next 3 days,
+// then a final slow drop over the next 3 days until it reaches TG.
 // ============================================================
 
 float estimateGravity(uint8_t i) {
-  // Simple linear model — OG falls to TG over time during active fermentation
-  // A more accurate model would use temperature-corrected readings
   float og = g_fermenters[i].og;
   float tg = g_fermenters[i].tg;
+  float h  = g_fermenters[i].currentHour;
+  float range = og - tg;
 
-  // Use current hour to estimate how far through fermentation
-  // This is a rough approximation — real SG from Tilt/iSpindel is preferred
-  if (g_fermenters[i].currentHour > 0 && og > tg) {
-    // Typical fermentation: most attenuation in first 72h
-    float progress = min(1.0f, g_fermenters[i].currentHour / 72.0f);
-    float estimated = og - ((og - tg) * progress);
-    return estimated;
+  if (h <= 24.0f || og <= tg) {
+    return og;
+  } else if (h <= 96.0f) {
+    float p = (h - 24.0f) / 72.0f;
+    return og - (p * 0.9f * range);
+  } else {
+    float p = min(1.0f, (h - 96.0f) / 72.0f);
+    return og - ((0.9f + p * 0.1f) * range);
   }
-  return og;  // Haven't started yet
 }
 
 float getCurrentSG(uint8_t i) {
