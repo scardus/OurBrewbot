@@ -180,6 +180,20 @@ void readTempResults() {
       temp = g_sensors2.getTempC(addr);
     }
 
+    // First-failure blocking retry — catches transient read errors
+    if (temp == DEVICE_DISCONNECTED_C && g_probes[i].failCount == 0) {
+      g_sensors1.setWaitForConversion(true);
+      g_sensors1.requestTemperatures();
+      temp = g_sensors1.getTempC(addr);
+      g_sensors1.setWaitForConversion(false);
+      if (temp == DEVICE_DISCONNECTED_C) {
+        g_sensors2.setWaitForConversion(true);
+        g_sensors2.requestTemperatures();
+        temp = g_sensors2.getTempC(addr);
+        g_sensors2.setWaitForConversion(false);
+      }
+    }
+
     if (temp != DEVICE_DISCONNECTED_C) {
       g_probes[i].rawTemperature = temp;
       g_probes[i].temperature = temp + g_probes[i].tempAdjust;

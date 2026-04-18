@@ -272,3 +272,4 @@ const char* getFermenterStatusStr(uint8_t status) {
     default:             return "Idle";
   }
 }
+
