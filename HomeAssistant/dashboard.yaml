@@ -126,52 +126,6 @@ views:
             text_only: true
             grid_options:
               columns: full
-          - type: custom:mushroom-chips-card
-            chips:
-              - type: template
-                entity: sensor.ourbrewbot_f0_status
-                content: '{{ states(''sensor.ourbrewbot_f0_status'') | title }}'
-                icon: >
-                  {% set s = states('sensor.ourbrewbot_f0_status') %}
-                  {% if s == 'heating' %} mdi:fire
-                  {% elif s == 'cooling' %} mdi:snowflake
-                  {% elif s == 'alarm' %} mdi:alert 
-                  {% else %} mdi:check-circle
-                  {% endif %}
-                icon_color: >
-                  {% set s = states('sensor.ourbrewbot_f0_status') %} 
-                  {% if s =='heating' %} orange 
-                  {% elif s == 'cooling' %} blue 
-                  {% elif s == 'alarm' %} red 
-                  {% else %} green 
-                  {% endif %}
-                card_mod:
-                  style: >
-                    {% if states('sensor.ourbrewbot_f0_status') == 'alarm' %}
-                    ha-card {
-                      animation: brewbot-blink 1s step-start infinite;
-                    } @keyframes brewbot-blink { 50% { opacity: 0; } } 
-                    {% endif %}
-              - type: template
-                entity: sensor.ourbrewbot_f0_power
-                content: Power
-                icon: mdi:power
-                icon_color: >
-                  {{ 'green' if states('sensor.ourbrewbot_f0_power') == 'ON' else 'grey' }}
-              - type: template
-                entity: sensor.ourbrewbot_f0_temp_control
-                content: Temp Ctrl
-                icon: mdi:thermostat
-                icon_color: >
-                  {{ 'blue' if states('sensor.ourbrewbot_f0_temp_control') == 'ON' else 'grey' }}
-              - type: template
-                entity: sensor.ourbrewbot_f0_profile_running
-                content: Profile
-                icon: mdi:chart-timeline-variant
-                icon_color: >
-                  {{ 'purple' if states('sensor.ourbrewbot_f0_profile_running') == 'ON' else 'grey' }}
-            grid_options:
-              columns: full      
           - type: custom:plotly-graph
             grid_options:
               columns: full
@@ -253,6 +207,18 @@ views:
             icon_color: >
               {{ 'green' if states('sensor.ourbrewbot_f0_power') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
+            primary: Temp Control
+            secondary: '{{ states(''sensor.ourbrewbot_f0_temp_control'') }}'
+            icon: mdi:thermostat
+            icon_color: >
+              {{ 'blue' if states('sensor.ourbrewbot_f0_temp_control') == 'ON' else 'grey' }}
+          - type: custom:mushroom-template-card
+            primary: Profile
+            secondary: '{{ states(''sensor.ourbrewbot_f0_profile_running'') }}'
+            icon: mdi:chart-timeline-variant
+            icon_color: >
+              {{ 'purple' if states('sensor.ourbrewbot_f0_profile_running') == 'ON' else 'grey' }}
+          - type: custom:mushroom-template-card
             primary: Beer Temp
             secondary: >
               {% set t = states('sensor.ourbrewbot_f0_beer_temperature') %} 
@@ -266,24 +232,12 @@ views:
               {% else %} green 
               {% endif %}
           - type: custom:mushroom-template-card
-            primary: Temp Control
-            secondary: '{{ states(''sensor.ourbrewbot_f0_temp_control'') }}'
-            icon: mdi:thermostat
-            icon_color: >
-              {{ 'blue' if states('sensor.ourbrewbot_f0_temp_control') == 'ON' else 'grey' }}
-          - type: custom:mushroom-template-card
             primary: Ambient Temp
             secondary: >
               {% set t = states('sensor.ourbrewbot_f0_ambient_temperature') %}
               {% set u = states('sensor.ourbrewbot_f0_temperature_unit') | default('C') %} {{ t }} °{{ u }}
             icon: mdi:home-thermometer-outline
             icon_color: purple
-          - type: custom:mushroom-template-card
-            primary: Profile
-            secondary: '{{ states(''sensor.ourbrewbot_f0_profile_running'') }}'
-            icon: mdi:chart-timeline-variant
-            icon_color: >
-              {{ 'purple' if states('sensor.ourbrewbot_f0_profile_running') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
             primary: Comp Delay
             secondary: '{{ states(''sensor.ourbrewbot_f0_compressor_delay'') }} min'
@@ -355,7 +309,7 @@ views:
         cards:
           - type: markdown
             content: >
-              # <center>{{ states('sensor.ourbrewbot_f1_name') | default('Fermenter 1', true) }}</center>
+              # <center>{{ states('sensor.ourbrewbot_f1_name') | default('Fermenter 0', true) }}</center>
 
               {% set beer = states('sensor.ourbrewbot_f1_beer_name') %}
               {% set yeast = states('sensor.ourbrewbot_f1_yeast') %}
@@ -371,58 +325,12 @@ views:
             text_only: true
             grid_options:
               columns: full
-          - type: custom:mushroom-chips-card
-            chips:
-              - type: template
-                entity: sensor.ourbrewbot_f1_status
-                content: '{{ states(''sensor.ourbrewbot_f1_status'') | title }}'
-                icon: >
-                  {% set s = states('sensor.ourbrewbot_f1_status') %}
-                  {% if s == 'heating' %} mdi:fire
-                  {% elif s == 'cooling' %} mdi:snowflake
-                  {% elif s == 'alarm' %} mdi:alert 
-                  {% else %} mdi:check-circle
-                  {% endif %}
-                icon_color: >
-                  {% set s = states('sensor.ourbrewbot_f1_status') %} 
-                  {% if s =='heating' %} orange 
-                  {% elif s == 'cooling' %} blue 
-                  {% elif s == 'alarm' %} red 
-                  {% else %} green 
-                  {% endif %}
-                card_mod:
-                  style: >
-                    {% if states('sensor.ourbrewbot_f1_status') == 'alarm' %}
-                    ha-card {
-                      animation: brewbot-blink 1s step-start infinite;
-                    } @keyframes brewbot-blink { 50% { opacity: 0; } } 
-                    {% endif %}
-              - type: template
-                entity: sensor.ourbrewbot_f1_power
-                content: Power
-                icon: mdi:power
-                icon_color: >
-                  {{ 'green' if states('sensor.ourbrewbot_f1_power') == 'ON' else 'grey' }}
-              - type: template
-                entity: sensor.ourbrewbot_f1_temp_control
-                content: Temp Ctrl
-                icon: mdi:thermostat
-                icon_color: >
-                  {{ 'blue' if states('sensor.ourbrewbot_f1_temp_control') == 'ON' else 'grey' }}
-              - type: template
-                entity: sensor.ourbrewbot_f1_profile_running
-                content: Profile
-                icon: mdi:chart-timeline-variant
-                icon_color: >
-                  {{ 'purple' if states('sensor.ourbrewbot_f1_profile_running') == 'ON' else 'grey' }}
-            grid_options:
-              columns: full      
           - type: custom:plotly-graph
             grid_options:
               columns: full
             color_scheme: dutch_field
             title: >
-              $fn ({ hass }) => hass.states['sensor.ourbrewbot_f1_name']?.state || 'Fermenter 1'
+              $fn ({ hass }) => hass.states['sensor.ourbrewbot_f1_name']?.state || 'Fermenter 0'
             entities:
               - entity: sensor.ourbrewbot_f1_beer_temperature
                 name: Beer Temp
@@ -498,6 +406,18 @@ views:
             icon_color: >
               {{ 'green' if states('sensor.ourbrewbot_f1_power') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
+            primary: Temp Control
+            secondary: '{{ states(''sensor.ourbrewbot_f1_temp_control'') }}'
+            icon: mdi:thermostat
+            icon_color: >
+              {{ 'blue' if states('sensor.ourbrewbot_f1_temp_control') == 'ON' else 'grey' }}
+          - type: custom:mushroom-template-card
+            primary: Profile
+            secondary: '{{ states(''sensor.ourbrewbot_f1_profile_running'') }}'
+            icon: mdi:chart-timeline-variant
+            icon_color: >
+              {{ 'purple' if states('sensor.ourbrewbot_f1_profile_running') == 'ON' else 'grey' }}
+          - type: custom:mushroom-template-card
             primary: Beer Temp
             secondary: >
               {% set t = states('sensor.ourbrewbot_f1_beer_temperature') %} 
@@ -511,24 +431,12 @@ views:
               {% else %} green 
               {% endif %}
           - type: custom:mushroom-template-card
-            primary: Temp Control
-            secondary: '{{ states(''sensor.ourbrewbot_f1_temp_control'') }}'
-            icon: mdi:thermostat
-            icon_color: >
-              {{ 'blue' if states('sensor.ourbrewbot_f1_temp_control') == 'ON' else 'grey' }}
-          - type: custom:mushroom-template-card
             primary: Ambient Temp
             secondary: >
               {% set t = states('sensor.ourbrewbot_f1_ambient_temperature') %}
               {% set u = states('sensor.ourbrewbot_f1_temperature_unit') | default('C') %} {{ t }} °{{ u }}
             icon: mdi:home-thermometer-outline
             icon_color: purple
-          - type: custom:mushroom-template-card
-            primary: Profile
-            secondary: '{{ states(''sensor.ourbrewbot_f1_profile_running'') }}'
-            icon: mdi:chart-timeline-variant
-            icon_color: >
-              {{ 'purple' if states('sensor.ourbrewbot_f1_profile_running') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
             primary: Comp Delay
             secondary: '{{ states(''sensor.ourbrewbot_f1_compressor_delay'') }} min'
@@ -584,7 +492,7 @@ views:
               type: custom:mushroom-template-card
               primary: Device Offline
               secondary: >
-                {{ states('sensor.ourbrewbot_f1_name') | default('Fermenter 1', true) }} 
+                {{ states('sensor.ourbrewbot_f1_name') | default('Fermenter 0', true) }} 
                 has not published in the last 3 minutes. Check power and Wi-Fi.
               icon: mdi:wifi-off
               icon_color: red
@@ -600,7 +508,7 @@ views:
         cards:
           - type: markdown
             content: >
-              # <center>{{ states('sensor.ourbrewbot_f2_name') | default('Fermenter 2', true) }}</center>
+              # <center>{{ states('sensor.ourbrewbot_f2_name') | default('Fermenter 0', true) }}</center>
 
               {% set beer = states('sensor.ourbrewbot_f2_beer_name') %}
               {% set yeast = states('sensor.ourbrewbot_f2_yeast') %}
@@ -616,58 +524,12 @@ views:
             text_only: true
             grid_options:
               columns: full
-          - type: custom:mushroom-chips-card
-            chips:
-              - type: template
-                entity: sensor.ourbrewbot_f2_status
-                content: '{{ states(''sensor.ourbrewbot_f2_status'') | title }}'
-                icon: >
-                  {% set s = states('sensor.ourbrewbot_f2_status') %}
-                  {% if s == 'heating' %} mdi:fire
-                  {% elif s == 'cooling' %} mdi:snowflake
-                  {% elif s == 'alarm' %} mdi:alert 
-                  {% else %} mdi:check-circle
-                  {% endif %}
-                icon_color: >
-                  {% set s = states('sensor.ourbrewbot_f2_status') %} 
-                  {% if s =='heating' %} orange 
-                  {% elif s == 'cooling' %} blue 
-                  {% elif s == 'alarm' %} red 
-                  {% else %} green 
-                  {% endif %}
-                card_mod:
-                  style: >
-                    {% if states('sensor.ourbrewbot_f2_status') == 'alarm' %}
-                    ha-card {
-                      animation: brewbot-blink 1s step-start infinite;
-                    } @keyframes brewbot-blink { 50% { opacity: 0; } } 
-                    {% endif %}
-              - type: template
-                entity: sensor.ourbrewbot_f2_power
-                content: Power
-                icon: mdi:power
-                icon_color: >
-                  {{ 'green' if states('sensor.ourbrewbot_f2_power') == 'ON' else 'grey' }}
-              - type: template
-                entity: sensor.ourbrewbot_f2_temp_control
-                content: Temp Ctrl
-                icon: mdi:thermostat
-                icon_color: >
-                  {{ 'blue' if states('sensor.ourbrewbot_f2_temp_control') == 'ON' else 'grey' }}
-              - type: template
-                entity: sensor.ourbrewbot_f2_profile_running
-                content: Profile
-                icon: mdi:chart-timeline-variant
-                icon_color: >
-                  {{ 'purple' if states('sensor.ourbrewbot_f2_profile_running') == 'ON' else 'grey' }}
-            grid_options:
-              columns: full      
           - type: custom:plotly-graph
             grid_options:
               columns: full
             color_scheme: dutch_field
             title: >
-              $fn ({ hass }) => hass.states['sensor.ourbrewbot_f2_name']?.state || 'Fermenter 2'
+              $fn ({ hass }) => hass.states['sensor.ourbrewbot_f2_name']?.state || 'Fermenter 0'
             entities:
               - entity: sensor.ourbrewbot_f2_beer_temperature
                 name: Beer Temp
@@ -743,6 +605,18 @@ views:
             icon_color: >
               {{ 'green' if states('sensor.ourbrewbot_f2_power') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
+            primary: Temp Control
+            secondary: '{{ states(''sensor.ourbrewbot_f2_temp_control'') }}'
+            icon: mdi:thermostat
+            icon_color: >
+              {{ 'blue' if states('sensor.ourbrewbot_f2_temp_control') == 'ON' else 'grey' }}
+          - type: custom:mushroom-template-card
+            primary: Profile
+            secondary: '{{ states(''sensor.ourbrewbot_f2_profile_running'') }}'
+            icon: mdi:chart-timeline-variant
+            icon_color: >
+              {{ 'purple' if states('sensor.ourbrewbot_f2_profile_running') == 'ON' else 'grey' }}
+          - type: custom:mushroom-template-card
             primary: Beer Temp
             secondary: >
               {% set t = states('sensor.ourbrewbot_f2_beer_temperature') %} 
@@ -756,24 +630,12 @@ views:
               {% else %} green 
               {% endif %}
           - type: custom:mushroom-template-card
-            primary: Temp Control
-            secondary: '{{ states(''sensor.ourbrewbot_f2_temp_control'') }}'
-            icon: mdi:thermostat
-            icon_color: >
-              {{ 'blue' if states('sensor.ourbrewbot_f2_temp_control') == 'ON' else 'grey' }}
-          - type: custom:mushroom-template-card
             primary: Ambient Temp
             secondary: >
               {% set t = states('sensor.ourbrewbot_f2_ambient_temperature') %}
               {% set u = states('sensor.ourbrewbot_f2_temperature_unit') | default('C') %} {{ t }} °{{ u }}
             icon: mdi:home-thermometer-outline
             icon_color: purple
-          - type: custom:mushroom-template-card
-            primary: Profile
-            secondary: '{{ states(''sensor.ourbrewbot_f2_profile_running'') }}'
-            icon: mdi:chart-timeline-variant
-            icon_color: >
-              {{ 'purple' if states('sensor.ourbrewbot_f2_profile_running') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
             primary: Comp Delay
             secondary: '{{ states(''sensor.ourbrewbot_f2_compressor_delay'') }} min'
@@ -829,7 +691,7 @@ views:
               type: custom:mushroom-template-card
               primary: Device Offline
               secondary: >
-                {{ states('sensor.ourbrewbot_f2_name') | default('Fermenter 2', true) }} 
+                {{ states('sensor.ourbrewbot_f2_name') | default('Fermenter 0', true) }} 
                 has not published in the last 3 minutes. Check power and Wi-Fi.
               icon: mdi:wifi-off
               icon_color: red
@@ -845,7 +707,7 @@ views:
         cards:
           - type: markdown
             content: >
-              # <center>{{ states('sensor.ourbrewbot_f3_name') | default('Fermenter 3', true) }}</center>
+              # <center>{{ states('sensor.ourbrewbot_f3_name') | default('Fermenter 0', true) }}</center>
 
               {% set beer = states('sensor.ourbrewbot_f3_beer_name') %}
               {% set yeast = states('sensor.ourbrewbot_f3_yeast') %}
@@ -861,58 +723,12 @@ views:
             text_only: true
             grid_options:
               columns: full
-          - type: custom:mushroom-chips-card
-            chips:
-              - type: template
-                entity: sensor.ourbrewbot_f3_status
-                content: '{{ states(''sensor.ourbrewbot_f3_status'') | title }}'
-                icon: >
-                  {% set s = states('sensor.ourbrewbot_f3_status') %}
-                  {% if s == 'heating' %} mdi:fire
-                  {% elif s == 'cooling' %} mdi:snowflake
-                  {% elif s == 'alarm' %} mdi:alert 
-                  {% else %} mdi:check-circle
-                  {% endif %}
-                icon_color: >
-                  {% set s = states('sensor.ourbrewbot_f3_status') %} 
-                  {% if s =='heating' %} orange 
-                  {% elif s == 'cooling' %} blue 
-                  {% elif s == 'alarm' %} red 
-                  {% else %} green 
-                  {% endif %}
-                card_mod:
-                  style: >
-                    {% if states('sensor.ourbrewbot_f3_status') == 'alarm' %}
-                    ha-card {
-                      animation: brewbot-blink 1s step-start infinite;
-                    } @keyframes brewbot-blink { 50% { opacity: 0; } } 
-                    {% endif %}
-              - type: template
-                entity: sensor.ourbrewbot_f3_power
-                content: Power
-                icon: mdi:power
-                icon_color: >
-                  {{ 'green' if states('sensor.ourbrewbot_f3_power') == 'ON' else 'grey' }}
-              - type: template
-                entity: sensor.ourbrewbot_f3_temp_control
-                content: Temp Ctrl
-                icon: mdi:thermostat
-                icon_color: >
-                  {{ 'blue' if states('sensor.ourbrewbot_f3_temp_control') == 'ON' else 'grey' }}
-              - type: template
-                entity: sensor.ourbrewbot_f3_profile_running
-                content: Profile
-                icon: mdi:chart-timeline-variant
-                icon_color: >
-                  {{ 'purple' if states('sensor.ourbrewbot_f3_profile_running') == 'ON' else 'grey' }}
-            grid_options:
-              columns: full      
           - type: custom:plotly-graph
             grid_options:
               columns: full
             color_scheme: dutch_field
             title: >
-              $fn ({ hass }) => hass.states['sensor.ourbrewbot_f3_name']?.state || 'Fermenter 3'
+              $fn ({ hass }) => hass.states['sensor.ourbrewbot_f3_name']?.state || 'Fermenter 0'
             entities:
               - entity: sensor.ourbrewbot_f3_beer_temperature
                 name: Beer Temp
@@ -988,6 +804,18 @@ views:
             icon_color: >
               {{ 'green' if states('sensor.ourbrewbot_f3_power') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
+            primary: Temp Control
+            secondary: '{{ states(''sensor.ourbrewbot_f3_temp_control'') }}'
+            icon: mdi:thermostat
+            icon_color: >
+              {{ 'blue' if states('sensor.ourbrewbot_f3_temp_control') == 'ON' else 'grey' }}
+          - type: custom:mushroom-template-card
+            primary: Profile
+            secondary: '{{ states(''sensor.ourbrewbot_f3_profile_running'') }}'
+            icon: mdi:chart-timeline-variant
+            icon_color: >
+              {{ 'purple' if states('sensor.ourbrewbot_f3_profile_running') == 'ON' else 'grey' }}
+          - type: custom:mushroom-template-card
             primary: Beer Temp
             secondary: >
               {% set t = states('sensor.ourbrewbot_f3_beer_temperature') %} 
@@ -1001,24 +829,12 @@ views:
               {% else %} green 
               {% endif %}
           - type: custom:mushroom-template-card
-            primary: Temp Control
-            secondary: '{{ states(''sensor.ourbrewbot_f3_temp_control'') }}'
-            icon: mdi:thermostat
-            icon_color: >
-              {{ 'blue' if states('sensor.ourbrewbot_f3_temp_control') == 'ON' else 'grey' }}
-          - type: custom:mushroom-template-card
             primary: Ambient Temp
             secondary: >
               {% set t = states('sensor.ourbrewbot_f3_ambient_temperature') %}
               {% set u = states('sensor.ourbrewbot_f3_temperature_unit') | default('C') %} {{ t }} °{{ u }}
             icon: mdi:home-thermometer-outline
             icon_color: purple
-          - type: custom:mushroom-template-card
-            primary: Profile
-            secondary: '{{ states(''sensor.ourbrewbot_f3_profile_running'') }}'
-            icon: mdi:chart-timeline-variant
-            icon_color: >
-              {{ 'purple' if states('sensor.ourbrewbot_f3_profile_running') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
             primary: Comp Delay
             secondary: '{{ states(''sensor.ourbrewbot_f3_compressor_delay'') }} min'
@@ -1074,7 +890,7 @@ views:
               type: custom:mushroom-template-card
               primary: Device Offline
               secondary: >
-                {{ states('sensor.ourbrewbot_f3_name') | default('Fermenter 3', true) }} 
+                {{ states('sensor.ourbrewbot_f3_name') | default('Fermenter 0', true) }} 
                 has not published in the last 3 minutes. Check power and Wi-Fi.
               icon: mdi:wifi-off
               icon_color: red
