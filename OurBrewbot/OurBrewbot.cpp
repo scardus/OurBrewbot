@@ -8,13 +8,13 @@
  *  - ESP8266HTTPClient    (bundled)
  *  - ESP8266httpUpdate    (bundled)
  *  - LittleFS             (bundled)
- *  - ArduinoJson          v6.x (search "ArduinoJson" by Benoit Blanchon)
+ *  - ArduinoJson          v7.x (search "ArduinoJson" by Benoit Blanchon)
  *  - DallasTemperature    (search "DallasTemperature" by Miles Burton)
  *  - OneWire              (search "OneWire" by Jim Studt)
  *  - WiFiManager          (search "WiFiManager" by tzapu)
  *  - SoftwareSerial       (bundled with ESP8266 Arduino core)
  *  - rc-switch            v2.6.4 (search "rc-switch" by sui77)
- *  - PubSubClient         v2.8 (search "PubSubClient" by Nick O'Leary)
+ *  - PubSubClient3        v3.x (search "PubSubClient3" by hmueller01)
  */
 
 // ============================================================
