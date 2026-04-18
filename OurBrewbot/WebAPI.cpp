@@ -314,6 +314,22 @@ void handleFermenter(ESP8266WebServer& server) {
         if (!doc["TG"].isNull())              g_fermenters[idx].tg              = doc["TG"];
         if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"];            if (v >= 0 && v <= MAX_PROFILES) g_fermenters[idx].profileNo       = (uint8_t)v; }
         if (!doc["LiveTest"].isNull())        g_fermenters[idx].liveTest        = doc["LiveTest"];
+
+        // Validate temperature control settings after applying all values
+        float ceiling    = g_fermenters[idx].ceilingTemp;
+        float floor_     = g_fermenters[idx].floorTemp;
+        float hysteresis = g_fermenters[idx].hysteresis;
+        if (floor_ >= ceiling) {
+          logMsg("[CONFIG] F%d: invalid settings — floor (%.2f) must be below ceiling (%.2f)", idx, floor_, ceiling);
+          sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Floor must be below ceiling\"}"), 400);
+          return;
+        }
+        if ((ceiling - floor_) <= (2.0f * hysteresis)) {
+          logMsg("[CONFIG] F%d: invalid settings — safe zone (%.2f) must be wider than 2x hysteresis (%.2f)", idx, ceiling - floor_, 2.0f * hysteresis);
+          sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Safe zone must be wider than 2x hysteresis\"}"), 400);
+          return;
+        }
+
         saveFermenterConfig();
         sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Configuration saved\"}"));
         return;

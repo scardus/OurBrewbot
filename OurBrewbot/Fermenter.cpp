@@ -10,9 +10,8 @@
 // Track compressor delay per fermenter (millis of last cooling stop)
 static unsigned long s_lastCoolingStop[MAX_FERMENTERS] = {0};
 
-// Track heating/cooling state per fermenter to enforce hysteresis
-static bool s_wasHeating[MAX_FERMENTERS] = {false};
-static bool s_wasCooling[MAX_FERMENTERS] = {false};
+// Per-fermenter control state for the hysteresis state machine
+static uint8_t s_state[MAX_FERMENTERS] = {STATUS_IDLE};  // STATUS_IDLE / STATUS_HEATING / STATUS_COOLING
 
 // ============================================================
 // MAIN PROCESSOR
@@ -37,14 +36,15 @@ void processFermenters() {
 // ============================================================
 // SINGLE FERMENTER CONTROL LOGIC
 //
-// Algorithm:
-//   temp = getControlTemp(i)
-//   if temp > CeilingTemp + Hysteresis → start cooling (if delay OK)
-//   if temp < FloorTemp  - Hysteresis → start heating
-//   if temp in band → stop active heating/cooling
+// Algorithm (state machine):
+//   IDLE    → HEATING  if temp < FloorTemp
+//   IDLE    → COOLING  if temp > CeilingTemp (and compressor delay passed)
+//   HEATING → IDLE     if temp >= FloorTemp + Hysteresis
+//   COOLING → IDLE     if temp <= CeilingTemp - Hysteresis
 //
-// CeilingTemp is the MAXIMUM allowed temp (cooling threshold)
-// FloorTemp   is the MINIMUM allowed temp (heating threshold)
+// Hysteresis is applied at the STOP point (inside the safe zone),
+// not the trigger point, so the system pushes the temperature well
+// into the safe zone before stopping.
 // ============================================================
 
 void processSingleFermenter(uint8_t i) {
@@ -62,52 +62,43 @@ void processSingleFermenter(uint8_t i) {
   float floor_     = g_fermenters[i].floorTemp;
   float hysteresis = g_fermenters[i].hysteresis;
 
-  bool shouldHeat = false;
-  bool shouldCool = false;
+  switch (s_state[i]) {
 
-  // COOLING DECISION
-  // Start cooling if temp exceeds ceiling + hysteresis
-  if (temp > ceiling + hysteresis) {
-    // Enforce compressor delay — protects refrigeration compressor
-    unsigned long delaySec = (unsigned long)g_fermenters[i].compressorDelay * 60000UL;
-    unsigned long now = millis();
+    case STATUS_IDLE:
+      if (temp < floor_) {
+        s_state[i] = STATUS_HEATING;
+      } else if (temp > ceiling) {
+        // Enforce compressor delay — protects refrigeration compressor
+        unsigned long delaySec = (unsigned long)g_fermenters[i].compressorDelay * 60000UL;
+        unsigned long now = millis();
+        if ((now - s_lastCoolingStop[i]) >= delaySec) {
+          s_state[i] = STATUS_COOLING;
+        } else {
+          logMsg("[FERM] F%d (%s): in compressor delay (%.0fs remaining)",
+            i, g_fermenters[i].fermenterName, (delaySec - (now - s_lastCoolingStop[i])) / 1000.0f);
+        }
+      }
+      break;
 
-    if (s_wasCooling[i] || (now - s_lastCoolingStop[i]) >= delaySec) {
-      shouldCool = true;
-    } else {
-      // Still in compressor delay — log but don't cool
-      logMsg("[FERM] F%d (%s): in compressor delay (%.0fs remaining)",
-        i, g_fermenters[i].fermenterName, (delaySec - (now - s_lastCoolingStop[i])) / 1000.0f);
-    }
+    case STATUS_HEATING:
+      if (temp >= floor_ + hysteresis) {
+        s_state[i] = STATUS_IDLE;
+      }
+      break;
+
+    case STATUS_COOLING:
+      if (temp <= ceiling - hysteresis) {
+        s_lastCoolingStop[i] = millis();
+        s_state[i] = STATUS_IDLE;
+      }
+      break;
   }
 
-  // HEATING DECISION
-  // Start heating if temp drops below floor - hysteresis
-  else if (temp < floor_ - hysteresis) {
-    shouldHeat = true;
-  }
-
-  // IN-BAND — if we're in the temp band, stop everything (hysteresis)
-  else {
-    if (s_wasCooling[i]) {
-      s_lastCoolingStop[i] = millis();  // Record when cooling stopped
-    }
-    shouldHeat = false;
-    shouldCool = false;
-  }
+  bool shouldHeat = (s_state[i] == STATUS_HEATING);
+  bool shouldCool = (s_state[i] == STATUS_COOLING);
 
   // Update status
-  if (shouldHeat) {
-    g_fermenters[i].status = STATUS_HEATING;
-  } else if (shouldCool) {
-    g_fermenters[i].status = STATUS_COOLING;
-  } else {
-    g_fermenters[i].status = STATUS_IDLE;
-  }
-
-  // Track state changes
-  s_wasHeating[i] = shouldHeat;
-  s_wasCooling[i] = shouldCool;
+  g_fermenters[i].status = s_state[i];
 
   // Operate the smart plugs
   setFermenterPlugs(i, shouldHeat, shouldCool);
@@ -158,8 +149,7 @@ void switchOffAll() {
   }
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     g_fermenters[i].status = STATUS_IDLE;
-    s_wasHeating[i] = false;
-    s_wasCooling[i] = false;
+    s_state[i] = STATUS_IDLE;
   }
 }
 
