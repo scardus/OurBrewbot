@@ -332,19 +332,6 @@ views:
               {% elif p < 90 %} yellow 
               {% else %} green 
               {% endif %}
-          - type: entities
-            entities:
-              - type: custom:mushroom-template-card
-                primary: Last Seen
-                secondary: >
-                  {% set lu = states.sensor.ourbrewbot_f0_status.last_updated %}
-                  {% if lu %}
-                    {{ relative_time(lu) }} ago
-                  {% else %}
-                    unknown
-                  {% endif %}
-                icon: mdi:clock-outline
-                icon_color: grey
           - type: conditional
             conditions:
               - condition: state
@@ -592,19 +579,6 @@ views:
               {% elif p < 90 %} yellow 
               {% else %} green 
               {% endif %}
-          - type: entities
-            entities:
-              - type: custom:mushroom-template-card
-                primary: Last Seen
-                secondary: >
-                  {% set lu = states.sensor.ourbrewbot_f1_status.last_updated %}
-                  {% if lu %}
-                    {{ relative_time(lu) }} ago
-                  {% else %}
-                    unknown
-                  {% endif %}
-                icon: mdi:clock-outline
-                icon_color: grey
           - type: conditional
             conditions:
               - condition: state
@@ -852,19 +826,6 @@ views:
               {% elif p < 90 %} yellow 
               {% else %} green 
               {% endif %}
-          - type: entities
-            entities:
-              - type: custom:mushroom-template-card
-                primary: Last Seen
-                secondary: >
-                  {% set lu = states.sensor.ourbrewbot_f2_status.last_updated %}
-                  {% if lu %}
-                    {{ relative_time(lu) }} ago
-                  {% else %}
-                    unknown
-                  {% endif %}
-                icon: mdi:clock-outline
-                icon_color: grey
           - type: conditional
             conditions:
               - condition: state
@@ -1112,19 +1073,6 @@ views:
               {% elif p < 90 %} yellow 
               {% else %} green 
               {% endif %}
-          - type: entities
-            entities:
-              - type: custom:mushroom-template-card
-                primary: Last Seen
-                secondary: >
-                  {% set lu = states.sensor.ourbrewbot_f3_status.last_updated %}
-                  {% if lu %}
-                    {{ relative_time(lu) }} ago
-                  {% else %}
-                    unknown
-                  {% endif %}
-                icon: mdi:clock-outline
-                icon_color: grey
           - type: conditional
             conditions:
               - condition: state
