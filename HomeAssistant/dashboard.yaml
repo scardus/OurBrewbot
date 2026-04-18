@@ -285,11 +285,6 @@ views:
             icon_color: >
               {{ 'purple' if states('sensor.ourbrewbot_f0_profile_running') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
-            primary: Temp Range
-            secondary: '{{ states(''sensor.ourbrewbot_f0_temp_range'') }}'
-            icon: mdi:thermometer-lines
-            icon_color: green
-          - type: custom:mushroom-template-card
             primary: Comp Delay
             secondary: '{{ states(''sensor.ourbrewbot_f0_compressor_delay'') }} min'
             icon: mdi:timer-outline
@@ -534,11 +529,6 @@ views:
             icon: mdi:chart-timeline-variant
             icon_color: >
               {{ 'purple' if states('sensor.ourbrewbot_f1_profile_running') == 'ON' else 'grey' }}
-          - type: custom:mushroom-template-card
-            primary: Temp Range
-            secondary: '{{ states(''sensor.ourbrewbot_f1_temp_range'') }}'
-            icon: mdi:thermometer-lines
-            icon_color: green
           - type: custom:mushroom-template-card
             primary: Comp Delay
             secondary: '{{ states(''sensor.ourbrewbot_f1_compressor_delay'') }} min'
@@ -785,11 +775,6 @@ views:
             icon_color: >
               {{ 'purple' if states('sensor.ourbrewbot_f2_profile_running') == 'ON' else 'grey' }}
           - type: custom:mushroom-template-card
-            primary: Temp Range
-            secondary: '{{ states(''sensor.ourbrewbot_f2_temp_range'') }}'
-            icon: mdi:thermometer-lines
-            icon_color: green
-          - type: custom:mushroom-template-card
             primary: Comp Delay
             secondary: '{{ states(''sensor.ourbrewbot_f2_compressor_delay'') }} min'
             icon: mdi:timer-outline
@@ -1034,11 +1019,6 @@ views:
             icon: mdi:chart-timeline-variant
             icon_color: >
               {{ 'purple' if states('sensor.ourbrewbot_f3_profile_running') == 'ON' else 'grey' }}
-          - type: custom:mushroom-template-card
-            primary: Temp Range
-            secondary: '{{ states(''sensor.ourbrewbot_f3_temp_range'') }}'
-            icon: mdi:thermometer-lines
-            icon_color: green
           - type: custom:mushroom-template-card
             primary: Comp Delay
             secondary: '{{ states(''sensor.ourbrewbot_f3_compressor_delay'') }} min'
