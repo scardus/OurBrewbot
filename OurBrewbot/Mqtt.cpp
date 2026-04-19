@@ -239,6 +239,10 @@ static void publishFermenterField(int i, const char* key) {
   else if (strcmp(key, "compressor_delay")    == 0) publishInt  (base, "compressor_delay",     g_fermenters[i].compressorDelay);
   else if (strcmp(key, "og")                  == 0) publishFloat(base, "og",                   g_fermenters[i].og, 4);
   else if (strcmp(key, "tg")                  == 0) publishFloat(base, "tg",                   g_fermenters[i].tg, 4);
+  else if (strcmp(key, "name")                == 0) publishValue(base, "name",                 g_fermenters[i].fermenterName);
+  else if (strcmp(key, "beer_name")           == 0) publishValue(base, "beer_name",            g_fermenters[i].beerName);
+  else if (strcmp(key, "yeast")               == 0) publishValue(base, "yeast",                g_fermenters[i].yeastName);
+  else if (strcmp(key, "profile_no")          == 0) publishInt  (base, "profile_no",           g_fermenters[i].profileNo);
 }
 
 // Publish HA discovery entity configs for the device itself (not per-fermenter).
@@ -357,15 +361,17 @@ static void publishHaDiscovery(int i) {
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "attenuation", "Attenuation", "attenuation", nullptr, "%",  "mdi:percent",   nullptr, "measurement");
 
-  // Status and info — text, no state_class
+  // Status — read-only text sensor
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "status",    "Status",    "status",    nullptr, nullptr, "mdi:thermometer", nullptr, nullptr);
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "name",      "Name",      "name",      nullptr, nullptr, "mdi:label",       nullptr, nullptr);
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "beer_name", "Beer Name", "beer_name", nullptr, nullptr, "mdi:beer",        nullptr, nullptr);
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "yeast",     "Yeast",     "yeast",     nullptr, nullptr, "mdi:flask",       nullptr, nullptr);
+    "status", "Status", "status", nullptr, nullptr, "mdi:thermometer", nullptr, nullptr);
+
+  // Text fields — always text entities; device ignores commands when allowControl is off
+  publishTextEntity(doc, devId, fermBase, fermLabel,
+    "name",      "Name",      "name",      "name/set",      31, "mdi:label");
+  publishTextEntity(doc, devId, fermBase, fermLabel,
+    "beer_name", "Beer Name", "beer_name", "beer_name/set", 31, "mdi:beer");
+  publishTextEntity(doc, devId, fermBase, fermLabel,
+    "yeast",     "Yeast",     "yeast",     "yeast/set",     31, "mdi:flask");
 
   // ON/OFF state — always switches; device ignores commands when allowControl is off
   // and the 60s state publish corrects any HA UI changes within one interval
@@ -375,6 +381,12 @@ static void publishHaDiscovery(int i) {
     "temp_control",    "Temp Control",    "temp_control",    "temp_control/set",    "mdi:thermostat");
   publishSwitchEntity(doc, devId, fermBase, fermLabel,
     "profile_running", "Profile Running", "profile_running", "profile_running/set", "mdi:play-circle");
+
+  // Profile select + step progress
+  static const char* profileOpts[] = {"0","1","2","3","4"};
+  publishSelectEntity(doc, devId, fermBase, fermLabel,
+    "profile_no", "Profile No", "profile_no", "profile_no/set",
+    profileOpts, MAX_PROFILES + 1, "mdi:playlist-play");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "profile_step",  "Profile Step",  "profile_step",  nullptr, "#", "mdi:counter", nullptr, "measurement");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
@@ -450,6 +462,14 @@ static void removeHaDiscovery(int i) {
   removeOneEntity("number", devId, "compressor_delay");
   removeOneEntity("number", devId, "og");
   removeOneEntity("number", devId, "tg");
+
+  // Text versions (present from Patch 5+)
+  removeOneEntity("text",   devId, "name");
+  removeOneEntity("text",   devId, "beer_name");
+  removeOneEntity("text",   devId, "yeast");
+
+  // Select versions (present from Patch 5+)
+  removeOneEntity("select", devId, "profile_no");
 
   logMsg("[MQTT] HA discovery removed for F%d", i);
 }
@@ -582,6 +602,19 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
     else if (strcmp(key, "compressor_delay")    == 0) g_fermenters[idx].compressorDelay = (uint16_t)v;
     else if (strcmp(key, "og")                  == 0) g_fermenters[idx].og              = v;
     else if (strcmp(key, "tg")                  == 0) g_fermenters[idx].tg              = v;
+  } else if (strcmp(key, "name") == 0) {
+    strlcpy(g_fermenters[idx].fermenterName, pl, sizeof(g_fermenters[0].fermenterName));
+  } else if (strcmp(key, "beer_name") == 0) {
+    strlcpy(g_fermenters[idx].beerName, pl, sizeof(g_fermenters[0].beerName));
+  } else if (strcmp(key, "yeast") == 0) {
+    strlcpy(g_fermenters[idx].yeastName, pl, sizeof(g_fermenters[0].yeastName));
+  } else if (strcmp(key, "profile_no") == 0) {
+    int pno = atoi(pl);
+    if (pno < 0 || pno > MAX_PROFILES) {
+      logMsg("[MQTT] cmd rejected: profile_no %d out of range (0-%d)", pno, MAX_PROFILES);
+      return;
+    }
+    g_fermenters[idx].profileNo = (uint8_t)pno;
   } else {
     return;  // unknown key — ignore silently
   }
@@ -836,6 +869,7 @@ void reportMqtt() {
     publishValue(base, "beer_name", g_fermenters[i].beerName);
     publishValue(base, "yeast", g_fermenters[i].yeastName);
     publishInt(base, "compressor_delay", g_fermenters[i].compressorDelay);
+    publishInt (base, "profile_no",      g_fermenters[i].profileNo);
     publishBool(base, "profile_running", g_fermenters[i].profileRunning);
     if (g_fermenters[i].profileRunning) {
       publishInt(base, "profile_step",  g_fermenters[i].currentStep + 1);
