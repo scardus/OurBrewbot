@@ -280,6 +280,7 @@ views:
             icon: mdi:home-thermometer-outline
             icon_color: blue
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f0_compressor_delay
             primary: Comp Delay
             secondary: '{{ states(''number.ourbrewbot_f0_compressor_delay'') }} min'
             icon: mdi:timer-outline
@@ -529,6 +530,23 @@ views:
             icon: mdi:home-thermometer-outline
             icon_color: purple
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f1_ceiling_temperature
+            primary: Ceiling Temp
+            secondary: >
+              {% set t = states('number.ourbrewbot_f1_ceiling_temperature') %}
+              {% set u = states('sensor.ourbrewbot_f1_temperature_unit') | default('C') %} {{ t }} °{{ u }}
+            icon: mdi:home-thermometer-outline
+            icon_color: red
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f1_floor_temperature
+            primary: Floor Temp
+            secondary: >
+              {% set t = states('number.ourbrewbot_f1_floor_temperature') %}
+              {% set u = states('sensor.ourbrewbot_f1_temperature_unit') | default('C') %} {{ t }} °{{ u }}
+            icon: mdi:home-thermometer-outline
+            icon_color: blue
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f1_compressor_delay
             primary: Comp Delay
             secondary: '{{ states(''number.ourbrewbot_f1_compressor_delay'') }} min'
             icon: mdi:timer-outline
@@ -778,6 +796,23 @@ views:
             icon: mdi:home-thermometer-outline
             icon_color: purple
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f2_ceiling_temperature
+            primary: Ceiling Temp
+            secondary: >
+              {% set t = states('number.ourbrewbot_f2_ceiling_temperature') %}
+              {% set u = states('sensor.ourbrewbot_f2_temperature_unit') | default('C') %} {{ t }} °{{ u }}
+            icon: mdi:home-thermometer-outline
+            icon_color: red
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f2_floor_temperature
+            primary: Floor Temp
+            secondary: >
+              {% set t = states('number.ourbrewbot_f2_floor_temperature') %}
+              {% set u = states('sensor.ourbrewbot_f2_temperature_unit') | default('C') %} {{ t }} °{{ u }}
+            icon: mdi:home-thermometer-outline
+            icon_color: blue
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f2_compressor_delay
             primary: Comp Delay
             secondary: '{{ states(''number.ourbrewbot_f2_compressor_delay'') }} min'
             icon: mdi:timer-outline
@@ -1027,6 +1062,23 @@ views:
             icon: mdi:home-thermometer-outline
             icon_color: purple
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f3_ceiling_temperature
+            primary: Ceiling Temp
+            secondary: >
+              {% set t = states('number.ourbrewbot_f3_ceiling_temperature') %}
+              {% set u = states('sensor.ourbrewbot_f3_temperature_unit') | default('C') %} {{ t }} °{{ u }}
+            icon: mdi:home-thermometer-outline
+            icon_color: red
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f3_floor_temperature
+            primary: Floor Temp
+            secondary: >
+              {% set t = states('number.ourbrewbot_f3_floor_temperature') %}
+              {% set u = states('sensor.ourbrewbot_f3_temperature_unit') | default('C') %} {{ t }} °{{ u }}
+            icon: mdi:home-thermometer-outline
+            icon_color: blue
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f3_compressor_delay
             primary: Comp Delay
             secondary: '{{ states(''number.ourbrewbot_f3_compressor_delay'') }} min'
             icon: mdi:timer-outline
