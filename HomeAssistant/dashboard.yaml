@@ -160,7 +160,7 @@ views:
                 name: TG
               - entity: sensor.ourbrewbot_f0_og
                 name: OG
-            hours_to_show: 24
+            hours_to_show: 72
             refresh_interval: 10
             layout:
               yaxis:
@@ -363,7 +363,7 @@ views:
                 name: TG
               - entity: sensor.ourbrewbot_f1_og
                 name: OG
-            hours_to_show: 24
+            hours_to_show: 72
             refresh_interval: 10
             layout:
               yaxis:
@@ -566,7 +566,7 @@ views:
                 name: TG
               - entity: sensor.ourbrewbot_f2_og
                 name: OG
-            hours_to_show: 24
+            hours_to_show: 72
             refresh_interval: 10
             layout:
               yaxis:
@@ -769,7 +769,7 @@ views:
                 name: TG
               - entity: sensor.ourbrewbot_f3_og
                 name: OG
-            hours_to_show: 24
+            hours_to_show: 72
             refresh_interval: 10
             layout:
               yaxis:
