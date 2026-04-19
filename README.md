@@ -24,6 +24,7 @@ New/Updated Features:
 - Brewfather integration uses the Custom Stream API
 - MQTT support for publishing fermenter data to any MQTT broker
 - Home Assistant MQTT Discovery — auto-creates HA entities with no YAML needed (optional, per-broker toggle)
+- Home Assistant MQTT control - see section below
 - Full local REST API
 - Web-based admin page for configuring probes, fermenters, Tilts, iSpindels, plugs, and services
 - mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
@@ -179,48 +180,48 @@ These should be auto-detected and used if you flash this firmware to the same de
 |--------|--------------------|-------------------------------|
 | GET    | /                  | Welcome / API index page      |
 | GET    | /admin             | Admin configuration page      |
-| GET    | /fermenters        | All fermenter data (JSON)     |
-| GET    | /fermenter?id=0    | Single fermenter              |
-| POST   | /fermenter         | Update fermenter config       |
-| GET    | /controller        | Controller config + plugs     |
-| POST   | /controller        | Update global config          |
-| GET    | /status            | Quick status all fermenters   |
-| GET    | /probes            | All temperature probes        |
-| POST   | /probes            | Update probe config           |
-| GET    | /health            | System health                 |
-| GET    | /smartplugs        | Smart plug config (JSON)      |
-| POST   | /smartplug         | Update smart plug config      |
-| POST   | /smartplug/test    | Test smart plug RF on/off     |
-| GET    | /rf/sniff          | RF sniff page                 |
-| GET    | /rf/sniff/poll     | Poll RF sniff results         |
 | GET    | /ble/sniff         | BLE AT command console page   |
 | GET    | /ble/sniff/poll    | Poll BLE serial data          |
 | POST   | /ble/sniff/send    | Send AT command to HM-10      |
+| GET    | /board_info.json   | Board info                    |
 | GET    | /brewservices      | Brew service config           |
 | POST   | /brewservices      | Update brew service config    |
 | POST   | /brewservices/test | Test brew service connection  |
-| GET    | /mqtt              | MQTT config (includes haDiscovery flag) |
-| POST   | /mqtt              | Update MQTT config (haDiscovery, LWT, discovery cleanup on disable) |
-| POST   | /mqtt/test         | Test MQTT connection          |
-| POST   | /mqtt/discover     | Trigger HA MQTT discovery     |
-| GET    | /profiles          | Fermentation profile config   |
-| POST   | /profile           | Update fermentation profile   |
-| POST   | /fermenter/profile | Profile control (start/stop/pause/next/prev) |
-| GET    | /board_info.json   | Board info                    |
-| POST   | /iSpindel          | iSpindel gravity data         |
 | GET    | /config            | WiFi config page              |
 | GET    | /configMe          | Save WiFi config (form GET)   |
-| GET    | /WiFi              | WiFi config page (alias)      |
+| GET    | /controller        | Controller config + plugs     |
+| POST   | /controller        | Update global config          |
+| GET    | /fermenter?id=0    | Single fermenter              |
+| POST   | /fermenter         | Update fermenter config       |
+| POST   | /fermenter/profile | Profile control (start/stop/pause/next/prev) |
+| GET    | /fermenters        | All fermenter data (JSON)     |
+| GET    | /fs/file           | Read LittleFS file content    |
+| GET    | /fs/files          | List LittleFS files           |
+| GET    | /health            | System health                 |
+| POST   | /iSpindel          | iSpindel gravity data         |
+| GET    | /mqtt              | MQTT config (includes haDiscovery flag) |
+| POST   | /mqtt              | Update MQTT config (haDiscovery, LWT, discovery cleanup on disable) |
+| POST   | /mqtt/discover     | Trigger HA MQTT discovery     |
+| POST   | /mqtt/test         | Test MQTT connection          |
+| GET    | /probes            | All temperature probes        |
+| POST   | /probes            | Update probe config           |
+| POST   | /profile           | Update fermentation profile   |
+| GET    | /profiles          | Fermentation profile config   |
+| GET    | /reboot            | Reboot device                 |
+| GET    | /reset             | Reset all config to defaults  |
+| GET    | /rf/sniff          | RF sniff page                 |
+| GET    | /rf/sniff/poll     | Poll RF sniff results         |
+| POST   | /smartplug         | Update smart plug config      |
+| POST   | /smartplug/test    | Test smart plug RF on/off     |
+| GET    | /smartplugs        | Smart plug config (JSON)      |
+| GET    | /status            | Quick status all fermenters   |
+| GET    | /syslog            | Syslog config                 |
+| POST   | /syslog            | Update syslog config (host, port, facility, minLevel) |
+| POST   | /tilt              | Update Tilt config (fermenter, function, SG/temp adjust) |
+| GET    | /tilts             | Tilt hydrometer config + live data |
 | GET    | /update            | OTA firmware update page      |
 | POST   | /update            | Upload new firmware binary    |
-| GET    | /reset             | Reset all config to defaults  |
-| GET    | /reboot            | Reboot device                 |
-| GET    | /fs/files          | List LittleFS files           |
-| GET    | /fs/file           | Read LittleFS file content    |
-| GET    | /tilts             | Tilt hydrometer config + live data |
-| POST   | /tilt              | Update Tilt config (fermenter, function, SG/temp adjust) |
-| GET    | /syslog            | Syslog config |
-| POST   | /syslog            | Update syslog config (host, port, facility, minLevel) |
+| GET    | /WiFi              | WiFi config page (alias)      |
 
 ---
 
@@ -299,22 +300,21 @@ Any HA automations, template sensors (`binary_sensor.ourbrewbot_fN_online`, `sen
 
 ```
 OurBrewbot/
-  OurBrewbot.ino       Main sketch — setup, loop, state machine
+  OurBrewbot.cpp       Main sketch — setup, loop, state machine
   Config.h/.cpp        All data structures and JSON serialisation
-  Pins.h               Hardware GPIO pin assignments
-  Version.h            Firmware version constants
-  Log.h/.cpp           Serial logging routines
-  Fermenter.h/.cpp     Temperature control loop (heating/cooling)
+  Fermenter.h/.cpp     Temperature control loop (heating/cooling/hysteresis state machine)
   Temperatures.h/.cpp  DS18B20 probe management
   SmartPlugs.h/.cpp    RF smart plug control
   Profile.h/.cpp       Fermentation profile runner
   Reports.h/.cpp       Brewfather / Brewer's Friend reporting
   iSpindel.h/.cpp      iSpindel WiFi hydrometer receive and registration
-  Mqtt.h/.cpp          MQTT client for fermenter data publishing
+  Tilt.h/.cpp          Tilt hydrometer via HM-10 BLE
+  Mqtt.h/.cpp          MQTT client — publishing, HA discovery, command dispatch
   WebAPI.h/.cpp        REST API web server
   WebAdmin.cpp         Admin configuration page (PROGMEM HTML)
-  Tilt.h/.cpp          Tilt hydrometer via HM-10 BLE
-  Log.h/.cpp           Centralised serial logging with timestamps
+  Log.h/.cpp           Centralised serial & syslog logging with timestamps
+  Pins.h               Hardware GPIO pin assignments
+  Version.h            Firmware version constants
 ```
 
 ---
