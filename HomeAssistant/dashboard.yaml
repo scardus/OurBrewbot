@@ -205,24 +205,40 @@ views:
               {% else %} green
               {% endif %}
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f0_power
             primary: Power
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f0_power'', ''on'') else ''Off'' }}'
             icon: mdi:power
             icon_color: >
               {{ 'green' if is_state('switch.ourbrewbot_f0_power', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f0_temp_control
             primary: Temp Control
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f0_temp_control'', ''on'') else ''Off'' }}'
             icon: mdi:thermostat
             icon_color: >
               {{ 'blue' if is_state('switch.ourbrewbot_f0_temp_control', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f0_profile_running
             primary: Profile Running
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f0_profile_running'', ''on'') else ''Off'' }}'
             icon: mdi:chart-timeline-variant
             icon_color: >
               {{ 'purple' if is_state('switch.ourbrewbot_f0_profile_running', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle              
           - type: custom:mushroom-template-card
+            entity: select.ourbrewbot_f0_profile_no
             primary: Profile No
             secondary: '{{ states(''select.ourbrewbot_f0_profile_no'') }}'
             icon: mdi:playlist-play
@@ -248,16 +264,34 @@ views:
             icon: mdi:home-thermometer-outline
             icon_color: purple
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f0_ceiling_temperature
+            primary: Ceiling Temp
+            secondary: >
+              {% set t = states('number.ourbrewbot_f0_ceiling_temperature') %}
+              {% set u = states('sensor.ourbrewbot_f0_temperature_unit') | default('C') %} {{ t }} °{{ u }}
+            icon: mdi:home-thermometer-outline
+            icon_color: red
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f0_floor_temperature
+            primary: Floor Temp
+            secondary: >
+              {% set t = states('number.ourbrewbot_f0_floor_temperature') %}
+              {% set u = states('sensor.ourbrewbot_f0_temperature_unit') | default('C') %} {{ t }} °{{ u }}
+            icon: mdi:home-thermometer-outline
+            icon_color: blue
+          - type: custom:mushroom-template-card
             primary: Comp Delay
             secondary: '{{ states(''number.ourbrewbot_f0_compressor_delay'') }} min'
             icon: mdi:timer-outline
             icon_color: grey
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f0_hysteresis
             primary: Hysteresis
             secondary: '{{ states(''number.ourbrewbot_f0_hysteresis'') }} °'
             icon: mdi:swap-vertical
             icon_color: grey
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f0_og
             primary: OG
             secondary: '{{ states(''number.ourbrewbot_f0_og'') }}'
             icon: mdi:cup-water
@@ -268,6 +302,7 @@ views:
             icon: mdi:water
             icon_color: blue
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f0_tg
             primary: Target SG
             secondary: '{{ states(''number.ourbrewbot_f0_tg'') }}'
             icon: mdi:target
@@ -435,24 +470,40 @@ views:
               {% else %} green
               {% endif %}
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f1_power
             primary: Power
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f1_power'', ''on'') else ''Off'' }}'
             icon: mdi:power
             icon_color: >
               {{ 'green' if is_state('switch.ourbrewbot_f1_power', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f1_temp_control
             primary: Temp Control
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f1_temp_control'', ''on'') else ''Off'' }}'
             icon: mdi:thermostat
             icon_color: >
               {{ 'blue' if is_state('switch.ourbrewbot_f1_temp_control', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f1_profile_running
             primary: Profile Running
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f1_profile_running'', ''on'') else ''Off'' }}'
             icon: mdi:chart-timeline-variant
             icon_color: >
               {{ 'purple' if is_state('switch.ourbrewbot_f1_profile_running', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle              
           - type: custom:mushroom-template-card
+            entity: select.ourbrewbot_f1_profile_no
             primary: Profile No
             secondary: '{{ states(''select.ourbrewbot_f1_profile_no'') }}'
             icon: mdi:playlist-play
@@ -483,11 +534,13 @@ views:
             icon: mdi:timer-outline
             icon_color: grey
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f1_hysteresis
             primary: Hysteresis
             secondary: '{{ states(''number.ourbrewbot_f1_hysteresis'') }} °'
             icon: mdi:swap-vertical
             icon_color: grey
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f1_og
             primary: OG
             secondary: '{{ states(''number.ourbrewbot_f1_og'') }}'
             icon: mdi:cup-water
@@ -498,6 +551,7 @@ views:
             icon: mdi:water
             icon_color: blue
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f1_tg
             primary: Target SG
             secondary: '{{ states(''number.ourbrewbot_f1_tg'') }}'
             icon: mdi:target
@@ -665,24 +719,40 @@ views:
               {% else %} green
               {% endif %}
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f2_power
             primary: Power
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f2_power'', ''on'') else ''Off'' }}'
             icon: mdi:power
             icon_color: >
               {{ 'green' if is_state('switch.ourbrewbot_f2_power', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f2_temp_control
             primary: Temp Control
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f2_temp_control'', ''on'') else ''Off'' }}'
             icon: mdi:thermostat
             icon_color: >
               {{ 'blue' if is_state('switch.ourbrewbot_f2_temp_control', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f2_profile_running
             primary: Profile Running
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f2_profile_running'', ''on'') else ''Off'' }}'
             icon: mdi:chart-timeline-variant
             icon_color: >
               {{ 'purple' if is_state('switch.ourbrewbot_f2_profile_running', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle              
           - type: custom:mushroom-template-card
+            entity: select.ourbrewbot_f2_profile_no
             primary: Profile No
             secondary: '{{ states(''select.ourbrewbot_f2_profile_no'') }}'
             icon: mdi:playlist-play
@@ -713,11 +783,13 @@ views:
             icon: mdi:timer-outline
             icon_color: grey
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f2_hysteresis
             primary: Hysteresis
             secondary: '{{ states(''number.ourbrewbot_f2_hysteresis'') }} °'
             icon: mdi:swap-vertical
             icon_color: grey
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f2_og
             primary: OG
             secondary: '{{ states(''number.ourbrewbot_f2_og'') }}'
             icon: mdi:cup-water
@@ -728,6 +800,7 @@ views:
             icon: mdi:water
             icon_color: blue
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f2_tg
             primary: Target SG
             secondary: '{{ states(''number.ourbrewbot_f2_tg'') }}'
             icon: mdi:target
@@ -895,24 +968,40 @@ views:
               {% else %} green
               {% endif %}
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f3_power
             primary: Power
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f3_power'', ''on'') else ''Off'' }}'
             icon: mdi:power
             icon_color: >
               {{ 'green' if is_state('switch.ourbrewbot_f3_power', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f3_temp_control
             primary: Temp Control
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f3_temp_control'', ''on'') else ''Off'' }}'
             icon: mdi:thermostat
             icon_color: >
               {{ 'blue' if is_state('switch.ourbrewbot_f3_temp_control', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle
           - type: custom:mushroom-template-card
+            entity: switch.ourbrewbot_f3_profile_running
             primary: Profile Running
             secondary: '{{ ''On'' if is_state(''switch.ourbrewbot_f3_profile_running'', ''on'') else ''Off'' }}'
             icon: mdi:chart-timeline-variant
             icon_color: >
               {{ 'purple' if is_state('switch.ourbrewbot_f3_profile_running', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+            icon_tap_action:
+              action: toggle              
           - type: custom:mushroom-template-card
+            entity: select.ourbrewbot_f3_profile_no
             primary: Profile No
             secondary: '{{ states(''select.ourbrewbot_f3_profile_no'') }}'
             icon: mdi:playlist-play
@@ -943,11 +1032,13 @@ views:
             icon: mdi:timer-outline
             icon_color: grey
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f3_hysteresis
             primary: Hysteresis
             secondary: '{{ states(''number.ourbrewbot_f3_hysteresis'') }} °'
             icon: mdi:swap-vertical
             icon_color: grey
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f3_og
             primary: OG
             secondary: '{{ states(''number.ourbrewbot_f3_og'') }}'
             icon: mdi:cup-water
@@ -958,6 +1049,7 @@ views:
             icon: mdi:water
             icon_color: blue
           - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f3_tg
             primary: Target SG
             secondary: '{{ states(''number.ourbrewbot_f3_tg'') }}'
             icon: mdi:target
