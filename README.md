@@ -224,6 +224,77 @@ These should be auto-detected and used if you flash this firmware to the same de
 
 ---
 
+## Home Assistant MQTT Integration
+
+When MQTT is enabled and **HA Discovery** is turned on, the device publishes Home Assistant MQTT discovery payloads on connect and whenever HA restarts. No manual YAML configuration is needed — entities appear automatically in HA.
+
+### Entity types (v0.1.74+)
+
+| Entity type | Fields |
+|-------------|--------|
+| `sensor`    | beer_temperature, ambient_temperature, gravity, gravity_source, attenuation, status, beer_temperature_source, temperature_unit, profile_step, profile_steps |
+| `switch`    | power, temp_control, profile_running |
+| `number`    | ceiling_temperature, floor_temperature, hysteresis, compressor_delay, og, tg |
+| `text`      | name, beer_name, yeast |
+| `select`    | profile_no (options: 0–4) |
+| `button`    | Device: reboot, all_off |
+
+All temperatures are published in **°C** regardless of display unit setting. Conversion for display is handled by the receiving side (HA, dashboard, etc.).
+
+### Allow HA Control
+
+By default the device is read-only from HA's perspective. Enable **Allow HA Control** in the MQTT settings page to allow Home Assistant to send commands back to the device.
+
+When enabled, the device subscribes to `<baseTopic>/+/+/set` and accepts commands for all writable entity types (switch, number, text, select, button). Commands are validated — out-of-range values are silently rejected and the HA entity reverts to the actual device state within ~60 seconds via the regular state publish.
+
+When disabled, all discovery entities are still advertised (so the dashboard YAML remains stable), but the device ignores any incoming commands.
+
+### Dashboard
+
+A ready-made Lovelace dashboard is provided in `HomeAssistant/dashboard.yaml`. It requires these HACS frontend cards:
+- [lovelace-plotly-graph-card](https://github.com/dbuezas/lovelace-plotly-graph-card)
+- [lovelace-mushroom](https://github.com/piitaya/lovelace-mushroom)
+- [card-mod](https://github.com/thomasloven/lovelace-card-mod)
+
+---
+
+## Upgrading from earlier firmware
+
+### From v0.1.73 or earlier (pre-MQTT control)
+
+Versions before v0.1.74 published all per-fermenter fields as `sensor` entities. From v0.1.74 onwards, several fields changed to more appropriate HA entity types (switch, number, text, select). The firmware sends empty retained payloads to the old discovery topics on connect to clean up stale HA entities automatically.
+
+**Steps after flashing:**
+
+1. Flash the new binary via OTA (`http://ourbrewbot-XXXXXX.local/update`) or esptool.
+2. Once connected, the device retries HA discovery automatically. If entities don't update immediately, click **HA Discover** in the MQTT settings page of the admin UI, or reboot the device.
+3. HA will remove the old `sensor.*` entities and create the new `switch.*`, `number.*`, `text.*`, and `select.*` entities.
+4. Replace your Lovelace dashboard with the updated `HomeAssistant/dashboard.yaml` from this repository. The new YAML references the correct entity types.
+
+**Entity ID changes (old → new):**
+
+| Old entity ID | New entity ID |
+|---------------|---------------|
+| `sensor.ourbrewbot_fN_power` | `switch.ourbrewbot_fN_power` |
+| `sensor.ourbrewbot_fN_temp_control` | `switch.ourbrewbot_fN_temp_control` |
+| `sensor.ourbrewbot_fN_profile_running` | `switch.ourbrewbot_fN_profile_running` |
+| `sensor.ourbrewbot_fN_ceiling_temperature` | `number.ourbrewbot_fN_ceiling_temperature` |
+| `sensor.ourbrewbot_fN_floor_temperature` | `number.ourbrewbot_fN_floor_temperature` |
+| `sensor.ourbrewbot_fN_hysteresis` | `number.ourbrewbot_fN_hysteresis` |
+| `sensor.ourbrewbot_fN_compressor_delay` | `number.ourbrewbot_fN_compressor_delay` |
+| `sensor.ourbrewbot_fN_og` | `number.ourbrewbot_fN_og` |
+| `sensor.ourbrewbot_fN_tg` | `number.ourbrewbot_fN_tg` |
+| `sensor.ourbrewbot_fN_name` | `text.ourbrewbot_fN_name` |
+| `sensor.ourbrewbot_fN_beer_name` | `text.ourbrewbot_fN_beer_name` |
+| `sensor.ourbrewbot_fN_yeast` | `text.ourbrewbot_fN_yeast` |
+| _(new)_ | `select.ourbrewbot_fN_profile_no` |
+
+> Replace `N` with the fermenter index (0–3).
+
+Any HA automations, template sensors (`binary_sensor.ourbrewbot_fN_online`, `sensor.ourbrewbot_fN_fermentation_progress`, etc.) or Plotly graph history that reference the old `sensor.*` entity IDs will need to be updated to the new IDs.
+
+---
+
 ## File Structure
 
 ```
