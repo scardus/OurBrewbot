@@ -43,6 +43,10 @@ void setFermenterPower(uint8_t index, bool on);
 // Get human-readable status string for REST API / dashboard
 const char* getFermenterStatusStr(uint8_t status);
 
+// Validate a numeric fermenter field (range + cross-field for temp/hysteresis).
+// Returns true if valid; sets *errMsg to a static error string if not.
+bool validateFermenterField(uint8_t idx, const char* key, float value, const char** errMsg);
+
 // Set heating/cooling plugs for a fermenter
 // Implemented here, called internally and by switchOffAll()
 void setFermenterPlugs(uint8_t fermenterIndex, bool heat, bool cool);

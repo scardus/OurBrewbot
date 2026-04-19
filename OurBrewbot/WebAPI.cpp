@@ -300,35 +300,34 @@ void handleFermenter(ESP8266WebServer& server) {
     if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
       int idx = doc["Fermenter"] | -1;
       if (idx >= 0 && idx < MAX_FERMENTERS) {
-        if (!doc["CeilingTemp"].isNull())     { float v = doc["CeilingTemp"];        if (v >= -20.0f && v <= 50.0f)   g_fermenters[idx].ceilingTemp     = v; }
-        if (!doc["FloorTemp"].isNull())       { float v = doc["FloorTemp"];          if (v >= -20.0f && v <= 50.0f)   g_fermenters[idx].floorTemp       = v; }
+        // Validated numeric fields — validateFermenterField() owns all ranges
+        const char* valErr;
+        char valJson[128];
+        #define VALIDATE_AND_SET(jsonKey, valKey, member, cast) \
+          if (!doc[#jsonKey].isNull()) { \
+            float v = doc[#jsonKey]; \
+            if (!validateFermenterField(idx, valKey, v, &valErr)) { \
+              snprintf(valJson, sizeof(valJson), "{\"status\":\"error\",\"msg\":\"%s\"}", valErr); \
+              sendJsonResponse(server, valJson, 400); return; \
+            } \
+            g_fermenters[idx].member = (cast)v; \
+          }
+        VALIDATE_AND_SET(CeilingTemp,     "ceiling_temperature", ceilingTemp,     float)
+        VALIDATE_AND_SET(FloorTemp,       "floor_temperature",   floorTemp,       float)
+        VALIDATE_AND_SET(Hysteresis,      "hysteresis",          hysteresis,      float)
+        VALIDATE_AND_SET(CompressorDelay, "compressor_delay",    compressorDelay, uint16_t)
+        VALIDATE_AND_SET(OG,              "og",                  og,              float)
+        VALIDATE_AND_SET(TG,              "tg",                  tg,              float)
+        #undef VALIDATE_AND_SET
+
         if (!doc["Power"].isNull())           g_fermenters[idx].power           = doc["Power"];
         if (!doc["TempControl"].isNull())     g_fermenters[idx].tempControl     = doc["TempControl"];
         if (!doc["BeerName"].isNull())        strlcpy(g_fermenters[idx].beerName,      doc["BeerName"],      sizeof(g_fermenters[0].beerName));
         if (!doc["FermenterName"].isNull())   strlcpy(g_fermenters[idx].fermenterName, doc["FermenterName"], sizeof(g_fermenters[0].fermenterName));
         if (!doc["YeastName"].isNull())       strlcpy(g_fermenters[idx].yeastName,     doc["YeastName"],     sizeof(g_fermenters[0].yeastName));
-        if (!doc["Hysteresis"].isNull())      { float v = doc["Hysteresis"];         if (v >= 0.0f && v <= 10.0f)     g_fermenters[idx].hysteresis      = v; }
-        if (!doc["CompressorDelay"].isNull()) { uint16_t v = doc["CompressorDelay"]; if (v <= 1440)                   g_fermenters[idx].compressorDelay = v; }
         if (!doc["BrewServices"].isNull())    g_fermenters[idx].brewServices    = doc["BrewServices"];
-        if (!doc["OG"].isNull())              g_fermenters[idx].og              = doc["OG"];
-        if (!doc["TG"].isNull())              g_fermenters[idx].tg              = doc["TG"];
-        if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"];            if (v >= 0 && v <= MAX_PROFILES) g_fermenters[idx].profileNo       = (uint8_t)v; }
+        if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"]; if (v >= 0 && v <= MAX_PROFILES) g_fermenters[idx].profileNo = (uint8_t)v; }
         if (!doc["LiveTest"].isNull())        g_fermenters[idx].liveTest        = doc["LiveTest"];
-
-        // Validate temperature control settings after applying all values
-        float ceiling    = g_fermenters[idx].ceilingTemp;
-        float floor_     = g_fermenters[idx].floorTemp;
-        float hysteresis = g_fermenters[idx].hysteresis;
-        if (floor_ >= ceiling) {
-          logMsg("[CONFIG] F%d: invalid settings — floor (%.2f) must be below ceiling (%.2f)", idx, floor_, ceiling);
-          sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Floor must be below ceiling\"}"), 400);
-          return;
-        }
-        if ((ceiling - floor_) <= (2.0f * hysteresis)) {
-          logMsg("[CONFIG] F%d: invalid settings — safe zone (%.2f) must be wider than 2x hysteresis (%.2f)", idx, ceiling - floor_, 2.0f * hysteresis);
-          sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Safe zone must be wider than 2x hysteresis\"}"), 400);
-          return;
-        }
 
         saveFermenterConfig();
         sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Configuration saved\"}"));

@@ -230,9 +230,15 @@ static void publishButtonEntity(JsonDocument& doc,
 static void publishFermenterField(int i, const char* key) {
   char base[96];
   snprintf(base, sizeof(base), "%s/Fermenter%d", g_mqttConfig.baseTopic, i);
-  if      (strcmp(key, "power")           == 0) publishBool(base, "power",           g_fermenters[i].power);
-  else if (strcmp(key, "temp_control")    == 0) publishBool(base, "temp_control",    g_fermenters[i].tempControl);
-  else if (strcmp(key, "profile_running") == 0) publishBool(base, "profile_running", g_fermenters[i].profileRunning);
+  if      (strcmp(key, "power")               == 0) publishBool (base, "power",               g_fermenters[i].power);
+  else if (strcmp(key, "temp_control")        == 0) publishBool (base, "temp_control",         g_fermenters[i].tempControl);
+  else if (strcmp(key, "profile_running")     == 0) publishBool (base, "profile_running",      g_fermenters[i].profileRunning);
+  else if (strcmp(key, "ceiling_temperature") == 0) publishFloat(base, "ceiling_temperature",  g_fermenters[i].ceilingTemp);
+  else if (strcmp(key, "floor_temperature")   == 0) publishFloat(base, "floor_temperature",    g_fermenters[i].floorTemp);
+  else if (strcmp(key, "hysteresis")          == 0) publishFloat(base, "hysteresis",           g_fermenters[i].hysteresis);
+  else if (strcmp(key, "compressor_delay")    == 0) publishInt  (base, "compressor_delay",     g_fermenters[i].compressorDelay);
+  else if (strcmp(key, "og")                  == 0) publishFloat(base, "og",                   g_fermenters[i].og, 4);
+  else if (strcmp(key, "tg")                  == 0) publishFloat(base, "tg",                   g_fermenters[i].tg, 4);
 }
 
 // Publish HA discovery entity configs for the device itself (not per-fermenter).
@@ -314,38 +320,52 @@ static void publishHaDiscovery(int i) {
     "beer_temperature_source", "Beer Temperature Source", "beer_temperature_source", nullptr, nullptr, "mdi:information-outline", nullptr, nullptr);
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "ambient_temperature", "Ambient Temperature", "ambient_temperature", "temperature", tempUnit, nullptr,           nullptr, "measurement");
+  // Setpoint numbers — always number entities; device ignores commands when allowControl is off,
+  // and the 60s state publish corrects any HA UI changes within one interval
+  publishNumberEntity(doc, devId, fermBase, fermLabel,
+    "ceiling_temperature", "Ceiling Temperature",
+    "ceiling_temperature", "ceiling_temperature/set",
+    -20.0f, 50.0f, 0.1f, tempUnit, "temperature");
+  publishNumberEntity(doc, devId, fermBase, fermLabel,
+    "floor_temperature", "Floor Temperature",
+    "floor_temperature", "floor_temperature/set",
+    -20.0f, 50.0f, 0.1f, tempUnit, "temperature");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "ceiling_temperature", "Ceiling Temperature", "ceiling_temperature", "temperature", tempUnit, nullptr,           nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "floor_temperature",   "Floor Temperature",   "floor_temperature",   "temperature", tempUnit, nullptr,           nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "temperature_unit",    "Temperature Unit",    "temperature_unit",    nullptr,       nullptr,  "mdi:thermometer", nullptr, nullptr);
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "hysteresis",          "Hysteresis",          "hysteresis",          nullptr,       tempUnit, nullptr,           nullptr, "measurement");
+    "temperature_unit", "Temperature Unit", "temperature_unit", nullptr, nullptr, "mdi:thermometer", nullptr, nullptr);
+  publishNumberEntity(doc, devId, fermBase, fermLabel,
+    "hysteresis", "Hysteresis",
+    "hysteresis", "hysteresis/set",
+    0.0f, 10.0f, 0.1f, tempUnit);
+  publishNumberEntity(doc, devId, fermBase, fermLabel,
+    "compressor_delay", "Compressor Delay",
+    "compressor_delay", "compressor_delay/set",
+    0.0f, 1440.0f, 1.0f, "min", nullptr, "mdi:timer-outline");
 
-  // Gravity sensors — numeric
+  // Gravity sensors — read-only numeric sensors
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "gravity",     "Gravity",     "gravity",     nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "gravity_source", "Gravity Source", "gravity_source", nullptr, nullptr, "mdi:information-outline", nullptr, nullptr);
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "og",          "OG",          "og",          nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "tg",          "TG",          "tg",          nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
+  publishNumberEntity(doc, devId, fermBase, fermLabel,
+    "og", "OG",
+    "og", "og/set",
+    0.990f, 1.200f, 0.001f, "SG", nullptr, "mdi:test-tube");
+  publishNumberEntity(doc, devId, fermBase, fermLabel,
+    "tg", "TG",
+    "tg", "tg/set",
+    0.990f, 1.200f, 0.001f, "SG", nullptr, "mdi:test-tube");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "attenuation", "Attenuation", "attenuation", nullptr, "%",  "mdi:percent",   nullptr, "measurement");
 
   // Status and info — text, no state_class
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "status",           "Status",           "status",           nullptr, nullptr, "mdi:thermometer",   nullptr, nullptr);
+    "status",    "Status",    "status",    nullptr, nullptr, "mdi:thermometer", nullptr, nullptr);
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "name",             "Name",             "name",             nullptr, nullptr, "mdi:label",         nullptr, nullptr);
+    "name",      "Name",      "name",      nullptr, nullptr, "mdi:label",       nullptr, nullptr);
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "beer_name",        "Beer Name",        "beer_name",        nullptr, nullptr, "mdi:beer",          nullptr, nullptr);
+    "beer_name", "Beer Name", "beer_name", nullptr, nullptr, "mdi:beer",        nullptr, nullptr);
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "yeast",            "Yeast",            "yeast",            nullptr, nullptr, "mdi:flask",         nullptr, nullptr);
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "compressor_delay", "Compressor Delay", "compressor_delay", nullptr, "min",   "mdi:timer-outline", nullptr, "measurement");
+    "yeast",     "Yeast",     "yeast",     nullptr, nullptr, "mdi:flask",       nullptr, nullptr);
 
   // ON/OFF state — always switches; device ignores commands when allowControl is off
   // and the 60s state publish corrects any HA UI changes within one interval
@@ -418,10 +438,18 @@ static void removeHaDiscovery(int i) {
   removeOneEntity("sensor", devId, "profile_step");
   removeOneEntity("sensor", devId, "profile_steps");
 
-  // Switch versions (present when allowControl was enabled)
+  // Switch versions (present from Patch 3+)
   removeOneEntity("switch", devId, "power");
   removeOneEntity("switch", devId, "temp_control");
   removeOneEntity("switch", devId, "profile_running");
+
+  // Number versions (present from Patch 4+)
+  removeOneEntity("number", devId, "ceiling_temperature");
+  removeOneEntity("number", devId, "floor_temperature");
+  removeOneEntity("number", devId, "hysteresis");
+  removeOneEntity("number", devId, "compressor_delay");
+  removeOneEntity("number", devId, "og");
+  removeOneEntity("number", devId, "tg");
 
   logMsg("[MQTT] HA discovery removed for F%d", i);
 }
@@ -536,6 +564,24 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
   } else if (strcmp(key, "profile_running") == 0) {
     if (on) startProfile(idx, g_fermenters[idx].profileNo);
     else    stopProfile(idx);
+  } else if (strcmp(key, "ceiling_temperature") == 0 ||
+             strcmp(key, "floor_temperature")   == 0 ||
+             strcmp(key, "hysteresis")          == 0 ||
+             strcmp(key, "compressor_delay")    == 0 ||
+             strcmp(key, "og")                  == 0 ||
+             strcmp(key, "tg")                  == 0) {
+    const char* errMsg;
+    float v = atof(pl);
+    if (!validateFermenterField(idx, key, v, &errMsg)) {
+      logMsg("[MQTT] cmd rejected (%s): %s", key, errMsg);
+      return;
+    }
+    if      (strcmp(key, "ceiling_temperature") == 0) g_fermenters[idx].ceilingTemp     = v;
+    else if (strcmp(key, "floor_temperature")   == 0) g_fermenters[idx].floorTemp       = v;
+    else if (strcmp(key, "hysteresis")          == 0) g_fermenters[idx].hysteresis      = v;
+    else if (strcmp(key, "compressor_delay")    == 0) g_fermenters[idx].compressorDelay = (uint16_t)v;
+    else if (strcmp(key, "og")                  == 0) g_fermenters[idx].og              = v;
+    else if (strcmp(key, "tg")                  == 0) g_fermenters[idx].tg              = v;
   } else {
     return;  // unknown key — ignore silently
   }
