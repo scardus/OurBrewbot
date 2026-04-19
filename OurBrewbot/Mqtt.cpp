@@ -65,7 +65,45 @@ static void publishBool(const char* base, const char* key, bool value) {
 // HOME ASSISTANT DISCOVERY
 // ============================================================
 
-// Build and publish a single HA entity discovery config.
+// Fill common HA discovery fields (uniq_id, name, stat_t, avty_t, exp_aft, dev).
+static void buildDiscoveryBase(JsonDocument& doc,
+    const char* devId, const char* base, const char* devName,
+    const char* objectId, const char* friendlyName,
+    const char* stKey, const char* icon)
+{
+  char uid[56], stTopic[96];
+  snprintf(uid,     sizeof(uid),     "%s_%s", devId, objectId);
+  snprintf(stTopic, sizeof(stTopic), "%s/%s", base,  stKey);
+  doc["uniq_id"] = uid;
+  doc["name"]    = friendlyName;
+  doc["stat_t"]  = stTopic;
+  if (icon && icon[0]) doc["ic"] = icon;
+  doc["avty_t"]  = s_availTopic;
+  doc["exp_aft"] = 180;
+  JsonObject dev = doc["dev"].to<JsonObject>();
+  JsonArray  ids = dev["ids"].to<JsonArray>();
+  ids.add(devId);
+  dev["name"] = devName;
+  dev["mf"]   = "OurBrewbot";
+  dev["mdl"]  = "ESP8266";
+  dev["sw"]   = FW_VERSION;
+}
+
+// Serialize doc to the entity's discovery topic, publish retained, clear doc, yield.
+static void publishAndReset(JsonDocument& doc,
+    const char* component, const char* devId, const char* objectId)
+{
+  char discTopic[128];
+  snprintf(discTopic, sizeof(discTopic), "homeassistant/%s/%s/%s/config",
+    component, devId, objectId);
+  String payload;
+  serializeJson(doc, payload);
+  g_mqtt.publish(discTopic, payload.c_str(), true);
+  doc.clear();
+  yield();  // feed WDT between successive publishes
+}
+
+// Build and publish a single HA sensor/binary_sensor entity discovery config.
 // Reuses the caller's JsonDocument (caller must call doc.clear() between calls).
 static void publishOneEntity(
     JsonDocument& doc,
@@ -82,37 +120,107 @@ static void publishOneEntity(
     const char* entityCat,      // entity_category ("diagnostic"), nullptr/""=omit
     const char* stateClass      // state_class ("measurement"), nullptr/""=omit
 ) {
-  char uid[56], stTopic[96], discTopic[128];
-  snprintf(uid,       sizeof(uid),       "%s_%s",  devId, objectId);
-  snprintf(stTopic,   sizeof(stTopic),   "%s/%s",  fermBase, stKey);
-  snprintf(discTopic, sizeof(discTopic), "homeassistant/%s/%s/%s/config",
-    component, devId, objectId);
-
-  doc["uniq_id"] = uid;
-  doc["name"]    = name;
-  doc["stat_t"]  = stTopic;
+  buildDiscoveryBase(doc, devId, fermBase, fermName, objectId, name, stKey, icon);
   if (devClass   && devClass[0])   doc["dev_cla"]      = devClass;
   if (unit       && unit[0])       doc["unit_of_meas"] = unit;
-  if (icon       && icon[0])       doc["ic"]           = icon;
   if (entityCat  && entityCat[0])  doc["ent_cat"]      = entityCat;
   if (stateClass && stateClass[0]) doc["stat_cla"]     = stateClass;
-  doc["avty_t"]  = s_availTopic;
-  doc["exp_aft"] = 180;   // entity goes unavailable after 3× the 60 s publish interval
+  publishAndReset(doc, component, devId, objectId);
+}
 
-  // ArduinoJson 7 API for nested objects
+// HA switch entity (ON/OFF command).
+static void publishSwitchEntity(JsonDocument& doc,
+    const char* devId, const char* base, const char* devName,
+    const char* objectId, const char* name,
+    const char* stKey, const char* cmdKey,
+    const char* icon = nullptr)
+{
+  buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
+  char cmdTopic[96];
+  snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
+  doc["cmd_t"]  = cmdTopic;
+  doc["pl_on"]  = "ON";   // pl_on / pl_off are HA abbreviated names for payload_on / payload_off
+  doc["pl_off"] = "OFF";
+  publishAndReset(doc, "switch", devId, objectId);
+}
+
+// HA number entity (numeric slider/input).
+static void publishNumberEntity(JsonDocument& doc,
+    const char* devId, const char* base, const char* devName,
+    const char* objectId, const char* name,
+    const char* stKey, const char* cmdKey,
+    float minVal, float maxVal, float step,
+    const char* unit = nullptr, const char* devClass = nullptr,
+    const char* icon = nullptr)
+{
+  buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
+  char cmdTopic[96];
+  snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
+  doc["cmd_t"] = cmdTopic;
+  doc["min"]   = minVal;
+  doc["max"]   = maxVal;
+  doc["step"]  = step;
+  doc["mode"]  = "box";
+  if (unit     && unit[0])     doc["unit_of_meas"] = unit;
+  if (devClass && devClass[0]) doc["dev_cla"]      = devClass;
+  publishAndReset(doc, "number", devId, objectId);
+}
+
+// HA select entity (dropdown from fixed options list).
+static void publishSelectEntity(JsonDocument& doc,
+    const char* devId, const char* base, const char* devName,
+    const char* objectId, const char* name,
+    const char* stKey, const char* cmdKey,
+    const char** options, int optCount,
+    const char* icon = nullptr)
+{
+  buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
+  char cmdTopic[96];
+  snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
+  doc["cmd_t"] = cmdTopic;
+  JsonArray opts = doc["ops"].to<JsonArray>();
+  for (int i = 0; i < optCount; i++) opts.add(options[i]);
+  publishAndReset(doc, "select", devId, objectId);
+}
+
+// HA text entity (free-text input).
+static void publishTextEntity(JsonDocument& doc,
+    const char* devId, const char* base, const char* devName,
+    const char* objectId, const char* name,
+    const char* stKey, const char* cmdKey,
+    int maxLen = 31, const char* icon = nullptr)
+{
+  buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
+  char cmdTopic[96];
+  snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
+  doc["cmd_t"] = cmdTopic;
+  doc["max"]   = maxLen;
+  publishAndReset(doc, "text", devId, objectId);
+}
+
+// HA button entity (press-only, no state topic).
+static void publishButtonEntity(JsonDocument& doc,
+    const char* devId, const char* base, const char* devName,
+    const char* objectId, const char* name,
+    const char* cmdKey, const char* icon = nullptr)
+{
+  char uid[56], cmdTopic[96];
+  snprintf(uid,      sizeof(uid),      "%s_%s", devId, objectId);
+  snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base,  cmdKey);
+  doc["uniq_id"] = uid;
+  doc["name"]    = name;
+  doc["cmd_t"]   = cmdTopic;
+  doc["pl_prs"]  = "1";
+  if (icon && icon[0]) doc["ic"] = icon;
+  doc["avty_t"]  = s_availTopic;
   JsonObject dev = doc["dev"].to<JsonObject>();
   JsonArray  ids = dev["ids"].to<JsonArray>();
   ids.add(devId);
-  dev["name"] = fermName;
+  dev["name"] = devName;
   dev["mf"]   = "OurBrewbot";
   dev["mdl"]  = "ESP8266";
   dev["sw"]   = FW_VERSION;
-
-  String payload;
-  serializeJson(doc, payload);
-  g_mqtt.publish(discTopic, payload.c_str(), true);
-  doc.clear();
-  yield();  // feed WDT between successive publishes
+  publishAndReset(doc, "button", devId, objectId);
 }
 
 // Publish HA discovery entity configs for the device itself (not per-fermenter).
@@ -174,7 +282,7 @@ static void publishHaDiscovery(int i) {
   snprintf(devId,     sizeof(devId),     "ourbrewbot_%06X_f%d", ESP.getChipId(), i);
   snprintf(fermBase,  sizeof(fermBase),  "%s/Fermenter%d", g_mqttConfig.baseTopic, i);
   snprintf(fermLabel, sizeof(fermLabel), "OurBrewbot F%d", i);  // stable — not user-editable name
-  const char* tempUnit = (g_globalConfig.unit == UNIT_CELSIUS) ? "\xC2\xB0""C" : "\xC2\xB0""F";  // °C / °F
+  const char* tempUnit = "\xC2\xB0""C";
 
   JsonDocument doc;
 
@@ -342,12 +450,31 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
   if (strcmp(topic, "homeassistant/status") == 0 &&
       length >= 6 && memcmp(payload, "online", 6) == 0) {
     publishAllHaDiscovery();
+    return;
   }
+  // Command dispatch — Patch 3 will fill this in
+  if (!g_mqttConfig.allowControl) return;
 }
 
 // ============================================================
 // CONNECT
 // ============================================================
+
+// Subscribe or unsubscribe the command wildcard based on current allowControl state.
+// Safe to call on an already-connected client — used both at connect-time and when
+// the setting is toggled at runtime via the admin UI.
+void mqttApplyControlSubscription() {
+  if (!g_mqtt.connected()) return;
+  char cmdWildcard[48];
+  snprintf(cmdWildcard, sizeof(cmdWildcard), "%s/+/+/set", g_mqttConfig.baseTopic);
+  if (g_mqttConfig.allowControl) {
+    g_mqtt.subscribe(cmdWildcard);
+    logMsg("[MQTT] Subscribed to commands: %s/+/+/set", g_mqttConfig.baseTopic);
+  } else {
+    g_mqtt.unsubscribe(cmdWildcard);
+    logMsg("[MQTT] Unsubscribed from commands: %s/+/+/set", g_mqttConfig.baseTopic);
+  }
+}
 
 static bool mqttConnect() {
   if (!g_mqttConfig.enabled) return false;
@@ -370,7 +497,7 @@ static bool mqttConnect() {
   snprintf(s_availTopic, sizeof(s_availTopic), "%s/availability", g_mqttConfig.baseTopic);
 
   // Always set buffer and callback here (in case initMqtt() was skipped when MQTT was disabled at boot)
-  g_mqtt.setBufferSize(700);
+  g_mqtt.setBufferSize(1024);
   g_mqtt.setCallback(mqttMessageCallback);
 
   bool ok;
@@ -396,6 +523,9 @@ static bool mqttConnect() {
 
     // Subscribe to HA birth message to re-publish discovery after HA restarts
     g_mqtt.subscribe("homeassistant/status");
+
+    // Subscribe/unsubscribe command wildcard based on current allowControl state
+    mqttApplyControlSubscription();
 
     // Publish discovery configs for all MQTT-enabled fermenters
     if (g_mqttConfig.haDiscovery) {
@@ -449,7 +579,7 @@ void initMqtt() {
   if (!g_mqttConfig.enabled) return;
   g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
   g_mqtt.setCallback(mqttMessageCallback);
-  g_mqtt.setBufferSize(700);  // discovery payloads are ~500 bytes; default 256 is too small
+  g_mqtt.setBufferSize(1024);  // writable-entity discovery payloads can reach ~900 bytes; measure in testing
   logMsg("[MQTT] Configured: %s:%d base=%s ha_discovery=%s",
     g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.baseTopic,
     g_mqttConfig.haDiscovery ? "on" : "off");
@@ -524,14 +654,14 @@ void reportMqtt() {
     float beerTemp    = getBeerTemp(i);
     float ambientTemp = getAmbientTemp(i);
     float sg          = getCurrentSG(i);
-    const char* unit  = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
+    const char* unit  = "C";
 
     // Temperatures
     if (beerTemp > -100.0f)
-      publishFloat(base, "beer_temperature", toDisplayTemp(beerTemp));
+      publishFloat(base, "beer_temperature", beerTemp);
     publishValue(base, "beer_temperature_source", getBeerTempSource(i));
     if (ambientTemp > -100.0f)
-      publishFloat(base, "ambient_temperature", toDisplayTemp(ambientTemp));
+      publishFloat(base, "ambient_temperature", ambientTemp);
     publishFloat(base, "ceiling_temperature", g_fermenters[i].ceilingTemp);
     publishFloat(base, "floor_temperature", g_fermenters[i].floorTemp);
     publishValue(base, "temperature_unit", unit);

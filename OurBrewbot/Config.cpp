@@ -708,9 +708,10 @@ bool loadMqttConfig() {
     initDefaultMqttConfig();
     return false;
   }
-  g_mqttConfig.enabled     = doc["enabled"]     | false;
-  g_mqttConfig.haDiscovery = doc["haDiscovery"] | false;
-  g_mqttConfig.port        = doc["port"]        | 1883;
+  g_mqttConfig.enabled      = doc["enabled"]      | false;
+  g_mqttConfig.haDiscovery  = doc["haDiscovery"]  | false;
+  g_mqttConfig.allowControl = doc["allowControl"] | false;
+  g_mqttConfig.port         = doc["port"]         | 1883;
   strlcpy(g_mqttConfig.host,      doc["host"]      | "", sizeof(g_mqttConfig.host));
   strlcpy(g_mqttConfig.username,  doc["username"]  | "", sizeof(g_mqttConfig.username));
   strlcpy(g_mqttConfig.password,  doc["password"]  | "", sizeof(g_mqttConfig.password));
@@ -720,9 +721,10 @@ bool loadMqttConfig() {
 
 bool saveMqttConfig() {
   JsonDocument doc;
-  doc["enabled"]     = (bool)g_mqttConfig.enabled;
-  doc["haDiscovery"] = (bool)g_mqttConfig.haDiscovery;
-  doc["host"]        = g_mqttConfig.host;
+  doc["enabled"]      = (bool)g_mqttConfig.enabled;
+  doc["haDiscovery"]  = (bool)g_mqttConfig.haDiscovery;
+  doc["allowControl"] = (bool)g_mqttConfig.allowControl;
+  doc["host"]         = g_mqttConfig.host;
   doc["port"]        = g_mqttConfig.port;
   doc["username"]    = g_mqttConfig.username;
   doc["password"]    = g_mqttConfig.password;
@@ -916,9 +918,10 @@ void initDefaultBrewServiceConfig() {
 }
 
 void initDefaultMqttConfig() {
-  g_mqttConfig.enabled     = false;
-  g_mqttConfig.haDiscovery = false;
-  g_mqttConfig.port        = 1883;
+  g_mqttConfig.enabled      = false;
+  g_mqttConfig.haDiscovery  = false;
+  g_mqttConfig.allowControl = false;
+  g_mqttConfig.port         = 1883;
   g_mqttConfig.host[0]     = '\0';
   g_mqttConfig.username[0] = '\0';
   g_mqttConfig.password[0] = '\0';

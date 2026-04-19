@@ -1128,9 +1128,10 @@ void handleBrewServiceTest(ESP8266WebServer& server) {
 
 void handleMqttConfig(ESP8266WebServer& server) {
   JsonDocument doc;
-  doc["enabled"]     = g_mqttConfig.enabled;
-  doc["haDiscovery"] = g_mqttConfig.haDiscovery;
-  doc["host"]        = g_mqttConfig.host;
+  doc["enabled"]      = g_mqttConfig.enabled;
+  doc["haDiscovery"]  = g_mqttConfig.haDiscovery;
+  doc["allowControl"] = g_mqttConfig.allowControl;
+  doc["host"]         = g_mqttConfig.host;
   doc["port"]        = g_mqttConfig.port;
   doc["username"]    = g_mqttConfig.username;
   doc["password"]    = g_mqttConfig.password;
@@ -1156,6 +1157,10 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
     bool newHa = doc["haDiscovery"];
     if (g_mqttConfig.haDiscovery && !newHa) cleanupAllHaDiscovery();
     g_mqttConfig.haDiscovery = newHa;
+  }
+  if (!doc["allowControl"].isNull()) {
+    g_mqttConfig.allowControl = doc["allowControl"];
+    mqttApplyControlSubscription();  // takes effect immediately on live connection
   }
   saveMqttConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"MQTT config saved\"}"));

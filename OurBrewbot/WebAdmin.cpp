@@ -380,6 +380,7 @@ h+='<div class="row"><label>Username</label><input type="text" id="mquser" value
 h+='<div class="row"><label>Password</label><input type="password" id="mqpass" value="'+(mq.password||'')+'" style="width:180px"></div>';
 h+='<div class="row"><label>Base Topic</label><input type="text" id="mqtopic" value="'+(mq.baseTopic||'ourbrewbot')+'" style="width:180px"></div>';
 h+='<div class="row"><label>HA Discovery</label>'+sw('mqha',mq.haDiscovery||false)+'</div>';
+h+='<div class="row"><label>Allow HA Control</label>'+sw('mqctl',mq.allowControl||false)+'</div>';
 h+='<button class="save" onclick="saveMqtt()">Save</button> ';
 h+='<button class="test" onclick="testMqtt()">Test</button> ';
 h+='<button class="test" onclick="discoverMqtt()">Discover</button> ';
@@ -469,7 +470,7 @@ fetch('/brewservices/test',{method:'POST',headers:{'Content-Type':'application/j
 .catch(function(e){msg('svm'+s,'Error: '+e,false)})}
 
 function saveMqtt(){
-var body={enabled:$('mqen').checked,host:$('mqhost').value,port:parseInt($('mqport').value),username:$('mquser').value,password:$('mqpass').value,baseTopic:$('mqtopic').value,haDiscovery:$('mqha').checked};
+var body={enabled:$('mqen').checked,host:$('mqhost').value,port:parseInt($('mqport').value),username:$('mquser').value,password:$('mqpass').value,baseTopic:$('mqtopic').value,haDiscovery:$('mqha').checked,allowControl:$('mqctl').checked};
 fetch('/mqtt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
 .then(function(r){return r.json()}).then(function(d){msg('mqm',d.msg,d.status=='ok');dirty=false})
 .catch(function(e){msg('mqm','Error: '+e,false)})}
