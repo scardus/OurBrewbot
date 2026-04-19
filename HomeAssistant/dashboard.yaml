@@ -274,7 +274,29 @@ views:
             icon_color: teal
           - type: custom:mushroom-template-card
             primary: Est. ABV
-            secondary: '{{ states(''sensor.ourbrewbot_f0_est_abv'') }} %'
+            secondary: >-
+              {% set og = states('sensor.ourbrewbot_f0_og') | float(0) %}
+              {% set cg = states('sensor.ourbrewbot_f0_gravity') | float(0) %}
+              {% set temp = states('sensor.ourbrewbot_f0_beer_temperature') | float(0) %}
+              {% set unit = states('sensor.ourbrewbot_f0_temperature_unit') | replace('°', '') | upper %}
+              
+              {% if og > 0 and cg > 0 %}
+                {# Convert temp to Fahrenheit for the correction equation #}
+                {% set t = (temp * 1.8) + 32 if unit == 'C' else temp %}
+                
+                {# Hydrometer calibration temperature (change to 60.0 if yours is calibrated to 60°F) #}
+                {% set c = 68.0 %}
+                
+                {# Standard specific gravity temperature correction formula #}
+                {% set num = 1.00130346 - (0.000134722124 * t) + (0.00000204052596 * (t**2)) - (0.00000000232820948 * (t**3)) %}
+                {% set den = 1.00130346 - (0.000134722124 * c) + (0.00000204052596 * (c**2)) - (0.00000000232820948 * (c**3)) %}
+                {% set cg_corrected = cg * (num / den) %}
+                
+                {% set abv = ((og - cg_corrected) * 131.25) | round(2) %}
+                {{ abv if abv > 0 else 0.0 }} %
+              {% else %}
+                0.0 %
+              {% endif %}
             icon: mdi:beer
             icon_color: amber
           - type: custom:mushroom-template-card
@@ -388,7 +410,7 @@ views:
                       step: day
               legend:
                 x: 0
-                y: -0.8
+                y: -0.5
             autorange_after_scroll: true
           - type: custom:mushroom-template-card
             primary: Status
@@ -477,7 +499,29 @@ views:
             icon_color: teal
           - type: custom:mushroom-template-card
             primary: Est. ABV
-            secondary: '{{ states(''sensor.ourbrewbot_f1_est_abv'') }} %'
+            secondary: >-
+              {% set og = states('sensor.ourbrewbot_f1_og') | float(0) %}
+              {% set cg = states('sensor.ourbrewbot_f1_gravity') | float(0) %}
+              {% set temp = states('sensor.ourbrewbot_f1_beer_temperature') | float(0) %}
+              {% set unit = states('sensor.ourbrewbot_f1_temperature_unit') | replace('°', '') | upper %}
+              
+              {% if og > 0 and cg > 0 %}
+                {# Convert temp to Fahrenheit for the correction equation #}
+                {% set t = (temp * 1.8) + 32 if unit == 'C' else temp %}
+                
+                {# Hydrometer calibration temperature (change to 60.0 if yours is calibrated to 60°F) #}
+                {% set c = 68.0 %}
+                
+                {# Standard specific gravity temperature correction formula #}
+                {% set num = 1.00130346 - (0.000134722124 * t) + (0.00000204052596 * (t**2)) - (0.00000000232820948 * (t**3)) %}
+                {% set den = 1.00130346 - (0.000134722124 * c) + (0.00000204052596 * (c**2)) - (0.00000000232820948 * (c**3)) %}
+                {% set cg_corrected = cg * (num / den) %}
+                
+                {% set abv = ((og - cg_corrected) * 131.25) | round(2) %}
+                {{ abv if abv > 0 else 0.0 }} %
+              {% else %}
+                0.0 %
+              {% endif %}
             icon: mdi:beer
             icon_color: amber
           - type: custom:mushroom-template-card
@@ -591,7 +635,7 @@ views:
                       step: day
               legend:
                 x: 0
-                y: -0.8
+                y: -0.5
             autorange_after_scroll: true
           - type: custom:mushroom-template-card
             primary: Status
@@ -680,7 +724,29 @@ views:
             icon_color: teal
           - type: custom:mushroom-template-card
             primary: Est. ABV
-            secondary: '{{ states(''sensor.ourbrewbot_f2_est_abv'') }} %'
+            secondary: >-
+              {% set og = states('sensor.ourbrewbot_f2_og') | float(0) %}
+              {% set cg = states('sensor.ourbrewbot_f2_gravity') | float(0) %}
+              {% set temp = states('sensor.ourbrewbot_f2_beer_temperature') | float(0) %}
+              {% set unit = states('sensor.ourbrewbot_f2_temperature_unit') | replace('°', '') | upper %}
+              
+              {% if og > 0 and cg > 0 %}
+                {# Convert temp to Fahrenheit for the correction equation #}
+                {% set t = (temp * 1.8) + 32 if unit == 'C' else temp %}
+                
+                {# Hydrometer calibration temperature (change to 60.0 if yours is calibrated to 60°F) #}
+                {% set c = 68.0 %}
+                
+                {# Standard specific gravity temperature correction formula #}
+                {% set num = 1.00130346 - (0.000134722124 * t) + (0.00000204052596 * (t**2)) - (0.00000000232820948 * (t**3)) %}
+                {% set den = 1.00130346 - (0.000134722124 * c) + (0.00000204052596 * (c**2)) - (0.00000000232820948 * (c**3)) %}
+                {% set cg_corrected = cg * (num / den) %}
+                
+                {% set abv = ((og - cg_corrected) * 131.25) | round(2) %}
+                {{ abv if abv > 0 else 0.0 }} %
+              {% else %}
+                0.0 %
+              {% endif %}
             icon: mdi:beer
             icon_color: amber
           - type: custom:mushroom-template-card
@@ -794,7 +860,7 @@ views:
                       step: day
               legend:
                 x: 0
-                y: -0.8
+                y: -0.5
             autorange_after_scroll: true
           - type: custom:mushroom-template-card
             primary: Status
@@ -883,7 +949,29 @@ views:
             icon_color: teal
           - type: custom:mushroom-template-card
             primary: Est. ABV
-            secondary: '{{ states(''sensor.ourbrewbot_f3_est_abv'') }} %'
+            secondary: >-
+              {% set og = states('sensor.ourbrewbot_f3_og') | float(0) %}
+              {% set cg = states('sensor.ourbrewbot_f3_gravity') | float(0) %}
+              {% set temp = states('sensor.ourbrewbot_f3_beer_temperature') | float(0) %}
+              {% set unit = states('sensor.ourbrewbot_f3_temperature_unit') | replace('°', '') | upper %}
+              
+              {% if og > 0 and cg > 0 %}
+                {# Convert temp to Fahrenheit for the correction equation #}
+                {% set t = (temp * 1.8) + 32 if unit == 'C' else temp %}
+                
+                {# Hydrometer calibration temperature (change to 60.0 if yours is calibrated to 60°F) #}
+                {% set c = 68.0 %}
+                
+                {# Standard specific gravity temperature correction formula #}
+                {% set num = 1.00130346 - (0.000134722124 * t) + (0.00000204052596 * (t**2)) - (0.00000000232820948 * (t**3)) %}
+                {% set den = 1.00130346 - (0.000134722124 * c) + (0.00000204052596 * (c**2)) - (0.00000000232820948 * (c**3)) %}
+                {% set cg_corrected = cg * (num / den) %}
+                
+                {% set abv = ((og - cg_corrected) * 131.25) | round(2) %}
+                {{ abv if abv > 0 else 0.0 }} %
+              {% else %}
+                0.0 %
+              {% endif %}
             icon: mdi:beer
             icon_color: amber
           - type: custom:mushroom-template-card
