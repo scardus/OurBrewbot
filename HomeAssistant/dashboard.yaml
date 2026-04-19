@@ -137,6 +137,10 @@ views:
                 filters:
                   - force_numeric
             entities:
+              - entity: sensor.ourbrewbot_f0_ceiling_temperature
+                name: Ceiling
+              - entity: sensor.ourbrewbot_f0_floor_temperature
+                name: Floor
               - entity: sensor.ourbrewbot_f0_beer_temperature
                 name: Beer Temp
                 line:
@@ -147,19 +151,15 @@ views:
                 line:
                   width: 1
                   shape: spline
-              - entity: sensor.ourbrewbot_f0_ceiling_temperature
-                name: Ceiling
-              - entity: sensor.ourbrewbot_f0_floor_temperature
-                name: Floor
+              - entity: sensor.ourbrewbot_f0_tg
+                name: TG
+              - entity: sensor.ourbrewbot_f0_og
+                name: OG
               - entity: sensor.ourbrewbot_f0_gravity
                 name: SG
                 line:
                   width: 1
                   shape: spline
-              - entity: sensor.ourbrewbot_f0_tg
-                name: TG
-              - entity: sensor.ourbrewbot_f0_og
-                name: OG
             hours_to_show: 72
             refresh_interval: 10
             layout:
@@ -185,7 +185,7 @@ views:
                       step: day
               legend:
                 x: 0
-                y: -0.8
+                y: -0.5
             autorange_after_scroll: true
           - type: custom:mushroom-template-card
             primary: Status
@@ -340,6 +340,10 @@ views:
                 filters:
                 - force_numeric
             entities:
+              - entity: sensor.ourbrewbot_f1_ceiling_temperature
+                name: Ceiling
+              - entity: sensor.ourbrewbot_f1_floor_temperature
+                name: Floor
               - entity: sensor.ourbrewbot_f1_beer_temperature
                 name: Beer Temp
                 line:
@@ -350,19 +354,15 @@ views:
                 line:
                   width: 1
                   shape: spline
-              - entity: sensor.ourbrewbot_f1_ceiling_temperature
-                name: Ceiling
-              - entity: sensor.ourbrewbot_f1_floor_temperature
-                name: Floor
+              - entity: sensor.ourbrewbot_f1_tg
+                name: TG
+              - entity: sensor.ourbrewbot_f1_og
+                name: OG
               - entity: sensor.ourbrewbot_f1_gravity
                 name: SG
                 line:
                   width: 1
                   shape: spline
-              - entity: sensor.ourbrewbot_f1_tg
-                name: TG
-              - entity: sensor.ourbrewbot_f1_og
-                name: OG
             hours_to_show: 72
             refresh_interval: 10
             layout:
@@ -543,6 +543,10 @@ views:
                 filters:
                 - force_numeric
             entities:
+              - entity: sensor.ourbrewbot_f2_ceiling_temperature
+                name: Ceiling
+              - entity: sensor.ourbrewbot_f2_floor_temperature
+                name: Floor
               - entity: sensor.ourbrewbot_f2_beer_temperature
                 name: Beer Temp
                 line:
@@ -553,19 +557,15 @@ views:
                 line:
                   width: 1
                   shape: spline
-              - entity: sensor.ourbrewbot_f2_ceiling_temperature
-                name: Ceiling
-              - entity: sensor.ourbrewbot_f2_floor_temperature
-                name: Floor
+              - entity: sensor.ourbrewbot_f2_tg
+                name: TG
+              - entity: sensor.ourbrewbot_f2_og
+                name: OG
               - entity: sensor.ourbrewbot_f2_gravity
                 name: SG
                 line:
                   width: 1
                   shape: spline
-              - entity: sensor.ourbrewbot_f2_tg
-                name: TG
-              - entity: sensor.ourbrewbot_f2_og
-                name: OG
             hours_to_show: 72
             refresh_interval: 10
             layout:
@@ -746,6 +746,10 @@ views:
                 filters:
                 - force_numeric
             entities:
+              - entity: sensor.ourbrewbot_f3_ceiling_temperature
+                name: Ceiling
+              - entity: sensor.ourbrewbot_f3_floor_temperature
+                name: Floor
               - entity: sensor.ourbrewbot_f3_beer_temperature
                 name: Beer Temp
                 line:
@@ -756,19 +760,15 @@ views:
                 line:
                   width: 1
                   shape: spline
-              - entity: sensor.ourbrewbot_f3_ceiling_temperature
-                name: Ceiling
-              - entity: sensor.ourbrewbot_f3_floor_temperature
-                name: Floor
+              - entity: sensor.ourbrewbot_f3_tg
+                name: TG
+              - entity: sensor.ourbrewbot_f3_og
+                name: OG
               - entity: sensor.ourbrewbot_f3_gravity
                 name: SG
                 line:
                   width: 1
                   shape: spline
-              - entity: sensor.ourbrewbot_f3_tg
-                name: TG
-              - entity: sensor.ourbrewbot_f3_og
-                name: OG
             hours_to_show: 72
             refresh_interval: 10
             layout:
