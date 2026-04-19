@@ -26,11 +26,13 @@
 
 extern String g_rebootReason;  // captured at boot in OurBrewbot.ino
 
-static WiFiClient   g_mqttWifi;
-static PubSubClient g_mqtt(g_mqttWifi);
-static bool         g_mqttWasConnected = false;
-static unsigned long g_mqttLastAttempt  = 0;
-static unsigned long g_mqttBackoffMs    = 5000;   // start at 5s, doubles on failure
+static WiFiClient    g_mqttWifi;
+static PubSubClient  g_mqtt(g_mqttWifi);
+static bool          g_mqttWasConnected  = false;
+static unsigned long g_mqttLastAttempt   = 0;
+static unsigned long g_mqttBackoffMs     = 5000;  // start at 5s, doubles on failure
+static bool          g_mqttPendingSave   = false;
+static unsigned long g_mqttPendingSaveAt = 0;
 #define MQTT_MAX_BACKOFF_MS  300000               // cap at 5 minutes
 
 // ============================================================
@@ -223,6 +225,16 @@ static void publishButtonEntity(JsonDocument& doc,
   publishAndReset(doc, "button", devId, objectId);
 }
 
+// Echo a single fermenter field immediately after processing a /set command,
+// so HA shows confirmed state without waiting for the 60 s periodic publish.
+static void publishFermenterField(int i, const char* key) {
+  char base[96];
+  snprintf(base, sizeof(base), "%s/Fermenter%d", g_mqttConfig.baseTopic, i);
+  if      (strcmp(key, "power")           == 0) publishBool(base, "power",           g_fermenters[i].power);
+  else if (strcmp(key, "temp_control")    == 0) publishBool(base, "temp_control",    g_fermenters[i].tempControl);
+  else if (strcmp(key, "profile_running") == 0) publishBool(base, "profile_running", g_fermenters[i].profileRunning);
+}
+
 // Publish HA discovery entity configs for the device itself (not per-fermenter).
 // Uses device ID ourbrewbot_{CHIPID} and base topic {baseTopic}/Device.
 static void publishDeviceDiscovery() {
@@ -269,6 +281,13 @@ static void publishDeviceDiscovery() {
   publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
     "reboot_code", "Reboot Code", "reboot_code",
     nullptr, nullptr, "mdi:restart-alert", "diagnostic", "measurement");
+
+  // Device control buttons — always advertised; ignored by device when allowControl is off,
+  // state topic publishes correct device state within 60s regardless
+  publishButtonEntity(doc, devId, devBase, "OurBrewbot",
+    "reboot",  "Reboot",  "reboot/set",  "mdi:restart");
+  publishButtonEntity(doc, devId, devBase, "OurBrewbot",
+    "all_off", "All Off", "all_off/set", "mdi:power-off");
 
   logMsg("[MQTT] HA discovery published for device: base=%s", devBase);
 }
@@ -328,13 +347,14 @@ static void publishHaDiscovery(int i) {
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "compressor_delay", "Compressor Delay", "compressor_delay", nullptr, "min",   "mdi:timer-outline", nullptr, "measurement");
 
-  // ON/OFF state sensors
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "power",           "Power",           "power",           nullptr, nullptr, "mdi:power",       nullptr, nullptr);
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "temp_control",    "Temp Control",    "temp_control",    nullptr, nullptr, "mdi:thermostat",  nullptr, nullptr);
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "profile_running", "Profile Running", "profile_running", nullptr, nullptr, "mdi:play-circle", nullptr, nullptr);
+  // ON/OFF state — always switches; device ignores commands when allowControl is off
+  // and the 60s state publish corrects any HA UI changes within one interval
+  publishSwitchEntity(doc, devId, fermBase, fermLabel,
+    "power",           "Power",           "power",           "power/set",           "mdi:power");
+  publishSwitchEntity(doc, devId, fermBase, fermLabel,
+    "temp_control",    "Temp Control",    "temp_control",    "temp_control/set",    "mdi:thermostat");
+  publishSwitchEntity(doc, devId, fermBase, fermLabel,
+    "profile_running", "Profile Running", "profile_running", "profile_running/set", "mdi:play-circle");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "profile_step",  "Profile Step",  "profile_step",  nullptr, "#", "mdi:counter", nullptr, "measurement");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
@@ -398,6 +418,11 @@ static void removeHaDiscovery(int i) {
   removeOneEntity("sensor", devId, "profile_step");
   removeOneEntity("sensor", devId, "profile_steps");
 
+  // Switch versions (present when allowControl was enabled)
+  removeOneEntity("switch", devId, "power");
+  removeOneEntity("switch", devId, "temp_control");
+  removeOneEntity("switch", devId, "profile_running");
+
   logMsg("[MQTT] HA discovery removed for F%d", i);
 }
 
@@ -416,6 +441,8 @@ static void removeDeviceDiscovery() {
   removeOneEntity("sensor", devId, "chip_id");
   removeOneEntity("sensor", devId, "reboot_reason");
   removeOneEntity("sensor", devId, "reboot_code");
+  removeOneEntity("button", devId, "reboot");
+  removeOneEntity("button", devId, "all_off");
   logMsg("[MQTT] HA discovery removed for device");
 }
 
@@ -452,8 +479,70 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
     publishAllHaDiscovery();
     return;
   }
-  // Command dispatch — Patch 3 will fill this in
+  // Command dispatch: <baseTopic>/<scope>/<key>/set
   if (!g_mqttConfig.allowControl) return;
+
+  // Parse scope and key from topic
+  size_t baseLen = strlen(g_mqttConfig.baseTopic);
+  if (strncmp(topic, g_mqttConfig.baseTopic, baseLen) != 0 || topic[baseLen] != '/') return;
+  const char* rest   = topic + baseLen + 1;
+  const char* slash1 = strchr(rest, '/');
+  if (!slash1) return;
+  char scope[16];
+  size_t scopeLen = slash1 - rest;
+  if (scopeLen == 0 || scopeLen >= sizeof(scope)) return;
+  memcpy(scope, rest, scopeLen);
+  scope[scopeLen] = '\0';
+
+  const char* keyStart = slash1 + 1;
+  const char* slash2   = strchr(keyStart, '/');
+  if (!slash2 || strcmp(slash2, "/set") != 0) return;
+  char key[32];
+  size_t keyLen = slash2 - keyStart;
+  if (keyLen == 0 || keyLen >= sizeof(key)) return;
+  memcpy(key, keyStart, keyLen);
+  key[keyLen] = '\0';
+
+  // Copy payload (not null-terminated in PubSubClient callback)
+  char pl[48];
+  size_t n = length < sizeof(pl) - 1 ? length : sizeof(pl) - 1;
+  memcpy(pl, payload, n);
+  pl[n] = '\0';
+
+  logMsg("[MQTT] cmd scope=%s key=%s pl=%s", scope, key, pl);
+
+  // Device-scope commands
+  if (strcmp(scope, "Device") == 0) {
+    if (strcmp(key, "reboot") == 0) {
+      recordReboot("MQTT command");
+      ESP.restart();
+    } else if (strcmp(key, "all_off") == 0) {
+      switchOffAll();
+    }
+    return;
+  }
+
+  // Fermenter-scope commands: scope = "FermenterN"
+  if (strncmp(scope, "Fermenter", 9) != 0) return;
+  int idx = atoi(scope + 9);
+  if (idx < 0 || idx >= MAX_FERMENTERS) return;
+
+  bool on = (strcmp(pl, "ON") == 0);
+
+  if (strcmp(key, "power") == 0) {
+    setFermenterPower(idx, on);
+  } else if (strcmp(key, "temp_control") == 0) {
+    g_fermenters[idx].tempControl = on;
+  } else if (strcmp(key, "profile_running") == 0) {
+    if (on) startProfile(idx, g_fermenters[idx].profileNo);
+    else    stopProfile(idx);
+  } else {
+    return;  // unknown key — ignore silently
+  }
+
+  g_mqttPendingSave   = true;
+  g_mqttPendingSaveAt = millis();
+  publishFermenterField(idx, key);
 }
 
 // ============================================================
@@ -474,6 +563,7 @@ void mqttApplyControlSubscription() {
     g_mqtt.unsubscribe(cmdWildcard);
     logMsg("[MQTT] Unsubscribed from commands: %s/+/+/set", g_mqttConfig.baseTopic);
   }
+
 }
 
 static bool mqttConnect() {
@@ -569,6 +659,18 @@ bool forcePublishAllHaDiscovery() {
     publishHaDiscovery(i);
   }
   return true;
+}
+
+// ============================================================
+// DEFERRED SAVE — called from main loop, not from within the callback
+// ============================================================
+
+void mqttPendingSaveCheck() {
+  if (!g_mqttPendingSave) return;
+  if (millis() - g_mqttPendingSaveAt < 3000) return;
+  saveFermenterConfig();
+  g_mqttPendingSave = false;
+  logMsg("[MQTT] Deferred config save complete");
 }
 
 // ============================================================

@@ -14,6 +14,7 @@ void initMqtt();
 void mqttLoop();
 void reportMqtt();
 void mqttApplyControlSubscription(); // subscribe or unsubscribe command wildcard based on allowControl
+void mqttPendingSaveCheck();          // call from main loop — writes deferred config save after MQTT commands
 bool testMqtt();
 void publishAllHaDiscovery();        // publish HA discovery for all MQTT-enabled fermenters (requires haDiscovery=true)
 bool forcePublishAllHaDiscovery();   // same but ignores haDiscovery flag, connects if needed (for manual/button trigger)

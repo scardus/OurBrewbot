@@ -194,6 +194,7 @@ void loop() {
   checkBLESniffTimeout();
   MDNS.update();
   mqttLoop();
+  mqttPendingSaveCheck();
 
   // LED: double-blink every 5s when WiFi connected, fast-flash when disconnected (active low)
   if (WiFi.isConnected()) {
