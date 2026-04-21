@@ -314,6 +314,11 @@ struct iSpindelConfig {
   float    temperature;         // current temp reading
   float    battery;             // battery voltage
   int8_t   rssi;                // WiFi signal strength
+  float    angle;               // tilt angle in degrees
+  float    velocity;            // gravity velocity (rate of change per day)
+  float    corrGravity;         // temperature-corrected gravity
+  float    runTime;             // per-wake cycle duration: wake-up to report sent (seconds)
+  char     gravityUnit[4];      // unit string from device ("SG", "G", "P")
 };
 
 // ============================================================

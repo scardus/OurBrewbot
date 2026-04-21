@@ -612,6 +612,11 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["temperature"] = toDisplayTemp(g_iSpindels[i].temperature);
     s["battery"]     = g_iSpindels[i].battery;
     s["rssi"]        = g_iSpindels[i].rssi;
+    s["angle"]       = g_iSpindels[i].angle;
+    s["velocity"]    = g_iSpindels[i].velocity;
+    s["corrGravity"] = g_iSpindels[i].corrGravity;
+    s["runTime"]     = g_iSpindels[i].runTime;
+    s["gravityUnit"] = g_iSpindels[i].gravityUnit;
   }
   String out;
   serializeJson(doc, out);
@@ -642,10 +647,15 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     g_iSpindels[idx].collectData = false;
     g_iSpindels[idx].fermenter   = PROBE_UNASSIGNED;
     g_iSpindels[idx].unit        = 0;
-    g_iSpindels[idx].sg          = 0.0f;
-    g_iSpindels[idx].temperature = 0.0f;
-    g_iSpindels[idx].battery     = 0.0f;
-    g_iSpindels[idx].rssi        = 0;
+    g_iSpindels[idx].sg             = 0.0f;
+    g_iSpindels[idx].temperature    = 0.0f;
+    g_iSpindels[idx].battery        = 0.0f;
+    g_iSpindels[idx].rssi           = 0;
+    g_iSpindels[idx].angle          = 0.0f;
+    g_iSpindels[idx].velocity       = 0.0f;
+    g_iSpindels[idx].corrGravity    = 0.0f;
+    g_iSpindels[idx].runTime        = 0.0f;
+    g_iSpindels[idx].gravityUnit[0] = '\0';
     saveiSpindelConfig();
     sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"iSpindel slot cleared\"}"));
     return;

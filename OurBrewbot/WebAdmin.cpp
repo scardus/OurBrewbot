@@ -569,7 +569,7 @@ if(hasData&&!empty)h+=' <span class="badge badge-idle">Active</span>';
 h+='</h3>';
 if(!empty){
 h+='<div class="live">';
-if(hasData)h+='SG: '+s.sg.toFixed(4)+' &nbsp; Temp: '+s.temperature.toFixed(1)+'&deg; &nbsp; Batt: '+s.battery.toFixed(2)+'V &nbsp; RSSI: '+s.rssi+'dBm';
+if(hasData){h+='SG: '+s.sg.toFixed(4)+' &nbsp; Temp: '+s.temperature.toFixed(1)+'&deg; &nbsp; Angle: '+s.angle.toFixed(1)+'&deg; &nbsp; Batt: '+s.battery.toFixed(2)+'V &nbsp; RSSI: '+s.rssi+'dBm';if(s.corrGravity>0||s.velocity>0){h+='<br>Corr.SG: '+s.corrGravity.toFixed(4)+' &nbsp; Velocity: '+s.velocity.toFixed(4)+' &nbsp; Cycle: '+s.runTime.toFixed(1)+'s'+(s.gravityUnit?' &nbsp; Unit: '+s.gravityUnit:'');}}
 h+='</div>';
 h+='<div class="row"><label>Device ID</label><span style="color:#53d8fb;font-size:13px">'+(s.id||'—')+'</span></div>';
 }

@@ -24,12 +24,19 @@ void handleiSpindelPost(const String& body) {
     return;
   }
 
-  const char* name    = doc["name"]        | "";
-  uint32_t    id      = doc["ID"]          | 0;
-  float       temp    = doc["temperature"] | 0.0f;
-  float       sg      = doc["gravity"]     | 0.0f;
-  float       battery = doc["battery"]     | 0.0f;
-  int         rssi    = doc["RSSI"]        | 0;
+  const char* name        = doc["name"]         | "";
+  uint32_t    id          = doc["ID"]           | 0;
+  float       temp        = doc["temperature"]  | 0.0f;
+  const char* tempUnits   = doc["temp_units"]   | "";
+  uint32_t    interval    = doc["interval"]     | 0;
+  float       sg          = doc["gravity"]      | 0.0f;
+  float       battery     = doc["battery"]      | 0.0f;
+  int         rssi        = doc["RSSI"]         | 0;
+  float       angle       = doc["angle"]        | 0.0f;
+  float       velocity    = doc["velocity"]     | 0.0f;
+  float       corrGravity = doc["corr-gravity"] | 0.0f;
+  float       runTime     = doc["run-time"]     | 0.0f;
+  const char* gravityUnit = doc["gravity-unit"] | "";
 
   // Match by device ID first (primary key), then by name as fallback
   int matched = -1;
@@ -59,6 +66,11 @@ void handleiSpindelPost(const String& body) {
     g_iSpindels[matched].temperature = temp;
     g_iSpindels[matched].battery     = battery;
     g_iSpindels[matched].rssi        = rssi;
+    g_iSpindels[matched].angle       = angle;
+    g_iSpindels[matched].velocity    = velocity;
+    g_iSpindels[matched].corrGravity = corrGravity;
+    g_iSpindels[matched].runTime     = runTime;
+    strlcpy(g_iSpindels[matched].gravityUnit, gravityUnit, sizeof(g_iSpindels[matched].gravityUnit));
 
     // Sync name/ID if changed
     bool configChanged = false;
@@ -72,8 +84,8 @@ void handleiSpindelPost(const String& body) {
     }
     if (configChanged) saveiSpindelConfig();
 
-    logMsg("[ISPINDEL] Slot %d (%s): SG=%.4f T=%.1f Batt=%.2fV RSSI=%d",
-      matched, g_iSpindels[matched].name, sg, temp, battery, rssi);
+    logMsg("[ISPINDEL] Slot %d (%s) ID:%u SG=%.4f Corr=%.4f Unit=%s T=%.1f%s Angle=%.1f Vel=%.4f Batt=%.2fV RSSI=%d Interval=%us Runtime=%.1fs",
+      matched, g_iSpindels[matched].name, id, sg, corrGravity, gravityUnit, temp, tempUnits, angle, velocity, battery, rssi, interval, runTime);
     return;
   }
 
@@ -87,6 +99,11 @@ void handleiSpindelPost(const String& body) {
       g_iSpindels[i].temperature = temp;
       g_iSpindels[i].battery     = battery;
       g_iSpindels[i].rssi        = rssi;
+      g_iSpindels[i].angle       = angle;
+      g_iSpindels[i].velocity    = velocity;
+      g_iSpindels[i].corrGravity = corrGravity;
+      g_iSpindels[i].runTime     = runTime;
+      strlcpy(g_iSpindels[i].gravityUnit, gravityUnit, sizeof(g_iSpindels[i].gravityUnit));
       g_iSpindels[i].collectData = true;
       logMsg("[ISPINDEL] Registered %s (ID:%u) in slot %d", name, id, i);
       saveiSpindelConfig();
