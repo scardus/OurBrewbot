@@ -23,6 +23,15 @@ void processFermenters() {
       // Fermenter off — ensure all its plugs are off
       setFermenterPlugs(i, false, false);
       g_fermenters[i].status = STATUS_IDLE;
+      s_state[i] = STATUS_IDLE;
+      continue;
+    }
+    if (!g_fermenters[i].tempControl) {
+      // Temp control paused — plugs off but fermenter still watches for alarms
+      setFermenterPlugs(i, false, false);
+      g_fermenters[i].status = STATUS_IDLE;
+      s_state[i] = STATUS_IDLE;
+      checkFermenterAlarm(i);
       continue;
     }
     processSingleFermenter(i);
