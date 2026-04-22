@@ -25,7 +25,8 @@ void handleiSpindelPost(const String& body) {
   }
 
   const char* name        = doc["name"]         | "";
-  uint32_t    id          = doc["ID"]           | 0;
+  String      idStr       = doc["ID"].as<String>();
+  const char* id          = idStr.c_str();
   float       temp        = doc["temperature"]  | 0.0f;
   const char* tempUnits   = doc["temp_units"]   | "";
   uint32_t    interval    = doc["interval"]     | 0;
@@ -41,7 +42,7 @@ void handleiSpindelPost(const String& body) {
   // Match by device ID first (primary key), then by name as fallback
   int matched = -1;
   for (int i = 0; i < MAX_ISPINDELS; i++) {
-    if (id > 0 && g_iSpindels[i].id == id) {
+    if (strlen(id) > 0 && strcmp(g_iSpindels[i].id, id) == 0) {
       matched = i;
       break;
     }
@@ -74,8 +75,8 @@ void handleiSpindelPost(const String& body) {
 
     // Sync name/ID if changed
     bool configChanged = false;
-    if (id > 0 && g_iSpindels[matched].id != id) {
-      g_iSpindels[matched].id = id;
+    if (strlen(id) > 0 && strcmp(g_iSpindels[matched].id, id) != 0) {
+      strlcpy(g_iSpindels[matched].id, id, sizeof(g_iSpindels[matched].id));
       configChanged = true;
     }
     if (strlen(name) > 0 && strcmp(g_iSpindels[matched].name, name) != 0) {
@@ -84,7 +85,7 @@ void handleiSpindelPost(const String& body) {
     }
     if (configChanged) saveiSpindelConfig();
 
-    logMsg("[ISPINDEL] Slot %d (%s) ID:%u SG=%.4f Corr=%.4f Unit=%s T=%.1f%s Angle=%.1f Vel=%.4f Batt=%.2fV RSSI=%d Interval=%us Runtime=%.1fs",
+    logMsg("[ISPINDEL] Slot %d (%s) ID:%s SG=%.4f Corr=%.4f Unit=%s T=%.1f%s Angle=%.1f Vel=%.4f Batt=%.2fV RSSI=%d Interval=%us Runtime=%.1fs",
       matched, g_iSpindels[matched].name, id, sg, corrGravity, gravityUnit, temp, tempUnits, angle, velocity, battery, rssi, interval, runTime);
     return;
   }
@@ -94,7 +95,7 @@ void handleiSpindelPost(const String& body) {
     if (strcmp(g_iSpindels[i].name, "None") == 0 || strlen(g_iSpindels[i].name) == 0) {
       // At registration unit is unknown — store raw value, user sets unit via admin tab
       strlcpy(g_iSpindels[i].name, name, sizeof(g_iSpindels[i].name));
-      g_iSpindels[i].id          = id;
+      strlcpy(g_iSpindels[i].id, id, sizeof(g_iSpindels[i].id));
       g_iSpindels[i].sg          = sg;
       g_iSpindels[i].temperature = temp;
       g_iSpindels[i].battery     = battery;
@@ -105,11 +106,11 @@ void handleiSpindelPost(const String& body) {
       g_iSpindels[i].runTime     = runTime;
       strlcpy(g_iSpindels[i].gravityUnit, gravityUnit, sizeof(g_iSpindels[i].gravityUnit));
       g_iSpindels[i].collectData = true;
-      logMsg("[ISPINDEL] Registered %s (ID:%u) in slot %d", name, id, i);
+      logMsg("[ISPINDEL] Registered %s (ID:%s) in slot %d", name, id, i);
       saveiSpindelConfig();
       return;
     }
   }
 
-  logMsg("[ISPINDEL] Ignored %s (ID:%u) - no free slots", name, id);
+  logMsg("[ISPINDEL] Ignored %s (ID:%s) - no free slots", name, id);
 }

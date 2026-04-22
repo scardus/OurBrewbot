@@ -305,7 +305,7 @@ struct TiltConfig {
 // ============================================================
 struct iSpindelConfig {
   char     name[24];            // device name (e.g. "None" when unregistered)
-  uint32_t id;                  // device ID
+  char     id[16];              // device ID string (hex, e.g. "9b5c5e")
   bool     collectData;         // collect data from this device
   uint8_t  fermenter;           // assigned fermenter
   uint8_t  unit;                // unit: 0=SG, 1=Plato

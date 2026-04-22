@@ -589,7 +589,9 @@ void handleOTAUpload(ESP8266WebServer& server) {
 // ============================================================
 
 void handleiSpindel(ESP8266WebServer& server) {
-  handleiSpindelPost(server.arg("plain"));
+  String body = server.arg("plain");
+  logMsg("[ISPINDEL] Raw payload: %s", body.c_str());
+  handleiSpindelPost(body);
   sendJsonResponse(server, F("{\"status\":\"ok\"}"));
 }
 
@@ -643,7 +645,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
 
   if (doc["_clear"] | false) {
     strlcpy(g_iSpindels[idx].name, "None", sizeof(g_iSpindels[idx].name));
-    g_iSpindels[idx].id          = 0;
+    g_iSpindels[idx].id[0]       = '\0';
     g_iSpindels[idx].collectData = false;
     g_iSpindels[idx].fermenter   = PROBE_UNASSIGNED;
     g_iSpindels[idx].unit        = 0;

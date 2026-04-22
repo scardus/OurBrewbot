@@ -496,7 +496,7 @@ bool loadiSpindelConfig() {
   }
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     strlcpy(g_iSpindels[i].name, doc["iSpindelName"][i] | "None", sizeof(g_iSpindels[i].name));
-    g_iSpindels[i].id          = doc["ID"][i]                  | 0;
+    strlcpy(g_iSpindels[i].id, doc["ID"][i] | "", sizeof(g_iSpindels[i].id));
     g_iSpindels[i].collectData = doc["iSpindelCollectData"][i] | false;
     g_iSpindels[i].fermenter   = doc["iSpindelFermenter"][i]   | PROBE_UNASSIGNED;
     g_iSpindels[i].unit        = doc["Unit"][i]                | 1;
@@ -895,7 +895,7 @@ void initDefaultTiltConfig() {
 void initDefaultiSpindelConfig() {
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     strlcpy(g_iSpindels[i].name, "None", sizeof(g_iSpindels[i].name));
-    g_iSpindels[i].id          = 0;
+    g_iSpindels[i].id[0]       = '\0';
     g_iSpindels[i].collectData = false;
     g_iSpindels[i].fermenter   = (i == 0) ? 0 : PROBE_UNASSIGNED;
     g_iSpindels[i].unit        = (i == 0) ? 1 : 0;
