@@ -16,11 +16,15 @@ views:
                 content: '{{ states(''sensor.ourbrewbot_firmware_version'') }}'
                 icon: mdi:tag
                 icon_color: grey
+                tap_action:
+                  action: none
               - type: template
                 entity: sensor.ourbrewbot_ip_address
                 content: '{{ states(''sensor.ourbrewbot_ip_address'') }}'
                 icon: mdi:ip-network
                 icon_color: grey
+                tap_action:
+                  action: none
               - type: template
                 entity: sensor.ourbrewbot_uptime
                 content: >
@@ -33,6 +37,8 @@ views:
                   {% endif %}
                 icon: mdi:clock-outline
                 icon_color: grey
+                tap_action:
+                  action: none
               - type: template
                 entity: sensor.ourbrewbot_rssi
                 content: '{{ states(''sensor.ourbrewbot_rssi'') }} dBm'
@@ -43,12 +49,16 @@ views:
                   {% elif r > -75 %} orange
                   {% else %} red
                   {% endif %}
+                tap_action:
+                  action: none
               - type: template
                 entity: sensor.ourbrewbot_free_heap
                 content: >
                   {{ (states('sensor.ourbrewbot_free_heap') | int(0) / 1024) | round(1) }} KB
                 icon: mdi:memory
                 icon_color: grey
+                tap_action:
+                  action: none
             grid_options:
               columns: full
             alignment: center
@@ -66,6 +76,8 @@ views:
                   {% elif s == 'alarm' %} red
                   {% else %} green
                   {% endif %}
+                tap_action:
+                  action: none
               - type: template
                 entity: sensor.ourbrewbot_f1_status
                 content: >
@@ -78,6 +90,8 @@ views:
                   {% elif s == 'alarm' %} red
                   {% else %} green
                   {% endif %}
+                tap_action:
+                  action: none
               - type: template
                 entity: sensor.ourbrewbot_f2_status
                 content: >
@@ -90,6 +104,8 @@ views:
                   {% elif s == 'alarm' %} red
                   {% else %} green
                   {% endif %}
+                tap_action:
+                  action: none
               - type: template
                 entity: sensor.ourbrewbot_f3_status
                 content: >
@@ -102,6 +118,8 @@ views:
                   {% elif s == 'alarm' %} red
                   {% else %} green
                   {% endif %}
+                tap_action:
+                  action: none
             grid_options:
               columns: full
             alignment: center
