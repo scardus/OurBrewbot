@@ -589,9 +589,7 @@ void handleOTAUpload(ESP8266WebServer& server) {
 // ============================================================
 
 void handleiSpindel(ESP8266WebServer& server) {
-  String body = server.arg("plain");
-  logMsg("[ISPINDEL] Raw payload: %s", body.c_str());
-  handleiSpindelPost(body);
+  handleiSpindelPost(server.arg("plain"));
   sendJsonResponse(server, F("{\"status\":\"ok\"}"));
 }
 
