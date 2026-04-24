@@ -161,11 +161,15 @@ views:
                 name: Floor
               - entity: sensor.ourbrewbot_f0_beer_temperature
                 name: Beer Temp
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
               - entity: sensor.ourbrewbot_f0_ambient_temperature
                 name: Fridge Temp
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
@@ -175,6 +179,8 @@ views:
                 name: OG
               - entity: sensor.ourbrewbot_f0_gravity
                 name: SG
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
@@ -427,11 +433,15 @@ views:
                 name: Floor
               - entity: sensor.ourbrewbot_f1_beer_temperature
                 name: Beer Temp
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
               - entity: sensor.ourbrewbot_f1_ambient_temperature
                 name: Fridge Temp
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
@@ -441,6 +451,8 @@ views:
                 name: OG
               - entity: sensor.ourbrewbot_f1_gravity
                 name: SG
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
@@ -693,11 +705,15 @@ views:
                 name: Floor
               - entity: sensor.ourbrewbot_f2_beer_temperature
                 name: Beer Temp
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
               - entity: sensor.ourbrewbot_f2_ambient_temperature
                 name: Fridge Temp
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
@@ -707,6 +723,8 @@ views:
                 name: OG
               - entity: sensor.ourbrewbot_f2_gravity
                 name: SG
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
@@ -959,11 +977,15 @@ views:
                 name: Floor
               - entity: sensor.ourbrewbot_f3_beer_temperature
                 name: Beer Temp
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
               - entity: sensor.ourbrewbot_f3_ambient_temperature
                 name: Fridge Temp
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
@@ -973,6 +995,8 @@ views:
                 name: OG
               - entity: sensor.ourbrewbot_f3_gravity
                 name: SG
+                statistic: mean
+                period: auto
                 line:
                   width: 1
                   shape: spline
