@@ -15,7 +15,6 @@
  */
 
 #include <Arduino.h>
-#include <WiFiUDP.h>
 
 // Syslog severity levels (RFC 5424)
 #define SYSLOG_EMERG   0
