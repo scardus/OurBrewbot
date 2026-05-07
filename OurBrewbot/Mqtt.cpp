@@ -138,7 +138,7 @@ static void publishSwitchEntity(JsonDocument& doc,
     const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[96];
+  char cmdTopic[128];
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"]  = cmdTopic;
   doc["pl_on"]  = "ON";   // pl_on / pl_off are HA abbreviated names for payload_on / payload_off
@@ -156,7 +156,7 @@ static void publishNumberEntity(JsonDocument& doc,
     const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[96];
+  char cmdTopic[128];
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"] = cmdTopic;
   doc["min"]   = minVal;
@@ -177,7 +177,7 @@ static void publishSelectEntity(JsonDocument& doc,
     const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[96];
+  char cmdTopic[128];
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"] = cmdTopic;
   JsonArray opts = doc["ops"].to<JsonArray>();
@@ -193,7 +193,7 @@ static void publishTextEntity(JsonDocument& doc,
     int maxLen = 31, const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[96];
+  char cmdTopic[128];
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"] = cmdTopic;
   doc["max"]   = maxLen;
