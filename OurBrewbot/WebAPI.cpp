@@ -667,6 +667,12 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
   if (!doc["fermenter"].isNull())   { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_iSpindels[idx].fermenter = v; }
   if (!doc["unit"].isNull())        g_iSpindels[idx].unit        = doc["unit"];
   if (!doc["function"].isNull())    { uint8_t v = doc["function"]; g_iSpindels[idx].function = (v == PROBE_FN_BEER) ? PROBE_FN_BEER : PROBE_UNASSIGNED; }
+  // Normalize collectData from fermenter when client didn't send it explicitly.
+  // Lets the UI omit the toggle entirely; legacy 'collectData=false + fermenter assigned'
+  // configs self-heal on first UI save. External scripts that POST collectData win.
+  if (doc["collectData"].isNull() && !doc["fermenter"].isNull()) {
+    g_iSpindels[idx].collectData = (g_iSpindels[idx].fermenter != PROBE_UNASSIGNED);
+  }
   saveiSpindelConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"iSpindel updated\"}"));
 }
