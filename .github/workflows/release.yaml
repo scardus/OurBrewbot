@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # needed to fetch full tag history
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Get previous tag
+        run: |
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
+          echo "PREVIOUS_TAG=${PREVIOUS_TAG}" >> $GITHUB_ENV
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Rename firmware binary
+        run: cp .pio/build/nodemcuv2/firmware.bin OurBrewbot_${{ github.ref_name }}.bin
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: OurBrewbot ${{ github.ref_name }}
+          body: |
+            ## OurBrewbot ${{ github.ref_name }}
+            See the [README](https://github.com/scardus/OurBrewbot/blob/main/README.md) for more information.
+
+            **Full changelog:** https://github.com/scardus/OurBrewbot/compare/${{ env.PREVIOUS_TAG }}...${{ github.ref_name }}
+          files: OurBrewbot_${{ github.ref_name }}.bin
