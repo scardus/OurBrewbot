@@ -1,27 +1,50 @@
 name: PlatformIO CI
 
-on: [push]
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
 
 jobs:
-  build:
+  analysis:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
           key: ${{ runner.os }}-pio
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+      - name: Run static analysis
+        run: pio check --fail-on-defect=high
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
-
-      - name: Run static analysis
-        run: pio check
-        
       - name: Build firmware
         run: pio run
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: .pio/build/nodemcuv2/firmware.bin
+          retention-days: 7
