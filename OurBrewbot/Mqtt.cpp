@@ -19,10 +19,23 @@
 #include "Fermenter.h"
 #include "Temperatures.h"
 #include "Profile.h"
+#include "Tilt.h"
 #include "Version.h"
 #include "Log.h"
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
+
+static const char* probeFunctionName(uint8_t fn) {
+  switch (fn) {
+    case PROBE_FN_BEER:     return "beer";
+    case PROBE_FN_AMBIENT:  return "ambient";
+    case PROBE_FN_TILT:     return "tilt";
+    case PROBE_FN_ISPINDEL: return "ispindel";
+    case PROBE_FN_AIR:      return "air";
+    case PROBE_FN_CONTROL:  return "control";
+    default:                return "unassigned";
+  }
+}
 
 extern String g_rebootReason;  // captured at boot in OurBrewbot.ino
 
@@ -365,6 +378,10 @@ static void publishHaDiscovery(int i) {
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "status", "Status", "status", nullptr, nullptr, "mdi:thermometer", nullptr, nullptr);
 
+  // Alarm — over/under temperature beyond tolerance
+  publishOneEntity(doc, "binary_sensor", devId, fermBase, fermLabel,
+    "alarm", "Alarm", "alarm", "problem", nullptr, "mdi:alarm-light", nullptr, nullptr);
+
   // Text fields — always text entities; device ignores commands when allowControl is off
   publishTextEntity(doc, devId, fermBase, fermLabel,
     "name",      "Name",      "name",      "name/set",      31, "mdi:label");
@@ -393,6 +410,170 @@ static void publishHaDiscovery(int i) {
     "profile_steps", "Profile Steps", "profile_steps", nullptr, "#", "mdi:counter", nullptr, "measurement");
 
   logMsg("[MQTT] HA discovery published for F%d: base=%s", i, fermBase);
+}
+
+// Publish HA discovery for one Probe slot. Skips empty / unconfigured slots.
+static void publishProbeDiscovery(int idx) {
+  if (!g_mqtt.connected()) return;
+  if (strlen(g_probes[idx].address) == 0) return;
+
+  const char* tempUnit = "\xC2\xB0""C";
+  char devId[48], base[96], devName[48];
+  snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X_probe_%s",
+    ESP.getChipId(), g_probes[idx].address);
+  snprintf(base,    sizeof(base),    "%s/Probe/%s",
+    g_mqttConfig.baseTopic, g_probes[idx].address);
+  snprintf(devName, sizeof(devName), "OurBrewbot Probe %s",
+    strlen(g_probes[idx].probeName) > 0 ? g_probes[idx].probeName : g_probes[idx].address);
+
+  JsonDocument doc;
+  publishOneEntity(doc, "binary_sensor", devId, base, devName,
+    "active", "Active", "active",
+    "connectivity", nullptr, nullptr, "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "temperature", "Temperature", "temperature",
+    "temperature", tempUnit, nullptr, nullptr, "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "name", "Name", "name",
+    nullptr, nullptr, "mdi:label", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "function", "Function", "function",
+    nullptr, nullptr, "mdi:function-variant", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "fermenter", "Fermenter", "fermenter",
+    nullptr, nullptr, "mdi:tank", "diagnostic", nullptr);
+
+  logMsg("[MQTT] HA discovery published for probe %s", g_probes[idx].address);
+}
+
+// Publish HA discovery for one Tilt colour slot. Skips unconfigured colours.
+static void publishTiltDiscovery(int colour) {
+  if (!g_mqtt.connected()) return;
+  if (g_tilts[colour].colour == PROBE_UNASSIGNED) return;
+
+  const char* tempUnit = "\xC2\xB0""C";
+  const char* colourName = getTiltColourName(colour);
+  char devId[48], base[96], devName[48];
+  snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X_tilt_%s",
+    ESP.getChipId(), colourName);
+  snprintf(base,    sizeof(base),    "%s/Tilt/%s",
+    g_mqttConfig.baseTopic, colourName);
+  snprintf(devName, sizeof(devName), "OurBrewbot Tilt %s", colourName);
+
+  JsonDocument doc;
+  publishOneEntity(doc, "binary_sensor", devId, base, devName,
+    "active", "Active", "active",
+    "connectivity", nullptr, nullptr, "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "temperature", "Temperature", "temperature",
+    "temperature", tempUnit, nullptr, nullptr, "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "gravity", "Gravity", "gravity",
+    nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
+  publishOneEntity(doc, "binary_sensor", devId, base, devName,
+    "is_pro", "Tilt Pro", "is_pro",
+    nullptr, nullptr, "mdi:bluetooth", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "fermenter", "Fermenter", "fermenter",
+    nullptr, nullptr, "mdi:tank", "diagnostic", nullptr);
+
+  logMsg("[MQTT] HA discovery published for tilt %s", colourName);
+}
+
+// Publish HA discovery for one iSpindel slot. Skips empty / "None" slots.
+static void publishIspindelDiscovery(int idx) {
+  if (!g_mqtt.connected()) return;
+  if (strlen(g_iSpindels[idx].id) == 0) return;
+  if (strcmp(g_iSpindels[idx].name, "None") == 0) return;
+
+  const char* tempUnit = "\xC2\xB0""C";
+  char devId[48], base[96], devName[48];
+  snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X_ispindel_%s",
+    ESP.getChipId(), g_iSpindels[idx].id);
+  snprintf(base,    sizeof(base),    "%s/iSpindel/%s",
+    g_mqttConfig.baseTopic, g_iSpindels[idx].id);
+  snprintf(devName, sizeof(devName), "OurBrewbot iSpindel %s",
+    strlen(g_iSpindels[idx].name) > 0 ? g_iSpindels[idx].name : g_iSpindels[idx].id);
+
+  JsonDocument doc;
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "temperature", "Temperature", "temperature",
+    "temperature", tempUnit, nullptr, nullptr, "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "gravity", "Gravity", "gravity",
+    nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "corrected_gravity", "Corrected Gravity", "corrected_gravity",
+    nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "battery", "Battery", "battery",
+    "voltage", "V", nullptr, "diagnostic", "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "rssi", "RSSI", "rssi",
+    "signal_strength", "dBm", nullptr, "diagnostic", "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "angle", "Angle", "angle",
+    nullptr, "\xC2\xB0", "mdi:angle-acute", "diagnostic", "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "velocity", "Velocity", "velocity",
+    nullptr, nullptr, "mdi:speedometer", "diagnostic", "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "run_time", "Run Time", "run_time",
+    "duration", "s", "mdi:timer-outline", "diagnostic", "measurement");
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "name", "Name", "name",
+    nullptr, nullptr, "mdi:label", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "fermenter", "Fermenter", "fermenter",
+    nullptr, nullptr, "mdi:tank", "diagnostic", nullptr);
+
+  logMsg("[MQTT] HA discovery published for ispindel %s", g_iSpindels[idx].id);
+}
+
+static void removeOneEntity(const char* component, const char* devId, const char* objectId);
+
+// Remove HA discovery for one Probe by its OneWire address.
+static void removeProbeDiscovery(const char* address) {
+  if (!g_mqtt.connected()) return;
+  if (strlen(address) == 0) return;
+  char devId[48];
+  snprintf(devId, sizeof(devId), "ourbrewbot_%06X_probe_%s", ESP.getChipId(), address);
+  removeOneEntity("binary_sensor", devId, "active");
+  removeOneEntity("sensor", devId, "temperature");
+  removeOneEntity("sensor", devId, "name");
+  removeOneEntity("sensor", devId, "function");
+  removeOneEntity("sensor", devId, "fermenter");
+}
+
+// Remove HA discovery for one Tilt colour.
+static void removeTiltDiscovery(int colour) {
+  if (!g_mqtt.connected()) return;
+  const char* colourName = getTiltColourName(colour);
+  char devId[48];
+  snprintf(devId, sizeof(devId), "ourbrewbot_%06X_tilt_%s", ESP.getChipId(), colourName);
+  removeOneEntity("binary_sensor", devId, "active");
+  removeOneEntity("sensor", devId, "temperature");
+  removeOneEntity("sensor", devId, "gravity");
+  removeOneEntity("binary_sensor", devId, "is_pro");
+  removeOneEntity("sensor", devId, "fermenter");
+}
+
+// Remove HA discovery for one iSpindel by its hex id.
+static void removeIspindelDiscovery(const char* id) {
+  if (!g_mqtt.connected()) return;
+  if (strlen(id) == 0) return;
+  char devId[48];
+  snprintf(devId, sizeof(devId), "ourbrewbot_%06X_ispindel_%s", ESP.getChipId(), id);
+  removeOneEntity("sensor", devId, "temperature");
+  removeOneEntity("sensor", devId, "gravity");
+  removeOneEntity("sensor", devId, "corrected_gravity");
+  removeOneEntity("sensor", devId, "battery");
+  removeOneEntity("sensor", devId, "rssi");
+  removeOneEntity("sensor", devId, "angle");
+  removeOneEntity("sensor", devId, "velocity");
+  removeOneEntity("sensor", devId, "run_time");
+  removeOneEntity("sensor", devId, "name");
+  removeOneEntity("sensor", devId, "fermenter");
 }
 
 // Remove one HA entity by publishing an empty retained payload to its discovery topic.
@@ -442,6 +623,9 @@ static void removeHaDiscovery(int i) {
   removeOneEntity("binary_sensor", devId, "power");
   removeOneEntity("binary_sensor", devId, "temp_control");
   removeOneEntity("binary_sensor", devId, "profile_running");
+
+  // Alarm binary_sensor (added v0.1.84)
+  removeOneEntity("binary_sensor", devId, "alarm");
 
   // Current sensor versions of ON/OFF entities
   removeOneEntity("sensor", devId, "power");
@@ -505,6 +689,9 @@ void publishAllHaDiscovery() {
       publishHaDiscovery(i);
     }
   }
+  for (int i = 0; i < MAX_PROBES;    i++) publishProbeDiscovery(i);
+  for (int i = 0; i < MAX_TILTS;     i++) publishTiltDiscovery(i);
+  for (int i = 0; i < MAX_ISPINDELS; i++) publishIspindelDiscovery(i);
 }
 
 // Remove all HA discovery entities (called when haDiscovery is disabled).
@@ -513,6 +700,15 @@ void cleanupAllHaDiscovery() {
   removeDeviceDiscovery();
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     removeHaDiscovery(i);
+  }
+  for (int i = 0; i < MAX_PROBES; i++) {
+    if (strlen(g_probes[i].address) > 0) removeProbeDiscovery(g_probes[i].address);
+  }
+  for (int i = 0; i < MAX_TILTS; i++) {
+    if (g_tilts[i].colour != PROBE_UNASSIGNED) removeTiltDiscovery(i);
+  }
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    if (strlen(g_iSpindels[i].id) > 0) removeIspindelDiscovery(g_iSpindels[i].id);
   }
 }
 
@@ -737,6 +933,9 @@ bool forcePublishAllHaDiscovery() {
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     publishHaDiscovery(i);
   }
+  for (int i = 0; i < MAX_PROBES;    i++) publishProbeDiscovery(i);
+  for (int i = 0; i < MAX_TILTS;     i++) publishTiltDiscovery(i);
+  for (int i = 0; i < MAX_ISPINDELS; i++) publishIspindelDiscovery(i);
   return true;
 }
 
@@ -775,6 +974,60 @@ void mqttLoop() {
 // ============================================================
 // REPORT — publish all enabled fermenter data
 // ============================================================
+
+// Publish state for all configured Probes to {baseTopic}/Probe/{address}/{key}.
+static void publishProbes() {
+  char base[96];
+  for (int i = 0; i < MAX_PROBES; i++) {
+    if (strlen(g_probes[i].address) == 0) continue;
+    snprintf(base, sizeof(base), "%s/Probe/%s",
+      g_mqttConfig.baseTopic, g_probes[i].address);
+    publishBool (base, "active",      g_probes[i].failCount < PROBE_FAIL_THRESHOLD);
+    publishFloat(base, "temperature", g_probes[i].temperature);
+    publishValue(base, "name",        g_probes[i].probeName);
+    publishValue(base, "function",    probeFunctionName(g_probes[i].function));
+    publishInt  (base, "fermenter",   g_probes[i].fermenter);
+    yield();
+  }
+}
+
+// Publish state for all configured Tilts to {baseTopic}/Tilt/{Colour}/{key}.
+static void publishTilts() {
+  char base[96];
+  for (int i = 0; i < MAX_TILTS; i++) {
+    if (g_tilts[i].colour == PROBE_UNASSIGNED) continue;
+    snprintf(base, sizeof(base), "%s/Tilt/%s",
+      g_mqttConfig.baseTopic, getTiltColourName(i));
+    publishBool (base, "active",      g_tilts[i].active);
+    publishFloat(base, "temperature", g_tilts[i].temperature);
+    publishFloat(base, "gravity",     g_tilts[i].sg, 4);
+    publishBool (base, "is_pro",      g_tilts[i].isPro);
+    publishInt  (base, "fermenter",   g_tilts[i].fermenter);
+    yield();
+  }
+}
+
+// Publish state for all configured iSpindels to {baseTopic}/iSpindel/{id}/{key}.
+static void publishIspindels() {
+  char base[96];
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    if (strlen(g_iSpindels[i].id) == 0) continue;
+    if (strcmp(g_iSpindels[i].name, "None") == 0) continue;
+    snprintf(base, sizeof(base), "%s/iSpindel/%s",
+      g_mqttConfig.baseTopic, g_iSpindels[i].id);
+    publishFloat(base, "temperature",       g_iSpindels[i].temperature);
+    publishFloat(base, "gravity",           g_iSpindels[i].sg, 4);
+    publishFloat(base, "corrected_gravity", g_iSpindels[i].corrGravity, 4);
+    publishFloat(base, "battery",           g_iSpindels[i].battery, 3);
+    publishInt  (base, "rssi",              g_iSpindels[i].rssi);
+    publishFloat(base, "angle",             g_iSpindels[i].angle, 2);
+    publishFloat(base, "velocity",          g_iSpindels[i].velocity, 4);
+    publishFloat(base, "run_time",          g_iSpindels[i].runTime, 1);
+    publishValue(base, "name",              g_iSpindels[i].name);
+    publishInt  (base, "fermenter",         g_iSpindels[i].fermenter);
+    yield();
+  }
+}
 
 // Publish current device-level diagnostics to {baseTopic}/Device/{key}.
 static void publishDeviceReport() {
@@ -859,6 +1112,7 @@ void reportMqtt() {
     // State
     publishBool(base, "power", g_fermenters[i].power);
     publishBool(base, "temp_control", g_fermenters[i].tempControl);
+    publishBool(base, "alarm", g_fermenters[i].alarm);
     uint8_t st = g_fermenters[i].status;
     const char* state = (st == STATUS_HEATING) ? "heating" :
                         (st == STATUS_COOLING) ? "cooling" :
@@ -882,6 +1136,9 @@ void reportMqtt() {
     logMsg("[MQTT] Published F%d (%s)", i, g_fermenters[i].fermenterName);
   }
 
+  publishProbes();
+  publishTilts();
+  publishIspindels();
   publishDeviceReport();
 }
 
