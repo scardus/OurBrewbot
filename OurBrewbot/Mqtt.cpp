@@ -476,6 +476,9 @@ static void publishTiltDiscovery(int colour) {
   publishOneEntity(doc, "sensor", devId, base, devName,
     "fermenter", "Fermenter", "fermenter",
     nullptr, nullptr, "mdi:tank", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "function", "Temperature Reading", "function",
+    nullptr, nullptr, "mdi:thermometer", "diagnostic", nullptr);
 
   logMsg("[MQTT] HA discovery published for tilt %s", colourName);
 }
@@ -526,6 +529,9 @@ static void publishIspindelDiscovery(int idx) {
   publishOneEntity(doc, "sensor", devId, base, devName,
     "fermenter", "Fermenter", "fermenter",
     nullptr, nullptr, "mdi:tank", "diagnostic", nullptr);
+  publishOneEntity(doc, "sensor", devId, base, devName,
+    "function", "Temperature Reading", "function",
+    nullptr, nullptr, "mdi:thermometer", "diagnostic", nullptr);
 
   logMsg("[MQTT] HA discovery published for ispindel %s", g_iSpindels[idx].id);
 }
@@ -556,6 +562,7 @@ static void removeTiltDiscovery(int colour) {
   removeOneEntity("sensor", devId, "gravity");
   removeOneEntity("binary_sensor", devId, "is_pro");
   removeOneEntity("sensor", devId, "fermenter");
+  removeOneEntity("sensor", devId, "function");
 }
 
 // Remove HA discovery for one iSpindel by its hex id.
@@ -574,6 +581,7 @@ static void removeIspindelDiscovery(const char* id) {
   removeOneEntity("sensor", devId, "run_time");
   removeOneEntity("sensor", devId, "name");
   removeOneEntity("sensor", devId, "fermenter");
+  removeOneEntity("sensor", devId, "function");
 }
 
 // Remove one HA entity by publishing an empty retained payload to its discovery topic.
@@ -1003,6 +1011,7 @@ static void publishTilts() {
     publishFloat(base, "gravity",     g_tilts[i].sg, 4);
     publishBool (base, "is_pro",      g_tilts[i].isPro);
     publishInt  (base, "fermenter",   g_tilts[i].fermenter);
+    publishValue(base, "function",    probeFunctionName(g_tilts[i].function));
     yield();
   }
 }
@@ -1025,6 +1034,7 @@ static void publishIspindels() {
     publishFloat(base, "run_time",          g_iSpindels[i].runTime, 1);
     publishValue(base, "name",              g_iSpindels[i].name);
     publishInt  (base, "fermenter",         g_iSpindels[i].fermenter);
+    publishValue(base, "function",          probeFunctionName(g_iSpindels[i].function));
     yield();
   }
 }

@@ -500,6 +500,11 @@ bool loadiSpindelConfig() {
     g_iSpindels[i].collectData = doc["iSpindelCollectData"][i] | false;
     g_iSpindels[i].fermenter   = doc["iSpindelFermenter"][i]   | PROBE_UNASSIGNED;
     g_iSpindels[i].unit        = doc["Unit"][i]                | 1;
+    // Default to PROBE_FN_BEER for legacy configs without the field — preserves
+    // existing behavior where iSpindel temperature flowed into the beer-temp chain.
+    uint8_t fn                 = doc["Function"][i]            | PROBE_FN_BEER;
+    if (fn != PROBE_FN_BEER) fn = PROBE_UNASSIGNED;
+    g_iSpindels[i].function    = fn;
   }
   return true;
 }
@@ -511,6 +516,7 @@ bool saveiSpindelConfig() {
   JsonArray cdArr   = doc["iSpindelCollectData"].to<JsonArray>();
   JsonArray fiArr   = doc["iSpindelFermenter"].to<JsonArray>();
   JsonArray unArr   = doc["Unit"].to<JsonArray>();
+  JsonArray fnArr   = doc["Function"].to<JsonArray>();
 
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     nameArr.add(g_iSpindels[i].name);
@@ -518,6 +524,7 @@ bool saveiSpindelConfig() {
     cdArr.add((bool)g_iSpindels[i].collectData);
     fiArr.add(g_iSpindels[i].fermenter);
     unArr.add(g_iSpindels[i].unit);
+    fnArr.add(g_iSpindels[i].function);
   }
   String json;
   serializeJson(doc, json);
@@ -584,7 +591,11 @@ bool loadTiltConfig() {
     uint8_t colour = doc["Address"][i] | PROBE_UNASSIGNED;
     if (colour >= MAX_TILTS) continue;  // skip unassigned or out-of-range
     g_tilts[colour].colour     = colour;
-    g_tilts[colour].function   = doc["Function"][i]    | PROBE_UNASSIGNED;
+    uint8_t fn                 = doc["Function"][i]    | PROBE_UNASSIGNED;
+    // Migrate legacy values: only PROBE_FN_BEER means "provide beer temp" — everything
+    // else (Ambient/Tilt-only/etc) collapses to Unassigned ("temperature reading not used").
+    if (fn != PROBE_FN_BEER) fn = PROBE_UNASSIGNED;
+    g_tilts[colour].function   = fn;
     g_tilts[colour].fermenter  = doc["Fermenter"][i]   | PROBE_UNASSIGNED;
     g_tilts[colour].tempAdjust = doc["Temp_Adjust"][i] | 0.0f;
     g_tilts[colour].sgAdjust   = doc["SG_Adjust"][i]   | 0.0f;
@@ -899,6 +910,7 @@ void initDefaultiSpindelConfig() {
     g_iSpindels[i].collectData = false;
     g_iSpindels[i].fermenter   = (i == 0) ? 0 : PROBE_UNASSIGNED;
     g_iSpindels[i].unit        = (i == 0) ? 1 : 0;
+    g_iSpindels[i].function    = PROBE_FN_BEER;
   }
 }
 

@@ -310,9 +310,11 @@ float getBeerTemp(uint8_t fermenterIndex) {
       return g_probes[i].temperature;
     }
   }
-  // Priority 3: iSpindel
+  // Priority 3: iSpindel (only when configured to provide beer temp)
   for (int i = 0; i < MAX_ISPINDELS; i++) {
-    if (g_iSpindels[i].collectData && g_iSpindels[i].fermenter == fermenterIndex) {
+    if (g_iSpindels[i].collectData &&
+        g_iSpindels[i].fermenter == fermenterIndex &&
+        g_iSpindels[i].function  == PROBE_FN_BEER) {
       return g_iSpindels[i].temperature;
     }
   }
@@ -336,7 +338,9 @@ const char* getBeerTempSource(uint8_t fermenterIndex) {
     }
   }
   for (int i = 0; i < MAX_ISPINDELS; i++) {
-    if (g_iSpindels[i].collectData && g_iSpindels[i].fermenter == fermenterIndex) {
+    if (g_iSpindels[i].collectData &&
+        g_iSpindels[i].fermenter == fermenterIndex &&
+        g_iSpindels[i].function  == PROBE_FN_BEER) {
       return "iSpindel";
     }
   }

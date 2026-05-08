@@ -608,6 +608,7 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["collectData"] = g_iSpindels[i].collectData;
     s["fermenter"]   = g_iSpindels[i].fermenter;
     s["unit"]        = g_iSpindels[i].unit;
+    s["function"]    = g_iSpindels[i].function;
     s["sg"]          = g_iSpindels[i].sg;
     s["temperature"] = toDisplayTemp(g_iSpindels[i].temperature);
     s["battery"]     = g_iSpindels[i].battery;
@@ -647,6 +648,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     g_iSpindels[idx].collectData = false;
     g_iSpindels[idx].fermenter   = PROBE_UNASSIGNED;
     g_iSpindels[idx].unit        = 0;
+    g_iSpindels[idx].function    = PROBE_FN_BEER;
     g_iSpindels[idx].sg             = 0.0f;
     g_iSpindels[idx].temperature    = 0.0f;
     g_iSpindels[idx].battery        = 0.0f;
@@ -664,6 +666,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
   if (!doc["collectData"].isNull()) g_iSpindels[idx].collectData = doc["collectData"];
   if (!doc["fermenter"].isNull())   { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_iSpindels[idx].fermenter = v; }
   if (!doc["unit"].isNull())        g_iSpindels[idx].unit        = doc["unit"];
+  if (!doc["function"].isNull())    { uint8_t v = doc["function"]; g_iSpindels[idx].function = (v == PROBE_FN_BEER) ? PROBE_FN_BEER : PROBE_UNASSIGNED; }
   saveiSpindelConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"iSpindel updated\"}"));
 }

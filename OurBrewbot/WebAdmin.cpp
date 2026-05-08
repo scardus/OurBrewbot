@@ -496,8 +496,8 @@ fetch('/mqtt/discover',{method:'POST',headers:{'Content-Type':'application/json'
 // ---- TILTS TAB ----
 var tiltColourNames=['Red','Green','Black','Purple','Orange','Blue','Yellow','Pink'];
 var tiltDotColours=['#e94560','#4caf50','#444','#9c27b0','#ff9800','#2196f3','#ffeb3b','#e91e63'];
-var tiltFnNames={2:'Beer',3:'Ambient',4:'Tilt',99:'Unassigned'};
-function tiltFnOpts(sel){var h='';for(var k in tiltFnNames)h+='<option value="'+k+'"'+(k==sel?' selected':'')+'>'+tiltFnNames[k]+'</option>';return h}
+var tiltFnNames={2:'Beer',99:'Not used'};
+function tiltFnOpts(sel){var s=(sel==2)?2:99;var h='';for(var k in tiltFnNames)h+='<option value="'+k+'"'+(k==s?' selected':'')+'>'+tiltFnNames[k]+'</option>';return h}
 
 function loadTilts(){
 fetch('/tilts').then(function(r){return r.json()}).then(function(d){
@@ -526,7 +526,7 @@ if(t&&t.isPro)h+=' <span class="badge" style="background:#ff9800;color:#000">Pro
 h+='</h3>';
 if(active&&t){h+='<div class="live">SG: '+(t.sg>0?t.sg.toFixed(4):'--')+' &nbsp; Temp: '+(t.temperature>-100?t.temperature.toFixed(1)+'&deg;':'--')+'</div>';}
 var fn=t?t.function:99;var ferm=t?t.fermenter:99;var ta=t?t.tempAdjust:0;var sa=t?t.sgAdjust:0;
-h+='<div class="row"><label>Function</label><select id="tlf'+colour+'">'+tiltFnOpts(fn)+'</select></div>';
+h+='<div class="row"><label>Temperature reading</label><select id="tlf'+colour+'">'+tiltFnOpts(fn)+'</select></div>';
 h+='<div class="row"><label>Fermenter</label><select id="tlr'+colour+'">'+fermOpts(ferm)+'</select></div>';
 h+='<div class="row"><label>Temp Adjust</label><input type="number" step="0.1" id="tlta'+colour+'" value="'+ta+'" style="width:70px"> &deg;C</div>';
 h+='<div class="row"><label>SG Adjust</label><input type="number" step="0.0001" id="tlsa'+colour+'" value="'+sa+'" style="width:80px"></div>';
@@ -576,13 +576,14 @@ h+='<div class="row"><label>Device ID</label><span style="color:#53d8fb;font-siz
 h+='<div class="row"><label>Unit</label><select id="isu'+idx+'"><option value="0"'+(s.unit==0?' selected':'')+'>SG</option><option value="1"'+(s.unit==1?' selected':'')+'>Plato</option></select></div>';
 h+='<div class="row"><label>Collect Data</label><label class="sw"><input type="checkbox" id="isc'+idx+'"'+(s.collectData?' checked':'')+'><span class="sl"></span></label></div>';
 h+='<div class="row"><label>Fermenter</label><select id="isf'+idx+'">'+fermOpts(s.fermenter)+'</select></div>';
+h+='<div class="row"><label>Temperature reading</label><select id="isfn'+idx+'">'+tiltFnOpts(s.function)+'</select></div>';
 h+='<button class="save" onclick="saveISpindel('+idx+')">Save</button>';
 if(!empty)h+=' <button class="test" onclick="clearISpindel('+idx+')" style="background:#333">Clear</button>';
 h+=' <span class="msg" id="ism'+idx+'"></span></div>';
 return h}
 
 function saveISpindel(idx){
-var body={index:idx,collectData:$('isc'+idx).checked,fermenter:parseInt($('isf'+idx).value),unit:parseInt($('isu'+idx).value)};
+var body={index:idx,collectData:$('isc'+idx).checked,fermenter:parseInt($('isf'+idx).value),unit:parseInt($('isu'+idx).value),function:parseInt($('isfn'+idx).value)};
 fetch('/ispindel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
 .then(function(r){return r.json()}).then(function(d){msg('ism'+idx,d.msg,d.status=='ok');dirty=false;if(d.status=='ok')setTimeout(loadISpindels,500)})
 .catch(function(e){msg('ism'+idx,'Error: '+e,false)})}
