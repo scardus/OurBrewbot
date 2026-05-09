@@ -113,6 +113,7 @@ void scanBuses() {
       for (int j = 0; j < MAX_PROBES; j++) {
         if (strlen(g_probes[j].address) == 0) continue;
         if (addrStr.equalsIgnoreCase(g_probes[j].address)) {
+          g_probes[j].busId = busId;
           found = true;
           break;
         }
@@ -123,6 +124,7 @@ void scanBuses() {
           logMsg("[TEMP] Upgrading truncated address %s -> %s",
             g_probes[j].address, addrStr.c_str());
           strlcpy(g_probes[j].address, addrStr.c_str(), sizeof(g_probes[j].address));
+          g_probes[j].busId = busId;
           found = true;
           break;
         }
@@ -136,6 +138,7 @@ void scanBuses() {
             snprintf(g_probes[j].probeName, sizeof(g_probes[j].probeName), "Probe Bus%d-%d", busId, i+1);
             g_probes[j].function  = PROBE_UNASSIGNED;
             g_probes[j].fermenter = PROBE_UNASSIGNED;
+            g_probes[j].busId     = busId;
             logMsg("[TEMP] Found New Probe: %s (Bus%d)", addrStr.c_str(), busId);
             break;
           }
@@ -172,26 +175,19 @@ void readTempResults() {
 
     if (!stringToAddress(g_probes[i].address, addr)) continue;
 
-    float temp = DEVICE_DISCONNECTED_C;
-
-    // Try Bus 1 first, then Bus 2
-    temp = g_sensors1.getTempC(addr);
-    if (temp == DEVICE_DISCONNECTED_C) {
+    // Use the bus recorded during the last scan; fall back to both if not yet scanned
+    DallasTemperature* sensors = (g_probes[i].busId == 2) ? &g_sensors2 : &g_sensors1;
+    float temp = sensors->getTempC(addr);
+    if (temp == DEVICE_DISCONNECTED_C && g_probes[i].busId == 0) {
       temp = g_sensors2.getTempC(addr);
     }
 
     // First-failure blocking retry — catches transient read errors
     if (temp == DEVICE_DISCONNECTED_C && g_probes[i].failCount == 0) {
-      g_sensors1.setWaitForConversion(true);
-      g_sensors1.requestTemperatures();
-      temp = g_sensors1.getTempC(addr);
-      g_sensors1.setWaitForConversion(false);
-      if (temp == DEVICE_DISCONNECTED_C) {
-        g_sensors2.setWaitForConversion(true);
-        g_sensors2.requestTemperatures();
-        temp = g_sensors2.getTempC(addr);
-        g_sensors2.setWaitForConversion(false);
-      }
+      sensors->setWaitForConversion(true);
+      sensors->requestTemperatures();
+      temp = sensors->getTempC(addr);
+      sensors->setWaitForConversion(false);
     }
 
     if (temp != DEVICE_DISCONNECTED_C) {

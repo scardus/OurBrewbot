@@ -239,6 +239,7 @@ struct ProbeConfig {
   float   tempAdjust;           // calibration offset
   float   sgAdjust;             // SG calibration offset
   uint8_t failCount;            // consecutive failed reads (runtime only, not persisted)
+  uint8_t busId;                // 1 or 2; set by scanBuses(), not persisted
 };
 
 // ============================================================
