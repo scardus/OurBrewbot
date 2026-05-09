@@ -776,23 +776,23 @@ function loadReporting() {
     for (var s = 0; s < svcs.length; s++) {
       var sv = svcs[s];
       html += '<div class="card"><h3>' + sv.name + '</h3>';
-      html += '<div class="row"><label>Enabled</label>' + switchHtml('sven' + s, sv.enabled) + '</div>';
-      html += '<div class="row"><label>Device Name</label><input type="text" id="svn' + s + '" value="' + (sv.deviceName || 'OurBrewbot') + '" style="width:180px"></div>';
-      html += '<div class="row"><label>' + bsIdLabel[s] + '</label><input type="text" id="svi' + s + '" value="' + (sv.serviceId || '') + '" style="width:260px"></div>';
+      html += row('Enabled',     switchHtml('sven' + s, sv.enabled));
+      html += row('Device Name', textInput('svn' + s, sv.deviceName || 'OurBrewbot', 180));
+      html += row(bsIdLabel[s],  textInput('svi' + s, sv.serviceId || '',           260));
       html += '<button class="save" onclick="saveSvc(' + s + ')">Save</button> ';
       html += '<button class="test" onclick="testSvc(' + s + ')">Test</button> ';
       html += '<span class="msg" id="svm' + s + '"></span>';
       html += '</div>';
     }
     html += '<div class="card"><h3>MQTT</h3>';
-    html += '<div class="row"><label>Enabled</label>' + switchHtml('mqen', mq.enabled) + '</div>';
-    html += '<div class="row"><label>Broker Host</label><input type="text" id="mqhost" value="' + (mq.host || '') + '" style="width:220px"></div>';
-    html += '<div class="row"><label>Port</label><input type="number" id="mqport" value="' + (mq.port || 1883) + '" style="width:80px"></div>';
-    html += '<div class="row"><label>Username</label><input type="text" id="mquser" value="' + (mq.username || '') + '" style="width:180px"></div>';
+    html += row('Enabled',          switchHtml('mqen',  mq.enabled));
+    html += row('Broker Host',       textInput ('mqhost',  mq.host     || '',          220));
+    html += row('Port',              numInput  ('mqport',  mq.port     || 1883, null,   80));
+    html += row('Username',          textInput ('mquser',  mq.username || '',          180));
     html += '<div class="row"><label>Password</label><input type="password" id="mqpass" value="' + (mq.password || '') + '" style="width:180px"></div>';
-    html += '<div class="row"><label>Base Topic</label><input type="text" id="mqtopic" value="' + (mq.baseTopic || 'ourbrewbot') + '" style="width:180px"></div>';
-    html += '<div class="row"><label>HA Discovery</label>' + switchHtml('mqha', mq.haDiscovery || false) + '</div>';
-    html += '<div class="row"><label>Allow HA Control</label>' + switchHtml('mqctl', mq.allowControl || false) + '</div>';
+    html += row('Base Topic',        textInput ('mqtopic', mq.baseTopic || 'ourbrewbot', 180));
+    html += row('HA Discovery',      switchHtml('mqha',  mq.haDiscovery  || false));
+    html += row('Allow HA Control',  switchHtml('mqctl', mq.allowControl || false));
     html += '<button class="save" onclick="saveMqtt()">Save</button> ';
     html += '<button class="test" onclick="testMqtt()">Test</button> ';
     html += '<button class="test" onclick="discoverMqtt()">Discover</button> ';
@@ -827,9 +827,9 @@ function loadSystemSettings() {
     html += '<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
     html += '</div>';
     html += '<div class="card"><h3>Syslog</h3>';
-    html += '<div class="row"><label>Enabled</label>' + switchHtml('slen', sl.enabled || false) + '</div>';
-    html += '<div class="row"><label>Host</label><input type="text" id="slhost" value="' + (sl.host || '') + '" style="width:220px"></div>';
-    html += '<div class="row"><label>Port</label><input type="number" id="slport" value="' + (sl.port || 514) + '" style="width:80px"></div>';
+    html += row('Enabled', switchHtml('slen', sl.enabled || false));
+    html += row('Host',    textInput ('slhost', sl.host || '',    220));
+    html += row('Port',    numInput  ('slport', sl.port || 514, null, 80));
     html += '<div class="row"><label>Facility</label><select id="slfac">';
     for (var fi = 0; fi < syslogFacilities.length; fi++) html += '<option value="' + fi + '"' + (fi == (sl.facility != null ? sl.facility : 16) ? ' selected' : '') + '>' + syslogFacilities[fi] + '</option>';
     html += '</select></div>';
