@@ -296,8 +296,8 @@ button.danger {
   <div id="t7" class="tab"></div>
 
 <script>
-var T = 0;
-var R = null;
+var activeTab = 0;
+var refreshTimer = null;
 var dirty = false;
 var dirtyTimer = null;
 
@@ -310,7 +310,7 @@ function markDirty() {
 
 // Switch the active tab and trigger a re-render of its contents.
 function showTab(n) {
-  T = n;
+  activeTab = n;
   dirty = false;
   for (var i = 0; i < 8; i++) {
     document.getElementById('t' + i).className = 'tab' + (i == n ? ' active' : '');
@@ -344,14 +344,14 @@ function resetWiFiSettings() {
 
 // Dispatch to the active tab's loader function.
 function loadTab() {
-  if      (T == 0) loadFermenters();
-  else if (T == 1) loadProfiles();
-  else if (T == 2) loadProbes();
-  else if (T == 3) loadTilts();
-  else if (T == 4) loadISpindels();
-  else if (T == 5) loadPlugs();
-  else if (T == 6) loadReporting();
-  else if (T == 7) loadSystemSettings();
+  if      (activeTab == 0) loadFermenters();
+  else if (activeTab == 1) loadProfiles();
+  else if (activeTab == 2) loadProbes();
+  else if (activeTab == 3) loadTilts();
+  else if (activeTab == 4) loadISpindels();
+  else if (activeTab == 5) loadPlugs();
+  else if (activeTab == 6) loadReporting();
+  else if (activeTab == 7) loadSystemSettings();
 }
 
 // Render a coloured status badge for a fermenter (Idle/Heating/Cooling/Alarm/Off).
@@ -1148,8 +1148,8 @@ function downloadFile() {
 // ---- AUTO REFRESH ----
 // Re-render the active tab every 10s, but skip while the user has unsaved edits.
 function startRefresh() {
-  if (R) clearInterval(R);
-  R = setInterval(function () { if (!dirty) loadTab(); }, 10000);
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(function () { if (!dirty) loadTab(); }, 10000);
 }
 loadTab();
 startRefresh();
