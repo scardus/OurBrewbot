@@ -1103,39 +1103,60 @@ function clearISpindel(idx) {
     .catch(function (e) { msg('ism' + idx, 'Error: ' + e, false); });
 }
 
-var sysFn='';
+// ---- LITTLEFS FILE VIEWER ----
+var sysFn = '';
 
-function loadFileContent(name){
-markDirty();sysFn=name;
-var card=$('sysfc_card');var ta=$('sysfc');var title=$('sysfc_title');
-if(card)card.style.display='none';
-if(ta)ta.value='Loading...';
-fetch('/fs/file?name='+encodeURIComponent(name)).then(function(r){
-if(!r.ok)throw new Error('HTTP '+r.status);
-return r.text();
-}).then(function(text){
-if(card)card.style.display='';
-if(title)title.textContent=name;
-if(ta)ta.value=text;
-markDirty();
-}).catch(function(e){if(ta)ta.value='Error: '+e;if(card)card.style.display=''})}
+// Fetch the named file from LittleFS and show its contents in the file-viewer textarea.
+function loadFileContent(name) {
+  markDirty();
+  sysFn = name;
+  var card  = $('sysfc_card');
+  var ta    = $('sysfc');
+  var title = $('sysfc_title');
+  if (card) card.style.display = 'none';
+  if (ta)   ta.value = 'Loading...';
+  fetch('/fs/file?name=' + encodeURIComponent(name)).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text();
+  }).then(function (text) {
+    if (card)  card.style.display = '';
+    if (title) title.textContent = name;
+    if (ta)    ta.value = text;
+    markDirty();
+  }).catch(function (e) {
+    if (ta)   ta.value = 'Error: ' + e;
+    if (card) card.style.display = '';
+  });
+}
 
-function downloadFile(){
-var ta=$('sysfc');
-if(!ta||!sysFn)return;
-var blob=new Blob([ta.value],{type:'text/plain'});
-var url=URL.createObjectURL(blob);
-var a=document.createElement('a');
-var base=sysFn.replace(/.*\//,'');
-a.href=url;a.download=base||'file.txt';
-document.body.appendChild(a);a.click();
-document.body.removeChild(a);URL.revokeObjectURL(url)}
+// Download the currently displayed file as a browser-side blob (no server round-trip).
+function downloadFile() {
+  var ta = $('sysfc');
+  if (!ta || !sysFn) return;
+  var blob = new Blob([ta.value], { type: 'text/plain' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  var base = sysFn.replace(/.*\//, '');
+  a.href = url;
+  a.download = base || 'file.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // ---- AUTO REFRESH ----
-function startRefresh(){if(R)clearInterval(R);R=setInterval(function(){if(!dirty)loadTab()},10000)}
-loadTab();startRefresh();
-document.body.addEventListener('focusin',function(e){if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')markDirty()});
-document.body.addEventListener('input',function(){markDirty()});
+// Re-render the active tab every 10s, but skip while the user has unsaved edits.
+function startRefresh() {
+  if (R) clearInterval(R);
+  R = setInterval(function () { if (!dirty) loadTab(); }, 10000);
+}
+loadTab();
+startRefresh();
+document.body.addEventListener('focusin', function (e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') markDirty();
+});
+document.body.addEventListener('input', function () { markDirty(); });
 </script>
 </body>
 </html>)rawliteral";
