@@ -325,7 +325,7 @@ void handleFermenter(ESP8266WebServer& server) {
         if (wbFloor   < -20.0f || wbFloor   > 50.0f)  REJECT("floor temperature out of range (-20 to 50)")
         if (wbHyst    <   0.0f || wbHyst    > 10.0f)  REJECT("hysteresis out of range (0 to 10)")
         if (wbFloor >= wbCeiling)                     REJECT("floor must be below ceiling")
-        if ((wbCeiling - wbFloor) <= 2.0f * wbHyst)   REJECT("safe zone must be wider than 2x hysteresis")
+        if ((wbCeiling - wbFloor) <  2.0f * wbHyst)   REJECT("safe zone must be at least 2x hysteresis")
         if (!doc["CeilingTemp"].isNull()) g_fermenters[idx].ceilingTemp = wbCeiling;
         if (!doc["FloorTemp"].isNull())   g_fermenters[idx].floorTemp   = wbFloor;
         if (!doc["Hysteresis"].isNull())  g_fermenters[idx].hysteresis  = wbHyst;

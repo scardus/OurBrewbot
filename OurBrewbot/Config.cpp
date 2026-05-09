@@ -212,7 +212,7 @@ bool loadFermenterConfig() {
                    (f < -20.0f || f > 50.0f) ||
                    (h <   0.0f || h > 10.0f) ||
                    (f >= c) ||
-                   ((c - f) <= 2.0f * h);
+                   ((c - f) <  2.0f * h);
     if (invalid) {
       logMsg("[CFG] Fermenter %d: invalid temp/hyst trio (c=%.2f f=%.2f h=%.2f); reset to defaults", i, c, f, h);
       g_fermenters[i].ceilingTemp = 22.0f;

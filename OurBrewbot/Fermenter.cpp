@@ -304,8 +304,8 @@ bool validateFermenterField(uint8_t idx, const char* key, float value, const cha
       if (errMsg) *errMsg = "floor must be below ceiling";
       return false;
     }
-    if ((ceiling - flr) <= 2.0f * hyst) {
-      if (errMsg) *errMsg = "safe zone must be wider than 2x hysteresis";
+    if ((ceiling - flr) < 2.0f * hyst) {
+      if (errMsg) *errMsg = "safe zone must be at least 2x hysteresis";
       return false;
     }
   } else if (strcmp(key, "hysteresis") == 0) {
@@ -313,8 +313,8 @@ bool validateFermenterField(uint8_t idx, const char* key, float value, const cha
       if (errMsg) *errMsg = "hysteresis out of range (0 to 10)";
       return false;
     }
-    if ((g_fermenters[idx].ceilingTemp - g_fermenters[idx].floorTemp) <= 2.0f * value) {
-      if (errMsg) *errMsg = "safe zone must be wider than 2x hysteresis";
+    if ((g_fermenters[idx].ceilingTemp - g_fermenters[idx].floorTemp) < 2.0f * value) {
+      if (errMsg) *errMsg = "safe zone must be at least 2x hysteresis";
       return false;
     }
   } else if (strcmp(key, "compressor_delay") == 0) {
