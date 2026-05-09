@@ -369,81 +369,116 @@ function sw(id, chk) {
 }
 
 // ---- FERMENTERS TAB ----
-var SVC=[],MQEN=false,PNAMES=[];
-function loadFermenters(){
-Promise.all([fetch('/brewservices').then(function(r){return r.json()}),fetch('/mqtt').then(function(r){return r.json()}),fetch('/fermenters').then(function(r){return r.json()}),fetch('/profiles').then(function(r){return r.json()})]).then(function(res){
-SVC=res[0].services||[];MQEN=res[1].enabled;var d=res[2];
-var profs=res[3].profiles||[];PNAMES=[];for(var p=0;p<profs.length;p++)PNAMES.push(profs[p].name);
-var h='';
-for(var i=0;i<d.length;i++){var f=d[i];
-h+='<div class="card"><h3>Fermenter '+i+' '+statusBadge(f.Status,f.Power)+' '+(f.ProfileNo>=1?'<span class="badge badge-prof">'+f.ProfileName+'</span>':'<span class="badge badge-idle">Standard</span>')+'</h3>';
-h+='<div class="live">Beer: '+(f.BeerTemp>-100?f.BeerTemp.toFixed(1)+'&deg;'+f.TempUnit+(f.BeerTempSource&&f.BeerTempSource!='None'?' ('+f.BeerTempSource+')':''):'--')
-  +' &nbsp; Ambient: '+(f.AmbientTemp>-100?f.AmbientTemp.toFixed(1)+'&deg;'+f.TempUnit:'--')
-  +' &nbsp; SG: '+(f.SG>0?f.SG.toFixed(3)+(f.GravitySource?' ('+f.GravitySource+')':''):'--')
-  +(f.ProfileRunning?' &nbsp; Step: '+(f.CurrentStep+1)+'/'+f.TotalSteps+' &nbsp; Hour: '+f.CurrentHour:'')+'</div>';
-h+='<div class="row"><label>Name</label><input type="text" id="fn'+i+'" value="'+f.FermenterName+'"></div>';
-h+='<div class="row"><label>Beer</label><input type="text" id="bn'+i+'" value="'+f.BeerName+'"></div>';
-h+='<div class="row"><label>Ceiling Temp</label><input type="number" step="0.1" id="ct'+i+'" value="'+f.CeilingTemp+'"></div>';
-h+='<div class="row"><label>Floor Temp</label><input type="number" step="0.1" id="ft'+i+'" value="'+f.FloorTemp+'"></div>';
-h+='<div class="row"><label>Hysteresis</label><input type="number" step="0.1" id="hy'+i+'" value="'+f.Hysteresis+'"></div>';
-h+='<div class="row"><label>Compressor Delay</label><input type="number" id="cd'+i+'" value="'+f.CompressorDelay+'"> min</div>';
-h+='<div class="row"><label>Yeast</label><input type="text" id="yn'+i+'" value="'+f.YeastName+'"></div>';
-h+='<div class="row"><label>OG</label><input type="number" step="0.001" min="1.0" max="1.2" id="og'+i+'" value="'+f.OG+'" style="width:80px"> <label style="min-width:auto">TG</label><input type="number" step="0.001" min="1.0" max="1.2" id="tg'+i+'" value="'+f.TG+'" style="width:80px"></div>';
-h+='<div class="row"><label>Power</label>'+sw('pw'+i,f.Power)+'</div>';
-h+='<div class="row"><label>Temp Control</label>'+sw('tc'+i,f.TempControl)+'</div>';
-h+='<div class="row"><label>Profile</label><select id="fp'+i+'"><option value="0"'+(f.ProfileNo==0?' selected':'')+'>Standard</option>';
-for(var p=0;p<PNAMES.length;p++)h+='<option value="'+(p+1)+'"'+(f.ProfileNo==(p+1)?' selected':'')+'>'+PNAMES[p]+'</option>';
-h+='</select></div>';
-if(f.ProfileNo>=1)h+='<div class="row"><label>Profile Control</label>';
-if(f.ProfileNo>=1&&!f.ProfileRunning)h+='<button class="test" onclick="profAction('+i+',\'start\')">Start</button> ';
-if(f.ProfileRunning)h+='<button class="test" onclick="profAction('+i+',\'pause\')">Pause</button> ';
-if(f.ProfileNo>=1)h+='<button class="test" onclick="profAction('+i+',\'stop\')">Stop</button> ';
-if(f.ProfileRunning){h+='<button class="test" onclick="profAction('+i+',\'prev\')">&laquo; Prev</button> ';
-h+='<button class="test" onclick="profAction('+i+',\'next\')">Next &raquo;</button>';}
-if(f.ProfileNo>=1)h+='</div>';
-if(f.ProfileNo>=1)h+='<div class="row"><label>Test Mode</label>'+sw('lt'+i,f.LiveTest)+'</div>';
-var bs=f.BrewServices||0;
-var hasSvc=false;
-for(var s=0;s<SVC.length;s++){if(SVC[s].enabled){
-h+='<div class="row"><label>'+SVC[s].name+'</label>'+sw('bsv'+i+'_'+s,!!(bs&(1<<s)))+'</div>';
-hasSvc=true;}}
-if(MQEN){h+='<div class="row"><label>MQTT</label>'+sw('bsv'+i+'_3',!!(bs&(1<<3)))+'</div>';hasSvc=true;}
-if(!hasSvc)h+='<div class="row"><label>Brew Services</label><span style="color:#888;font-size:12px">None enabled — configure in Reporting tab</span></div>';
-h+='<button class="save" onclick="saveFerm('+i+')">Save</button> <span class="msg" id="fm'+i+'"></span>';
-h+='</div>';
+var SVC = [];
+var MQEN = false;
+var PNAMES = [];
+
+// Fetch brew-services / MQTT / fermenters / profiles in parallel, then render fermenter cards.
+function loadFermenters() {
+  Promise.all([
+    fetch('/brewservices').then(function (r) { return r.json(); }),
+    fetch('/mqtt').then(function (r) { return r.json(); }),
+    fetch('/fermenters').then(function (r) { return r.json(); }),
+    fetch('/profiles').then(function (r) { return r.json(); })
+  ]).then(function (res) {
+    SVC = res[0].services || [];
+    MQEN = res[1].enabled;
+    var d = res[2];
+    var profs = res[3].profiles || [];
+    PNAMES = [];
+    for (var p = 0; p < profs.length; p++) PNAMES.push(profs[p].name);
+    var h = '';
+    for (var i = 0; i < d.length; i++) {
+      var f = d[i];
+      h += '<div class="card"><h3>Fermenter ' + i + ' ' + statusBadge(f.Status, f.Power) + ' ' + (f.ProfileNo >= 1 ? '<span class="badge badge-prof">' + f.ProfileName + '</span>' : '<span class="badge badge-idle">Standard</span>') + '</h3>';
+      h += '<div class="live">Beer: ' + (f.BeerTemp > -100 ? f.BeerTemp.toFixed(1) + '&deg;' + f.TempUnit + (f.BeerTempSource && f.BeerTempSource != 'None' ? ' (' + f.BeerTempSource + ')' : '') : '--')
+         + ' &nbsp; Ambient: ' + (f.AmbientTemp > -100 ? f.AmbientTemp.toFixed(1) + '&deg;' + f.TempUnit : '--')
+         + ' &nbsp; SG: ' + (f.SG > 0 ? f.SG.toFixed(3) + (f.GravitySource ? ' (' + f.GravitySource + ')' : '') : '--')
+         + (f.ProfileRunning ? ' &nbsp; Step: ' + (f.CurrentStep + 1) + '/' + f.TotalSteps + ' &nbsp; Hour: ' + f.CurrentHour : '') + '</div>';
+      h += '<div class="row"><label>Name</label><input type="text" id="fn' + i + '" value="' + f.FermenterName + '"></div>';
+      h += '<div class="row"><label>Beer</label><input type="text" id="bn' + i + '" value="' + f.BeerName + '"></div>';
+      h += '<div class="row"><label>Ceiling Temp</label><input type="number" step="0.1" id="ct' + i + '" value="' + f.CeilingTemp + '"></div>';
+      h += '<div class="row"><label>Floor Temp</label><input type="number" step="0.1" id="ft' + i + '" value="' + f.FloorTemp + '"></div>';
+      h += '<div class="row"><label>Hysteresis</label><input type="number" step="0.1" id="hy' + i + '" value="' + f.Hysteresis + '"></div>';
+      h += '<div class="row"><label>Compressor Delay</label><input type="number" id="cd' + i + '" value="' + f.CompressorDelay + '"> min</div>';
+      h += '<div class="row"><label>Yeast</label><input type="text" id="yn' + i + '" value="' + f.YeastName + '"></div>';
+      h += '<div class="row"><label>OG</label><input type="number" step="0.001" min="1.0" max="1.2" id="og' + i + '" value="' + f.OG + '" style="width:80px"> <label style="min-width:auto">TG</label><input type="number" step="0.001" min="1.0" max="1.2" id="tg' + i + '" value="' + f.TG + '" style="width:80px"></div>';
+      h += '<div class="row"><label>Power</label>' + sw('pw' + i, f.Power) + '</div>';
+      h += '<div class="row"><label>Temp Control</label>' + sw('tc' + i, f.TempControl) + '</div>';
+      h += '<div class="row"><label>Profile</label><select id="fp' + i + '"><option value="0"' + (f.ProfileNo == 0 ? ' selected' : '') + '>Standard</option>';
+      for (var p = 0; p < PNAMES.length; p++) h += '<option value="' + (p + 1) + '"' + (f.ProfileNo == (p + 1) ? ' selected' : '') + '>' + PNAMES[p] + '</option>';
+      h += '</select></div>';
+      if (f.ProfileNo >= 1) h += '<div class="row"><label>Profile Control</label>';
+      if (f.ProfileNo >= 1 && !f.ProfileRunning) h += '<button class="test" onclick="profAction(' + i + ',\'start\')">Start</button> ';
+      if (f.ProfileRunning) h += '<button class="test" onclick="profAction(' + i + ',\'pause\')">Pause</button> ';
+      if (f.ProfileNo >= 1) h += '<button class="test" onclick="profAction(' + i + ',\'stop\')">Stop</button> ';
+      if (f.ProfileRunning) {
+        h += '<button class="test" onclick="profAction(' + i + ',\'prev\')">&laquo; Prev</button> ';
+        h += '<button class="test" onclick="profAction(' + i + ',\'next\')">Next &raquo;</button>';
+      }
+      if (f.ProfileNo >= 1) h += '</div>';
+      if (f.ProfileNo >= 1) h += '<div class="row"><label>Test Mode</label>' + sw('lt' + i, f.LiveTest) + '</div>';
+      var bs = f.BrewServices || 0;
+      var hasSvc = false;
+      for (var s = 0; s < SVC.length; s++) {
+        if (SVC[s].enabled) {
+          h += '<div class="row"><label>' + SVC[s].name + '</label>' + sw('bsv' + i + '_' + s, !!(bs & (1 << s))) + '</div>';
+          hasSvc = true;
+        }
+      }
+      if (MQEN) {
+        h += '<div class="row"><label>MQTT</label>' + sw('bsv' + i + '_3', !!(bs & (1 << 3))) + '</div>';
+        hasSvc = true;
+      }
+      if (!hasSvc) h += '<div class="row"><label>Brew Services</label><span style="color:#888;font-size:12px">None enabled — configure in Reporting tab</span></div>';
+      h += '<button class="save" onclick="saveFerm(' + i + ')">Save</button> <span class="msg" id="fm' + i + '"></span>';
+      h += '</div>';
+    }
+    $('t0').innerHTML = h;
+  });
 }
-$('t0').innerHTML=h;
-})}
 
-function saveFerm(i){
-var bs=0;
-for(var s=0;s<SVC.length;s++){var el=$('bsv'+i+'_'+s);if(el&&el.checked)bs|=(1<<s);}
-var mqel=$('bsv'+i+'_3');if(mqel&&mqel.checked)bs|=(1<<3);
-var body={Fermenter:i,
-FermenterName:$('fn'+i).value,
-BeerName:$('bn'+i).value,
-YeastName:$('yn'+i).value,
-OG:parseFloat($('og'+i).value),
-TG:parseFloat($('tg'+i).value),
-CeilingTemp:parseFloat($('ct'+i).value),
-FloorTemp:parseFloat($('ft'+i).value),
-Hysteresis:parseFloat($('hy'+i).value),
-CompressorDelay:parseInt($('cd'+i).value),
-Power:$('pw'+i).checked,
-TempControl:$('tc'+i).checked,
-ProfileNo:parseInt($('fp'+i).value),
-LiveTest:$('lt'+i)?$('lt'+i).checked:false,
-BrewServices:bs};
-fetch('/fermenter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(r=>r.json()).then(function(d){msg('fm'+i,d.msg,d.status=='ok');dirty=false;setTimeout(loadFermenters,500)})
-.catch(function(e){msg('fm'+i,'Error: '+e,false)})}
+// Gather fermenter i's form values into a body object and POST to /fermenter.
+function saveFerm(i) {
+  var bs = 0;
+  for (var s = 0; s < SVC.length; s++) {
+    var el = $('bsv' + i + '_' + s);
+    if (el && el.checked) bs |= (1 << s);
+  }
+  var mqel = $('bsv' + i + '_3');
+  if (mqel && mqel.checked) bs |= (1 << 3);
+  var body = {
+    Fermenter:       i,
+    FermenterName:   $('fn' + i).value,
+    BeerName:        $('bn' + i).value,
+    YeastName:       $('yn' + i).value,
+    OG:              parseFloat($('og' + i).value),
+    TG:              parseFloat($('tg' + i).value),
+    CeilingTemp:     parseFloat($('ct' + i).value),
+    FloorTemp:       parseFloat($('ft' + i).value),
+    Hysteresis:      parseFloat($('hy' + i).value),
+    CompressorDelay: parseInt($('cd' + i).value),
+    Power:           $('pw' + i).checked,
+    TempControl:     $('tc' + i).checked,
+    ProfileNo:       parseInt($('fp' + i).value),
+    LiveTest:        $('lt' + i) ? $('lt' + i).checked : false,
+    BrewServices:    bs
+  };
+  fetch('/fermenter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('fm' + i, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadFermenters, 500); })
+    .catch(function (e) { msg('fm' + i, 'Error: ' + e, false); });
+}
 
-function profAction(i,a){
-var body={Fermenter:i,action:a};
-if(a=='start')body.ProfileIndex=parseInt($('fp'+i).value);
-fetch('/fermenter/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('fm'+i,d.msg,d.status=='ok');dirty=false;setTimeout(loadFermenters,500)})
-.catch(function(e){msg('fm'+i,'Error: '+e,false)})}
+// Send a profile-control action (start / pause / stop / prev / next) for fermenter i.
+function profAction(i, a) {
+  var body = { Fermenter: i, action: a };
+  if (a == 'start') body.ProfileIndex = parseInt($('fp' + i).value);
+  fetch('/fermenter/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('fm' + i, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadFermenters, 500); })
+    .catch(function (e) { msg('fm' + i, 'Error: ' + e, false); });
+}
 
 // ---- PROFILES TAB ----
 var STYPES=[];
