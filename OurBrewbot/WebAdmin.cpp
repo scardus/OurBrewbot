@@ -950,60 +950,90 @@ function discoverMqtt() {
 }
 
 // ---- TILTS TAB ----
-var tiltColourNames=['Red','Green','Black','Purple','Orange','Blue','Yellow','Pink'];
-var tiltDotColours=['#e94560','#4caf50','#444','#9c27b0','#ff9800','#2196f3','#ffeb3b','#e91e63'];
-var tiltFnNames={2:'Beer',99:'Not used'};
-function tiltFnOpts(sel){var s=(sel==2)?2:99;var h='';for(var k in tiltFnNames)h+='<option value="'+k+'"'+(k==s?' selected':'')+'>'+tiltFnNames[k]+'</option>';return h}
+var tiltColourNames = ['Red',     'Green',   'Black', 'Purple',  'Orange',  'Blue',    'Yellow',  'Pink'];
+var tiltDotColours  = ['#e94560', '#4caf50', '#444',  '#9c27b0', '#ff9800', '#2196f3', '#ffeb3b', '#e91e63'];
+var tiltFnNames = { 2: 'Beer', 99: 'Not used' };
 
-function loadTilts(){
-fetch('/tilts').then(function(r){return r.json()}).then(function(d){
-var ts=d.tilts||[];
-var h='';
-if(ts.length==0){
-h='<div class="card"><p style="color:#888">No Tilts detected or configured.<br>Tilts are discovered automatically via BLE scanning every 30 seconds.<br>Configure a Tilt slot below by colour to set fermenter assignment and calibration offsets.</p>';
-h+='<p style="color:#888;font-size:12px;margin-top:8px">To pre-configure a Tilt before it is seen, select its colour and click Save.</p></div>';
-// Show all 8 colours as unconfigured
-for(var c=0;c<8;c++){h+=buildTiltCard(c,null);}
-}else{
-// Show configured/seen tilts
-var seen={};for(var i=0;i<ts.length;i++)seen[ts[i].colour]=ts[i];
-for(var c=0;c<8;c++){h+=buildTiltCard(c,seen[c]||null);}
+// Render <option> tags for a Tilt's temperature-reading dropdown.
+function tiltFnOpts(sel) {
+  var s = (sel == 2) ? 2 : 99;
+  var h = '';
+  for (var k in tiltFnNames) h += '<option value="' + k + '"' + (k == s ? ' selected' : '') + '>' + tiltFnNames[k] + '</option>';
+  return h;
 }
-$('t3').innerHTML=h;
-}).catch(function(e){$('t3').innerHTML='<div class="card"><p style="color:#f44">Error loading Tilt data: '+e+'</p></div>'})}
 
-function buildTiltCard(colour,t){
-var dot='<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+tiltDotColours[colour]+';margin-right:6px;vertical-align:middle"></span>';
-var active=t&&t.active;
-var label=(t&&t.isPro)?'Tilt Pro':'Tilt';
-var h='<div class="card"><h3>'+dot+tiltColourNames[colour]+' '+label;
-if(active)h+=' <span class="badge badge-idle">Active</span>';
-if(t&&t.isPro)h+=' <span class="badge" style="background:#ff9800;color:#000">Pro</span>';
-h+='</h3>';
-if(active&&t){h+='<div class="live">SG: '+(t.sg>0?t.sg.toFixed(4):'--')+' &nbsp; Temp: '+(t.temperature>-100?t.temperature.toFixed(1)+'&deg;':'--')+'</div>';}
-var fn=t?t.function:99;var ferm=t?t.fermenter:99;var ta=t?t.tempAdjust:0;var sa=t?t.sgAdjust:0;
-h+='<div class="row"><label>Fermenter</label><select id="tlr'+colour+'">'+fermOpts(ferm)+'</select></div>';
-h+='<div class="row"><label>SG Adjust</label><input type="number" step="0.0001" id="tlsa'+colour+'" value="'+sa+'" style="width:80px"></div>';
-h+='<div class="row"><label>Temp Adjust</label><input type="number" step="0.1" id="tlta'+colour+'" value="'+ta+'" style="width:70px"> &deg;C</div>';
-h+='<div class="row"><label>Temperature reading</label><select id="tlf'+colour+'">'+tiltFnOpts(fn)+'</select></div>';
-h+='<button class="save" onclick="saveTilt('+colour+')">Save</button>';
-if(t)h+=' <button class="test" onclick="clearTilt('+colour+')" style="background:#333">Clear</button>';
-h+=' <span class="msg" id="tlm'+colour+'"></span></div>';
-return h}
+// Render the Tilts tab — one card per colour slot, marked Active for any Tilts seen by BLE.
+function loadTilts() {
+  fetch('/tilts').then(function (r) { return r.json(); }).then(function (d) {
+    var ts = d.tilts || [];
+    var h = '';
+    if (ts.length == 0) {
+      h = '<div class="card"><p style="color:#888">No Tilts detected or configured.<br>Tilts are discovered automatically via BLE scanning every 30 seconds.<br>Configure a Tilt slot below by colour to set fermenter assignment and calibration offsets.</p>';
+      h += '<p style="color:#888;font-size:12px;margin-top:8px">To pre-configure a Tilt before it is seen, select its colour and click Save.</p></div>';
+      // Show all 8 colours as unconfigured.
+      for (var c = 0; c < 8; c++) h += buildTiltCard(c, null);
+    } else {
+      // Show configured/seen tilts.
+      var seen = {};
+      for (var i = 0; i < ts.length; i++) seen[ts[i].colour] = ts[i];
+      for (var c = 0; c < 8; c++) h += buildTiltCard(c, seen[c] || null);
+    }
+    $('t3').innerHTML = h;
+  }).catch(function (e) {
+    $('t3').innerHTML = '<div class="card"><p style="color:#f44">Error loading Tilt data: ' + e + '</p></div>';
+  });
+}
 
-function saveTilt(colour){
-var body={colour:colour,function:parseInt($('tlf'+colour).value),fermenter:parseInt($('tlr'+colour).value),tempAdjust:parseFloat($('tlta'+colour).value)||0,sgAdjust:parseFloat($('tlsa'+colour).value)||0};
-fetch('/tilt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('tlm'+colour,d.msg,d.status=='ok');dirty=false;if(d.status=='ok')setTimeout(loadTilts,500)})
-.catch(function(e){msg('tlm'+colour,'Error: '+e,false)})}
+// Build a single Tilt slot card. `t` is the seen-Tilt record or null when unconfigured.
+function buildTiltCard(colour, t) {
+  var dot = '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + tiltDotColours[colour] + ';margin-right:6px;vertical-align:middle"></span>';
+  var active = t && t.active;
+  var label = (t && t.isPro) ? 'Tilt Pro' : 'Tilt';
+  var h = '<div class="card"><h3>' + dot + tiltColourNames[colour] + ' ' + label;
+  if (active) h += ' <span class="badge badge-idle">Active</span>';
+  if (t && t.isPro) h += ' <span class="badge" style="background:#ff9800;color:#000">Pro</span>';
+  h += '</h3>';
+  if (active && t) {
+    h += '<div class="live">SG: ' + (t.sg > 0 ? t.sg.toFixed(4) : '--') + ' &nbsp; Temp: ' + (t.temperature > -100 ? t.temperature.toFixed(1) + '&deg;' : '--') + '</div>';
+  }
+  var fn   = t ? t.function   : 99;
+  var ferm = t ? t.fermenter  : 99;
+  var ta   = t ? t.tempAdjust : 0;
+  var sa   = t ? t.sgAdjust   : 0;
+  h += '<div class="row"><label>Fermenter</label><select id="tlr' + colour + '">' + fermOpts(ferm) + '</select></div>';
+  h += '<div class="row"><label>SG Adjust</label><input type="number" step="0.0001" id="tlsa' + colour + '" value="' + sa + '" style="width:80px"></div>';
+  h += '<div class="row"><label>Temp Adjust</label><input type="number" step="0.1" id="tlta' + colour + '" value="' + ta + '" style="width:70px"> &deg;C</div>';
+  h += '<div class="row"><label>Temperature reading</label><select id="tlf' + colour + '">' + tiltFnOpts(fn) + '</select></div>';
+  h += '<button class="save" onclick="saveTilt(' + colour + ')">Save</button>';
+  if (t) h += ' <button class="test" onclick="clearTilt(' + colour + ')" style="background:#333">Clear</button>';
+  h += ' <span class="msg" id="tlm' + colour + '"></span></div>';
+  return h;
+}
 
-function clearTilt(colour){
-if(!confirm('Remove '+tiltColourNames[colour]+' Tilt configuration?'))return;
-// Reset to unassigned
-var body={colour:colour,function:99,fermenter:99,tempAdjust:0,sgAdjust:0,_clear:true};
-fetch('/tilt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('tlm'+colour,d.msg,d.status=='ok');dirty=false;if(d.status=='ok')setTimeout(loadTilts,500)})
-.catch(function(e){msg('tlm'+colour,'Error: '+e,false)})}
+// Save Tilt configuration for the given colour slot.
+function saveTilt(colour) {
+  var body = {
+    colour:     colour,
+    function:   parseInt  ($('tlf'  + colour).value),
+    fermenter:  parseInt  ($('tlr'  + colour).value),
+    tempAdjust: parseFloat($('tlta' + colour).value) || 0,
+    sgAdjust:   parseFloat($('tlsa' + colour).value) || 0
+  };
+  fetch('/tilt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('tlm' + colour, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadTilts, 500); })
+    .catch(function (e) { msg('tlm' + colour, 'Error: ' + e, false); });
+}
+
+// Confirm and clear the Tilt slot for the given colour, resetting it to unassigned.
+function clearTilt(colour) {
+  if (!confirm('Remove ' + tiltColourNames[colour] + ' Tilt configuration?')) return;
+  var body = { colour: colour, function: 99, fermenter: 99, tempAdjust: 0, sgAdjust: 0, _clear: true };
+  fetch('/tilt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('tlm' + colour, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadTilts, 500); })
+    .catch(function (e) { msg('tlm' + colour, 'Error: ' + e, false); });
+}
 
 // ---- iSpindels Tab ----
 var iSpindelUnitNames={0:'SG',1:'Plato'};
