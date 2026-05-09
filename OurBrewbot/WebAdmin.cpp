@@ -301,12 +301,14 @@ var R = null;
 var dirty = false;
 var dirtyTimer = null;
 
+// Mark the form as edited; auto-refresh resumes after a 30-second idle.
 function markDirty() {
   dirty = true;
   if (dirtyTimer) clearTimeout(dirtyTimer);
   dirtyTimer = setTimeout(function () { dirty = false; }, 30000);
 }
 
+// Switch the active tab and trigger a re-render of its contents.
 function showTab(n) {
   T = n;
   dirty = false;
@@ -317,10 +319,12 @@ function showTab(n) {
   loadTab();
 }
 
+// Shorthand for document.getElementById.
 function $(s) {
   return document.getElementById(s);
 }
 
+// Show a status message in the element with the given id, styled ok (green) or err (red).
 function msg(id, t, ok) {
   var e = $(id);
   if (e) {
@@ -329,6 +333,7 @@ function msg(id, t, ok) {
   }
 }
 
+// Confirm with the user, then clear WiFi credentials and reboot into the setup portal.
 function resetWiFiSettings() {
   if (!confirm('Are you sure you want to clear WiFi settings? The controller will reboot and reopen the setup portal.')) return;
   fetch('/wifi/reset', { method: 'POST' })
