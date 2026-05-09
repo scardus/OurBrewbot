@@ -481,43 +481,80 @@ function profAction(i, a) {
 }
 
 // ---- PROFILES TAB ----
-var STYPES=[];
-// Fields relevant per step type: s=startTemp, e=endTemp, g=sgTrigger, d=days
-var SFIELDS={0:'segd',1:'sed',2:'sed',3:'sgd',4:'sg',5:'se',6:'sg',7:'sg',8:'segd',9:'sed'};
-function stepFieldsEnabled(t){var f=SFIELDS[t]||'segd';return{s:f.indexOf('s')>=0,e:f.indexOf('e')>=0,g:f.indexOf('g')>=0,d:f.indexOf('d')>=0}}
-function onStepTypeChange(p,s){var t=parseInt($('pst'+p+'_'+s).value);var fl=stepFieldsEnabled(t);$('pss'+p+'_'+s).disabled=!fl.s;$('pse'+p+'_'+s).disabled=!fl.e;$('psg'+p+'_'+s).disabled=!fl.g;$('psd'+p+'_'+s).disabled=!fl.d}
+var STYPES = [];
 
-function loadProfiles(){
-fetch('/profiles').then(function(r){return r.json()}).then(function(d){
-STYPES=d.stepTypes||[];
-var ps=d.profiles||[];
-var h='';
-for(var p=0;p<ps.length;p++){var pr=ps[p];
-h+='<div class="card"><h3>Profile '+(p+1)+'</h3>';
-h+='<div class="row"><label>Name</label><input type="text" id="ppn'+p+'" value="'+pr.name+'" style="width:200px"></div>';
-h+='<table class="tbl"><tr><th>#</th><th>Step Type</th><th>Start Temp</th><th>End Temp</th><th>SG Trigger</th><th>Days</th></tr>';
-for(var s=0;s<pr.steps.length;s++){var st=pr.steps[s];var fl=stepFieldsEnabled(st.stepType);
-h+='<tr><td>'+(s+1)+'</td>';
-h+='<td><select id="pst'+p+'_'+s+'" onchange="onStepTypeChange('+p+','+s+')">';
-for(var t=0;t<STYPES.length;t++)h+='<option value="'+STYPES[t].id+'"'+(STYPES[t].id==st.stepType?' selected':'')+'>'+STYPES[t].name+'</option>';
-h+='</select></td>';
-h+='<td><input type="number" step="0.1" id="pss'+p+'_'+s+'" value="'+st.startTemp+'" style="width:70px"'+(fl.s?'':' disabled')+'></td>';
-h+='<td><input type="number" step="0.1" id="pse'+p+'_'+s+'" value="'+st.endTemp+'" style="width:70px"'+(fl.e?'':' disabled')+'></td>';
-h+='<td><input type="number" step="0.001" id="psg'+p+'_'+s+'" value="'+st.sgTrigger+'" style="width:80px"'+(fl.g?'':' disabled')+'></td>';
-h+='<td><input type="number" step="0.1" id="psd'+p+'_'+s+'" value="'+st.days+'" style="width:60px"'+(fl.d?'':' disabled')+'></td></tr>';}
-h+='</table>';
-h+='<button class="save" onclick="saveProfile('+p+')">Save Profile '+(p+1)+'</button> <span class="msg" id="ppm'+p+'"></span>';
-h+='</div>';}
-$('t1').innerHTML=h;
-})}
+// Which step-type uses which fields: s=startTemp, e=endTemp, g=sgTrigger, d=days.
+var SFIELDS = { 0: 'segd', 1: 'sed', 2: 'sed', 3: 'sgd', 4: 'sg', 5: 'se', 6: 'sg', 7: 'sg', 8: 'segd', 9: 'sed' };
 
-function saveProfile(p){
-var body={index:p,name:$('ppn'+p).value,steps:[]};
-for(var s=0;s<15;s++){
-body.steps.push({stepType:parseInt($('pst'+p+'_'+s).value)||0,startTemp:parseFloat($('pss'+p+'_'+s).value)||0,endTemp:parseFloat($('pse'+p+'_'+s).value)||0,sgTrigger:parseFloat($('psg'+p+'_'+s).value)||0,days:parseFloat($('psd'+p+'_'+s).value)||0});}
-fetch('/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('ppm'+p,d.msg,d.status=='ok');dirty=false;setTimeout(loadProfiles,500)})
-.catch(function(e){msg('ppm'+p,'Error: '+e,false)})}
+// Decode the SFIELDS letter-set for a step type into per-field enabled flags.
+function stepFieldsEnabled(t) {
+  var f = SFIELDS[t] || 'segd';
+  return {
+    s: f.indexOf('s') >= 0,
+    e: f.indexOf('e') >= 0,
+    g: f.indexOf('g') >= 0,
+    d: f.indexOf('d') >= 0
+  };
+}
+
+// onchange handler for a step-type dropdown — enable/disable the per-step inputs.
+function onStepTypeChange(p, s) {
+  var t = parseInt($('pst' + p + '_' + s).value);
+  var fl = stepFieldsEnabled(t);
+  $('pss' + p + '_' + s).disabled = !fl.s;
+  $('pse' + p + '_' + s).disabled = !fl.e;
+  $('psg' + p + '_' + s).disabled = !fl.g;
+  $('psd' + p + '_' + s).disabled = !fl.d;
+}
+
+// Fetch all profiles and render one editable card per profile.
+function loadProfiles() {
+  fetch('/profiles').then(function (r) { return r.json(); }).then(function (d) {
+    STYPES = d.stepTypes || [];
+    var ps = d.profiles || [];
+    var h = '';
+    for (var p = 0; p < ps.length; p++) {
+      var pr = ps[p];
+      h += '<div class="card"><h3>Profile ' + (p + 1) + '</h3>';
+      h += '<div class="row"><label>Name</label><input type="text" id="ppn' + p + '" value="' + pr.name + '" style="width:200px"></div>';
+      h += '<table class="tbl"><tr><th>#</th><th>Step Type</th><th>Start Temp</th><th>End Temp</th><th>SG Trigger</th><th>Days</th></tr>';
+      for (var s = 0; s < pr.steps.length; s++) {
+        var st = pr.steps[s];
+        var fl = stepFieldsEnabled(st.stepType);
+        h += '<tr><td>' + (s + 1) + '</td>';
+        h += '<td><select id="pst' + p + '_' + s + '" onchange="onStepTypeChange(' + p + ',' + s + ')">';
+        for (var t = 0; t < STYPES.length; t++) h += '<option value="' + STYPES[t].id + '"' + (STYPES[t].id == st.stepType ? ' selected' : '') + '>' + STYPES[t].name + '</option>';
+        h += '</select></td>';
+        h += '<td><input type="number" step="0.1"   id="pss' + p + '_' + s + '" value="' + st.startTemp + '" style="width:70px"' + (fl.s ? '' : ' disabled') + '></td>';
+        h += '<td><input type="number" step="0.1"   id="pse' + p + '_' + s + '" value="' + st.endTemp   + '" style="width:70px"' + (fl.e ? '' : ' disabled') + '></td>';
+        h += '<td><input type="number" step="0.001" id="psg' + p + '_' + s + '" value="' + st.sgTrigger + '" style="width:80px"' + (fl.g ? '' : ' disabled') + '></td>';
+        h += '<td><input type="number" step="0.1"   id="psd' + p + '_' + s + '" value="' + st.days      + '" style="width:60px"' + (fl.d ? '' : ' disabled') + '></td></tr>';
+      }
+      h += '</table>';
+      h += '<button class="save" onclick="saveProfile(' + p + ')">Save Profile ' + (p + 1) + '</button> <span class="msg" id="ppm' + p + '"></span>';
+      h += '</div>';
+    }
+    $('t1').innerHTML = h;
+  });
+}
+
+// Collect profile p's name and 15 step rows, then POST to /profile.
+function saveProfile(p) {
+  var body = { index: p, name: $('ppn' + p).value, steps: [] };
+  for (var s = 0; s < 15; s++) {
+    body.steps.push({
+      stepType:  parseInt  ($('pst' + p + '_' + s).value) || 0,
+      startTemp: parseFloat($('pss' + p + '_' + s).value) || 0,
+      endTemp:   parseFloat($('pse' + p + '_' + s).value) || 0,
+      sgTrigger: parseFloat($('psg' + p + '_' + s).value) || 0,
+      days:      parseFloat($('psd' + p + '_' + s).value) || 0
+    });
+  }
+  fetch('/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('ppm' + p, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadProfiles, 500); })
+    .catch(function (e) { msg('ppm' + p, 'Error: ' + e, false); });
+}
 
 // ---- PROBES TAB ----
 var fnNames={2:'Beer',3:'Ambient',99:'Unassigned'};
