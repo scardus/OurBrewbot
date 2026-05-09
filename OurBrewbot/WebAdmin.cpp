@@ -609,95 +609,130 @@ function saveProbe(i) {
 }
 
 // ---- SMART PLUGS TAB ----
-var plugFnNames={0:'F1 Hot',1:'F1 Cold',2:'F2 Hot',3:'F2 Cold',4:'F3 Hot',5:'F3 Cold',6:'F4 Hot',7:'F4 Cold',8:'Aux 1',9:'Aux 2',99:'Unassigned'};
-function plugFnOpts(sel){var h='';for(var k in plugFnNames)h+='<option value="'+k+'"'+(k==sel?' selected':'')+'>'+plugFnNames[k]+'</option>';return h}
+var plugFnNames = {
+  0: 'F1 Hot',  1: 'F1 Cold',
+  2: 'F2 Hot',  3: 'F2 Cold',
+  4: 'F3 Hot',  5: 'F3 Cold',
+  6: 'F4 Hot',  7: 'F4 Cold',
+  8: 'Aux 1',   9: 'Aux 2',
+  99: 'Unassigned'
+};
 
-// Preset codes: [btn1_on, btn1_off, btn2_on, btn2_off, btn3_on, btn3_off, btn4_on, btn4_off]
+// Render <option> tags for the plug-function dropdown, with `sel` selected.
+function plugFnOpts(sel) {
+  var h = '';
+  for (var k in plugFnNames) h += '<option value="' + k + '"' + (k == sel ? ' selected' : '') + '>' + plugFnNames[k] + '</option>';
+  return h;
+}
+
+// Preset codes: c = [btn1_on, btn1_off, btn2_on, btn2_off, btn3_on, btn3_off, btn4_on, btn4_off]
 // Firmware array order is (on,off) pairs, buttons [3,4,1,2]. Corrected here to [1,2,3,4].
 // Dial codesets 1-4 confirmed via RF sniffer. Others are estimates — verify with /rf/sniff if unsure.
-var P=[
-{n:'Dial Codeset 1',m:'Dial',d:410,c:[1381717,1381716,1394005,1394004,1397077,1397076,1397845,1397844]},
-{n:'Dial Codeset 2',m:'Dial',d:410,c:[4527445,4527444,4539733,4539732,4542805,4542804,4543573,4543572]},
-{n:'Dial Codeset 3',m:'Dial',d:410,c:[5313877,5313876,5326165,5326164,5329237,5329236,5330005,5330004]},
-{n:'Dial Codeset 4',m:'Dial',d:410,c:[5510485,5510484,5522773,5522772,5525845,5525844,5526613,5526612]},
-{n:'Codeset 3a',m:'Dial',d:410,c:[10958860,10958852,10958858,10958850,10958857,10958849,10958861,10958853]},
-{n:'Codeset 2a',m:'Dial',d:410,c:[1070387,1070396,1070531,1070540,1070851,1070860,1072387,1072396]},
-{n:'Codeset 4 alt',m:'Dial',d:410,c:[12068364,12068356,12068362,12068354,12068363,12068355,12068365,12068357]},
-{n:'ZAP USA 0308',m:'ZAP',d:160,c:[4281651,4281660,4282243,4282252,4281795,4281804,4282115,4282124]},
-{n:'ZAP USA 0313',m:'ZAP',d:160,c:[1332531,1332540,1332675,1332684,1332995,1333004,1334531,1334540]},
-{n:'Arlec Code 1',m:'Arlec',d:160,c:[4461875,4461884,4462019,4462028,4462339,4462348,4463875,4463884]},
-{n:'Arlec Code 2',m:'Arlec',d:160,c:[5526835,5526844,5526979,5526988,5527299,5527308,5528835,5528844]},
-{n:'Arlec Code 3',m:'Arlec',d:160,c:[16468316,15835788,16028133,16395413,16148014,16569774,15742919,16710407]}
+var P = [
+  { n: 'Dial Codeset 1',  m: 'Dial',  d: 410, c: [ 1381717,  1381716,  1394005,  1394004,  1397077,  1397076,  1397845,  1397844] },
+  { n: 'Dial Codeset 2',  m: 'Dial',  d: 410, c: [ 4527445,  4527444,  4539733,  4539732,  4542805,  4542804,  4543573,  4543572] },
+  { n: 'Dial Codeset 3',  m: 'Dial',  d: 410, c: [ 5313877,  5313876,  5326165,  5326164,  5329237,  5329236,  5330005,  5330004] },
+  { n: 'Dial Codeset 4',  m: 'Dial',  d: 410, c: [ 5510485,  5510484,  5522773,  5522772,  5525845,  5525844,  5526613,  5526612] },
+  { n: 'Codeset 3a',      m: 'Dial',  d: 410, c: [10958860, 10958852, 10958858, 10958850, 10958857, 10958849, 10958861, 10958853] },
+  { n: 'Codeset 2a',      m: 'Dial',  d: 410, c: [ 1070387,  1070396,  1070531,  1070540,  1070851,  1070860,  1072387,  1072396] },
+  { n: 'Codeset 4 alt',   m: 'Dial',  d: 410, c: [12068364, 12068356, 12068362, 12068354, 12068363, 12068355, 12068365, 12068357] },
+  { n: 'ZAP USA 0308',    m: 'ZAP',   d: 160, c: [ 4281651,  4281660,  4282243,  4282252,  4281795,  4281804,  4282115,  4282124] },
+  { n: 'ZAP USA 0313',    m: 'ZAP',   d: 160, c: [ 1332531,  1332540,  1332675,  1332684,  1332995,  1333004,  1334531,  1334540] },
+  { n: 'Arlec Code 1',    m: 'Arlec', d: 160, c: [ 4461875,  4461884,  4462019,  4462028,  4462339,  4462348,  4463875,  4463884] },
+  { n: 'Arlec Code 2',    m: 'Arlec', d: 160, c: [ 5526835,  5526844,  5526979,  5526988,  5527299,  5527308,  5528835,  5528844] },
+  { n: 'Arlec Code 3',    m: 'Arlec', d: 160, c: [16468316, 15835788, 16028133, 16395413, 16148014, 16569774, 15742919, 16710407] }
 ];
 
-function presetOpts(){var h='<option value="">-- Select Preset --</option>';for(var i=0;i<P.length;i++)h+='<option value="'+i+'">'+P[i].n+'</option>';return h}
-function btnOpts(){return'<option value="0">Button 1</option><option value="1">Button 2</option><option value="2">Button 3</option><option value="3">Button 4</option>'}
-
-function applyPreset(i){
-var ps=$('sps'+i);var bs=$('sbs'+i);
-if(ps.value==='')return;
-var p=P[parseInt(ps.value)];var b=parseInt(bs.value);
-$('sm'+i).value=p.m;
-$('smo'+i).value=p.n;
-$('son'+i).value=p.c[b*2];
-$('sof'+i).value=p.c[b*2+1];
-$('spr'+i).value=1;
-$('sbi'+i).value=24;
-$('sdl'+i).value=p.d;
-msg('sm'+i+'m','Preset applied - click Save to store',true)}
-
-function loadPlugs(){
-fetch('/smartplugs').then(function(r){return r.json()}).then(function(d){
-var p=d.plugs||[];
-var h='';
-for(var i=0;i<p.length;i++){var q=p[i];
-var active=q.onCode>0||q.offCode>0;
-var hdr='Plug '+q.index;
-if(active)hdr+=' <span style="color:#53d8fb;font-size:12px">'+q.manufacturer+(q.model?' - '+q.model:'')+'</span>';
-if(q.state)hdr+=' <span class="badge badge-heat">ON</span>';
-h+='<div class="card"><h3>'+hdr+'</h3>';
-h+='<div class="row" style="background:#0a1628;padding:6px;border-radius:4px;margin-bottom:8px"><label>Preset</label><select id="sps'+i+'" style="width:160px">'+presetOpts()+'</select>';
-h+=' <select id="sbs'+i+'" style="width:100px">'+btnOpts()+'</select>';
-h+=' <button class="test" onclick="applyPreset('+i+')">Apply</button></div>';
-h+='<div class="row"><label>Manufacturer</label><input type="text" id="sm'+i+'" value="'+q.manufacturer+'" style="width:120px">';
-h+=' <label style="min-width:auto">Model</label><input type="text" id="smo'+i+'" value="'+q.model+'" style="width:120px"></div>';
-h+='<div class="row"><label>On Code</label><input type="number" id="son'+i+'" value="'+q.onCode+'" style="width:120px">';
-h+=' <label style="min-width:auto">Off Code</label><input type="number" id="sof'+i+'" value="'+q.offCode+'" style="width:120px"></div>';
-h+='<div class="row"><label>Protocol</label><input type="number" id="spr'+i+'" value="'+q.protocol+'" style="width:60px">';
-h+=' <label style="min-width:auto">Bits</label><input type="number" id="sbi'+i+'" value="'+q.bits+'" style="width:60px">';
-h+=' <label style="min-width:auto">Delay &mu;s</label><input type="number" id="sdl'+i+'" value="'+q.delay+'" style="width:80px"></div>';
-h+='<div class="row"><label>Function</label><select id="sf'+i+'">'+plugFnOpts(q['function'])+'</select>';
-h+=' <label style="min-width:auto">Fermenter</label><select id="sr'+i+'">'+fermOpts(q.fermenter)+'</select></div>';
-h+='<div class="row">';
-h+='<button class="save" onclick="savePlug('+i+')">Save</button> ';
-h+='<button class="test" onclick="testPlug('+i+',\'on\')">Test On</button> ';
-h+='<button class="test" onclick="testPlug('+i+',\'off\')">Test Off</button>';
-h+='</div><div class="msg" id="sm'+i+'m"></div>';
-h+='</div>';
+// Render <option> tags for the preset picker.
+function presetOpts() {
+  var h = '<option value="">-- Select Preset --</option>';
+  for (var i = 0; i < P.length; i++) h += '<option value="' + i + '">' + P[i].n + '</option>';
+  return h;
 }
-$('t5').innerHTML=h;
-})}
 
-function savePlug(i){
-var body={};
-body['index']=i;
-body['manufacturer']=$('sm'+i).value;
-body['model']=$('smo'+i).value;
-body['onCode']=parseInt($('son'+i).value)||0;
-body['offCode']=parseInt($('sof'+i).value)||0;
-body['protocol']=parseInt($('spr'+i).value)||1;
-body['bits']=parseInt($('sbi'+i).value)||24;
-body['delay']=parseInt($('sdl'+i).value)||160;
-body['function']=parseInt($('sf'+i).value);
-body['fermenter']=parseInt($('sr'+i).value);
-fetch('/smartplug',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('sm'+i+'m',d.msg,d.status=='ok');dirty=false;setTimeout(loadPlugs,500)})
-.catch(function(e){msg('sm'+i+'m','Error: '+e,false)})}
+// Render <option> tags for the four buttons on a preset.
+function btnOpts() {
+  return '<option value="0">Button 1</option><option value="1">Button 2</option><option value="2">Button 3</option><option value="3">Button 4</option>';
+}
 
-function testPlug(i,a){
-fetch('/smartplug/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,action:a})})
-.then(function(r){return r.json()}).then(function(d){msg('sm'+i+'m',d.msg,d.status=='ok')})
-.catch(function(e){msg('sm'+i+'m','Error: '+e,false)})}
+// Copy the selected preset+button into plug i's form fields (does not save).
+function applyPreset(i) {
+  var ps = $('sps' + i);
+  var bs = $('sbs' + i);
+  if (ps.value === '') return;
+  var p = P[parseInt(ps.value)];
+  var b = parseInt(bs.value);
+  $('sm'  + i).value = p.m;
+  $('smo' + i).value = p.n;
+  $('son' + i).value = p.c[b * 2];
+  $('sof' + i).value = p.c[b * 2 + 1];
+  $('spr' + i).value = 1;
+  $('sbi' + i).value = 24;
+  $('sdl' + i).value = p.d;
+  msg('sm' + i + 'm', 'Preset applied - click Save to store', true);
+}
+
+// Fetch all smart plugs and render an editable card per plug.
+function loadPlugs() {
+  fetch('/smartplugs').then(function (r) { return r.json(); }).then(function (d) {
+    var p = d.plugs || [];
+    var h = '';
+    for (var i = 0; i < p.length; i++) {
+      var q = p[i];
+      var active = q.onCode > 0 || q.offCode > 0;
+      var hdr = 'Plug ' + q.index;
+      if (active) hdr += ' <span style="color:#53d8fb;font-size:12px">' + q.manufacturer + (q.model ? ' - ' + q.model : '') + '</span>';
+      if (q.state) hdr += ' <span class="badge badge-heat">ON</span>';
+      h += '<div class="card"><h3>' + hdr + '</h3>';
+      h += '<div class="row" style="background:#0a1628;padding:6px;border-radius:4px;margin-bottom:8px"><label>Preset</label><select id="sps' + i + '" style="width:160px">' + presetOpts() + '</select>';
+      h += ' <select id="sbs' + i + '" style="width:100px">' + btnOpts() + '</select>';
+      h += ' <button class="test" onclick="applyPreset(' + i + ')">Apply</button></div>';
+      h += '<div class="row"><label>Manufacturer</label><input type="text" id="sm' + i + '" value="' + q.manufacturer + '" style="width:120px">';
+      h += ' <label style="min-width:auto">Model</label><input type="text" id="smo' + i + '" value="' + q.model + '" style="width:120px"></div>';
+      h += '<div class="row"><label>On Code</label><input type="number" id="son' + i + '" value="' + q.onCode + '" style="width:120px">';
+      h += ' <label style="min-width:auto">Off Code</label><input type="number" id="sof' + i + '" value="' + q.offCode + '" style="width:120px"></div>';
+      h += '<div class="row"><label>Protocol</label><input type="number" id="spr' + i + '" value="' + q.protocol + '" style="width:60px">';
+      h += ' <label style="min-width:auto">Bits</label><input type="number" id="sbi' + i + '" value="' + q.bits + '" style="width:60px">';
+      h += ' <label style="min-width:auto">Delay &mu;s</label><input type="number" id="sdl' + i + '" value="' + q.delay + '" style="width:80px"></div>';
+      h += '<div class="row"><label>Function</label><select id="sf' + i + '">' + plugFnOpts(q['function']) + '</select>';
+      h += ' <label style="min-width:auto">Fermenter</label><select id="sr' + i + '">' + fermOpts(q.fermenter) + '</select></div>';
+      h += '<div class="row">';
+      h += '<button class="save" onclick="savePlug(' + i + ')">Save</button> ';
+      h += '<button class="test" onclick="testPlug(' + i + ',\'on\')">Test On</button> ';
+      h += '<button class="test" onclick="testPlug(' + i + ',\'off\')">Test Off</button>';
+      h += '</div><div class="msg" id="sm' + i + 'm"></div>';
+      h += '</div>';
+    }
+    $('t5').innerHTML = h;
+  });
+}
+
+// Save plug i: codes, RF parameters, function/fermenter assignment.
+function savePlug(i) {
+  var body = {};
+  body['index']        = i;
+  body['manufacturer'] = $('sm'  + i).value;
+  body['model']        = $('smo' + i).value;
+  body['onCode']       = parseInt($('son' + i).value) || 0;
+  body['offCode']      = parseInt($('sof' + i).value) || 0;
+  body['protocol']     = parseInt($('spr' + i).value) || 1;
+  body['bits']         = parseInt($('sbi' + i).value) || 24;
+  body['delay']        = parseInt($('sdl' + i).value) || 160;
+  body['function']     = parseInt($('sf'  + i).value);
+  body['fermenter']    = parseInt($('sr'  + i).value);
+  fetch('/smartplug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('sm' + i + 'm', d.msg, d.status == 'ok'); dirty = false; setTimeout(loadPlugs, 500); })
+    .catch(function (e) { msg('sm' + i + 'm', 'Error: ' + e, false); });
+}
+
+// Trigger plug i to fire its on or off RF code (transmit-only test, no save).
+function testPlug(i, a) {
+  fetch('/smartplug/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ index: i, action: a }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('sm' + i + 'm', d.msg, d.status == 'ok'); })
+    .catch(function (e) { msg('sm' + i + 'm', 'Error: ' + e, false); });
+}
 
 // ---- SETTINGS TAB ----
 var bsNames=["Brewer's Friend",'Brewfather'];
