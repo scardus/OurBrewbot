@@ -1018,10 +1018,10 @@ function buildTiltCard(colour, t) {
   var ferm = t ? t.fermenter  : 99;
   var ta   = t ? t.tempAdjust : 0;
   var sa   = t ? t.sgAdjust   : 0;
-  html += '<div class="row"><label>Fermenter</label><select id="tlr' + colour + '">' + fermOpts(ferm) + '</select></div>';
-  html += '<div class="row"><label>SG Adjust</label><input type="number" step="0.0001" id="tlsa' + colour + '" value="' + sa + '" style="width:80px"></div>';
-  html += '<div class="row"><label>Temp Adjust</label><input type="number" step="0.1" id="tlta' + colour + '" value="' + ta + '" style="width:70px"> &deg;C</div>';
-  html += '<div class="row"><label>Temperature reading</label><select id="tlf' + colour + '">' + tiltFnOpts(fn) + '</select></div>';
+  html += row('Fermenter',           '<select id="tlr' + colour + '">' + fermOpts(ferm)  + '</select>');
+  html += row('SG Adjust',           numInput('tlsa' + colour, sa, 0.0001, 80));
+  html += row('Temp Adjust',         numInput('tlta' + colour, ta, 0.1,    70) + ' &deg;C');
+  html += row('Temperature reading', '<select id="tlf' + colour + '">' + tiltFnOpts(fn) + '</select>');
   html += '<button class="save" onclick="saveTilt(' + colour + ')">Save</button>';
   if (t) html += ' <button class="test" onclick="clearTilt(' + colour + ')" style="background:#333">Clear</button>';
   html += ' <span class="msg" id="tlm' + colour + '"></span></div>';
@@ -1086,11 +1086,11 @@ function buildISpindelCard(idx, s) {
       }
     }
     html += '</div>';
-    html += '<div class="row"><label>Device ID</label><span style="color:#53d8fb;font-size:13px">' + (s.id || '—') + '</span></div>';
+    html += row('Device ID', '<span style="color:#53d8fb;font-size:13px">' + (s.id || '—') + '</span>');
   }
-  html += '<div class="row"><label>Fermenter</label><select id="isf' + idx + '">' + fermOpts(s.fermenter) + '</select></div>';
-  html += '<div class="row"><label>Unit</label><select id="isu' + idx + '"><option value="0"' + (s.unit == 0 ? ' selected' : '') + '>SG</option><option value="1"' + (s.unit == 1 ? ' selected' : '') + '>Plato</option></select></div>';
-  html += '<div class="row"><label>Temperature reading</label><select id="isfn' + idx + '">' + tiltFnOpts(s.function) + '</select></div>';
+  html += row('Fermenter',           '<select id="isf'  + idx + '">' + fermOpts(s.fermenter)   + '</select>');
+  html += row('Unit',                '<select id="isu'  + idx + '"><option value="0"' + (s.unit == 0 ? ' selected' : '') + '>SG</option><option value="1"' + (s.unit == 1 ? ' selected' : '') + '>Plato</option></select>');
+  html += row('Temperature reading', '<select id="isfn' + idx + '">' + tiltFnOpts(s.function) + '</select>');
   html += '<button class="save" onclick="saveISpindel(' + idx + ')">Save</button>';
   if (!empty) html += ' <button class="test" onclick="clearISpindel(' + idx + ')" style="background:#333">Clear</button>';
   html += ' <span class="msg" id="ism' + idx + '"></span></div>';
