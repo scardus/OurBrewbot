@@ -557,38 +557,56 @@ function saveProfile(p) {
 }
 
 // ---- PROBES TAB ----
-var fnNames={2:'Beer',3:'Ambient',99:'Unassigned'};
-function fnOpts(sel){var h='';for(var k in fnNames)h+='<option value="'+k+'"'+(k==sel?' selected':'')+'>'+fnNames[k]+'</option>';return h}
-function fermOpts(sel){var h='<option value="99"'+(sel==99?' selected':'')+'>None</option>';for(var i=0;i<4;i++)h+='<option value="'+i+'"'+(sel==i?' selected':'')+'>Fermenter '+i+'</option>';return h}
+var fnNames = { 2: 'Beer', 3: 'Ambient', 99: 'Unassigned' };
 
-function loadProbes(){
-fetch('/probes').then(r=>r.json()).then(function(d){
-var p=d.probes;
-var h='<div class="card"><table class="tbl"><tr><th>Address</th><th>Temp</th><th>Name</th><th>Function</th><th>Fermenter</th><th>Adjust</th><th></th></tr>';
-if(p.length==0)h+='<tr><td colspan="7" style="color:#888">No probes detected. Connect DS18B20 probes to the Green Jack.</td></tr>';
-for(var i=0;i<p.length;i++){var q=p[i];
-h+='<tr><td style="font-family:monospace;font-size:12px">'+q.address+'</td>';
-h+='<td>'+(q.temperature>-100?q.temperature.toFixed(1)+'&deg;':'<span style="color:#f44">--</span>')+'</td>';
-h+='<td><input type="text" id="pn'+q.index+'" value="'+q.name+'" style="width:100px"></td>';
-h+='<td><select id="pf'+q.index+'">'+fnOpts(q.function)+'</select></td>';
-h+='<td><select id="pr'+q.index+'">'+fermOpts(q.fermenter)+'</select></td>';
-h+='<td><input type="number" step="0.1" id="pa'+q.index+'" value="'+q.tempAdjust+'" style="width:60px"></td>';
-h+='<td><button class="save" onclick="saveProbe('+q.index+')">Save</button></td></tr>';
+// Render <option> tags for the probe-function dropdown, with `sel` selected.
+function fnOpts(sel) {
+  var h = '';
+  for (var k in fnNames) h += '<option value="' + k + '"' + (k == sel ? ' selected' : '') + '>' + fnNames[k] + '</option>';
+  return h;
 }
-h+='</table><div class="msg" id="pm"></div></div>';
-$('t2').innerHTML=h;
-})}
 
-function saveProbe(i){
-var body={};
-body['index']=i;
-body['name']=$('pn'+i).value;
-body['function']=parseInt($('pf'+i).value);
-body['fermenter']=parseInt($('pr'+i).value);
-body['tempAdjust']=parseFloat($('pa'+i).value);
-fetch('/probes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('pm',d.msg,d.status=='ok');dirty=false;setTimeout(loadProbes,500)})
-.catch(function(e){msg('pm','Error: '+e,false)})}
+// Render <option> tags for the fermenter-assignment dropdown (None + Fermenter 0..3).
+function fermOpts(sel) {
+  var h = '<option value="99"' + (sel == 99 ? ' selected' : '') + '>None</option>';
+  for (var i = 0; i < 4; i++) h += '<option value="' + i + '"' + (sel == i ? ' selected' : '') + '>Fermenter ' + i + '</option>';
+  return h;
+}
+
+// Fetch all detected probes and render an editable row per probe.
+function loadProbes() {
+  fetch('/probes').then(function (r) { return r.json(); }).then(function (d) {
+    var p = d.probes;
+    var h = '<div class="card"><table class="tbl"><tr><th>Address</th><th>Temp</th><th>Name</th><th>Function</th><th>Fermenter</th><th>Adjust</th><th></th></tr>';
+    if (p.length == 0) h += '<tr><td colspan="7" style="color:#888">No probes detected. Connect DS18B20 probes to the Green Jack.</td></tr>';
+    for (var i = 0; i < p.length; i++) {
+      var q = p[i];
+      h += '<tr><td style="font-family:monospace;font-size:12px">' + q.address + '</td>';
+      h += '<td>' + (q.temperature > -100 ? q.temperature.toFixed(1) + '&deg;' : '<span style="color:#f44">--</span>') + '</td>';
+      h += '<td><input type="text" id="pn' + q.index + '" value="' + q.name + '" style="width:100px"></td>';
+      h += '<td><select id="pf' + q.index + '">' + fnOpts(q.function) + '</select></td>';
+      h += '<td><select id="pr' + q.index + '">' + fermOpts(q.fermenter) + '</select></td>';
+      h += '<td><input type="number" step="0.1" id="pa' + q.index + '" value="' + q.tempAdjust + '" style="width:60px"></td>';
+      h += '<td><button class="save" onclick="saveProbe(' + q.index + ')">Save</button></td></tr>';
+    }
+    h += '</table><div class="msg" id="pm"></div></div>';
+    $('t2').innerHTML = h;
+  });
+}
+
+// Save probe i: name, function, assigned fermenter, and per-probe temp offset.
+function saveProbe(i) {
+  var body = {};
+  body['index']      = i;
+  body['name']       = $('pn' + i).value;
+  body['function']   = parseInt  ($('pf' + i).value);
+  body['fermenter']  = parseInt  ($('pr' + i).value);
+  body['tempAdjust'] = parseFloat($('pa' + i).value);
+  fetch('/probes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('pm', d.msg, d.status == 'ok'); dirty = false; setTimeout(loadProbes, 500); })
+    .catch(function (e) { msg('pm', 'Error: ' + e, false); });
+}
 
 // ---- SMART PLUGS TAB ----
 var plugFnNames={0:'F1 Hot',1:'F1 Cold',2:'F2 Hot',3:'F2 Cold',4:'F3 Hot',5:'F3 Cold',6:'F4 Hot',7:'F4 Cold',8:'Aux 1',9:'Aux 2',99:'Unassigned'};
