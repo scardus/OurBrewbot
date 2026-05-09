@@ -1036,49 +1036,72 @@ function clearTilt(colour) {
 }
 
 // ---- iSpindels Tab ----
-var iSpindelUnitNames={0:'SG',1:'Plato'};
-function loadISpindels(){
-fetch('/ispindels').then(function(r){return r.json()}).then(function(d){
-var ds=d.ispindels||[];
-var h='';
-if(ds.length==0){h='<div class="card"><p style="color:#888">No iSpindel slots configured.</p></div>';}
-for(var i=0;i<ds.length;i++){h+=buildISpindelCard(i,ds[i]);}
-$('t4').innerHTML=h;
-}).catch(function(e){$('t4').innerHTML='<div class="card"><p style="color:#f44">Error loading iSpindel data: '+e+'</p></div>'})}
+var iSpindelUnitNames = { 0: 'SG', 1: 'Plato' };
 
-function buildISpindelCard(idx,s){
-var empty=(s.name=='None'||s.name=='');
-var hasData=(s.sg>0||s.temperature>0);
-var h='<div class="card"><h3>Slot '+idx;
-if(!empty)h+=': '+s.name;
-if(hasData&&!empty)h+=' <span class="badge badge-idle">Active</span>';
-h+='</h3>';
-if(!empty){
-h+='<div class="live">';
-if(hasData){h+='SG: '+s.sg.toFixed(4)+' &nbsp; Temp: '+s.temperature.toFixed(1)+'&deg; &nbsp; Angle: '+s.angle.toFixed(1)+'&deg; &nbsp; Batt: '+s.battery.toFixed(2)+'V &nbsp; RSSI: '+s.rssi+'dBm';if(s.corrGravity>0||s.velocity>0){h+='<br>Corr.SG: '+s.corrGravity.toFixed(4)+' &nbsp; Velocity: '+s.velocity.toFixed(4)+' &nbsp; Cycle: '+s.runTime.toFixed(1)+'s'+(s.gravityUnit?' &nbsp; Unit: '+s.gravityUnit:'');}}
-h+='</div>';
-h+='<div class="row"><label>Device ID</label><span style="color:#53d8fb;font-size:13px">'+(s.id||'—')+'</span></div>';
+// Render the iSpindels tab — one card per configured slot.
+function loadISpindels() {
+  fetch('/ispindels').then(function (r) { return r.json(); }).then(function (d) {
+    var ds = d.ispindels || [];
+    var h = '';
+    if (ds.length == 0) h = '<div class="card"><p style="color:#888">No iSpindel slots configured.</p></div>';
+    for (var i = 0; i < ds.length; i++) h += buildISpindelCard(i, ds[i]);
+    $('t4').innerHTML = h;
+  }).catch(function (e) {
+    $('t4').innerHTML = '<div class="card"><p style="color:#f44">Error loading iSpindel data: ' + e + '</p></div>';
+  });
 }
-h+='<div class="row"><label>Fermenter</label><select id="isf'+idx+'">'+fermOpts(s.fermenter)+'</select></div>';
-h+='<div class="row"><label>Unit</label><select id="isu'+idx+'"><option value="0"'+(s.unit==0?' selected':'')+'>SG</option><option value="1"'+(s.unit==1?' selected':'')+'>Plato</option></select></div>';
-h+='<div class="row"><label>Temperature reading</label><select id="isfn'+idx+'">'+tiltFnOpts(s.function)+'</select></div>';
-h+='<button class="save" onclick="saveISpindel('+idx+')">Save</button>';
-if(!empty)h+=' <button class="test" onclick="clearISpindel('+idx+')" style="background:#333">Clear</button>';
-h+=' <span class="msg" id="ism'+idx+'"></span></div>';
-return h}
 
-function saveISpindel(idx){
-var body={index:idx,fermenter:parseInt($('isf'+idx).value),unit:parseInt($('isu'+idx).value),function:parseInt($('isfn'+idx).value)};
-fetch('/ispindel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('ism'+idx,d.msg,d.status=='ok');dirty=false;if(d.status=='ok')setTimeout(loadISpindels,500)})
-.catch(function(e){msg('ism'+idx,'Error: '+e,false)})}
+// Build a single iSpindel slot card. Shows live readings if present, plus per-slot config.
+function buildISpindelCard(idx, s) {
+  var empty   = (s.name == 'None' || s.name == '');
+  var hasData = (s.sg > 0 || s.temperature > 0);
+  var h = '<div class="card"><h3>Slot ' + idx;
+  if (!empty) h += ': ' + s.name;
+  if (hasData && !empty) h += ' <span class="badge badge-idle">Active</span>';
+  h += '</h3>';
+  if (!empty) {
+    h += '<div class="live">';
+    if (hasData) {
+      h += 'SG: ' + s.sg.toFixed(4) + ' &nbsp; Temp: ' + s.temperature.toFixed(1) + '&deg; &nbsp; Angle: ' + s.angle.toFixed(1) + '&deg; &nbsp; Batt: ' + s.battery.toFixed(2) + 'V &nbsp; RSSI: ' + s.rssi + 'dBm';
+      if (s.corrGravity > 0 || s.velocity > 0) {
+        h += '<br>Corr.SG: ' + s.corrGravity.toFixed(4) + ' &nbsp; Velocity: ' + s.velocity.toFixed(4) + ' &nbsp; Cycle: ' + s.runTime.toFixed(1) + 's' + (s.gravityUnit ? ' &nbsp; Unit: ' + s.gravityUnit : '');
+      }
+    }
+    h += '</div>';
+    h += '<div class="row"><label>Device ID</label><span style="color:#53d8fb;font-size:13px">' + (s.id || '—') + '</span></div>';
+  }
+  h += '<div class="row"><label>Fermenter</label><select id="isf' + idx + '">' + fermOpts(s.fermenter) + '</select></div>';
+  h += '<div class="row"><label>Unit</label><select id="isu' + idx + '"><option value="0"' + (s.unit == 0 ? ' selected' : '') + '>SG</option><option value="1"' + (s.unit == 1 ? ' selected' : '') + '>Plato</option></select></div>';
+  h += '<div class="row"><label>Temperature reading</label><select id="isfn' + idx + '">' + tiltFnOpts(s.function) + '</select></div>';
+  h += '<button class="save" onclick="saveISpindel(' + idx + ')">Save</button>';
+  if (!empty) h += ' <button class="test" onclick="clearISpindel(' + idx + ')" style="background:#333">Clear</button>';
+  h += ' <span class="msg" id="ism' + idx + '"></span></div>';
+  return h;
+}
 
-function clearISpindel(idx){
-if(!confirm('Reset iSpindel slot '+idx+'?'))return;
-var body={index:idx,_clear:true};
-fetch('/ispindel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('ism'+idx,d.msg,d.status=='ok');dirty=false;if(d.status=='ok')setTimeout(loadISpindels,500)})
-.catch(function(e){msg('ism'+idx,'Error: '+e,false)})}
+// Save iSpindel slot idx (fermenter, unit, function).
+function saveISpindel(idx) {
+  var body = {
+    index:     idx,
+    fermenter: parseInt($('isf'  + idx).value),
+    unit:      parseInt($('isu'  + idx).value),
+    function:  parseInt($('isfn' + idx).value)
+  };
+  fetch('/ispindel/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('ism' + idx, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadISpindels, 500); })
+    .catch(function (e) { msg('ism' + idx, 'Error: ' + e, false); });
+}
+
+// Confirm and reset iSpindel slot idx to unconfigured.
+function clearISpindel(idx) {
+  if (!confirm('Reset iSpindel slot ' + idx + '?')) return;
+  var body = { index: idx, _clear: true };
+  fetch('/ispindel/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('ism' + idx, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadISpindels, 500); })
+    .catch(function (e) { msg('ism' + idx, 'Error: ' + e, false); });
+}
 
 var sysFn='';
 
