@@ -320,13 +320,13 @@ function showTab(n) {
 }
 
 // Shorthand for document.getElementById.
-function $(s) {
+function byId(s) {
   return document.getElementById(s);
 }
 
 // Show a status message in the element with the given id, styled ok (green) or err (red).
-function msg(id, t, ok) {
-  var e = $(id);
+function showMsg(id, t, ok) {
+  var e = byId(id);
   if (e) {
     e.textContent = t;
     e.className = 'msg ' + (ok ? 'ok' : 'err');
@@ -364,7 +364,7 @@ function statusBadge(s, pwr) {
 }
 
 // Render a styled toggle-switch checkbox with the given id and initial state.
-function sw(id, chk) {
+function switchHtml(id, chk) {
   return '<label class="sw"><input type="checkbox" id="' + id + '"' + (chk ? ' checked' : '') + '><span class="sl"></span></label>';
 }
 
@@ -403,8 +403,8 @@ function loadFermenters() {
       h += '<div class="row"><label>Compressor Delay</label><input type="number" id="cd' + i + '" value="' + f.CompressorDelay + '"> min</div>';
       h += '<div class="row"><label>Yeast</label><input type="text" id="yn' + i + '" value="' + f.YeastName + '"></div>';
       h += '<div class="row"><label>OG</label><input type="number" step="0.001" min="1.0" max="1.2" id="og' + i + '" value="' + f.OG + '" style="width:80px"> <label style="min-width:auto">TG</label><input type="number" step="0.001" min="1.0" max="1.2" id="tg' + i + '" value="' + f.TG + '" style="width:80px"></div>';
-      h += '<div class="row"><label>Power</label>' + sw('pw' + i, f.Power) + '</div>';
-      h += '<div class="row"><label>Temp Control</label>' + sw('tc' + i, f.TempControl) + '</div>';
+      h += '<div class="row"><label>Power</label>' + switchHtml('pw' + i, f.Power) + '</div>';
+      h += '<div class="row"><label>Temp Control</label>' + switchHtml('tc' + i, f.TempControl) + '</div>';
       h += '<div class="row"><label>Profile</label><select id="fp' + i + '"><option value="0"' + (f.ProfileNo == 0 ? ' selected' : '') + '>Standard</option>';
       for (var p = 0; p < PNAMES.length; p++) h += '<option value="' + (p + 1) + '"' + (f.ProfileNo == (p + 1) ? ' selected' : '') + '>' + PNAMES[p] + '</option>';
       h += '</select></div>';
@@ -417,24 +417,24 @@ function loadFermenters() {
         h += '<button class="test" onclick="profAction(' + i + ',\'next\')">Next &raquo;</button>';
       }
       if (f.ProfileNo >= 1) h += '</div>';
-      if (f.ProfileNo >= 1) h += '<div class="row"><label>Test Mode</label>' + sw('lt' + i, f.LiveTest) + '</div>';
+      if (f.ProfileNo >= 1) h += '<div class="row"><label>Test Mode</label>' + switchHtml('lt' + i, f.LiveTest) + '</div>';
       var bs = f.BrewServices || 0;
       var hasSvc = false;
       for (var s = 0; s < SVC.length; s++) {
         if (SVC[s].enabled) {
-          h += '<div class="row"><label>' + SVC[s].name + '</label>' + sw('bsv' + i + '_' + s, !!(bs & (1 << s))) + '</div>';
+          h += '<div class="row"><label>' + SVC[s].name + '</label>' + switchHtml('bsv' + i + '_' + s, !!(bs & (1 << s))) + '</div>';
           hasSvc = true;
         }
       }
       if (MQEN) {
-        h += '<div class="row"><label>MQTT</label>' + sw('bsv' + i + '_3', !!(bs & (1 << 3))) + '</div>';
+        h += '<div class="row"><label>MQTT</label>' + switchHtml('bsv' + i + '_3', !!(bs & (1 << 3))) + '</div>';
         hasSvc = true;
       }
       if (!hasSvc) h += '<div class="row"><label>Brew Services</label><span style="color:#888;font-size:12px">None enabled — configure in Reporting tab</span></div>';
       h += '<button class="save" onclick="saveFerm(' + i + ')">Save</button> <span class="msg" id="fm' + i + '"></span>';
       h += '</div>';
     }
-    $('t0').innerHTML = h;
+    byId('t0').innerHTML = h;
   });
 }
 
@@ -442,42 +442,42 @@ function loadFermenters() {
 function saveFerm(i) {
   var bs = 0;
   for (var s = 0; s < SVC.length; s++) {
-    var el = $('bsv' + i + '_' + s);
+    var el = byId('bsv' + i + '_' + s);
     if (el && el.checked) bs |= (1 << s);
   }
-  var mqel = $('bsv' + i + '_3');
+  var mqel = byId('bsv' + i + '_3');
   if (mqel && mqel.checked) bs |= (1 << 3);
   var body = {
     Fermenter:       i,
-    FermenterName:   $('fn' + i).value,
-    BeerName:        $('bn' + i).value,
-    YeastName:       $('yn' + i).value,
-    OG:              parseFloat($('og' + i).value),
-    TG:              parseFloat($('tg' + i).value),
-    CeilingTemp:     parseFloat($('ct' + i).value),
-    FloorTemp:       parseFloat($('ft' + i).value),
-    Hysteresis:      parseFloat($('hy' + i).value),
-    CompressorDelay: parseInt($('cd' + i).value),
-    Power:           $('pw' + i).checked,
-    TempControl:     $('tc' + i).checked,
-    ProfileNo:       parseInt($('fp' + i).value),
-    LiveTest:        $('lt' + i) ? $('lt' + i).checked : false,
+    FermenterName:   byId('fn' + i).value,
+    BeerName:        byId('bn' + i).value,
+    YeastName:       byId('yn' + i).value,
+    OG:              parseFloat(byId('og' + i).value),
+    TG:              parseFloat(byId('tg' + i).value),
+    CeilingTemp:     parseFloat(byId('ct' + i).value),
+    FloorTemp:       parseFloat(byId('ft' + i).value),
+    Hysteresis:      parseFloat(byId('hy' + i).value),
+    CompressorDelay: parseInt(byId('cd' + i).value),
+    Power:           byId('pw' + i).checked,
+    TempControl:     byId('tc' + i).checked,
+    ProfileNo:       parseInt(byId('fp' + i).value),
+    LiveTest:        byId('lt' + i) ? byId('lt' + i).checked : false,
     BrewServices:    bs
   };
   fetch('/fermenter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('fm' + i, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadFermenters, 500); })
-    .catch(function (e) { msg('fm' + i, 'Error: ' + e, false); });
+    .then(function (d) { showMsg('fm' + i, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadFermenters, 500); })
+    .catch(function (e) { showMsg('fm' + i, 'Error: ' + e, false); });
 }
 
 // Send a profile-control action (start / pause / stop / prev / next) for fermenter i.
 function profAction(i, a) {
   var body = { Fermenter: i, action: a };
-  if (a == 'start') body.ProfileIndex = parseInt($('fp' + i).value);
+  if (a == 'start') body.ProfileIndex = parseInt(byId('fp' + i).value);
   fetch('/fermenter/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('fm' + i, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadFermenters, 500); })
-    .catch(function (e) { msg('fm' + i, 'Error: ' + e, false); });
+    .then(function (d) { showMsg('fm' + i, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadFermenters, 500); })
+    .catch(function (e) { showMsg('fm' + i, 'Error: ' + e, false); });
 }
 
 // ---- PROFILES TAB ----
@@ -499,12 +499,12 @@ function stepFieldsEnabled(t) {
 
 // onchange handler for a step-type dropdown — enable/disable the per-step inputs.
 function onStepTypeChange(p, s) {
-  var t = parseInt($('pst' + p + '_' + s).value);
+  var t = parseInt(byId('pst' + p + '_' + s).value);
   var fl = stepFieldsEnabled(t);
-  $('pss' + p + '_' + s).disabled = !fl.s;
-  $('pse' + p + '_' + s).disabled = !fl.e;
-  $('psg' + p + '_' + s).disabled = !fl.g;
-  $('psd' + p + '_' + s).disabled = !fl.d;
+  byId('pss' + p + '_' + s).disabled = !fl.s;
+  byId('pse' + p + '_' + s).disabled = !fl.e;
+  byId('psg' + p + '_' + s).disabled = !fl.g;
+  byId('psd' + p + '_' + s).disabled = !fl.d;
 }
 
 // Fetch all profiles and render one editable card per profile.
@@ -534,26 +534,26 @@ function loadProfiles() {
       h += '<button class="save" onclick="saveProfile(' + p + ')">Save Profile ' + (p + 1) + '</button> <span class="msg" id="ppm' + p + '"></span>';
       h += '</div>';
     }
-    $('t1').innerHTML = h;
+    byId('t1').innerHTML = h;
   });
 }
 
 // Collect profile p's name and 15 step rows, then POST to /profile.
 function saveProfile(p) {
-  var body = { index: p, name: $('ppn' + p).value, steps: [] };
+  var body = { index: p, name: byId('ppn' + p).value, steps: [] };
   for (var s = 0; s < 15; s++) {
     body.steps.push({
-      stepType:  parseInt  ($('pst' + p + '_' + s).value) || 0,
-      startTemp: parseFloat($('pss' + p + '_' + s).value) || 0,
-      endTemp:   parseFloat($('pse' + p + '_' + s).value) || 0,
-      sgTrigger: parseFloat($('psg' + p + '_' + s).value) || 0,
-      days:      parseFloat($('psd' + p + '_' + s).value) || 0
+      stepType:  parseInt  (byId('pst' + p + '_' + s).value) || 0,
+      startTemp: parseFloat(byId('pss' + p + '_' + s).value) || 0,
+      endTemp:   parseFloat(byId('pse' + p + '_' + s).value) || 0,
+      sgTrigger: parseFloat(byId('psg' + p + '_' + s).value) || 0,
+      days:      parseFloat(byId('psd' + p + '_' + s).value) || 0
     });
   }
   fetch('/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('ppm' + p, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadProfiles, 500); })
-    .catch(function (e) { msg('ppm' + p, 'Error: ' + e, false); });
+    .then(function (d) { showMsg('ppm' + p, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadProfiles, 500); })
+    .catch(function (e) { showMsg('ppm' + p, 'Error: ' + e, false); });
 }
 
 // ---- PROBES TAB ----
@@ -590,7 +590,7 @@ function loadProbes() {
       h += '<td><button class="save" onclick="saveProbe(' + q.index + ')">Save</button></td></tr>';
     }
     h += '</table><div class="msg" id="pm"></div></div>';
-    $('t2').innerHTML = h;
+    byId('t2').innerHTML = h;
   });
 }
 
@@ -598,14 +598,14 @@ function loadProbes() {
 function saveProbe(i) {
   var body = {};
   body['index']      = i;
-  body['name']       = $('pn' + i).value;
-  body['function']   = parseInt  ($('pf' + i).value);
-  body['fermenter']  = parseInt  ($('pr' + i).value);
-  body['tempAdjust'] = parseFloat($('pa' + i).value);
+  body['name']       = byId('pn' + i).value;
+  body['function']   = parseInt  (byId('pf' + i).value);
+  body['fermenter']  = parseInt  (byId('pr' + i).value);
+  body['tempAdjust'] = parseFloat(byId('pa' + i).value);
   fetch('/probes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('pm', d.msg, d.status == 'ok'); dirty = false; setTimeout(loadProbes, 500); })
-    .catch(function (e) { msg('pm', 'Error: ' + e, false); });
+    .then(function (d) { showMsg('pm', d.msg, d.status == 'ok'); dirty = false; setTimeout(loadProbes, 500); })
+    .catch(function (e) { showMsg('pm', 'Error: ' + e, false); });
 }
 
 // ---- SMART PLUGS TAB ----
@@ -657,19 +657,19 @@ function btnOpts() {
 
 // Copy the selected preset+button into plug i's form fields (does not save).
 function applyPreset(i) {
-  var ps = $('sps' + i);
-  var bs = $('sbs' + i);
+  var ps = byId('sps' + i);
+  var bs = byId('sbs' + i);
   if (ps.value === '') return;
   var p = P[parseInt(ps.value)];
   var b = parseInt(bs.value);
-  $('sm'  + i).value = p.m;
-  $('smo' + i).value = p.n;
-  $('son' + i).value = p.c[b * 2];
-  $('sof' + i).value = p.c[b * 2 + 1];
-  $('spr' + i).value = 1;
-  $('sbi' + i).value = 24;
-  $('sdl' + i).value = p.d;
-  msg('sm' + i + 'm', 'Preset applied - click Save to store', true);
+  byId('sm'  + i).value = p.m;
+  byId('smo' + i).value = p.n;
+  byId('son' + i).value = p.c[b * 2];
+  byId('sof' + i).value = p.c[b * 2 + 1];
+  byId('spr' + i).value = 1;
+  byId('sbi' + i).value = 24;
+  byId('sdl' + i).value = p.d;
+  showMsg('sm' + i + 'm', 'Preset applied - click Save to store', true);
 }
 
 // Fetch all smart plugs and render an editable card per plug.
@@ -703,7 +703,7 @@ function loadPlugs() {
       h += '</div><div class="msg" id="sm' + i + 'm"></div>';
       h += '</div>';
     }
-    $('t5').innerHTML = h;
+    byId('t5').innerHTML = h;
   });
 }
 
@@ -711,27 +711,27 @@ function loadPlugs() {
 function savePlug(i) {
   var body = {};
   body['index']        = i;
-  body['manufacturer'] = $('sm'  + i).value;
-  body['model']        = $('smo' + i).value;
-  body['onCode']       = parseInt($('son' + i).value) || 0;
-  body['offCode']      = parseInt($('sof' + i).value) || 0;
-  body['protocol']     = parseInt($('spr' + i).value) || 1;
-  body['bits']         = parseInt($('sbi' + i).value) || 24;
-  body['delay']        = parseInt($('sdl' + i).value) || 160;
-  body['function']     = parseInt($('sf'  + i).value);
-  body['fermenter']    = parseInt($('sr'  + i).value);
+  body['manufacturer'] = byId('sm'  + i).value;
+  body['model']        = byId('smo' + i).value;
+  body['onCode']       = parseInt(byId('son' + i).value) || 0;
+  body['offCode']      = parseInt(byId('sof' + i).value) || 0;
+  body['protocol']     = parseInt(byId('spr' + i).value) || 1;
+  body['bits']         = parseInt(byId('sbi' + i).value) || 24;
+  body['delay']        = parseInt(byId('sdl' + i).value) || 160;
+  body['function']     = parseInt(byId('sf'  + i).value);
+  body['fermenter']    = parseInt(byId('sr'  + i).value);
   fetch('/smartplug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('sm' + i + 'm', d.msg, d.status == 'ok'); dirty = false; setTimeout(loadPlugs, 500); })
-    .catch(function (e) { msg('sm' + i + 'm', 'Error: ' + e, false); });
+    .then(function (d) { showMsg('sm' + i + 'm', d.msg, d.status == 'ok'); dirty = false; setTimeout(loadPlugs, 500); })
+    .catch(function (e) { showMsg('sm' + i + 'm', 'Error: ' + e, false); });
 }
 
 // Trigger plug i to fire its on or off RF code (transmit-only test, no save).
 function testPlug(i, a) {
   fetch('/smartplug/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ index: i, action: a }) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('sm' + i + 'm', d.msg, d.status == 'ok'); })
-    .catch(function (e) { msg('sm' + i + 'm', 'Error: ' + e, false); });
+    .then(function (d) { showMsg('sm' + i + 'm', d.msg, d.status == 'ok'); })
+    .catch(function (e) { showMsg('sm' + i + 'm', 'Error: ' + e, false); });
 }
 
 // ---- SETTINGS TAB ----
@@ -758,7 +758,7 @@ function loadReporting() {
     for (var s = 0; s < svcs.length; s++) {
       var sv = svcs[s];
       h += '<div class="card"><h3>' + sv.name + '</h3>';
-      h += '<div class="row"><label>Enabled</label>' + sw('sven' + s, sv.enabled) + '</div>';
+      h += '<div class="row"><label>Enabled</label>' + switchHtml('sven' + s, sv.enabled) + '</div>';
       h += '<div class="row"><label>Device Name</label><input type="text" id="svn' + s + '" value="' + (sv.deviceName || 'OurBrewbot') + '" style="width:180px"></div>';
       h += '<div class="row"><label>' + bsIdLabel[s] + '</label><input type="text" id="svi' + s + '" value="' + (sv.serviceId || '') + '" style="width:260px"></div>';
       h += '<button class="save" onclick="saveSvc(' + s + ')">Save</button> ';
@@ -767,20 +767,20 @@ function loadReporting() {
       h += '</div>';
     }
     h += '<div class="card"><h3>MQTT</h3>';
-    h += '<div class="row"><label>Enabled</label>' + sw('mqen', mq.enabled) + '</div>';
+    h += '<div class="row"><label>Enabled</label>' + switchHtml('mqen', mq.enabled) + '</div>';
     h += '<div class="row"><label>Broker Host</label><input type="text" id="mqhost" value="' + (mq.host || '') + '" style="width:220px"></div>';
     h += '<div class="row"><label>Port</label><input type="number" id="mqport" value="' + (mq.port || 1883) + '" style="width:80px"></div>';
     h += '<div class="row"><label>Username</label><input type="text" id="mquser" value="' + (mq.username || '') + '" style="width:180px"></div>';
     h += '<div class="row"><label>Password</label><input type="password" id="mqpass" value="' + (mq.password || '') + '" style="width:180px"></div>';
     h += '<div class="row"><label>Base Topic</label><input type="text" id="mqtopic" value="' + (mq.baseTopic || 'ourbrewbot') + '" style="width:180px"></div>';
-    h += '<div class="row"><label>HA Discovery</label>' + sw('mqha', mq.haDiscovery || false) + '</div>';
-    h += '<div class="row"><label>Allow HA Control</label>' + sw('mqctl', mq.allowControl || false) + '</div>';
+    h += '<div class="row"><label>HA Discovery</label>' + switchHtml('mqha', mq.haDiscovery || false) + '</div>';
+    h += '<div class="row"><label>Allow HA Control</label>' + switchHtml('mqctl', mq.allowControl || false) + '</div>';
     h += '<button class="save" onclick="saveMqtt()">Save</button> ';
     h += '<button class="test" onclick="testMqtt()">Test</button> ';
     h += '<button class="test" onclick="discoverMqtt()">Discover</button> ';
     h += '<span class="msg" id="mqm"></span>';
     h += '</div>';
-    $('t6').innerHTML = h;
+    byId('t6').innerHTML = h;
   });
 }
 
@@ -809,7 +809,7 @@ function loadSystemSettings() {
     h += '<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
     h += '</div>';
     h += '<div class="card"><h3>Syslog</h3>';
-    h += '<div class="row"><label>Enabled</label>' + sw('slen', sl.enabled || false) + '</div>';
+    h += '<div class="row"><label>Enabled</label>' + switchHtml('slen', sl.enabled || false) + '</div>';
     h += '<div class="row"><label>Host</label><input type="text" id="slhost" value="' + (sl.host || '') + '" style="width:220px"></div>';
     h += '<div class="row"><label>Port</label><input type="number" id="slport" value="' + (sl.port || 514) + '" style="width:80px"></div>';
     h += '<div class="row"><label>Facility</label><select id="slfac">';
@@ -857,96 +857,96 @@ function loadSystemSettings() {
     h += '<textarea id="sysfc" readonly style="width:100%;height:140px;background:#0a1628;border:1px solid #333;color:#e0e0e0;font-family:monospace;font-size:12px;padding:6px;border-radius:3px;resize:vertical"></textarea>';
     h += '<div style="margin-top:6px"><button class="save" onclick="downloadFile()">Download</button></div>';
     h += '</div>';
-    $('t7').innerHTML = h;
+    byId('t7').innerHTML = h;
   }).catch(function (e) {
-    $('t7').innerHTML = '<div class="card"><p style="color:#f44">Error: ' + e + '</p></div>';
+    byId('t7').innerHTML = '<div class="card"><p style="color:#f44">Error: ' + e + '</p></div>';
   });
 }
 
 // Save the global controller settings (temp unit, resolution).
 function saveSettings() {
   var body = {
-    Unit:       parseInt($('su').value),
-    Resolution: parseInt($('sres').value)
+    Unit:       parseInt(byId('su').value),
+    Resolution: parseInt(byId('sres').value)
   };
   fetch('/controller', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('setm', d.msg, d.status == 'ok'); dirty = false; })
-    .catch(function (e) { msg('setm', 'Error: ' + e, false); });
+    .then(function (d) { showMsg('setm', d.msg, d.status == 'ok'); dirty = false; })
+    .catch(function (e) { showMsg('setm', 'Error: ' + e, false); });
 }
 
 // Save brew-service slot s (Brewer's Friend or Brewfather).
 function saveSvc(s) {
   var body = {
     index:      s,
-    enabled:    $('sven' + s).checked,
-    serviceId:  $('svi' + s).value,
-    deviceName: $('svn' + s).value
+    enabled:    byId('sven' + s).checked,
+    serviceId:  byId('svi' + s).value,
+    deviceName: byId('svn' + s).value
   };
   fetch('/brewservices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('svm' + s, d.msg, d.status == 'ok'); dirty = false; })
-    .catch(function (e) { msg('svm' + s, 'Error: ' + e, false); });
+    .then(function (d) { showMsg('svm' + s, d.msg, d.status == 'ok'); dirty = false; })
+    .catch(function (e) { showMsg('svm' + s, 'Error: ' + e, false); });
 }
 
 // Trigger a connectivity test for brew-service slot s.
 function testSvc(s) {
-  msg('svm' + s, 'Testing...', true);
+  showMsg('svm' + s, 'Testing...', true);
   fetch('/brewservices/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ index: s }) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('svm' + s, d.msg, d.status == 'ok'); })
-    .catch(function (e) { msg('svm' + s, 'Error: ' + e, false); });
+    .then(function (d) { showMsg('svm' + s, d.msg, d.status == 'ok'); })
+    .catch(function (e) { showMsg('svm' + s, 'Error: ' + e, false); });
 }
 
 // Save MQTT broker / Home Assistant settings.
 function saveMqtt() {
   var body = {
-    enabled:      $('mqen').checked,
-    host:         $('mqhost').value,
-    port:         parseInt($('mqport').value),
-    username:     $('mquser').value,
-    password:     $('mqpass').value,
-    baseTopic:    $('mqtopic').value,
-    haDiscovery:  $('mqha').checked,
-    allowControl: $('mqctl').checked
+    enabled:      byId('mqen').checked,
+    host:         byId('mqhost').value,
+    port:         parseInt(byId('mqport').value),
+    username:     byId('mquser').value,
+    password:     byId('mqpass').value,
+    baseTopic:    byId('mqtopic').value,
+    haDiscovery:  byId('mqha').checked,
+    allowControl: byId('mqctl').checked
   };
   fetch('/mqtt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('mqm', d.msg, d.status == 'ok'); dirty = false; })
-    .catch(function (e) { msg('mqm', 'Error: ' + e, false); });
+    .then(function (d) { showMsg('mqm', d.msg, d.status == 'ok'); dirty = false; })
+    .catch(function (e) { showMsg('mqm', 'Error: ' + e, false); });
 }
 
 // Save remote syslog settings.
 function saveSyslog() {
   var body = {
-    enabled:  $('slen').checked,
-    host:     $('slhost').value,
-    port:     parseInt($('slport').value),
-    facility: parseInt($('slfac').value),
-    minLevel: parseInt($('sllvl').value)
+    enabled:  byId('slen').checked,
+    host:     byId('slhost').value,
+    port:     parseInt(byId('slport').value),
+    facility: parseInt(byId('slfac').value),
+    minLevel: parseInt(byId('sllvl').value)
   };
   fetch('/syslog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('slm', d.msg, d.status == 'ok'); dirty = false; })
-    .catch(function (e) { msg('slm', 'Error: ' + e, false); });
+    .then(function (d) { showMsg('slm', d.msg, d.status == 'ok'); dirty = false; })
+    .catch(function (e) { showMsg('slm', 'Error: ' + e, false); });
 }
 
 // Trigger an MQTT broker connectivity test.
 function testMqtt() {
-  msg('mqm', 'Testing...', true);
+  showMsg('mqm', 'Testing...', true);
   fetch('/mqtt/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('mqm', d.msg, d.status == 'ok'); })
-    .catch(function (e) { msg('mqm', 'Error: ' + e, false); });
+    .then(function (d) { showMsg('mqm', d.msg, d.status == 'ok'); })
+    .catch(function (e) { showMsg('mqm', 'Error: ' + e, false); });
 }
 
 // Publish Home Assistant discovery topics now (rather than waiting for next reconnect).
 function discoverMqtt() {
-  msg('mqm', 'Publishing discovery...', true);
+  showMsg('mqm', 'Publishing discovery...', true);
   fetch('/mqtt/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('mqm', d.msg, d.status == 'ok'); })
-    .catch(function (e) { msg('mqm', 'Error: ' + e, false); });
+    .then(function (d) { showMsg('mqm', d.msg, d.status == 'ok'); })
+    .catch(function (e) { showMsg('mqm', 'Error: ' + e, false); });
 }
 
 // ---- TILTS TAB ----
@@ -978,9 +978,9 @@ function loadTilts() {
       for (var i = 0; i < ts.length; i++) seen[ts[i].colour] = ts[i];
       for (var c = 0; c < 8; c++) h += buildTiltCard(c, seen[c] || null);
     }
-    $('t3').innerHTML = h;
+    byId('t3').innerHTML = h;
   }).catch(function (e) {
-    $('t3').innerHTML = '<div class="card"><p style="color:#f44">Error loading Tilt data: ' + e + '</p></div>';
+    byId('t3').innerHTML = '<div class="card"><p style="color:#f44">Error loading Tilt data: ' + e + '</p></div>';
   });
 }
 
@@ -1014,15 +1014,15 @@ function buildTiltCard(colour, t) {
 function saveTilt(colour) {
   var body = {
     colour:     colour,
-    function:   parseInt  ($('tlf'  + colour).value),
-    fermenter:  parseInt  ($('tlr'  + colour).value),
-    tempAdjust: parseFloat($('tlta' + colour).value) || 0,
-    sgAdjust:   parseFloat($('tlsa' + colour).value) || 0
+    function:   parseInt  (byId('tlf'  + colour).value),
+    fermenter:  parseInt  (byId('tlr'  + colour).value),
+    tempAdjust: parseFloat(byId('tlta' + colour).value) || 0,
+    sgAdjust:   parseFloat(byId('tlsa' + colour).value) || 0
   };
   fetch('/tilt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('tlm' + colour, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadTilts, 500); })
-    .catch(function (e) { msg('tlm' + colour, 'Error: ' + e, false); });
+    .then(function (d) { showMsg('tlm' + colour, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadTilts, 500); })
+    .catch(function (e) { showMsg('tlm' + colour, 'Error: ' + e, false); });
 }
 
 // Confirm and clear the Tilt slot for the given colour, resetting it to unassigned.
@@ -1031,8 +1031,8 @@ function clearTilt(colour) {
   var body = { colour: colour, function: 99, fermenter: 99, tempAdjust: 0, sgAdjust: 0, _clear: true };
   fetch('/tilt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('tlm' + colour, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadTilts, 500); })
-    .catch(function (e) { msg('tlm' + colour, 'Error: ' + e, false); });
+    .then(function (d) { showMsg('tlm' + colour, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadTilts, 500); })
+    .catch(function (e) { showMsg('tlm' + colour, 'Error: ' + e, false); });
 }
 
 // ---- iSpindels Tab ----
@@ -1045,9 +1045,9 @@ function loadISpindels() {
     var h = '';
     if (ds.length == 0) h = '<div class="card"><p style="color:#888">No iSpindel slots configured.</p></div>';
     for (var i = 0; i < ds.length; i++) h += buildISpindelCard(i, ds[i]);
-    $('t4').innerHTML = h;
+    byId('t4').innerHTML = h;
   }).catch(function (e) {
-    $('t4').innerHTML = '<div class="card"><p style="color:#f44">Error loading iSpindel data: ' + e + '</p></div>';
+    byId('t4').innerHTML = '<div class="card"><p style="color:#f44">Error loading iSpindel data: ' + e + '</p></div>';
   });
 }
 
@@ -1083,14 +1083,14 @@ function buildISpindelCard(idx, s) {
 function saveISpindel(idx) {
   var body = {
     index:     idx,
-    fermenter: parseInt($('isf'  + idx).value),
-    unit:      parseInt($('isu'  + idx).value),
-    function:  parseInt($('isfn' + idx).value)
+    fermenter: parseInt(byId('isf'  + idx).value),
+    unit:      parseInt(byId('isu'  + idx).value),
+    function:  parseInt(byId('isfn' + idx).value)
   };
   fetch('/ispindel/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('ism' + idx, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadISpindels, 500); })
-    .catch(function (e) { msg('ism' + idx, 'Error: ' + e, false); });
+    .then(function (d) { showMsg('ism' + idx, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadISpindels, 500); })
+    .catch(function (e) { showMsg('ism' + idx, 'Error: ' + e, false); });
 }
 
 // Confirm and reset iSpindel slot idx to unconfigured.
@@ -1099,8 +1099,8 @@ function clearISpindel(idx) {
   var body = { index: idx, _clear: true };
   fetch('/ispindel/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { msg('ism' + idx, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadISpindels, 500); })
-    .catch(function (e) { msg('ism' + idx, 'Error: ' + e, false); });
+    .then(function (d) { showMsg('ism' + idx, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadISpindels, 500); })
+    .catch(function (e) { showMsg('ism' + idx, 'Error: ' + e, false); });
 }
 
 // ---- LITTLEFS FILE VIEWER ----
@@ -1110,9 +1110,9 @@ var sysFn = '';
 function loadFileContent(name) {
   markDirty();
   sysFn = name;
-  var card  = $('sysfc_card');
-  var ta    = $('sysfc');
-  var title = $('sysfc_title');
+  var card  = byId('sysfc_card');
+  var ta    = byId('sysfc');
+  var title = byId('sysfc_title');
   if (card) card.style.display = 'none';
   if (ta)   ta.value = 'Loading...';
   fetch('/fs/file?name=' + encodeURIComponent(name)).then(function (r) {
@@ -1131,7 +1131,7 @@ function loadFileContent(name) {
 
 // Download the currently displayed file as a browser-side blob (no server round-trip).
 function downloadFile() {
-  var ta = $('sysfc');
+  var ta = byId('sysfc');
   if (!ta || !sysFn) return;
   var blob = new Blob([ta.value], { type: 'text/plain' });
   var url = URL.createObjectURL(blob);
