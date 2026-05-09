@@ -368,6 +368,24 @@ function switchHtml(id, chk) {
   return '<label class="sw"><input type="checkbox" id="' + id + '"' + (chk ? ' checked' : '') + '><span class="sl"></span></label>';
 }
 
+// Render a labelled form row: <div class="row"><label>...</label>content</div>.
+function row(label, content) {
+  return '<div class="row"><label>' + label + '</label>' + content + '</div>';
+}
+
+// Render a text <input> with the given id and value (optional CSS width in px).
+function textInput(id, value, width) {
+  var styleAttr = width ? ' style="width:' + width + 'px"' : '';
+  return '<input type="text" id="' + id + '" value="' + value + '"' + styleAttr + '>';
+}
+
+// Render a number <input> with the given id, value, and optional step / width-in-px.
+function numInput(id, value, step, width) {
+  var stepAttr  = step  ? ' step="' + step + '"'              : '';
+  var styleAttr = width ? ' style="width:' + width + 'px"'    : '';
+  return '<input type="number"' + stepAttr + ' id="' + id + '" value="' + value + '"' + styleAttr + '>';
+}
+
 // ---- FERMENTERS TAB ----
 var brewServices = [];
 var mqttEnabled = false;
@@ -395,16 +413,16 @@ function loadFermenters() {
          + ' &nbsp; Ambient: ' + (f.AmbientTemp > -100 ? f.AmbientTemp.toFixed(1) + '&deg;' + f.TempUnit : '--')
          + ' &nbsp; SG: ' + (f.SG > 0 ? f.SG.toFixed(3) + (f.GravitySource ? ' (' + f.GravitySource + ')' : '') : '--')
          + (f.ProfileRunning ? ' &nbsp; Step: ' + (f.CurrentStep + 1) + '/' + f.TotalSteps + ' &nbsp; Hour: ' + f.CurrentHour : '') + '</div>';
-      html += '<div class="row"><label>Name</label><input type="text" id="fn' + i + '" value="' + f.FermenterName + '"></div>';
-      html += '<div class="row"><label>Beer</label><input type="text" id="bn' + i + '" value="' + f.BeerName + '"></div>';
-      html += '<div class="row"><label>Ceiling Temp</label><input type="number" step="0.1" id="ct' + i + '" value="' + f.CeilingTemp + '"></div>';
-      html += '<div class="row"><label>Floor Temp</label><input type="number" step="0.1" id="ft' + i + '" value="' + f.FloorTemp + '"></div>';
-      html += '<div class="row"><label>Hysteresis</label><input type="number" step="0.1" id="hy' + i + '" value="' + f.Hysteresis + '"></div>';
-      html += '<div class="row"><label>Compressor Delay</label><input type="number" id="cd' + i + '" value="' + f.CompressorDelay + '"> min</div>';
-      html += '<div class="row"><label>Yeast</label><input type="text" id="yn' + i + '" value="' + f.YeastName + '"></div>';
+      html += row('Name',             textInput('fn' + i, f.FermenterName));
+      html += row('Beer',             textInput('bn' + i, f.BeerName));
+      html += row('Ceiling Temp',     numInput ('ct' + i, f.CeilingTemp, 0.1));
+      html += row('Floor Temp',       numInput ('ft' + i, f.FloorTemp,   0.1));
+      html += row('Hysteresis',       numInput ('hy' + i, f.Hysteresis,  0.1));
+      html += row('Compressor Delay', numInput ('cd' + i, f.CompressorDelay) + ' min');
+      html += row('Yeast',            textInput('yn' + i, f.YeastName));
       html += '<div class="row"><label>OG</label><input type="number" step="0.001" min="1.0" max="1.2" id="og' + i + '" value="' + f.OG + '" style="width:80px"> <label style="min-width:auto">TG</label><input type="number" step="0.001" min="1.0" max="1.2" id="tg' + i + '" value="' + f.TG + '" style="width:80px"></div>';
-      html += '<div class="row"><label>Power</label>' + switchHtml('pw' + i, f.Power) + '</div>';
-      html += '<div class="row"><label>Temp Control</label>' + switchHtml('tc' + i, f.TempControl) + '</div>';
+      html += row('Power',        switchHtml('pw' + i, f.Power));
+      html += row('Temp Control', switchHtml('tc' + i, f.TempControl));
       html += '<div class="row"><label>Profile</label><select id="fp' + i + '"><option value="0"' + (f.ProfileNo == 0 ? ' selected' : '') + '>Standard</option>';
       for (var p = 0; p < profileNames.length; p++) html += '<option value="' + (p + 1) + '"' + (f.ProfileNo == (p + 1) ? ' selected' : '') + '>' + profileNames[p] + '</option>';
       html += '</select></div>';
@@ -417,20 +435,20 @@ function loadFermenters() {
         html += '<button class="test" onclick="profAction(' + i + ',\'next\')">Next &raquo;</button>';
       }
       if (f.ProfileNo >= 1) html += '</div>';
-      if (f.ProfileNo >= 1) html += '<div class="row"><label>Test Mode</label>' + switchHtml('lt' + i, f.LiveTest) + '</div>';
+      if (f.ProfileNo >= 1) html += row('Test Mode', switchHtml('lt' + i, f.LiveTest));
       var bs = f.BrewServices || 0;
       var hasSvc = false;
       for (var s = 0; s < brewServices.length; s++) {
         if (brewServices[s].enabled) {
-          html += '<div class="row"><label>' + brewServices[s].name + '</label>' + switchHtml('bsv' + i + '_' + s, !!(bs & (1 << s))) + '</div>';
+          html += row(brewServices[s].name, switchHtml('bsv' + i + '_' + s, !!(bs & (1 << s))));
           hasSvc = true;
         }
       }
       if (mqttEnabled) {
-        html += '<div class="row"><label>MQTT</label>' + switchHtml('bsv' + i + '_3', !!(bs & (1 << 3))) + '</div>';
+        html += row('MQTT', switchHtml('bsv' + i + '_3', !!(bs & (1 << 3))));
         hasSvc = true;
       }
-      if (!hasSvc) html += '<div class="row"><label>Brew Services</label><span style="color:#888;font-size:12px">None enabled — configure in Reporting tab</span></div>';
+      if (!hasSvc) html += row('Brew Services', '<span style="color:#888;font-size:12px">None enabled — configure in Reporting tab</span>');
       html += '<button class="save" onclick="saveFerm(' + i + ')">Save</button> <span class="msg" id="fm' + i + '"></span>';
       html += '</div>';
     }
