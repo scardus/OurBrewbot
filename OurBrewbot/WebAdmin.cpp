@@ -15,49 +15,262 @@ static const char ADMIN_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OurBrewbot Admin</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:8px}
-h2{color:#e94560;margin:0 0 12px}
-.tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
-.tabs button{padding:8px 16px;border:1px solid #444;background:#16213e;color:#e0e0e0;cursor:pointer;border-radius:4px 4px 0 0;font-size:14px}
-.tabs button.active{background:#0f3460;border-bottom:2px solid #e94560;color:#fff}
-.tab{display:none}
-.tab.active{display:block}
-.card{background:#16213e;border:1px solid #333;border-radius:6px;padding:12px;margin-bottom:10px}
-.card h3{color:#e94560;margin-bottom:8px;font-size:15px}
-.row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;align-items:center}
-.row label{min-width:120px;font-size:13px;color:#aaa}
-.row input,.row select{background:#0f3460;border:1px solid #444;color:#e0e0e0;padding:4px 8px;border-radius:3px;font-size:13px}
-.row input[type=number]{width:80px}
-.row input[type=text]{width:160px}
-.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:bold}
-.badge-idle{background:#333;color:#888}
-.badge-heat{background:#e94560;color:#fff}
-.badge-cool{background:#0f3460;color:#53d8fb}
-.badge-alarm{background:#ff0;color:#000}
-.badge-off{background:#222;color:#555}
-.badge-prof{background:#8b5cf6;color:#fff}
-.live{color:#53d8fb;font-size:13px;margin-bottom:8px}
-button.save{background:#e94560;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px;margin-top:4px}
-button.save:hover{background:#c73650}
-button.test{background:#0f3460;color:#53d8fb;border:1px solid #53d8fb;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px;margin:0 2px}
-button.test:hover{background:#1a4a8a}
-button.danger{background:#600;color:#faa;border:1px solid #a33;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px;margin:4px 4px 0 0}
-.msg{font-size:12px;margin-top:4px;min-height:16px}
-.msg.ok{color:#4f4}
-.msg.err{color:#f44}
-.tbl{width:100%;border-collapse:collapse;font-size:13px}
-.tbl th{text-align:left;padding:4px 8px;border-bottom:1px solid #444;color:#aaa;font-size:12px}
-.tbl td{padding:4px 8px;border-bottom:1px solid #222}
-.sw{position:relative;display:inline-block;width:36px;height:20px}
-.sw input{opacity:0;width:0;height:0}
-.sw .sl{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#333;border-radius:20px;transition:.2s}
-.sw input:checked+.sl{background:#e94560}
-.sw .sl:before{content:"";position:absolute;height:14px;width:14px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s}
-.sw input:checked+.sl:before{transform:translateX(16px)}
-.info{background:#0f3460;border:1px solid #333;border-radius:6px;padding:12px;margin-bottom:10px;font-size:13px}
-.info .r{display:flex;justify-content:space-between;padding:2px 0}
-.info .r .v{color:#53d8fb}
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  padding: 8px;
+}
+
+h2 {
+  color: #e94560;
+  margin: 0 0 12px;
+}
+
+/* ---- Tabs ---- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.tabs button {
+  padding: 8px 16px;
+  border: 1px solid #444;
+  background: #16213e;
+  color: #e0e0e0;
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+  font-size: 14px;
+}
+
+.tabs button.active {
+  background: #0f3460;
+  border-bottom: 2px solid #e94560;
+  color: #fff;
+}
+
+.tab {
+  display: none;
+}
+
+.tab.active {
+  display: block;
+}
+
+/* ---- Cards & rows ---- */
+.card {
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.card h3 {
+  color: #e94560;
+  margin-bottom: 8px;
+  font-size: 15px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+
+.row label {
+  min-width: 120px;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.row input,
+.row select {
+  background: #0f3460;
+  border: 1px solid #444;
+  color: #e0e0e0;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.row input[type=number] {
+  width: 80px;
+}
+
+.row input[type=text] {
+  width: 160px;
+}
+
+/* ---- Badges ---- */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.badge-idle  { background: #333;    color: #888; }
+.badge-heat  { background: #e94560; color: #fff; }
+.badge-cool  { background: #0f3460; color: #53d8fb; }
+.badge-alarm { background: #ff0;    color: #000; }
+.badge-off   { background: #222;    color: #555; }
+.badge-prof  { background: #8b5cf6; color: #fff; }
+
+.live {
+  color: #53d8fb;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+/* ---- Buttons ---- */
+button.save {
+  background: #e94560;
+  color: #fff;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+button.save:hover {
+  background: #c73650;
+}
+
+button.test {
+  background: #0f3460;
+  color: #53d8fb;
+  border: 1px solid #53d8fb;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  margin: 0 2px;
+}
+
+button.test:hover {
+  background: #1a4a8a;
+}
+
+button.danger {
+  background: #600;
+  color: #faa;
+  border: 1px solid #a33;
+  padding: 6px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  margin: 4px 4px 0 0;
+}
+
+/* ---- Status messages ---- */
+.msg {
+  font-size: 12px;
+  margin-top: 4px;
+  min-height: 16px;
+}
+
+.msg.ok  { color: #4f4; }
+.msg.err { color: #f44; }
+
+/* ---- Tables ---- */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.tbl th {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid #444;
+  color: #aaa;
+  font-size: 12px;
+}
+
+.tbl td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #222;
+}
+
+/* ---- Toggle switch ---- */
+.sw {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.sw input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.sw .sl {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #333;
+  border-radius: 20px;
+  transition: .2s;
+}
+
+.sw input:checked + .sl {
+  background: #e94560;
+}
+
+.sw .sl:before {
+  content: "";
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: .2s;
+}
+
+.sw input:checked + .sl:before {
+  transform: translateX(16px);
+}
+
+/* ---- System-info panel ---- */
+.info {
+  background: #0f3460;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.info .r {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+
+.info .r .v {
+  color: #53d8fb;
+}
 </style>
 </head><body>
 <h2>OurBrewbot Admin</h2>
