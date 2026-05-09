@@ -162,8 +162,8 @@ bool loadFermenterConfig() {
     strlcpy(g_fermenters[i].beerName,      doc["BeerName"][i]      | "Beer",      sizeof(g_fermenters[i].beerName));
     strlcpy(g_fermenters[i].yeastName,     doc["YeastName"][i]     | "Yeast",     sizeof(g_fermenters[i].yeastName));
     strlcpy(g_fermenters[i].bjcp,          doc["BJCP"][i]          | "BJCP",      sizeof(g_fermenters[i].bjcp));
-    g_fermenters[i].ceilingTemp     = doc["CeilingTemp"][i]    | 20.0f;
-    g_fermenters[i].floorTemp       = doc["FloorTemp"][i]      | 20.0f;
+    g_fermenters[i].ceilingTemp     = doc["CeilingTemp"][i]    | 22.0f;
+    g_fermenters[i].floorTemp       = doc["FloorTemp"][i]      | 18.0f;
     g_fermenters[i].og              = doc["OG"][i]             | 1.050f;
     g_fermenters[i].tg              = doc["TG"][i]             | 1.010f;
     // Migrate old integer-format values (e.g. 1050 → 1.050)
@@ -199,6 +199,29 @@ bool loadFermenterConfig() {
     g_fermenters[i].mbbPsiCollect   = doc["MyBrewBuddyPSI_Colle"][i] | false;
     g_fermenters[i].startMillis     = doc["StartMillis"][i]    | 0;
   }
+
+  // Validate temperature/hysteresis trio per fermenter; reset offending
+  // fields to defaults so an invalid persisted config can't lock the user
+  // out of the admin POST validation.
+  bool corrected = false;
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    float c = g_fermenters[i].ceilingTemp;
+    float f = g_fermenters[i].floorTemp;
+    float h = g_fermenters[i].hysteresis;
+    bool invalid = (c < -20.0f || c > 50.0f) ||
+                   (f < -20.0f || f > 50.0f) ||
+                   (h <   0.0f || h > 10.0f) ||
+                   (f >= c) ||
+                   ((c - f) <= 2.0f * h);
+    if (invalid) {
+      logMsg("[CFG] Fermenter %d: invalid temp/hyst trio (c=%.2f f=%.2f h=%.2f); reset to defaults", i, c, f, h);
+      g_fermenters[i].ceilingTemp = 22.0f;
+      g_fermenters[i].floorTemp   = 18.0f;
+      g_fermenters[i].hysteresis  = 0.5f;
+      corrected = true;
+    }
+  }
+  if (corrected) saveFermenterConfig();
   return true;
 }
 
@@ -837,8 +860,8 @@ void initDefaultFermenterConfig() {
     strlcpy(g_fermenters[i].beerName,  "Beer",  sizeof(g_fermenters[i].beerName));
     strlcpy(g_fermenters[i].yeastName, "Yeast", sizeof(g_fermenters[i].yeastName));
     strlcpy(g_fermenters[i].bjcp,      "BJCP",  sizeof(g_fermenters[i].bjcp));
-    g_fermenters[i].ceilingTemp     = 20.0f;
-    g_fermenters[i].floorTemp       = 20.0f;
+    g_fermenters[i].ceilingTemp     = 22.0f;
+    g_fermenters[i].floorTemp       = 18.0f;
     g_fermenters[i].og              = 1.050f;
     g_fermenters[i].tg              = 1.010f;
     g_fermenters[i].hysteresis      = 0.5f;

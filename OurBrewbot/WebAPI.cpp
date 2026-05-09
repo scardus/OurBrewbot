@@ -300,25 +300,41 @@ void handleFermenter(ESP8266WebServer& server) {
     if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
       int idx = doc["Fermenter"] | -1;
       if (idx >= 0 && idx < MAX_FERMENTERS) {
-        // Validated numeric fields — validateFermenterField() owns all ranges
+        // Validated numeric fields — validateFermenterField() owns single-
+        // field ranges; CeilingTemp / FloorTemp / Hysteresis are validated
+        // holistically below against the would-be combined state so a save
+        // can correct an invalid in-memory config.
         const char* valErr;
         char valJson[128];
+        #define REJECT(msg) { \
+            snprintf(valJson, sizeof(valJson), "{\"status\":\"error\",\"msg\":\"%s\"}", msg); \
+            sendJsonResponse(server, valJson, 400); return; \
+          }
         #define VALIDATE_AND_SET(jsonKey, valKey, member, cast) \
           if (!doc[#jsonKey].isNull()) { \
             float v = doc[#jsonKey]; \
-            if (!validateFermenterField(idx, valKey, v, &valErr)) { \
-              snprintf(valJson, sizeof(valJson), "{\"status\":\"error\",\"msg\":\"%s\"}", valErr); \
-              sendJsonResponse(server, valJson, 400); return; \
-            } \
+            if (!validateFermenterField(idx, valKey, v, &valErr)) REJECT(valErr) \
             g_fermenters[idx].member = (cast)v; \
           }
-        VALIDATE_AND_SET(CeilingTemp,     "ceiling_temperature", ceilingTemp,     float)
-        VALIDATE_AND_SET(FloorTemp,       "floor_temperature",   floorTemp,       float)
-        VALIDATE_AND_SET(Hysteresis,      "hysteresis",          hysteresis,      float)
+
+        // Holistic temp/hyst trio: take new value if present, else current.
+        float wbCeiling = doc["CeilingTemp"].isNull() ? g_fermenters[idx].ceilingTemp : (float)doc["CeilingTemp"];
+        float wbFloor   = doc["FloorTemp"].isNull()   ? g_fermenters[idx].floorTemp   : (float)doc["FloorTemp"];
+        float wbHyst    = doc["Hysteresis"].isNull()  ? g_fermenters[idx].hysteresis  : (float)doc["Hysteresis"];
+        if (wbCeiling < -20.0f || wbCeiling > 50.0f)  REJECT("ceiling temperature out of range (-20 to 50)")
+        if (wbFloor   < -20.0f || wbFloor   > 50.0f)  REJECT("floor temperature out of range (-20 to 50)")
+        if (wbHyst    <   0.0f || wbHyst    > 10.0f)  REJECT("hysteresis out of range (0 to 10)")
+        if (wbFloor >= wbCeiling)                     REJECT("floor must be below ceiling")
+        if ((wbCeiling - wbFloor) <= 2.0f * wbHyst)   REJECT("safe zone must be wider than 2x hysteresis")
+        if (!doc["CeilingTemp"].isNull()) g_fermenters[idx].ceilingTemp = wbCeiling;
+        if (!doc["FloorTemp"].isNull())   g_fermenters[idx].floorTemp   = wbFloor;
+        if (!doc["Hysteresis"].isNull())  g_fermenters[idx].hysteresis  = wbHyst;
+
         VALIDATE_AND_SET(CompressorDelay, "compressor_delay",    compressorDelay, uint16_t)
         VALIDATE_AND_SET(OG,              "og",                  og,              float)
         VALIDATE_AND_SET(TG,              "tg",                  tg,              float)
         #undef VALIDATE_AND_SET
+        #undef REJECT
 
         if (!doc["Power"].isNull())           g_fermenters[idx].power           = doc["Power"];
         if (!doc["TempControl"].isNull())     g_fermenters[idx].tempControl     = doc["TempControl"];
