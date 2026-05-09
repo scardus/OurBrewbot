@@ -342,26 +342,31 @@ function resetWiFiSettings() {
     .catch(function (e) { alert('Error: ' + e); });
 }
 
-function loadTab(){
-if(T==0)loadFermenters();
-else if(T==1)loadProfiles();
-else if(T==2)loadProbes();
-else if(T==3)loadTilts();
-else if(T==4)loadISpindels();
-else if(T==5)loadPlugs();
-else if(T==6)loadReporting();
-else if(T==7)loadSystemSettings();
+// Dispatch to the active tab's loader function.
+function loadTab() {
+  if      (T == 0) loadFermenters();
+  else if (T == 1) loadProfiles();
+  else if (T == 2) loadProbes();
+  else if (T == 3) loadTilts();
+  else if (T == 4) loadISpindels();
+  else if (T == 5) loadPlugs();
+  else if (T == 6) loadReporting();
+  else if (T == 7) loadSystemSettings();
 }
 
-function statusBadge(s,pwr){
-if(!pwr)return'<span class="badge badge-off">OFF</span>';
-if(s==1)return'<span class="badge badge-heat">Heating</span>';
-if(s==2)return'<span class="badge badge-cool">Cooling</span>';
-if(s==3)return'<span class="badge badge-alarm">ALARM</span>';
-return'<span class="badge badge-idle">Idle</span>';
+// Render a coloured status badge for a fermenter (Idle/Heating/Cooling/Alarm/Off).
+function statusBadge(s, pwr) {
+  if (!pwr)   return '<span class="badge badge-off">OFF</span>';
+  if (s == 1) return '<span class="badge badge-heat">Heating</span>';
+  if (s == 2) return '<span class="badge badge-cool">Cooling</span>';
+  if (s == 3) return '<span class="badge badge-alarm">ALARM</span>';
+  return '<span class="badge badge-idle">Idle</span>';
 }
 
-function sw(id,chk){return'<label class="sw"><input type="checkbox" id="'+id+'"'+(chk?' checked':'')+'><span class="sl"></span></label>'}
+// Render a styled toggle-switch checkbox with the given id and initial state.
+function sw(id, chk) {
+  return '<label class="sw"><input type="checkbox" id="' + id + '"' + (chk ? ' checked' : '') + '><span class="sl"></span></label>';
+}
 
 // ---- FERMENTERS TAB ----
 var SVC=[],MQEN=false,PNAMES=[];
