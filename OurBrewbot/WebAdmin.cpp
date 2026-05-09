@@ -735,144 +735,219 @@ function testPlug(i, a) {
 }
 
 // ---- SETTINGS TAB ----
-var bsNames=["Brewer's Friend",'Brewfather'];
-var bsIdLabel=["API Key",'Stream ID'];
+var bsNames   = ["Brewer's Friend", 'Brewfather'];
+var bsIdLabel = ["API Key",         'Stream ID'];
 
-function fmtUptime(m){var h=Math.floor(m/60);var mn=m%60;if(h>0)return h+'h '+mn+'m';return mn+'m'}
+// Format uptime in minutes as "Xh Ym" or "Ym".
+function fmtUptime(m) {
+  var h = Math.floor(m / 60);
+  var mn = m % 60;
+  if (h > 0) return h + 'h ' + mn + 'm';
+  return mn + 'm';
+}
 
-function loadReporting(){
-Promise.all([fetch('/brewservices').then(function(r){return r.json()}),fetch('/mqtt').then(function(r){return r.json()})]).then(function(res){
-var svcs=res[0].services||[],mq=res[1];
-var h='';
-for(var s=0;s<svcs.length;s++){var sv=svcs[s];
-h+='<div class="card"><h3>'+sv.name+'</h3>';
-h+='<div class="row"><label>Enabled</label>'+sw('sven'+s,sv.enabled)+'</div>';
-h+='<div class="row"><label>Device Name</label><input type="text" id="svn'+s+'" value="'+(sv.deviceName||'OurBrewbot')+'" style="width:180px"></div>';
-h+='<div class="row"><label>'+bsIdLabel[s]+'</label><input type="text" id="svi'+s+'" value="'+(sv.serviceId||'')+'" style="width:260px"></div>';
-h+='<button class="save" onclick="saveSvc('+s+')">Save</button> ';
-h+='<button class="test" onclick="testSvc('+s+')">Test</button> ';
-h+='<span class="msg" id="svm'+s+'"></span>';
-h+='</div>';}
-h+='<div class="card"><h3>MQTT</h3>';
-h+='<div class="row"><label>Enabled</label>'+sw('mqen',mq.enabled)+'</div>';
-h+='<div class="row"><label>Broker Host</label><input type="text" id="mqhost" value="'+(mq.host||'')+'" style="width:220px"></div>';
-h+='<div class="row"><label>Port</label><input type="number" id="mqport" value="'+(mq.port||1883)+'" style="width:80px"></div>';
-h+='<div class="row"><label>Username</label><input type="text" id="mquser" value="'+(mq.username||'')+'" style="width:180px"></div>';
-h+='<div class="row"><label>Password</label><input type="password" id="mqpass" value="'+(mq.password||'')+'" style="width:180px"></div>';
-h+='<div class="row"><label>Base Topic</label><input type="text" id="mqtopic" value="'+(mq.baseTopic||'ourbrewbot')+'" style="width:180px"></div>';
-h+='<div class="row"><label>HA Discovery</label>'+sw('mqha',mq.haDiscovery||false)+'</div>';
-h+='<div class="row"><label>Allow HA Control</label>'+sw('mqctl',mq.allowControl||false)+'</div>';
-h+='<button class="save" onclick="saveMqtt()">Save</button> ';
-h+='<button class="test" onclick="testMqtt()">Test</button> ';
-h+='<button class="test" onclick="discoverMqtt()">Discover</button> ';
-h+='<span class="msg" id="mqm"></span>';
-h+='</div>';
-$('t6').innerHTML=h;
-})}
+// Render the Reporting tab: Brewer's Friend / Brewfather / MQTT settings cards.
+function loadReporting() {
+  Promise.all([
+    fetch('/brewservices').then(function (r) { return r.json(); }),
+    fetch('/mqtt').then(function (r) { return r.json(); })
+  ]).then(function (res) {
+    var svcs = res[0].services || [];
+    var mq = res[1];
+    var h = '';
+    for (var s = 0; s < svcs.length; s++) {
+      var sv = svcs[s];
+      h += '<div class="card"><h3>' + sv.name + '</h3>';
+      h += '<div class="row"><label>Enabled</label>' + sw('sven' + s, sv.enabled) + '</div>';
+      h += '<div class="row"><label>Device Name</label><input type="text" id="svn' + s + '" value="' + (sv.deviceName || 'OurBrewbot') + '" style="width:180px"></div>';
+      h += '<div class="row"><label>' + bsIdLabel[s] + '</label><input type="text" id="svi' + s + '" value="' + (sv.serviceId || '') + '" style="width:260px"></div>';
+      h += '<button class="save" onclick="saveSvc(' + s + ')">Save</button> ';
+      h += '<button class="test" onclick="testSvc(' + s + ')">Test</button> ';
+      h += '<span class="msg" id="svm' + s + '"></span>';
+      h += '</div>';
+    }
+    h += '<div class="card"><h3>MQTT</h3>';
+    h += '<div class="row"><label>Enabled</label>' + sw('mqen', mq.enabled) + '</div>';
+    h += '<div class="row"><label>Broker Host</label><input type="text" id="mqhost" value="' + (mq.host || '') + '" style="width:220px"></div>';
+    h += '<div class="row"><label>Port</label><input type="number" id="mqport" value="' + (mq.port || 1883) + '" style="width:80px"></div>';
+    h += '<div class="row"><label>Username</label><input type="text" id="mquser" value="' + (mq.username || '') + '" style="width:180px"></div>';
+    h += '<div class="row"><label>Password</label><input type="password" id="mqpass" value="' + (mq.password || '') + '" style="width:180px"></div>';
+    h += '<div class="row"><label>Base Topic</label><input type="text" id="mqtopic" value="' + (mq.baseTopic || 'ourbrewbot') + '" style="width:180px"></div>';
+    h += '<div class="row"><label>HA Discovery</label>' + sw('mqha', mq.haDiscovery || false) + '</div>';
+    h += '<div class="row"><label>Allow HA Control</label>' + sw('mqctl', mq.allowControl || false) + '</div>';
+    h += '<button class="save" onclick="saveMqtt()">Save</button> ';
+    h += '<button class="test" onclick="testMqtt()">Test</button> ';
+    h += '<button class="test" onclick="discoverMqtt()">Discover</button> ';
+    h += '<span class="msg" id="mqm"></span>';
+    h += '</div>';
+    $('t6').innerHTML = h;
+  });
+}
 
-function loadSystemSettings(){
-markDirty();
-Promise.all([fetch('/controller').then(function(r){return r.json()}),fetch('/fs/files').then(function(r){return r.json()}),fetch('/syslog').then(function(r){return r.json()})]).then(function(res){
-var d=res[0],fs=res[1],sl=res[2];
-var syslogFacilities=['0 Kernel','1 User','2 Mail','3 Daemon','4 Auth','5 Syslog','6 LPR','7 News','8 UUCP','9 Cron','10 Security','11 FTP','12 NTP','13 Audit','14 Alert','15 Clock','16 Local0','17 Local1','18 Local2','19 Local3','20 Local4','21 Local5','22 Local6','23 Local7'];
-var syslogLevels=['0 Emergency','1 Alert','2 Critical','3 Error','4 Warning','5 Notice','6 Info','7 Debug'];
-var h='<div class="card"><h3>Global Settings</h3>';
-h+='<div class="row"><label>Temp Unit</label><select id="su"><option value="1"'+(d.Unit==1?' selected':'')+'>Celsius</option><option value="2"'+(d.Unit==2?' selected':'')+'>Fahrenheit</option></select></div>';
-h+='<div class="row"><label>Resolution</label><select id="sres">';
-for(var r=9;r<=12;r++)h+='<option value="'+r+'"'+(d.Resolution==r?' selected':'')+'>'+r+'-bit</option>';
-h+='</select></div>';
-h+='<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
-h+='</div>';
-h+='<div class="card"><h3>Syslog</h3>';
-h+='<div class="row"><label>Enabled</label>'+sw('slen',sl.enabled||false)+'</div>';
-h+='<div class="row"><label>Host</label><input type="text" id="slhost" value="'+(sl.host||'')+'" style="width:220px"></div>';
-h+='<div class="row"><label>Port</label><input type="number" id="slport" value="'+(sl.port||514)+'" style="width:80px"></div>';
-h+='<div class="row"><label>Facility</label><select id="slfac">';
-for(var fi=0;fi<syslogFacilities.length;fi++)h+='<option value="'+fi+'"'+(fi==(sl.facility!=null?sl.facility:16)?' selected':'')+'>'+syslogFacilities[fi]+'</option>';
-h+='</select></div>';
-h+='<div class="row"><label>Min Log Level</label><select id="sllvl">';
-for(var li=0;li<syslogLevels.length;li++)h+='<option value="'+li+'"'+(li==(sl.minLevel!=null?sl.minLevel:7)?' selected':'')+'>'+syslogLevels[li]+'</option>';
-h+='</select></div>';
-h+='<button class="save" onclick="saveSyslog()">Save</button> <span class="msg" id="slm"></span>';
-h+='</div>';
-h+='<div class="info"><h3 style="color:#e94560;margin-bottom:8px">System Info</h3>';
-h+='<div class="r"><span>Firmware</span><span class="v">'+d.FirmwareVersion+'</span></div>';
-h+='<div class="r"><span>IP Address</span><span class="v">'+d.IP+'</span></div>';
-h+='<div class="r"><span>mDNS Name</span><span class="v"><a href="http://'+d.mDNSName+'/" style="color:#53d8fb">'+d.mDNSName+'</a></span></div>';
-h+='<div class="r"><span>WiFi SSID</span><span class="v">'+d.WiFiSSID+'</span></div>';
-h+='<div class="r"><span>RSSI</span><span class="v">'+d.RSSI+' dBm</span></div>';
-h+='<div class="r"><span>Free Heap</span><span class="v">'+d.FreeHeap+' bytes</span></div>';
-h+='<div class="r"><span>Uptime</span><span class="v">'+fmtUptime(d.Uptime)+'</span></div>';
-h+='<div class="r"><span>Chip ID</span><span class="v">'+d.ChipId+'</span></div>';
-h+='</div>';
-h+='<div class="card"><h3>Actions</h3>';
-h+='<button class="danger" onclick="if(confirm(\'Reboot device?\'))fetch(\'/reboot\').then(function(){alert(\'Rebooting...\')})">Reboot</button>';
-h+='<button class="danger" onclick="if(confirm(\'Reset ALL configuration to defaults?\'))fetch(\'/reset?target=config\').then(function(){alert(\'Resetting...\')})">Factory Reset</button>';
-h+='<button class="danger" onclick="window.location.href=\'/update\'">Firmware Update</button>';
-h+='<button class="danger" onclick="resetWiFiSettings()">Reset WiFi Settings</button>';
-h+='<button class="danger" onclick="window.location.href=\'/rf/sniff\'">RF Sniffer</button>';
-h+='<button class="danger" onclick="window.location.href=\'/ble/sniff\'">BT Sniffer</button>';
-h+='</div>';
-var files=fs.files||[];
-h+='<div class="card"><h3>LittleFS Files</h3>';
-if(files.length==0){h+='<p style="color:#888;font-size:13px">No files found.</p>';}
-else{
-h+='<div style="max-height:200px;overflow-y:auto"><table class="tbl"><tr><th>File</th><th>Size</th></tr>';
-for(var i=0;i<files.length;i++){var f=files[i];
-h+='<tr style="cursor:pointer" onclick="loadFileContent(\''+f.name+'\')" id="sfr'+i+'">';
-h+='<td style="font-family:monospace">'+f.name+'</td><td>'+f.size+' B</td></tr>';}
-h+='</table></div>';}
-h+='</div>';
-h+='<div class="card" id="sysfc_card" style="display:none">';
-h+='<h3 id="sysfc_title"></h3>';
-h+='<textarea id="sysfc" readonly style="width:100%;height:140px;background:#0a1628;border:1px solid #333;color:#e0e0e0;font-family:monospace;font-size:12px;padding:6px;border-radius:3px;resize:vertical"></textarea>';
-h+='<div style="margin-top:6px"><button class="save" onclick="downloadFile()">Download</button></div>';
-h+='</div>';
-$('t7').innerHTML=h;
-}).catch(function(e){$('t7').innerHTML='<div class="card"><p style="color:#f44">Error: '+e+'</p></div>'})}
+// Render the System Settings tab: globals, syslog, system info, action buttons, file browser.
+function loadSystemSettings() {
+  markDirty();
+  Promise.all([
+    fetch('/controller').then(function (r) { return r.json(); }),
+    fetch('/fs/files').then(function (r) { return r.json(); }),
+    fetch('/syslog').then(function (r) { return r.json(); })
+  ]).then(function (res) {
+    var d = res[0], fs = res[1], sl = res[2];
+    var syslogFacilities = [
+      '0 Kernel', '1 User', '2 Mail', '3 Daemon', '4 Auth', '5 Syslog', '6 LPR', '7 News',
+      '8 UUCP', '9 Cron', '10 Security', '11 FTP', '12 NTP', '13 Audit', '14 Alert', '15 Clock',
+      '16 Local0', '17 Local1', '18 Local2', '19 Local3', '20 Local4', '21 Local5', '22 Local6', '23 Local7'
+    ];
+    var syslogLevels = [
+      '0 Emergency', '1 Alert', '2 Critical', '3 Error', '4 Warning', '5 Notice', '6 Info', '7 Debug'
+    ];
+    var h = '<div class="card"><h3>Global Settings</h3>';
+    h += '<div class="row"><label>Temp Unit</label><select id="su"><option value="1"' + (d.Unit == 1 ? ' selected' : '') + '>Celsius</option><option value="2"' + (d.Unit == 2 ? ' selected' : '') + '>Fahrenheit</option></select></div>';
+    h += '<div class="row"><label>Resolution</label><select id="sres">';
+    for (var r = 9; r <= 12; r++) h += '<option value="' + r + '"' + (d.Resolution == r ? ' selected' : '') + '>' + r + '-bit</option>';
+    h += '</select></div>';
+    h += '<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
+    h += '</div>';
+    h += '<div class="card"><h3>Syslog</h3>';
+    h += '<div class="row"><label>Enabled</label>' + sw('slen', sl.enabled || false) + '</div>';
+    h += '<div class="row"><label>Host</label><input type="text" id="slhost" value="' + (sl.host || '') + '" style="width:220px"></div>';
+    h += '<div class="row"><label>Port</label><input type="number" id="slport" value="' + (sl.port || 514) + '" style="width:80px"></div>';
+    h += '<div class="row"><label>Facility</label><select id="slfac">';
+    for (var fi = 0; fi < syslogFacilities.length; fi++) h += '<option value="' + fi + '"' + (fi == (sl.facility != null ? sl.facility : 16) ? ' selected' : '') + '>' + syslogFacilities[fi] + '</option>';
+    h += '</select></div>';
+    h += '<div class="row"><label>Min Log Level</label><select id="sllvl">';
+    for (var li = 0; li < syslogLevels.length; li++) h += '<option value="' + li + '"' + (li == (sl.minLevel != null ? sl.minLevel : 7) ? ' selected' : '') + '>' + syslogLevels[li] + '</option>';
+    h += '</select></div>';
+    h += '<button class="save" onclick="saveSyslog()">Save</button> <span class="msg" id="slm"></span>';
+    h += '</div>';
+    h += '<div class="info"><h3 style="color:#e94560;margin-bottom:8px">System Info</h3>';
+    h += '<div class="r"><span>Firmware</span><span class="v">' + d.FirmwareVersion + '</span></div>';
+    h += '<div class="r"><span>IP Address</span><span class="v">' + d.IP + '</span></div>';
+    h += '<div class="r"><span>mDNS Name</span><span class="v"><a href="http://' + d.mDNSName + '/" style="color:#53d8fb">' + d.mDNSName + '</a></span></div>';
+    h += '<div class="r"><span>WiFi SSID</span><span class="v">' + d.WiFiSSID + '</span></div>';
+    h += '<div class="r"><span>RSSI</span><span class="v">' + d.RSSI + ' dBm</span></div>';
+    h += '<div class="r"><span>Free Heap</span><span class="v">' + d.FreeHeap + ' bytes</span></div>';
+    h += '<div class="r"><span>Uptime</span><span class="v">' + fmtUptime(d.Uptime) + '</span></div>';
+    h += '<div class="r"><span>Chip ID</span><span class="v">' + d.ChipId + '</span></div>';
+    h += '</div>';
+    h += '<div class="card"><h3>Actions</h3>';
+    h += '<button class="danger" onclick="if(confirm(\'Reboot device?\'))fetch(\'/reboot\').then(function(){alert(\'Rebooting...\')})">Reboot</button>';
+    h += '<button class="danger" onclick="if(confirm(\'Reset ALL configuration to defaults?\'))fetch(\'/reset?target=config\').then(function(){alert(\'Resetting...\')})">Factory Reset</button>';
+    h += '<button class="danger" onclick="window.location.href=\'/update\'">Firmware Update</button>';
+    h += '<button class="danger" onclick="resetWiFiSettings()">Reset WiFi Settings</button>';
+    h += '<button class="danger" onclick="window.location.href=\'/rf/sniff\'">RF Sniffer</button>';
+    h += '<button class="danger" onclick="window.location.href=\'/ble/sniff\'">BT Sniffer</button>';
+    h += '</div>';
+    var files = fs.files || [];
+    h += '<div class="card"><h3>LittleFS Files</h3>';
+    if (files.length == 0) {
+      h += '<p style="color:#888;font-size:13px">No files found.</p>';
+    } else {
+      h += '<div style="max-height:200px;overflow-y:auto"><table class="tbl"><tr><th>File</th><th>Size</th></tr>';
+      for (var i = 0; i < files.length; i++) {
+        var f = files[i];
+        h += '<tr style="cursor:pointer" onclick="loadFileContent(\'' + f.name + '\')" id="sfr' + i + '">';
+        h += '<td style="font-family:monospace">' + f.name + '</td><td>' + f.size + ' B</td></tr>';
+      }
+      h += '</table></div>';
+    }
+    h += '</div>';
+    h += '<div class="card" id="sysfc_card" style="display:none">';
+    h += '<h3 id="sysfc_title"></h3>';
+    h += '<textarea id="sysfc" readonly style="width:100%;height:140px;background:#0a1628;border:1px solid #333;color:#e0e0e0;font-family:monospace;font-size:12px;padding:6px;border-radius:3px;resize:vertical"></textarea>';
+    h += '<div style="margin-top:6px"><button class="save" onclick="downloadFile()">Download</button></div>';
+    h += '</div>';
+    $('t7').innerHTML = h;
+  }).catch(function (e) {
+    $('t7').innerHTML = '<div class="card"><p style="color:#f44">Error: ' + e + '</p></div>';
+  });
+}
 
-function saveSettings(){
-var body={Unit:parseInt($('su').value),
-Resolution:parseInt($('sres').value)};
-fetch('/controller',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('setm',d.msg,d.status=='ok');dirty=false})
-.catch(function(e){msg('setm','Error: '+e,false)})}
+// Save the global controller settings (temp unit, resolution).
+function saveSettings() {
+  var body = {
+    Unit:       parseInt($('su').value),
+    Resolution: parseInt($('sres').value)
+  };
+  fetch('/controller', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('setm', d.msg, d.status == 'ok'); dirty = false; })
+    .catch(function (e) { msg('setm', 'Error: ' + e, false); });
+}
 
-function saveSvc(s){
-var body={index:s,enabled:$('sven'+s).checked,serviceId:$('svi'+s).value,deviceName:$('svn'+s).value};
-fetch('/brewservices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('svm'+s,d.msg,d.status=='ok');dirty=false})
-.catch(function(e){msg('svm'+s,'Error: '+e,false)})}
+// Save brew-service slot s (Brewer's Friend or Brewfather).
+function saveSvc(s) {
+  var body = {
+    index:      s,
+    enabled:    $('sven' + s).checked,
+    serviceId:  $('svi' + s).value,
+    deviceName: $('svn' + s).value
+  };
+  fetch('/brewservices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('svm' + s, d.msg, d.status == 'ok'); dirty = false; })
+    .catch(function (e) { msg('svm' + s, 'Error: ' + e, false); });
+}
 
-function testSvc(s){
-msg('svm'+s,'Testing...',true);
-fetch('/brewservices/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:s})})
-.then(function(r){return r.json()}).then(function(d){msg('svm'+s,d.msg,d.status=='ok')})
-.catch(function(e){msg('svm'+s,'Error: '+e,false)})}
+// Trigger a connectivity test for brew-service slot s.
+function testSvc(s) {
+  msg('svm' + s, 'Testing...', true);
+  fetch('/brewservices/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ index: s }) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('svm' + s, d.msg, d.status == 'ok'); })
+    .catch(function (e) { msg('svm' + s, 'Error: ' + e, false); });
+}
 
-function saveMqtt(){
-var body={enabled:$('mqen').checked,host:$('mqhost').value,port:parseInt($('mqport').value),username:$('mquser').value,password:$('mqpass').value,baseTopic:$('mqtopic').value,haDiscovery:$('mqha').checked,allowControl:$('mqctl').checked};
-fetch('/mqtt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('mqm',d.msg,d.status=='ok');dirty=false})
-.catch(function(e){msg('mqm','Error: '+e,false)})}
+// Save MQTT broker / Home Assistant settings.
+function saveMqtt() {
+  var body = {
+    enabled:      $('mqen').checked,
+    host:         $('mqhost').value,
+    port:         parseInt($('mqport').value),
+    username:     $('mquser').value,
+    password:     $('mqpass').value,
+    baseTopic:    $('mqtopic').value,
+    haDiscovery:  $('mqha').checked,
+    allowControl: $('mqctl').checked
+  };
+  fetch('/mqtt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('mqm', d.msg, d.status == 'ok'); dirty = false; })
+    .catch(function (e) { msg('mqm', 'Error: ' + e, false); });
+}
 
-function saveSyslog(){
-var body={enabled:$('slen').checked,host:$('slhost').value,port:parseInt($('slport').value),facility:parseInt($('slfac').value),minLevel:parseInt($('sllvl').value)};
-fetch('/syslog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-.then(function(r){return r.json()}).then(function(d){msg('slm',d.msg,d.status=='ok');dirty=false})
-.catch(function(e){msg('slm','Error: '+e,false)})}
+// Save remote syslog settings.
+function saveSyslog() {
+  var body = {
+    enabled:  $('slen').checked,
+    host:     $('slhost').value,
+    port:     parseInt($('slport').value),
+    facility: parseInt($('slfac').value),
+    minLevel: parseInt($('sllvl').value)
+  };
+  fetch('/syslog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('slm', d.msg, d.status == 'ok'); dirty = false; })
+    .catch(function (e) { msg('slm', 'Error: ' + e, false); });
+}
 
-function testMqtt(){
-msg('mqm','Testing...',true);
-fetch('/mqtt/test',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-.then(function(r){return r.json()}).then(function(d){msg('mqm',d.msg,d.status=='ok')})
-.catch(function(e){msg('mqm','Error: '+e,false)})}
+// Trigger an MQTT broker connectivity test.
+function testMqtt() {
+  msg('mqm', 'Testing...', true);
+  fetch('/mqtt/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('mqm', d.msg, d.status == 'ok'); })
+    .catch(function (e) { msg('mqm', 'Error: ' + e, false); });
+}
 
-function discoverMqtt(){
-msg('mqm','Publishing discovery...',true);
-fetch('/mqtt/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-.then(function(r){return r.json()}).then(function(d){msg('mqm',d.msg,d.status=='ok')})
-.catch(function(e){msg('mqm','Error: '+e,false)})}
+// Publish Home Assistant discovery topics now (rather than waiting for next reconnect).
+function discoverMqtt() {
+  msg('mqm', 'Publishing discovery...', true);
+  fetch('/mqtt/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { msg('mqm', d.msg, d.status == 'ok'); })
+    .catch(function (e) { msg('mqm', 'Error: ' + e, false); });
+}
 
 // ---- TILTS TAB ----
 var tiltColourNames=['Red','Green','Black','Purple','Orange','Blue','Yellow','Pink'];
