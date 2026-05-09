@@ -10,7 +10,8 @@
 // ============================================================
 
 static const char ADMIN_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
-<html><head>
+<html>
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OurBrewbot Admin</title>
@@ -272,26 +273,27 @@ button.danger {
   color: #53d8fb;
 }
 </style>
-</head><body>
-<h2>OurBrewbot Admin</h2>
-<div class="tabs">
-<button onclick="showTab(0)" id="tb0" class="active">Fermenters</button>
-<button onclick="showTab(1)" id="tb1">Profiles</button>
-<button onclick="showTab(2)" id="tb2">Probes</button>
-<button onclick="showTab(3)" id="tb3">Tilts</button>
-<button onclick="showTab(4)" id="tb4">iSpindels</button>
-<button onclick="showTab(5)" id="tb5">Smart Plugs</button>
-<button onclick="showTab(6)" id="tb6">Reporting</button>
-<button onclick="showTab(7)" id="tb7">System Settings</button>
-</div>
-<div id="t0" class="tab active"></div>
-<div id="t1" class="tab"></div>
-<div id="t2" class="tab"></div>
-<div id="t3" class="tab"></div>
-<div id="t4" class="tab"></div>
-<div id="t5" class="tab"></div>
-<div id="t6" class="tab"></div>
-<div id="t7" class="tab"></div>
+</head>
+<body>
+  <h2>OurBrewbot Admin</h2>
+  <div class="tabs">
+    <button onclick="showTab(0)" id="tb0" class="active">Fermenters</button>
+    <button onclick="showTab(1)" id="tb1">Profiles</button>
+    <button onclick="showTab(2)" id="tb2">Probes</button>
+    <button onclick="showTab(3)" id="tb3">Tilts</button>
+    <button onclick="showTab(4)" id="tb4">iSpindels</button>
+    <button onclick="showTab(5)" id="tb5">Smart Plugs</button>
+    <button onclick="showTab(6)" id="tb6">Reporting</button>
+    <button onclick="showTab(7)" id="tb7">System Settings</button>
+  </div>
+  <div id="t0" class="tab active"></div>
+  <div id="t1" class="tab"></div>
+  <div id="t2" class="tab"></div>
+  <div id="t3" class="tab"></div>
+  <div id="t4" class="tab"></div>
+  <div id="t5" class="tab"></div>
+  <div id="t6" class="tab"></div>
+  <div id="t7" class="tab"></div>
 
 <script>
 var T=0,R=null,dirty=false,dirtyTimer=null;
@@ -841,7 +843,8 @@ loadTab();startRefresh();
 document.body.addEventListener('focusin',function(e){if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')markDirty()});
 document.body.addEventListener('input',function(){markDirty()});
 </script>
-</body></html>)rawliteral";
+</body>
+</html>)rawliteral";
 
 // ============================================================
 // ADMIN PAGE HANDLER
