@@ -625,6 +625,8 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["fermenter"]   = g_iSpindels[i].fermenter;
     s["unit"]        = g_iSpindels[i].unit;
     s["function"]    = g_iSpindels[i].function;
+    s["tempAdjust"]  = g_iSpindels[i].tempAdjust;
+    s["sgAdjust"]    = g_iSpindels[i].sgAdjust;
     s["sg"]          = g_iSpindels[i].sg;
     s["temperature"] = toDisplayTemp(g_iSpindels[i].temperature);
     s["battery"]     = g_iSpindels[i].battery;
@@ -668,6 +670,8 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     g_iSpindels[idx].fermenter   = PROBE_UNASSIGNED;
     g_iSpindels[idx].unit        = 0;
     g_iSpindels[idx].function    = PROBE_FN_BEER;
+    g_iSpindels[idx].tempAdjust  = 0.0f;
+    g_iSpindels[idx].sgAdjust    = 0.0f;
     g_iSpindels[idx].sg             = 0.0f;
     g_iSpindels[idx].temperature    = 0.0f;
     g_iSpindels[idx].battery        = 0.0f;
@@ -686,6 +690,8 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
   if (!doc["fermenter"].isNull())   { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_iSpindels[idx].fermenter = v; }
   if (!doc["unit"].isNull())        g_iSpindels[idx].unit        = doc["unit"];
   if (!doc["function"].isNull())    { uint8_t v = doc["function"]; g_iSpindels[idx].function = (v == PROBE_FN_BEER) ? PROBE_FN_BEER : PROBE_UNASSIGNED; }
+  if (!doc["tempAdjust"].isNull())  g_iSpindels[idx].tempAdjust  = doc["tempAdjust"];
+  if (!doc["sgAdjust"].isNull())    g_iSpindels[idx].sgAdjust    = doc["sgAdjust"];
   // Normalize collectData from fermenter when client didn't send it explicitly.
   // Lets the UI omit the toggle entirely; legacy 'collectData=false + fermenter assigned'
   // configs self-heal on first UI save. External scripts that POST collectData win.

@@ -520,14 +520,16 @@ bool loadiSpindelConfig() {
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     strlcpy(g_iSpindels[i].name, doc["iSpindelName"][i] | "None", sizeof(g_iSpindels[i].name));
     strlcpy(g_iSpindels[i].id, doc["ID"][i] | "", sizeof(g_iSpindels[i].id));
-    g_iSpindels[i].collectData = doc["iSpindelCollectData"][i] | false;
-    g_iSpindels[i].fermenter   = doc["iSpindelFermenter"][i]   | PROBE_UNASSIGNED;
-    g_iSpindels[i].unit        = doc["Unit"][i]                | 1;
+    g_iSpindels[i].collectData  = doc["iSpindelCollectData"][i] | false;
+    g_iSpindels[i].fermenter    = doc["iSpindelFermenter"][i]   | PROBE_UNASSIGNED;
+    g_iSpindels[i].unit         = doc["Unit"][i]                | 1;
     // Default to PROBE_FN_BEER for legacy configs without the field — preserves
     // existing behavior where iSpindel temperature flowed into the beer-temp chain.
-    uint8_t fn                 = doc["Function"][i]            | PROBE_FN_BEER;
+    uint8_t fn                  = doc["Function"][i]            | PROBE_FN_BEER;
     if (fn != PROBE_FN_BEER) fn = PROBE_UNASSIGNED;
-    g_iSpindels[i].function    = fn;
+    g_iSpindels[i].function     = fn;
+    g_iSpindels[i].tempAdjust   = doc["TempAdjust"][i]         | 0.0f;
+    g_iSpindels[i].sgAdjust     = doc["SGAdjust"][i]           | 0.0f;
   }
   return true;
 }
@@ -540,6 +542,8 @@ bool saveiSpindelConfig() {
   JsonArray fiArr   = doc["iSpindelFermenter"].to<JsonArray>();
   JsonArray unArr   = doc["Unit"].to<JsonArray>();
   JsonArray fnArr   = doc["Function"].to<JsonArray>();
+  JsonArray taArr   = doc["TempAdjust"].to<JsonArray>();
+  JsonArray saArr   = doc["SGAdjust"].to<JsonArray>();
 
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     nameArr.add(g_iSpindels[i].name);
@@ -548,6 +552,8 @@ bool saveiSpindelConfig() {
     fiArr.add(g_iSpindels[i].fermenter);
     unArr.add(g_iSpindels[i].unit);
     fnArr.add(g_iSpindels[i].function);
+    taArr.add(g_iSpindels[i].tempAdjust);
+    saArr.add(g_iSpindels[i].sgAdjust);
   }
   String json;
   serializeJson(doc, json);

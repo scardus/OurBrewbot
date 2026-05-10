@@ -1093,6 +1093,8 @@ function buildISpindelCard(idx, s) {
   html += row('Fermenter',           '<select id="isf'  + idx + '">' + fermOpts(s.fermenter)   + '</select>');
   html += row('Unit',                '<select id="isu'  + idx + '"><option value="0"' + (s.unit == 0 ? ' selected' : '') + '>SG</option><option value="1"' + (s.unit == 1 ? ' selected' : '') + '>Plato</option></select>');
   html += row('Temperature reading', '<select id="isfn' + idx + '">' + tiltFnOpts(s.function) + '</select>');
+  html += row('SG Adjust',           numInput('issa' + idx, s.sgAdjust,   0.0001, 80));
+  html += row('Temp Adjust',         numInput('ista' + idx, s.tempAdjust, 0.1,    70) + ' &deg;C');
   html += '<button class="save" onclick="saveISpindel(' + idx + ')">Save</button>';
   if (!empty) html += ' <button class="test" onclick="clearISpindel(' + idx + ')" style="background:#333">Clear</button>';
   html += ' <span class="msg" id="ism' + idx + '"></span></div>';
@@ -1102,10 +1104,12 @@ function buildISpindelCard(idx, s) {
 // Save iSpindel slot idx (fermenter, unit, function).
 function saveISpindel(idx) {
   var body = {
-    index:     idx,
-    fermenter: parseInt(byId('isf'  + idx).value),
-    unit:      parseInt(byId('isu'  + idx).value),
-    function:  parseInt(byId('isfn' + idx).value)
+    index:       idx,
+    fermenter:   parseInt(byId('isf'  + idx).value),
+    unit:        parseInt(byId('isu'  + idx).value),
+    function:    parseInt(byId('isfn' + idx).value),
+    sgAdjust:    parseFloat(byId('issa' + idx).value),
+    tempAdjust:  parseFloat(byId('ista' + idx).value)
   };
   fetch('/ispindel/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })

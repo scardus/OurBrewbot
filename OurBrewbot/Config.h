@@ -311,6 +311,8 @@ struct iSpindelConfig {
   uint8_t  fermenter;           // assigned fermenter
   uint8_t  unit;                // unit: 0=SG, 1=Plato
   uint8_t  function;            // PROBE_FN_BEER = use as beer temp source; PROBE_UNASSIGNED = gravity only
+  float    tempAdjust;          // temperature calibration offset °C
+  float    sgAdjust;            // SG calibration offset
   // Runtime data (not persisted)
   float    sg;                  // current SG reading
   float    temperature;         // current temp reading

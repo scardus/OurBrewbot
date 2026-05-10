@@ -62,6 +62,11 @@ void handleiSpindelPost(const String& body) {
     if (g_iSpindels[matched].unit == 1) {
       sg = 1.0f + (sg / (258.6f - (sg / 258.2f * 227.1f)));
     }
+    // Apply calibration offsets
+    sg   += g_iSpindels[matched].sgAdjust;
+    temp += g_iSpindels[matched].tempAdjust;
+    if (corrGravity > 0.0f) corrGravity += g_iSpindels[matched].sgAdjust;
+
     // Update runtime data
     g_iSpindels[matched].sg          = sg;
     g_iSpindels[matched].temperature = temp;
