@@ -631,9 +631,12 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["rssi"]        = g_iSpindels[i].rssi;
     s["angle"]       = g_iSpindels[i].angle;
     s["velocity"]    = g_iSpindels[i].velocity;
-    s["corrGravity"] = g_iSpindels[i].corrGravity;
-    s["runTime"]     = g_iSpindels[i].runTime;
-    s["gravityUnit"] = g_iSpindels[i].gravityUnit;
+    s["corrGravity"]  = g_iSpindels[i].corrGravity;
+    s["runTime"]      = g_iSpindels[i].runTime;
+    s["gravityUnit"]  = g_iSpindels[i].gravityUnit;
+    s["minutesSince"] = g_iSpindels[i].lastSeen == 0
+                          ? 0xFFFF
+                          : (uint32_t)(millis() - g_iSpindels[i].lastSeen) / 60000UL;
   }
   String out;
   serializeJson(doc, out);

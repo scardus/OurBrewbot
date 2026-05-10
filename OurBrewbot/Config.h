@@ -321,6 +321,7 @@ struct iSpindelConfig {
   float    corrGravity;         // temperature-corrected gravity
   float    runTime;             // per-wake cycle duration: wake-up to report sent (seconds)
   char     gravityUnit[4];      // unit string from device ("SG", "G", "P")
+  uint32_t lastSeen;            // millis() of last POST received (0 = never seen since boot)
 };
 
 // ============================================================

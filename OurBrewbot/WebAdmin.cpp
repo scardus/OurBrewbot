@@ -1084,6 +1084,8 @@ function buildISpindelCard(idx, s) {
       if (s.corrGravity > 0 || s.velocity > 0) {
         html += '<br>Corr.SG: ' + s.corrGravity.toFixed(4) + ' &nbsp; Velocity: ' + s.velocity.toFixed(4) + ' &nbsp; Cycle: ' + s.runTime.toFixed(1) + 's' + (s.gravityUnit ? ' &nbsp; Unit: ' + s.gravityUnit : '');
       }
+      var lastSeen = s.minutesSince >= 0xFFFF ? 'Never' : s.minutesSince === 0 ? 'Less than a minute ago' : s.minutesSince + ' min ago';
+      html += '<br><span style="color:#888;font-size:12px">Last seen: ' + lastSeen + '</span>';
     }
     html += '</div>';
     html += row('Device ID', '<span style="color:#53d8fb;font-size:13px">' + (s.id || '—') + '</span>');

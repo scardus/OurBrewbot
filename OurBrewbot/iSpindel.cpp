@@ -72,6 +72,7 @@ void handleiSpindelPost(const String& body) {
     g_iSpindels[matched].corrGravity = corrGravity;
     g_iSpindels[matched].runTime     = runTime;
     strlcpy(g_iSpindels[matched].gravityUnit, gravityUnit, sizeof(g_iSpindels[matched].gravityUnit));
+    g_iSpindels[matched].lastSeen    = millis();
 
     // Sync name/ID if changed
     bool configChanged = false;
