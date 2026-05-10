@@ -249,6 +249,7 @@ String buildFermenterJson(uint8_t i) {
   doc["AmbientTemp"]    = (ambientTemp > -100.0f) ? toDisplayTemp(ambientTemp) : -127.0f;
   doc["SG"]             = sg;
   doc["Attenuation"]    = getAttenuation(i);
+  doc["EstABV"]         = getEstABV(i);
   doc["TempUnit"]       = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
   doc["BeerTempSource"] = getBeerTempSource(i);
   doc["GravitySource"]  = getGravitySource(i);

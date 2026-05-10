@@ -412,6 +412,8 @@ function loadFermenters() {
       html += '<div class="live">Beer: ' + (f.BeerTemp > -100 ? f.BeerTemp.toFixed(1) + '&deg;' + f.TempUnit + (f.BeerTempSource && f.BeerTempSource != 'None' ? ' (' + f.BeerTempSource + ')' : '') : '--')
          + ' &nbsp; Ambient: ' + (f.AmbientTemp > -100 ? f.AmbientTemp.toFixed(1) + '&deg;' + f.TempUnit : '--')
          + ' &nbsp; SG: ' + (f.SG > 0 ? f.SG.toFixed(3) + (f.GravitySource ? ' (' + f.GravitySource + ')' : '') : '--')
+         + (f.SG > 0 && f.Attenuation > 0 ? ' &nbsp; Att: ' + f.Attenuation.toFixed(1) + '%' : '')
+         + (f.SG > 0 && f.EstABV > 0 ? ' &nbsp; Est.ABV: ' + f.EstABV.toFixed(1) + '%' : '')
          + (f.ProfileRunning ? ' &nbsp; Step: ' + (f.CurrentStep + 1) + '/' + f.TotalSteps + ' &nbsp; Hour: ' + f.CurrentHour : '') + '</div>';
       html += row('Name',             textInput('fn' + i, f.FermenterName));
       html += row('Beer',             textInput('bn' + i, f.BeerName));

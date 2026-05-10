@@ -254,8 +254,15 @@ const char* getGravitySource(uint8_t i) {
 float getAttenuation(uint8_t i) {
   float og = g_fermenters[i].og;
   float sg = getCurrentSG(i);
-  if (og <= 1.0f || sg >= og) return 0.0f;
+  if (og <= 1.0f || sg <= 0.0f || sg >= og) return 0.0f;
   return ((og - sg) / (og - 1.0f)) * 100.0f;
+}
+
+float getEstABV(uint8_t i) {
+  float og = g_fermenters[i].og;
+  float sg = getCurrentSG(i);
+  if (og <= 1.0f || sg <= 0.0f || sg >= og) return 0.0f;
+  return (og - sg) * 131.25f;
 }
 
 // ============================================================

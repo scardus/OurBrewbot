@@ -37,6 +37,9 @@ void switchOffAll();
 // Get attenuation percentage
 float getAttenuation(uint8_t index);
 
+// Get estimated ABV% from OG and current SG
+float getEstABV(uint8_t index);
+
 // Fermenter power on/off
 void setFermenterPower(uint8_t index, bool on);
 
