@@ -230,7 +230,7 @@ float getCurrentSG(uint8_t i) {
   }
   for (int s = 0; s < MAX_ISPINDELS; s++) {
     if (g_iSpindels[s].collectData && g_iSpindels[s].fermenter == i) {
-      return g_iSpindels[s].sg;
+      return g_iSpindels[s].corrGravity > 0.0f ? g_iSpindels[s].corrGravity : g_iSpindels[s].sg;
     }
   }
   return estimateGravity(i);
