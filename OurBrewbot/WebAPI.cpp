@@ -772,7 +772,6 @@ void handleProbePost(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid probe index\"}"), 400);
     return;
   }
-  if (!doc["name"].isNull())       strlcpy(g_probes[idx].probeName, doc["name"], sizeof(g_probes[0].probeName));
   if (!doc["function"].isNull())   g_probes[idx].function   = doc["function"];
   if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_probes[idx].fermenter = v; }
   if (!doc["tempAdjust"].isNull()) g_probes[idx].tempAdjust = doc["tempAdjust"];

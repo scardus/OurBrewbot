@@ -603,7 +603,7 @@ function loadProbes() {
       var q = p[i];
       html += '<tr><td style="font-family:monospace;font-size:12px">' + q.address + '</td>';
       html += '<td>' + (q.temperature > -100 ? q.temperature.toFixed(1) + '&deg;' : '<span style="color:#f44">--</span>') + '</td>';
-      html += '<td><input type="text" id="pn' + q.index + '" value="' + q.name + '" style="width:100px"></td>';
+      html += '<td>' + q.name + '</td>';
       html += '<td><select id="pf' + q.index + '">' + fnOpts(q.function) + '</select></td>';
       html += '<td><select id="pr' + q.index + '">' + fermOpts(q.fermenter) + '</select></td>';
       html += '<td><input type="number" step="0.1" id="pa' + q.index + '" value="' + q.tempAdjust + '" style="width:60px"></td>';
@@ -614,11 +614,10 @@ function loadProbes() {
   });
 }
 
-// Save probe i: name, function, assigned fermenter, and per-probe temp offset.
+// Save probe i: function, assigned fermenter, and per-probe temp offset.
 function saveProbe(i) {
   var body = {};
   body['index']      = i;
-  body['name']       = byId('pn' + i).value;
   body['function']   = parseInt  (byId('pf' + i).value);
   body['fermenter']  = parseInt  (byId('pr' + i).value);
   body['tempAdjust'] = parseFloat(byId('pa' + i).value);

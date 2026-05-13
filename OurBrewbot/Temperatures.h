@@ -21,8 +21,9 @@ void requestTempConversion();
 // (94 << (resolution-9)) ms after requestTempConversion()
 void readTempResults();
 
-// Scan OneWire buses and register any new probes found
-void scanBuses();
+// Scan OneWire buses, assign position-based names, register new probes.
+// Returns true if any probe config changed (new probe or name updated).
+bool scanBuses();
 
 // Periodic scan: discover new probes and report inactive ones
 void periodicProbeScan();

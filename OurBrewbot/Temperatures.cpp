@@ -86,7 +86,7 @@ void cleanupDuplicateProbes() {
 // BUS SCANNING
 // ============================================================
 
-void scanBuses() {
+bool scanBuses() {
   logMsg("[TEMP] Scanning OneWire buses for probes...");
 
   // Scan Bus 1 (Green Jack)
@@ -99,47 +99,59 @@ void scanBuses() {
   int bus2Count = g_sensors2.getDeviceCount();
   logMsg("[TEMP] Bus2 (Black Jack): %d probe(s)", bus2Count);
 
+  bool configChanged = false;
 
-  // For each discovered probe, check if it's already in our config
-  // If not, add it to the first empty slot
-  auto registerProbe = [](DallasTemperature& sensors, int busCount, uint8_t busId) {
+  // Register probes found on a bus and assign fixed position-based names.
+  // Names are always overwritten so that physically moving a probe to a new
+  // bus or position is reflected immediately on the next scan.
+  auto registerProbe = [&configChanged](DallasTemperature& sensors, int busCount, uint8_t busId) {
     DeviceAddress addr;
     for (int i = 0; i < busCount; i++) {
       if (!sensors.getAddress(addr, i)) continue;
       String addrStr = addressToString(addr);
 
-      // Check if already registered (also match old truncated addresses)
+      char expectedName[24];
+      snprintf(expectedName, sizeof(expectedName), "Probe Bus%d-%d", busId, i + 1);
+
       bool found = false;
       for (int j = 0; j < MAX_PROBES; j++) {
         if (strlen(g_probes[j].address) == 0) continue;
-        if (addrStr.equalsIgnoreCase(g_probes[j].address)) {
-          g_probes[j].busId = busId;
-          found = true;
-          break;
-        }
-        // Match old truncated address (14 chars) as prefix of full address (16 chars)
-        if (strlen(g_probes[j].address) < 16 &&
-            addrStr.startsWith(g_probes[j].address)) {
-          // Upgrade the stored address to full length
+
+        bool addrMatch  = addrStr.equalsIgnoreCase(g_probes[j].address);
+        bool truncMatch = !addrMatch && strlen(g_probes[j].address) < 16 &&
+                          addrStr.startsWith(g_probes[j].address);
+
+        if (!addrMatch && !truncMatch) continue;
+
+        if (truncMatch) {
           logMsg("[TEMP] Upgrading truncated address %s -> %s",
             g_probes[j].address, addrStr.c_str());
           strlcpy(g_probes[j].address, addrStr.c_str(), sizeof(g_probes[j].address));
-          g_probes[j].busId = busId;
-          found = true;
-          break;
+          configChanged = true;
         }
+
+        g_probes[j].busId = busId;
+
+        if (strcmp(g_probes[j].probeName, expectedName) != 0) {
+          logMsg("[TEMP] Probe %s renamed: '%s' -> '%s'",
+            addrStr.c_str(), g_probes[j].probeName, expectedName);
+          strlcpy(g_probes[j].probeName, expectedName, sizeof(g_probes[j].probeName));
+          configChanged = true;
+        }
+        found = true;
+        break;
       }
 
       if (!found) {
-        // Find empty slot
         for (int j = 0; j < MAX_PROBES; j++) {
           if (strlen(g_probes[j].address) == 0) {
             strlcpy(g_probes[j].address, addrStr.c_str(), sizeof(g_probes[j].address));
-            snprintf(g_probes[j].probeName, sizeof(g_probes[j].probeName), "Probe Bus%d-%d", busId, i+1);
+            strlcpy(g_probes[j].probeName, expectedName, sizeof(g_probes[j].probeName));
             g_probes[j].function  = PROBE_UNASSIGNED;
             g_probes[j].fermenter = PROBE_UNASSIGNED;
             g_probes[j].busId     = busId;
-            logMsg("[TEMP] Found New Probe: %s (Bus%d)", addrStr.c_str(), busId);
+            logMsg("[TEMP] New probe: %s (%s)", addrStr.c_str(), expectedName);
+            configChanged = true;
             break;
           }
         }
@@ -149,6 +161,8 @@ void scanBuses() {
 
   registerProbe(g_sensors1, bus1Count, 1);
   registerProbe(g_sensors2, bus2Count, 2);
+
+  return configChanged;
 }
 
 // ============================================================
@@ -213,23 +227,13 @@ void readTempResults() {
 // ============================================================
 
 void periodicProbeScan() {
-  int prevCount = 0;
-  for (int i = 0; i < MAX_PROBES; i++) {
-    if (strlen(g_probes[i].address) > 0) prevCount++;
-  }
-
-  scanBuses();
+  bool changed = scanBuses();
   // begin() inside scanBuses() may reset the library's internal resolution — re-apply it.
   g_sensors1.setResolution(g_globalConfig.resolution);
   g_sensors2.setResolution(g_globalConfig.resolution);
 
-  int newCount = 0;
-  for (int i = 0; i < MAX_PROBES; i++) {
-    if (strlen(g_probes[i].address) > 0) newCount++;
-  }
-
-  if (newCount > prevCount) {
-    logMsg("[TEMP] Probe scan: %d new probe(s) detected", newCount - prevCount);
+  if (changed) {
+    logMsg("[TEMP] Probe scan: config updated");
     saveProbeConfig();
   }
 }
