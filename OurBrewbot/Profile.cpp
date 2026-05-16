@@ -123,8 +123,16 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
       return false;
 
     case STEP_ATTENUATION:
-      // Attenuation % at target
-      return attn >= step.sgTrigger;
+      // Minimum time must elapse, then attenuation at or above trigger
+      if (hours < daysInHours) return false;
+      if (attn >= step.sgTrigger) {
+        logMsg("[PROF] Attenuation target reached: %.1f%% >= %.1f%%", attn, step.sgTrigger);
+        return true;
+      }
+      if (hours > daysInHours * 2) {
+        logMsg("[PROF] Profile stalled on Attenuation step");
+      }
+      return false;
 
     case STEP_TEMP_REACHED:
       // Temperature reached target
