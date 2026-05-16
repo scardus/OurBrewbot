@@ -960,6 +960,31 @@ void mqttPendingSaveCheck() {
 }
 
 // ============================================================
+// LOG MIRROR — publish logMsg() lines to <baseTopic>/Device/log
+// ============================================================
+//
+// Called from Log.cpp:logMsg() after the Serial/syslog fan-out. The re-entry
+// guard prevents recursion if PubSubClient internals or our publish code ever
+// triggers another logMsg() while we're mid-publish. We still publish lines
+// that *describe* MQTT activity (e.g. "[MQTT] Published F0") — those are useful
+// to see on the topic. The guard only prevents the publish-from-within-publish
+// recursion that would form an infinite loop.
+
+void mqttPublishLog(const char* line) {
+  static bool s_inLogPublish = false;
+  if (s_inLogPublish) return;
+  if (!g_mqttConfig.enabled || !g_mqttConfig.logEnabled) return;
+  if (!g_mqtt.connected()) return;
+  if (!line || !line[0]) return;
+
+  s_inLogPublish = true;
+  char topic[64];
+  snprintf(topic, sizeof(topic), "%s/Device/log", g_mqttConfig.baseTopic);
+  g_mqtt.publish(topic, line, false);  // non-retained
+  s_inLogPublish = false;
+}
+
+// ============================================================
 // INIT / LOOP
 // ============================================================
 

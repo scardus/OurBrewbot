@@ -4,6 +4,7 @@
 
 #include "Log.h"
 #include "Config.h"
+#include "Mqtt.h"
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <stdarg.h>
@@ -62,5 +63,14 @@ void logMsg(const char* fmt, ...) {
     s_udp.beginPacket(s_syslogIP, g_syslogConfig.port);
     s_udp.write((const uint8_t*)pkt, strlen(pkt));
     s_udp.endPacket();
+  }
+
+  // MQTT log topic output: timestamp + message in a single payload.
+  // mqttPublishLog() is a no-op when MQTT is disabled / not connected, and
+  // self-guards against re-entry to prevent publish-from-within-publish loops.
+  if (g_mqttConfig.enabled && g_mqttConfig.logEnabled) {
+    char line[208];
+    snprintf(line, sizeof(line), "%s%s", ts, buf);
+    mqttPublishLog(line);
   }
 }
