@@ -90,17 +90,17 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
   uint16_t daysInHours = (uint16_t)(step.days * 24.0f);
 
   switch (step.stepType) {
-    case STEP_TIME_OVER_TEMP:
+    case STEP_TEMP_OVER_TIME:
       // Days elapsed AND temp at target
       if (hours < daysInHours) return false;
       if (temp < -100.0f) return false;
       if (fabs(temp - step.endTemp) > 0.5f) {
-        logMsg("[PROF] Profile stalled on Time/Temp: %.1f != %.1f", temp, step.endTemp);
+        logMsg("[PROF] Profile stalled on Temp/Time: %.1f != %.1f", temp, step.endTemp);
         return false;
       }
       return true;
 
-    case STEP_TEMP_OVER_TIME:
+    case STEP_TIME_OVER_TEMP:
       // Days elapsed
       return hours >= daysInHours;
 
