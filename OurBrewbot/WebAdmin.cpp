@@ -26,7 +26,7 @@ body {
   font-family: system-ui, sans-serif;
   background: #1a1a2e;
   color: #e0e0e0;
-  padding: 8px;
+  padding: 30px 8px 8px;
 }
 
 h2 {
@@ -272,9 +272,54 @@ button.danger {
 .info .r .v {
   color: #53d8fb;
 }
+
+/* ---- Refresh bar ---- */
+#rfbar-wrap {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 22px;
+  background: #111;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  z-index: 1000;
+  border-bottom: 1px solid #333;
+}
+#rfbar-bg {
+  flex: 1;
+  height: 6px;
+  background: #2a2a3a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+#rfbar {
+  height: 100%;
+  width: 100%;
+  background: #4caf50;
+  border-radius: 3px;
+}
+#rfbtn {
+  background: none;
+  border: 1px solid #444;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 6px;
+  border-radius: 3px;
+  height: 16px;
+  line-height: 16px;
+}
+#rfbtn:hover { color: #fff; border-color: #888; }
 </style>
 </head>
 <body>
+  <div id="rfbar-wrap">
+    <div id="rfbar-bg"><div id="rfbar"></div></div>
+    <button id="rfbtn" onclick="togglePause()" title="Pause/resume auto-refresh">&#9208;</button>
+  </div>
   <h2>OurBrewbot Admin</h2>
   <div class="tabs">
     <button onclick="showTab(0)" id="tb0" class="active">Fermenters</button>
@@ -300,18 +345,25 @@ var activeTab = 0;
 var refreshTimer = null;
 var dirty = false;
 var dirtyTimer = null;
+var paused = false;
+var REFRESH_MS = 10000;
+var DIRTY_MS = 30000;
+var refreshStart = 0;
+var dirtyStart = 0;
 
 // Mark the form as edited; auto-refresh resumes after a 30-second idle.
 function markDirty() {
   dirty = true;
+  dirtyStart = Date.now();
   if (dirtyTimer) clearTimeout(dirtyTimer);
-  dirtyTimer = setTimeout(function () { dirty = false; }, 30000);
+  dirtyTimer = setTimeout(function () { dirty = false; }, DIRTY_MS);
 }
 
 // Switch the active tab and trigger a re-render of its contents.
 function showTab(n) {
   activeTab = n;
   dirty = false;
+  refreshStart = Date.now();
   for (var i = 0; i < 8; i++) {
     document.getElementById('t' + i).className = 'tab' + (i == n ? ' active' : '');
     document.getElementById('tb' + i).className = i == n ? 'active' : '';
@@ -1206,14 +1258,50 @@ function downloadFile() {
   URL.revokeObjectURL(url);
 }
 
+// ---- REFRESH BAR ----
+function updateBar() {
+  var bar = byId('rfbar');
+  if (!bar) return;
+  var pct, color;
+  if (paused) {
+    pct = 1;
+    color = '#555';
+  } else if (dirty) {
+    pct = Math.max(0, 1 - (Date.now() - dirtyStart) / DIRTY_MS);
+    color = '#e94560';
+  } else {
+    pct = Math.max(0, 1 - (Date.now() - refreshStart) / REFRESH_MS);
+    color = '#4caf50';
+  }
+  bar.style.width = (pct * 100) + '%';
+  bar.style.background = color;
+}
+
+function togglePause() {
+  paused = !paused;
+  byId('rfbtn').textContent = paused ? '▶' : '⏸';
+  if (paused) {
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = null;
+  } else {
+    refreshStart = Date.now();
+    startRefresh();
+  }
+}
+
 // ---- AUTO REFRESH ----
 // Re-render the active tab every 10s, but skip while the user has unsaved edits.
 function startRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(function () { if (!dirty) loadTab(); }, 10000);
+  refreshTimer = setInterval(function () {
+    refreshStart = Date.now();
+    if (!dirty) loadTab();
+  }, REFRESH_MS);
 }
+refreshStart = Date.now();
 loadTab();
 startRefresh();
+setInterval(updateBar, 100);
 document.body.addEventListener('focusin', function (e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') markDirty();
 });
