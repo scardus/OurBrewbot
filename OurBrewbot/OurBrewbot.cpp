@@ -85,6 +85,9 @@ unsigned long g_tempRequestTime       = 0;
 bool g_wifiConnected = false;
 String g_rebootReason = ESP.getResetReason();
 
+bool g_fermenterDebugMode = false;
+FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
+
 // Hardware objects
 ESP8266WebServer g_webServer(80);
 

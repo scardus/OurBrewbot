@@ -294,6 +294,8 @@ float getTempQuick(const char* addressStr) {
 }
 
 float getBeerTemp(uint8_t fermenterIndex) {
+  if (g_fermenterDebugMode && g_fermenterDebugOverrides[fermenterIndex].enabled)
+    return g_fermenterDebugOverrides[fermenterIndex].beerTemp;
   // Priority 1: Tilt assigned to this fermenter with Beer function
   for (int i = 0; i < MAX_TILTS; i++) {
     if (g_tilts[i].active &&
@@ -322,6 +324,8 @@ float getBeerTemp(uint8_t fermenterIndex) {
 }
 
 const char* getBeerTempSource(uint8_t fermenterIndex) {
+  if (g_fermenterDebugMode && g_fermenterDebugOverrides[fermenterIndex].enabled)
+    return "Debug";
   // Mirror getBeerTemp() priority chain exactly
   for (int i = 0; i < MAX_TILTS; i++) {
     if (g_tilts[i].active &&
@@ -348,6 +352,8 @@ const char* getBeerTempSource(uint8_t fermenterIndex) {
 }
 
 float getAmbientTemp(uint8_t fermenterIndex) {
+  if (g_fermenterDebugMode && g_fermenterDebugOverrides[fermenterIndex].enabled)
+    return g_fermenterDebugOverrides[fermenterIndex].ambientTemp;
   for (int i = 0; i < MAX_PROBES; i++) {
     if (g_probes[i].fermenter == fermenterIndex &&
         g_probes[i].function  == PROBE_FN_AMBIENT &&

@@ -92,6 +92,10 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/syslog",           HTTP_GET,  [&server]() { handleSyslogConfig(server); });
   server.on("/syslog",           HTTP_POST, [&server]() { handleSyslogConfigPost(server); });
 
+  // Fermenter debug mode
+  server.on("/debug",            HTTP_GET,  [&server]() { handleDebug(server); });
+  server.on("/debug",            HTTP_POST, [&server]() { handleDebug(server); });
+
   // Profile management
   server.on("/profiles",          HTTP_GET,  [&server]() { handleProfiles(server); });
   server.on("/profile",           HTTP_POST, [&server]() { handleProfilePost(server); });
@@ -359,6 +363,62 @@ void handleFermenter(ESP8266WebServer& server) {
   int idx = server.arg("id").toInt();
   if (idx < 0 || idx >= MAX_FERMENTERS) idx = 0;
   sendJsonResponse(server, buildFermenterJson(idx));
+}
+
+// ============================================================
+// DEBUG — GET /debug, POST /debug
+// Runtime-only fermenter sensor overrides — never persisted.
+// GET returns current debug mode and per-fermenter overrides
+//     (temperatures in current display unit).
+// POST accepts { "DebugMode": bool } and/or
+//     { "Fermenter": n, "Enabled": bool, "BeerTemp": f,
+//       "AmbientTemp": f, "SG": f } (temps in display unit).
+// ============================================================
+
+void handleDebug(ESP8266WebServer& server) {
+  sendCORSHeaders(server);
+
+  if (server.method() == HTTP_POST) {
+    JsonDocument doc;
+    if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
+      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
+      return;
+    }
+    if (!doc["DebugMode"].isNull())
+      g_fermenterDebugMode = doc["DebugMode"];
+    if (!doc["Fermenter"].isNull()) {
+      int idx = doc["Fermenter"];
+      if (idx >= 0 && idx < MAX_FERMENTERS) {
+        if (!doc["Enabled"].isNull())
+          g_fermenterDebugOverrides[idx].enabled = doc["Enabled"];
+        if (!doc["BeerTemp"].isNull())
+          g_fermenterDebugOverrides[idx].beerTemp = toCelsius((float)doc["BeerTemp"]);
+        if (!doc["AmbientTemp"].isNull())
+          g_fermenterDebugOverrides[idx].ambientTemp = toCelsius((float)doc["AmbientTemp"]);
+        if (!doc["SG"].isNull())
+          g_fermenterDebugOverrides[idx].sg = doc["SG"];
+      }
+    }
+    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Debug state updated\"}"));
+    return;
+  }
+
+  // GET — return current debug state
+  JsonDocument doc;
+  doc["DebugMode"] = g_fermenterDebugMode;
+  doc["TempUnit"]  = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
+  JsonArray overrides = doc["Overrides"].to<JsonArray>();
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    JsonObject ov = overrides.add<JsonObject>();
+    ov["Fermenter"]   = i;
+    ov["Enabled"]     = g_fermenterDebugOverrides[i].enabled;
+    ov["BeerTemp"]    = toDisplayTemp(g_fermenterDebugOverrides[i].beerTemp);
+    ov["AmbientTemp"] = toDisplayTemp(g_fermenterDebugOverrides[i].ambientTemp);
+    ov["SG"]          = g_fermenterDebugOverrides[i].sg;
+  }
+  String out;
+  serializeJson(doc, out);
+  sendJsonResponse(server, out);
 }
 
 // ============================================================

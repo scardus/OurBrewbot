@@ -72,6 +72,9 @@ void handleTiltPost(ESP8266WebServer& server);
 void handleiSpindels(ESP8266WebServer& server);
 void handleiSpindelConfigPost(ESP8266WebServer& server);
 
+// Fermenter debug mode (runtime-only overrides)
+void handleDebug(ESP8266WebServer& server);
+
 // Helpers
 void sendCORSHeaders(ESP8266WebServer& server);
 void sendJsonResponse(ESP8266WebServer& server, const String& json, int code = 200);

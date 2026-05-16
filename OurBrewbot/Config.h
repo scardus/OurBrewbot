@@ -225,6 +225,20 @@ struct FermenterConfig {
 };
 
 // ============================================================
+// STRUCT: FermenterDebugOverride
+// Runtime-only — never persisted, resets on reboot.
+// ============================================================
+struct FermenterDebugOverride {
+  bool  enabled     = false;
+  float beerTemp    = 20.0f;  // °C
+  float ambientTemp = 20.0f;  // °C
+  float sg          = 1.050f;
+};
+
+extern bool g_fermenterDebugMode;
+extern FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
+
+// ============================================================
 // STRUCT: ProbeConfig
 // Persisted in jsonProbe.txt
 // ============================================================

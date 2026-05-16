@@ -390,19 +390,25 @@ function numInput(id, value, step, width) {
 var brewServices = [];
 var mqttEnabled = false;
 var profileNames = [];
+var fermDebugMode = false;
 
-// Fetch brew-services / MQTT / fermenters / profiles in parallel, then render fermenter cards.
+// Fetch brew-services / MQTT / fermenters / profiles / debug in parallel, then render fermenter cards.
 function loadFermenters() {
   Promise.all([
     fetch('/brewservices').then(function (r) { return r.json(); }),
     fetch('/mqtt').then(function (r) { return r.json(); }),
     fetch('/fermenters').then(function (r) { return r.json(); }),
-    fetch('/profiles').then(function (r) { return r.json(); })
+    fetch('/profiles').then(function (r) { return r.json(); }),
+    fetch('/debug').then(function (r) { return r.json(); })
   ]).then(function (res) {
     brewServices = res[0].services || [];
     mqttEnabled = res[1].enabled;
     var d = res[2];
     var profs = res[3].profiles || [];
+    var dbg = res[4];
+    fermDebugMode = dbg.DebugMode || false;
+    var dbgOverrides = dbg.Overrides || [];
+    var tempUnit = (d.length > 0 && d[0].TempUnit) ? d[0].TempUnit : 'C';
     profileNames = [];
     for (var p = 0; p < profs.length; p++) profileNames.push(profs[p].name);
     var html = '';
@@ -452,6 +458,17 @@ function loadFermenters() {
       }
       if (!hasSvc) html += row('Brew Services', '<span style="color:#888;font-size:12px">None enabled — configure in Reporting tab</span>');
       html += '<button class="save" onclick="saveFerm(' + i + ')">Save</button> <span class="msg" id="fm' + i + '"></span>';
+      if (fermDebugMode) {
+        var ov = dbgOverrides[i] || {};
+        html += '<div class="card" style="border-color:#8b5cf6;margin-top:8px">';
+        html += '<h3 style="color:#8b5cf6">Debug Overrides <span style="font-size:11px;font-weight:normal;color:#aaa">(runtime only — resets on reboot)</span></h3>';
+        html += row('Enable', switchHtml('dbe' + i, ov.Enabled || false));
+        html += row('Beer Temp (°' + tempUnit + ')', numInput('dbt' + i, (ov.BeerTemp || 20.0).toFixed(1), 0.1));
+        html += row('Ambient Temp (°' + tempUnit + ')', numInput('dat' + i, (ov.AmbientTemp || 20.0).toFixed(1), 0.1));
+        html += row('SG', '<input type="number" step="0.001" min="0.9" max="1.2" id="dsg' + i + '" value="' + (ov.SG || 1.050).toFixed(3) + '" style="width:80px">');
+        html += '<button class="test" onclick="saveDebugOverride(' + i + ')">Apply</button> <span class="msg" id="dbm' + i + '"></span>';
+        html += '</div>';
+      }
       html += '</div>';
     }
     byId('t0').innerHTML = html;
@@ -488,6 +505,21 @@ function saveFerm(i) {
     .then(function (r) { return r.json(); })
     .then(function (d) { showMsg('fm' + i, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadFermenters, 500); })
     .catch(function (e) { showMsg('fm' + i, 'Error: ' + e, false); });
+}
+
+// Apply debug sensor overrides for fermenter i.
+function saveDebugOverride(i) {
+  var body = {
+    Fermenter:   i,
+    Enabled:     byId('dbe' + i).checked,
+    BeerTemp:    parseFloat(byId('dbt' + i).value),
+    AmbientTemp: parseFloat(byId('dat' + i).value),
+    SG:          parseFloat(byId('dsg' + i).value)
+  };
+  fetch('/debug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { showMsg('dbm' + i, d.msg, d.status == 'ok'); })
+    .catch(function (e) { showMsg('dbm' + i, 'Error: ' + e, false); });
 }
 
 // Send a profile-control action (start / pause / stop / prev / next) for fermenter i.
@@ -809,9 +841,10 @@ function loadSystemSettings() {
   Promise.all([
     fetch('/controller').then(function (r) { return r.json(); }),
     fetch('/fs/files').then(function (r) { return r.json(); }),
-    fetch('/syslog').then(function (r) { return r.json(); })
+    fetch('/syslog').then(function (r) { return r.json(); }),
+    fetch('/debug').then(function (r) { return r.json(); })
   ]).then(function (res) {
-    var d = res[0], fs = res[1], sl = res[2];
+    var d = res[0], fs = res[1], sl = res[2], dbg = res[3];
     var syslogFacilities = [
       '0 Kernel', '1 User', '2 Mail', '3 Daemon', '4 Auth', '5 Syslog', '6 LPR', '7 News',
       '8 UUCP', '9 Cron', '10 Security', '11 FTP', '12 NTP', '13 Audit', '14 Alert', '15 Clock',
@@ -843,6 +876,7 @@ function loadSystemSettings() {
     html += '<div class="row"><label>Resolution</label><select id="sres">';
     for (var r = 9; r <= 12; r++) html += '<option value="' + r + '"' + (d.Resolution == r ? ' selected' : '') + '>' + r + '-bit</option>';
     html += '</select></div>';
+    html += row('<span style="color:#8b5cf6">Fermenter Debug Mode</span>', switchHtml('dbmode', dbg.DebugMode || false));
     html += '<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
     html += '</div>';
     html += '<div class="card"><h3>Syslog</h3>';
@@ -882,7 +916,7 @@ function loadSystemSettings() {
   });
 }
 
-// Save the global controller settings (temp unit, resolution).
+// Save the global controller settings (temp unit, resolution, debug mode).
 function saveSettings() {
   var body = {
     Unit:       parseInt(byId('su').value),
@@ -892,6 +926,8 @@ function saveSettings() {
     .then(function (r) { return r.json(); })
     .then(function (d) { showMsg('setm', d.msg, d.status == 'ok'); dirty = false; })
     .catch(function (e) { showMsg('setm', 'Error: ' + e, false); });
+  fetch('/debug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ DebugMode: byId('dbmode').checked }) })
+    .catch(function (e) { showMsg('setm', 'Error saving debug mode: ' + e, false); });
 }
 
 // Save brew-service slot s (Brewer's Friend or Brewfather).

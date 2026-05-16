@@ -222,6 +222,8 @@ float estimateGravity(uint8_t i) {
 }
 
 float getCurrentSG(uint8_t i) {
+  if (g_fermenterDebugMode && g_fermenterDebugOverrides[i].enabled)
+    return g_fermenterDebugOverrides[i].sg;
   // Priority: Tilt > iSpindel > Plaato > Estimate
   for (int t = 0; t < MAX_TILTS; t++) {
     if (g_tilts[t].active && g_tilts[t].fermenter == i) {
@@ -237,6 +239,8 @@ float getCurrentSG(uint8_t i) {
 }
 
 const char* getGravitySource(uint8_t i) {
+  if (g_fermenterDebugMode && g_fermenterDebugOverrides[i].enabled)
+    return "Debug";
   // Mirror getCurrentSG() priority chain exactly
   for (int t = 0; t < MAX_TILTS; t++) {
     if (g_tilts[t].active && g_tilts[t].fermenter == i) {
