@@ -536,7 +536,7 @@ function profAction(i, a) {
 var stepTypes = [];
 
 // Which step-type uses which fields: s=startTemp, e=endTemp, g=sgTrigger, d=days.
-var SFIELDS = { 0: 'segd', 1: 'sed', 2: 'sed', 3: 'sgd', 4: 'sg', 5: 'se', 6: 'sg', 7: 'sg', 8: 'segd', 9: 'sed' };
+var SFIELDS = { 0: 'sed', 1: 'sed', 2: 'sed', 3: 'egd', 4: 'egd', 5: 'e', 6: 'eg', 7: 'eg', 8: 'segd', 9: 'segd' };
 
 // Decode the SFIELDS letter-set for a step type into per-field enabled flags.
 function stepFieldsEnabled(t) {
