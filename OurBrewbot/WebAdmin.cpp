@@ -222,6 +222,34 @@ button.addstep:disabled {
   cursor: not-allowed;
 }
 
+button.stepact {
+  background: #1a1a2e;
+  color: #aaa;
+  border: 1px solid #444;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 6px;
+  margin: 0 1px;
+  min-width: 22px;
+  line-height: 18px;
+}
+
+button.stepact:hover:not(:disabled) {
+  color: #fff;
+  border-color: #888;
+}
+
+button.stepact:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+button.stepact.del:hover:not(:disabled) {
+  color: #faa;
+  border-color: #a33;
+}
+
 /* ---- Status messages ---- */
 .msg {
   font-size: 12px;
@@ -678,6 +706,27 @@ function onStepFieldChange(p, s) {
   markDirty();
 }
 
+// Swap step s with s+dir in profile p (dir = -1 or +1). No-op if out of bounds.
+function moveProfileStep(p, s, dir) {
+  var steps = profileEdits[p].steps;
+  var live = countLiveSteps(steps);
+  var t = s + dir;
+  if (t < 0 || t >= live) return;
+  var tmp = steps[s];
+  steps[s] = steps[t];
+  steps[t] = tmp;
+  markDirty();
+  loadProfilesFromState();
+}
+
+// Delete step s from profile p — splice and let following steps shift up.
+function deleteProfileStep(p, s) {
+  if (!confirm('Delete step ' + (s + 1) + '?')) return;
+  profileEdits[p].steps.splice(s, 1);
+  markDirty();
+  loadProfilesFromState();
+}
+
 // Add a new step to profile p — copies the last live step, or seeds Temp/Time 20°C 7 days.
 function addProfileStep(p) {
   var steps = profileEdits[p].steps;
@@ -711,10 +760,13 @@ function loadProfilesFromState() {
     if (live == 0) {
       html += '<div class="prof-empty">No steps yet — click <b>+ Add Step</b> to begin.</div>';
     } else {
-      html += '<table class="tbl"><tr><th>#</th><th>Step Type</th><th>Start Temp</th><th>End Temp</th><th>SG Trigger</th><th>Days</th></tr>';
+      html += '<table class="tbl"><tr><th>#</th><th>Step Type</th><th>Start Temp</th><th>End Temp</th><th>SG Trigger</th><th>Days</th><th></th></tr>';
       for (var s = 0; s < live; s++) {
         var st = pe.steps[s];
         var fl = stepFieldsEnabled(st.stepType);
+        var upDis   = (locked || s == 0)        ? ' disabled' : '';
+        var dnDis   = (locked || s == live - 1) ? ' disabled' : '';
+        var delDis  = locked ? ' disabled' : '';
         html += '<tr><td>' + (s + 1) + '</td>';
         html += '<td><select id="pst' + p + '_' + s + '" onchange="onStepFieldChange(' + p + ',' + s + ')"' + disAttr + '>';
         for (var t = 0; t < stepTypes.length; t++) html += '<option value="' + stepTypes[t].id + '"' + (stepTypes[t].id == st.stepType ? ' selected' : '') + '>' + stepTypes[t].name + '</option>';
@@ -722,7 +774,12 @@ function loadProfilesFromState() {
         html += '<td><input type="number" step="0.1"   id="pss' + p + '_' + s + '" value="' + st.startTemp + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.s && !locked ? '' : ' disabled') + '></td>';
         html += '<td><input type="number" step="0.1"   id="pse' + p + '_' + s + '" value="' + st.endTemp   + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.e && !locked ? '' : ' disabled') + '></td>';
         html += '<td><input type="number" step="0.001" id="psg' + p + '_' + s + '" value="' + st.sgTrigger + '" style="width:80px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.g && !locked ? '' : ' disabled') + '></td>';
-        html += '<td><input type="number" step="0.1"   id="psd' + p + '_' + s + '" value="' + st.days      + '" style="width:60px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.d && !locked ? '' : ' disabled') + '></td></tr>';
+        html += '<td><input type="number" step="0.1"   id="psd' + p + '_' + s + '" value="' + st.days      + '" style="width:60px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.d && !locked ? '' : ' disabled') + '></td>';
+        html += '<td style="white-space:nowrap">';
+        html += '<button class="stepact" title="Move up"   onclick="moveProfileStep(' + p + ',' + s + ',-1)"' + upDis  + '>&#9650;</button>';
+        html += '<button class="stepact" title="Move down" onclick="moveProfileStep(' + p + ',' + s + ',1)"'  + dnDis  + '>&#9660;</button>';
+        html += '<button class="stepact del" title="Delete step" onclick="deleteProfileStep(' + p + ',' + s + ')"' + delDis + '>&#10005;</button>';
+        html += '</td></tr>';
       }
       html += '</table>';
     }
