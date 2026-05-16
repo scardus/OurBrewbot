@@ -28,28 +28,41 @@ void handleSyslogConfigPost(ESP8266WebServer& server);
 // SERVER SETUP — register all routes
 // ============================================================
 
-void setupWebServer(ESP8266WebServer& server) {
-  server.on("/",              HTTP_GET,  [&server]() { handleRoot(server); });
-  server.on("/controller",    HTTP_GET,  [&server]() { handleController(server); });
-  server.on("/controller",    HTTP_POST, [&server]() { handleController(server); });
-  server.on("/fermenters",    HTTP_GET,  [&server]() { handleFermenters(server); });
-  server.on("/fermenter",     HTTP_GET,  [&server]() { handleFermenter(server); });
-  server.on("/fermenter",     HTTP_POST, [&server]() { handleFermenter(server); });
-  server.on("/board_info.json",HTTP_GET, [&server]() { handleBoardInfo(server); });
-  server.on("/reset",         HTTP_GET,  [&server]() { handleReset(server); });
-  server.on("/reboot",        HTTP_GET,  [&server]() { handleReboot(server); });
-  server.on("/update",        HTTP_GET,  [&server]() { handleOTAPage(server); });
-  server.on("/config",        HTTP_GET,  [&server]() { handleConfigPage(server); });
-  server.on("/wifi/reset",    HTTP_POST, [&server]() { handleWiFiReset(server); });
-  server.on("/WiFi",          HTTP_GET,  [&server]() { handleConfigPage(server); });
+static void logApiCall(ESP8266WebServer& server) {
+  const char* method;
+  switch (server.method()) {
+    case HTTP_POST:   method = "POST";   break;
+    case HTTP_PUT:    method = "PUT";    break;
+    case HTTP_DELETE: method = "DELETE"; break;
+    default:          method = "GET";    break;
+  }
+  logMsg("[API] %s %s from %s", method, server.uri().c_str(),
+         server.client().remoteIP().toString().c_str());
+}
 
-  server.on("/iSpindel",      HTTP_POST, [&server]() { handleiSpindel(server); });
-  server.on("/ispindels",      HTTP_GET,  [&server]() { handleiSpindels(server); });
-  server.on("/ispindel/config",HTTP_POST, [&server]() { handleiSpindelConfigPost(server); });
+void setupWebServer(ESP8266WebServer& server) {
+  server.on("/",              HTTP_GET,  [&server]() { logApiCall(server); handleRoot(server); });
+  server.on("/controller",    HTTP_GET,  [&server]() { logApiCall(server); handleController(server); });
+  server.on("/controller",    HTTP_POST, [&server]() { logApiCall(server); handleController(server); });
+  server.on("/fermenters",    HTTP_GET,  [&server]() { logApiCall(server); handleFermenters(server); });
+  server.on("/fermenter",     HTTP_GET,  [&server]() { logApiCall(server); handleFermenter(server); });
+  server.on("/fermenter",     HTTP_POST, [&server]() { logApiCall(server); handleFermenter(server); });
+  server.on("/board_info.json",HTTP_GET, [&server]() { logApiCall(server); handleBoardInfo(server); });
+  server.on("/reset",         HTTP_GET,  [&server]() { logApiCall(server); handleReset(server); });
+  server.on("/reboot",        HTTP_GET,  [&server]() { logApiCall(server); handleReboot(server); });
+  server.on("/update",        HTTP_GET,  [&server]() { logApiCall(server); handleOTAPage(server); });
+  server.on("/config",        HTTP_GET,  [&server]() { logApiCall(server); handleConfigPage(server); });
+  server.on("/wifi/reset",    HTTP_POST, [&server]() { logApiCall(server); handleWiFiReset(server); });
+  server.on("/WiFi",          HTTP_GET,  [&server]() { logApiCall(server); handleConfigPage(server); });
+
+  server.on("/iSpindel",      HTTP_POST, [&server]() { logApiCall(server); handleiSpindel(server); });
+  server.on("/ispindels",      HTTP_GET,  [&server]() { logApiCall(server); handleiSpindels(server); });
+  server.on("/ispindel/config",HTTP_POST, [&server]() { logApiCall(server); handleiSpindelConfigPost(server); });
 
   // OTA upload handler
   server.on("/update", HTTP_POST,
     [&server]() {
+      logApiCall(server);
       server.sendHeader("Connection", "close");
       if (Update.hasError()) {
         String err = "Update FAILED: ";
@@ -67,49 +80,49 @@ void setupWebServer(ESP8266WebServer& server) {
   );
 
   // New convenience endpoints
-  server.on("/status",        HTTP_GET,  [&server]() { handleStatus(server); });
-  server.on("/probes",        HTTP_GET,  [&server]() { handleProbes(server); });
-  server.on("/probes",        HTTP_POST, [&server]() { handleProbePost(server); });
-  server.on("/health",        HTTP_GET,  [&server]() { handleHealth(server); });
+  server.on("/status",        HTTP_GET,  [&server]() { logApiCall(server); handleStatus(server); });
+  server.on("/probes",        HTTP_GET,  [&server]() { logApiCall(server); handleProbes(server); });
+  server.on("/probes",        HTTP_POST, [&server]() { logApiCall(server); handleProbePost(server); });
+  server.on("/health",        HTTP_GET,  [&server]() { logApiCall(server); handleHealth(server); });
 
   // Admin configuration page
-  server.on("/admin",         HTTP_GET,  [&server]() { handleAdmin(server); });
-  server.on("/smartplugs",    HTTP_GET,  [&server]() { handleSmartPlugs(server); });
-  server.on("/smartplug",     HTTP_POST, [&server]() { handleSmartPlugPost(server); });
-  server.on("/smartplug/test",HTTP_POST, [&server]() { handleSmartPlugTest(server); });
-  server.on("/rf/sniff",     HTTP_GET,  [&server]() { handleRFSniff(server); });
-  server.on("/rf/sniff/poll",HTTP_GET,  [&server]() { handleRFSniffPoll(server); });
-  server.on("/ble/sniff",      HTTP_GET,  [&server]() { handleBLESniff(server); });
-  server.on("/ble/sniff/poll", HTTP_GET,  [&server]() { handleBLESniffPoll(server); });
-  server.on("/ble/sniff/send", HTTP_POST, [&server]() { handleBLESniffSend(server); });
-  server.on("/brewservices",      HTTP_GET,  [&server]() { handleBrewServices(server); });
-  server.on("/brewservices",      HTTP_POST, [&server]() { handleBrewServicesPost(server); });
-  server.on("/brewservices/test", HTTP_POST, [&server]() { handleBrewServiceTest(server); });
-  server.on("/mqtt",             HTTP_GET,  [&server]() { handleMqttConfig(server); });
-  server.on("/mqtt",             HTTP_POST, [&server]() { handleMqttConfigPost(server); });
-  server.on("/mqtt/test",        HTTP_POST, [&server]() { handleMqttTest(server); });
-  server.on("/mqtt/discover",    HTTP_POST, [&server]() { handleMqttDiscover(server); });
-  server.on("/syslog",           HTTP_GET,  [&server]() { handleSyslogConfig(server); });
-  server.on("/syslog",           HTTP_POST, [&server]() { handleSyslogConfigPost(server); });
+  server.on("/admin",         HTTP_GET,  [&server]() { logApiCall(server); handleAdmin(server); });
+  server.on("/smartplugs",    HTTP_GET,  [&server]() { logApiCall(server); handleSmartPlugs(server); });
+  server.on("/smartplug",     HTTP_POST, [&server]() { logApiCall(server); handleSmartPlugPost(server); });
+  server.on("/smartplug/test",HTTP_POST, [&server]() { logApiCall(server); handleSmartPlugTest(server); });
+  server.on("/rf/sniff",     HTTP_GET,  [&server]() { logApiCall(server); handleRFSniff(server); });
+  server.on("/rf/sniff/poll",HTTP_GET,  [&server]() { handleRFSniffPoll(server); });  // high-frequency poll — not logged
+  server.on("/ble/sniff",      HTTP_GET,  [&server]() { logApiCall(server); handleBLESniff(server); });
+  server.on("/ble/sniff/poll", HTTP_GET,  [&server]() { handleBLESniffPoll(server); });  // high-frequency poll — not logged
+  server.on("/ble/sniff/send", HTTP_POST, [&server]() { logApiCall(server); handleBLESniffSend(server); });
+  server.on("/brewservices",      HTTP_GET,  [&server]() { logApiCall(server); handleBrewServices(server); });
+  server.on("/brewservices",      HTTP_POST, [&server]() { logApiCall(server); handleBrewServicesPost(server); });
+  server.on("/brewservices/test", HTTP_POST, [&server]() { logApiCall(server); handleBrewServiceTest(server); });
+  server.on("/mqtt",             HTTP_GET,  [&server]() { logApiCall(server); handleMqttConfig(server); });
+  server.on("/mqtt",             HTTP_POST, [&server]() { logApiCall(server); handleMqttConfigPost(server); });
+  server.on("/mqtt/test",        HTTP_POST, [&server]() { logApiCall(server); handleMqttTest(server); });
+  server.on("/mqtt/discover",    HTTP_POST, [&server]() { logApiCall(server); handleMqttDiscover(server); });
+  server.on("/syslog",           HTTP_GET,  [&server]() { logApiCall(server); handleSyslogConfig(server); });
+  server.on("/syslog",           HTTP_POST, [&server]() { logApiCall(server); handleSyslogConfigPost(server); });
 
   // Fermenter debug mode
-  server.on("/debug",            HTTP_GET,  [&server]() { handleDebug(server); });
-  server.on("/debug",            HTTP_POST, [&server]() { handleDebug(server); });
+  server.on("/debug",            HTTP_GET,  [&server]() { logApiCall(server); handleDebug(server); });
+  server.on("/debug",            HTTP_POST, [&server]() { logApiCall(server); handleDebug(server); });
 
   // Profile management
-  server.on("/profiles",          HTTP_GET,  [&server]() { handleProfiles(server); });
-  server.on("/profile",           HTTP_POST, [&server]() { handleProfilePost(server); });
-  server.on("/fermenter/profile", HTTP_POST, [&server]() { handleFermenterProfile(server); });
+  server.on("/profiles",          HTTP_GET,  [&server]() { logApiCall(server); handleProfiles(server); });
+  server.on("/profile",           HTTP_POST, [&server]() { logApiCall(server); handleProfilePost(server); });
+  server.on("/fermenter/profile", HTTP_POST, [&server]() { logApiCall(server); handleFermenterProfile(server); });
 
   // Tilt hydrometer config
-  server.on("/tilts", HTTP_GET,  [&server]() { handleTilts(server); });
-  server.on("/tilt",  HTTP_POST, [&server]() { handleTiltPost(server); });
+  server.on("/tilts", HTTP_GET,  [&server]() { logApiCall(server); handleTilts(server); });
+  server.on("/tilt",  HTTP_POST, [&server]() { logApiCall(server); handleTiltPost(server); });
 
   // Filesystem browser
-  server.on("/fs/files", HTTP_GET, [&server]() { handleFsFiles(server); });
-  server.on("/fs/file",  HTTP_GET, [&server]() { handleFsFile(server); });
+  server.on("/fs/files", HTTP_GET, [&server]() { logApiCall(server); handleFsFiles(server); });
+  server.on("/fs/file",  HTTP_GET, [&server]() { logApiCall(server); handleFsFile(server); });
 
-  server.onNotFound([&server]() { handleNotFound(server); });
+  server.onNotFound([&server]() { logApiCall(server); handleNotFound(server); });
 }
 
 // ============================================================
