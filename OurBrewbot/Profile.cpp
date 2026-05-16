@@ -192,8 +192,15 @@ void stopProfile(uint8_t i) {
 
 void pauseProfile(uint8_t i) {
   logMsg("[PROF] F%d (%s): Profile Paused", i, g_fermenters[i].fermenterName);
-  // Preserve profileNo, currentStep, currentHour for resume
   g_fermenters[i].profileRunning = false;
+  saveFermenterConfig();
+}
+
+void resumeProfile(uint8_t i) {
+  if (g_fermenters[i].profileNo == 0) return;
+  if (g_fermenters[i].profileRunning) return;
+  logMsg("[PROF] F%d (%s): Profile resumed at step %d", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
+  g_fermenters[i].profileRunning = true;
   saveFermenterConfig();
 }
 

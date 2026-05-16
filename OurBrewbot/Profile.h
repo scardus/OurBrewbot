@@ -17,9 +17,10 @@ bool isStepComplete(uint8_t fermenterIndex, const ProfileStep& step);
 // Start a profile on a fermenter
 void startProfile(uint8_t fermenterIndex, uint8_t profileIndex);
 
-// Stop/pause a profile
+// Stop/pause/resume a profile
 void stopProfile(uint8_t fermenterIndex);
 void pauseProfile(uint8_t fermenterIndex);
+void resumeProfile(uint8_t fermenterIndex);
 
 // Manual step navigation
 void nextProfileStep(uint8_t fermenterIndex);

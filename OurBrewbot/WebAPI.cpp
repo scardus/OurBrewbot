@@ -167,7 +167,7 @@ static const char ROOT_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <li><span class='method'>GET</span><a href='/fermenters'>/fermenters</a><span class='desc'> &mdash; all fermenter data</span></li>
     <li><span class='method'>GET</span><a href='/fermenter?id=0'>/fermenter?id=N</a><span class='desc'> &mdash; single fermenter</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter</span><span class='desc'> &mdash; update fermenter config</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter/profile</span><span class='desc'> &mdash; profile control (start/stop/pause/next/prev)</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter/profile</span><span class='desc'> &mdash; profile control (start/stop/pause/resume/next/prev)</span></li>
     <li><span class='method'>GET</span><a href='/fs/files'>/fs/files</a><span class='desc'> &mdash; list LittleFS files</span></li>
     <li><span class='method'>GET</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/file?name=...</span><span class='desc'> &mdash; read file content</span></li>
     <li><span class='method'>GET</span><a href='/health'>/health</a><span class='desc'> &mdash; system health</span></li>
@@ -1397,6 +1397,13 @@ void handleFermenterProfile(ESP8266WebServer& server) {
   } else if (strcmp(action, "pause") == 0) {
     pauseProfile(idx);
     sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile paused\"}"));
+  } else if (strcmp(action, "resume") == 0) {
+    if (g_fermenters[idx].profileNo == 0 || g_fermenters[idx].profileRunning) {
+      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"No paused profile to resume\"}"), 400);
+      return;
+    }
+    resumeProfile(idx);
+    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile resumed\"}"));
   } else if (strcmp(action, "next") == 0) {
     nextProfileStep(idx);
     sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Advanced to next step\"}"));
