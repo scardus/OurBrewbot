@@ -250,6 +250,46 @@ button.stepact.del:hover:not(:disabled) {
   border-color: #a33;
 }
 
+.tip {
+  position: relative;
+  display: inline-block;
+  margin-left: 4px;
+  color: #53d8fb;
+  cursor: help;
+  font-size: 13px;
+  user-select: none;
+}
+
+.tip:focus {
+  outline: none;
+  color: #fff;
+}
+
+.tip .tt {
+  display: none;
+  position: absolute;
+  z-index: 100;
+  bottom: 130%;
+  left: 0;
+  width: 280px;
+  background: #1a1a2e;
+  color: #ddd;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid #555;
+  font-size: 12px;
+  font-weight: normal;
+  text-align: left;
+  line-height: 1.45;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  white-space: normal;
+}
+
+.tip .tt b { color: #53d8fb; }
+
+.tip:hover .tt, .tip:focus .tt { display: block; }
+
 /* ---- Status messages ---- */
 .msg {
   font-size: 12px;
@@ -666,6 +706,43 @@ var profileEdits = [];
 // Which step-type uses which fields: s=startTemp, e=endTemp, g=sgTrigger, d=days.
 var SFIELDS = { 0: 'sed', 1: 'sed', 2: 'sed', 3: 'egd', 4: 'egd', 5: 'e', 6: 'eg', 7: 'eg', 8: 'segd', 9: 'segd' };
 
+// Tooltip content per step type. Mirrors getStepTypeDescription and isStepComplete in Profile.cpp.
+var STEP_INFO = {
+  0: { title: 'Temperature over Time',
+       desc:  'Advances when the configured <b>Days</b> have elapsed <b>and</b> the current temp is within 0.5&deg;C of <b>End Temp</b>.' },
+  1: { title: 'Time over Temperature',
+       desc:  'Advances after <b>Days</b> have elapsed. Temperature is held at <b>End Temp</b> but is not a gating condition.' },
+  2: { title: 'Free Rise',
+       desc:  'Advances after <b>Days</b> have elapsed. Uses <b>Start Temp</b> as the floor and <b>End Temp</b> as the ceiling (no active heat/cool between them).' },
+  3: { title: 'Specific Gravity',
+       desc:  'Advances when the minimum <b>Days</b> have elapsed <b>and</b> SG falls to or below <b>SG Trigger</b>. Temperature held at <b>End Temp</b>.' },
+  4: { title: 'Attenuation %',
+       desc:  'Advances when the minimum <b>Days</b> have elapsed <b>and</b> attenuation reaches <b>SG Trigger</b>% or higher. Temperature held at <b>End Temp</b>.' },
+  5: { title: 'Temp Reached',
+       desc:  'Advances as soon as the current temp is within 0.5&deg;C of <b>End Temp</b>. No time gate.' },
+  6: { title: 'SG Reached',
+       desc:  'Advances as soon as SG falls to or below <b>SG Trigger</b>. No time gate. Temperature held at <b>End Temp</b>.' },
+  7: { title: 'Attn% Reached',
+       desc:  'Advances as soon as attenuation reaches <b>SG Trigger</b>% or higher. No time gate. Temperature held at <b>End Temp</b>.' },
+  8: { title: 'Time and SG',
+       desc:  'Advances when <b>Days</b> have elapsed <b>and</b> SG falls to or below <b>SG Trigger</b>. Temperature held at <b>End Temp</b>.' },
+  9: { title: 'Time and Attn%',
+       desc:  'Advances when <b>Days</b> have elapsed <b>and</b> attenuation reaches <b>SG Trigger</b>% or higher. Temperature held at <b>End Temp</b>.' }
+};
+
+var FIELD_LABELS = { s: 'Start Temp', e: 'End Temp', g: 'SG Trigger', d: 'Days' };
+
+// Build the inner HTML for a step-type info tooltip.
+function buildStepTooltipHtml(stepType) {
+  var info = STEP_INFO[stepType];
+  if (!info) return '';
+  var f = SFIELDS[stepType] || '';
+  var used = [];
+  for (var i = 0; i < f.length; i++) used.push(FIELD_LABELS[f[i]]);
+  var fields = used.length ? '<br><br><b>Fields:</b> ' + used.join(', ') : '';
+  return '<b>' + info.title + '</b><br>' + info.desc + fields;
+}
+
 // Decode the SFIELDS letter-set for a step type into per-field enabled flags.
 function stepFieldsEnabled(t) {
   var f = SFIELDS[t] || 'segd';
@@ -703,6 +780,8 @@ function onStepFieldChange(p, s) {
   byId('pse' + p + '_' + s).disabled = !fl.e;
   byId('psg' + p + '_' + s).disabled = !fl.g;
   byId('psd' + p + '_' + s).disabled = !fl.d;
+  var tt = byId('ptt' + p + '_' + s);
+  if (tt) tt.innerHTML = buildStepTooltipHtml(st.stepType);
   markDirty();
 }
 
@@ -770,7 +849,9 @@ function loadProfilesFromState() {
         html += '<tr><td>' + (s + 1) + '</td>';
         html += '<td><select id="pst' + p + '_' + s + '" onchange="onStepFieldChange(' + p + ',' + s + ')"' + disAttr + '>';
         for (var t = 0; t < stepTypes.length; t++) html += '<option value="' + stepTypes[t].id + '"' + (stepTypes[t].id == st.stepType ? ' selected' : '') + '>' + stepTypes[t].name + '</option>';
-        html += '</select></td>';
+        html += '</select>';
+        html += '<span class="tip" tabindex="0" aria-label="Step info">&#9432;<span class="tt" id="ptt' + p + '_' + s + '">' + buildStepTooltipHtml(st.stepType) + '</span></span>';
+        html += '</td>';
         html += '<td><input type="number" step="0.1"   id="pss' + p + '_' + s + '" value="' + st.startTemp + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.s && !locked ? '' : ' disabled') + '></td>';
         html += '<td><input type="number" step="0.1"   id="pse' + p + '_' + s + '" value="' + st.endTemp   + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.e && !locked ? '' : ' disabled') + '></td>';
         html += '<td><input type="number" step="0.001" id="psg' + p + '_' + s + '" value="' + st.sgTrigger + '" style="width:80px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.g && !locked ? '' : ' disabled') + '></td>';
