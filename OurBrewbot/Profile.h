@@ -22,9 +22,9 @@ void stopProfile(uint8_t fermenterIndex);
 void pauseProfile(uint8_t fermenterIndex);
 void resumeProfile(uint8_t fermenterIndex);
 
-// Manual step navigation
-void nextProfileStep(uint8_t fermenterIndex);
-void prevProfileStep(uint8_t fermenterIndex);
+// Manual step navigation — returns true if the step actually changed
+bool nextProfileStep(uint8_t fermenterIndex);
+bool prevProfileStep(uint8_t fermenterIndex);
 
 // Count non-empty steps in a profile (0-indexed profileSlot 0-3)
 uint8_t countProfileSteps(uint8_t profileSlot);

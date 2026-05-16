@@ -1405,11 +1405,19 @@ void handleFermenterProfile(ESP8266WebServer& server) {
     resumeProfile(idx);
     sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile resumed\"}"));
   } else if (strcmp(action, "next") == 0) {
-    nextProfileStep(idx);
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Advanced to next step\"}"));
+    if (nextProfileStep(idx)) {
+      sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Advanced to next step\"}"));
+    } else if (!g_fermenters[idx].profileRunning && g_fermenters[idx].profileNo > 0) {
+      sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile complete\"}"));
+    } else {
+      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Profile not running\"}"), 400);
+    }
   } else if (strcmp(action, "prev") == 0) {
-    prevProfileStep(idx);
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Moved to previous step\"}"));
+    if (prevProfileStep(idx)) {
+      sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Moved to previous step\"}"));
+    } else {
+      sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Already on first step\"}"));
+    }
   } else {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Unknown action\"}"), 400);
   }

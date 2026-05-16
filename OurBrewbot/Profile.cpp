@@ -204,9 +204,9 @@ void resumeProfile(uint8_t i) {
   saveFermenterConfig();
 }
 
-void nextProfileStep(uint8_t i) {
-  if (g_fermenters[i].profileNo == 0) return;
-  if (!g_fermenters[i].profileRunning) return;
+bool nextProfileStep(uint8_t i) {
+  if (g_fermenters[i].profileNo == 0) return false;
+  if (!g_fermenters[i].profileRunning) return false;
 
   uint8_t maxStep = countProfileSteps(g_fermenters[i].profileNo - 1);
   if (g_fermenters[i].currentStep + 1 >= maxStep) {
@@ -214,23 +214,25 @@ void nextProfileStep(uint8_t i) {
     logMsg("[PROF] F%d (%s): Next step past end -> Profile Finished", i, g_fermenters[i].fermenterName);
     g_fermenters[i].profileRunning = false;
     saveFermenterConfig();
-    return;
+    return false;
   }
   g_fermenters[i].currentStep++;
   g_fermenters[i].currentHour = 0;
   logMsg("[PROF] F%d (%s): Manual advance to step %d", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
   saveFermenterConfig();
+  return true;
 }
 
-void prevProfileStep(uint8_t i) {
-  if (g_fermenters[i].profileNo == 0) return;
-  if (!g_fermenters[i].profileRunning) return;
-  if (g_fermenters[i].currentStep == 0) return;
+bool prevProfileStep(uint8_t i) {
+  if (g_fermenters[i].profileNo == 0) return false;
+  if (!g_fermenters[i].profileRunning) return false;
+  if (g_fermenters[i].currentStep == 0) return false;
 
   g_fermenters[i].currentStep--;
   g_fermenters[i].currentHour = 0;
   logMsg("[PROF] F%d (%s): Manual retreat to step %d", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
   saveFermenterConfig();
+  return true;
 }
 
 uint8_t countProfileSteps(uint8_t profileSlot) {
