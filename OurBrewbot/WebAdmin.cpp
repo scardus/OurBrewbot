@@ -151,6 +151,16 @@ button.save:hover {
   background: #c73650;
 }
 
+button.save:disabled {
+  background: #555;
+  color: #999;
+  cursor: not-allowed;
+}
+
+button.save:disabled:hover {
+  background: #555;
+}
+
 button.test {
   background: #0f3460;
   color: #53d8fb;
@@ -175,6 +185,41 @@ button.danger {
   cursor: pointer;
   font-size: 13px;
   margin: 4px 4px 0 0;
+}
+
+/* ---- Profile builder ---- */
+.prof-banner {
+  background: #4a2a00;
+  border: 1px solid #a86;
+  color: #fda;
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.prof-empty {
+  color: #888;
+  font-size: 12px;
+  font-style: italic;
+  padding: 8px 0;
+}
+
+button.addstep {
+  background: #0f3460;
+  color: #53d8fb;
+  border: 1px dashed #53d8fb;
+  padding: 4px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+button.addstep:hover { background: #1a4a8a; }
+button.addstep:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ---- Status messages ---- */
@@ -586,6 +631,9 @@ function profAction(i, a) {
 
 // ---- PROFILES TAB ----
 var stepTypes = [];
+var MAX_STEPS = 15;
+// Per-profile edit state: [{ name, steps: [{stepType,startTemp,endTemp,sgTrigger,days}, ...], lockedBy: [fermenter names] }, ...]
+var profileEdits = [];
 
 // Which step-type uses which fields: s=startTemp, e=endTemp, g=sgTrigger, d=days.
 var SFIELDS = { 0: 'sed', 1: 'sed', 2: 'sed', 3: 'egd', 4: 'egd', 5: 'e', 6: 'eg', 7: 'eg', 8: 'segd', 9: 'segd' };
@@ -601,58 +649,147 @@ function stepFieldsEnabled(t) {
   };
 }
 
-// onchange handler for a step-type dropdown — enable/disable the per-step inputs.
-function onStepTypeChange(p, s) {
-  var t = parseInt(byId('pst' + p + '_' + s).value);
-  var fl = stepFieldsEnabled(t);
+// True if a step has the default "empty" signature (matches firmware isStepEmpty).
+function isProfileStepEmpty(st) {
+  return st.stepType == 0 && st.days == 0 && st.endTemp == 0 && st.startTemp == 0;
+}
+
+// Number of live (contiguous, non-empty) leading steps in a profile.
+function countLiveSteps(steps) {
+  for (var s = 0; s < steps.length; s++) {
+    if (isProfileStepEmpty(steps[s])) return s;
+  }
+  return steps.length;
+}
+
+// onchange handler: keep state in sync with the DOM and re-render the row's disabled flags.
+function onStepFieldChange(p, s) {
+  var st = profileEdits[p].steps[s];
+  st.stepType  = parseInt  (byId('pst' + p + '_' + s).value) || 0;
+  st.startTemp = parseFloat(byId('pss' + p + '_' + s).value) || 0;
+  st.endTemp   = parseFloat(byId('pse' + p + '_' + s).value) || 0;
+  st.sgTrigger = parseFloat(byId('psg' + p + '_' + s).value) || 0;
+  st.days      = parseFloat(byId('psd' + p + '_' + s).value) || 0;
+  var fl = stepFieldsEnabled(st.stepType);
   byId('pss' + p + '_' + s).disabled = !fl.s;
   byId('pse' + p + '_' + s).disabled = !fl.e;
   byId('psg' + p + '_' + s).disabled = !fl.g;
   byId('psd' + p + '_' + s).disabled = !fl.d;
+  markDirty();
 }
 
-// Fetch all profiles and render one editable card per profile.
-function loadProfiles() {
-  fetch('/profiles').then(function (r) { return r.json(); }).then(function (d) {
-    stepTypes = d.stepTypes || [];
-    var ps = d.profiles || [];
-    var html = '';
-    for (var p = 0; p < ps.length; p++) {
-      var pr = ps[p];
-      html += '<div class="card"><h3>Profile ' + (p + 1) + '</h3>';
-      html += '<div class="row"><label>Name</label><input type="text" id="ppn' + p + '" value="' + pr.name + '" style="width:200px"></div>';
+// Add a new step to profile p — copies the last live step, or seeds Temp/Time 20°C 7 days.
+function addProfileStep(p) {
+  var steps = profileEdits[p].steps;
+  var live = countLiveSteps(steps);
+  if (live >= MAX_STEPS) return;
+  var seed;
+  if (live > 0) {
+    var prev = steps[live - 1];
+    seed = { stepType: prev.stepType, startTemp: prev.startTemp, endTemp: prev.endTemp, sgTrigger: prev.sgTrigger, days: prev.days };
+  } else {
+    seed = { stepType: 0, startTemp: 0, endTemp: 20, sgTrigger: 0, days: 7 };
+  }
+  steps[live] = seed;
+  markDirty();
+  loadProfilesFromState();
+}
+
+// Render all profile cards from profileEdits[] state (no server fetch).
+function loadProfilesFromState() {
+  var html = '';
+  for (var p = 0; p < profileEdits.length; p++) {
+    var pe = profileEdits[p];
+    var locked = pe.lockedBy.length > 0;
+    var disAttr = locked ? ' disabled' : '';
+    var live = countLiveSteps(pe.steps);
+    html += '<div class="card" id="pcard' + p + '"><h3>Profile ' + (p + 1) + '</h3>';
+    if (locked) {
+      html += '<div class="prof-banner">Profile is running on ' + pe.lockedBy.join(', ') + ' — stop the profile to edit.</div>';
+    }
+    html += '<div class="row"><label>Name</label><input type="text" id="ppn' + p + '" value="' + pe.name + '" style="width:200px" oninput="profileEdits[' + p + '].name=this.value;markDirty()"' + disAttr + '></div>';
+    if (live == 0) {
+      html += '<div class="prof-empty">No steps yet — click <b>+ Add Step</b> to begin.</div>';
+    } else {
       html += '<table class="tbl"><tr><th>#</th><th>Step Type</th><th>Start Temp</th><th>End Temp</th><th>SG Trigger</th><th>Days</th></tr>';
-      for (var s = 0; s < pr.steps.length; s++) {
-        var st = pr.steps[s];
+      for (var s = 0; s < live; s++) {
+        var st = pe.steps[s];
         var fl = stepFieldsEnabled(st.stepType);
         html += '<tr><td>' + (s + 1) + '</td>';
-        html += '<td><select id="pst' + p + '_' + s + '" onchange="onStepTypeChange(' + p + ',' + s + ')">';
+        html += '<td><select id="pst' + p + '_' + s + '" onchange="onStepFieldChange(' + p + ',' + s + ')"' + disAttr + '>';
         for (var t = 0; t < stepTypes.length; t++) html += '<option value="' + stepTypes[t].id + '"' + (stepTypes[t].id == st.stepType ? ' selected' : '') + '>' + stepTypes[t].name + '</option>';
         html += '</select></td>';
-        html += '<td><input type="number" step="0.1"   id="pss' + p + '_' + s + '" value="' + st.startTemp + '" style="width:70px"' + (fl.s ? '' : ' disabled') + '></td>';
-        html += '<td><input type="number" step="0.1"   id="pse' + p + '_' + s + '" value="' + st.endTemp   + '" style="width:70px"' + (fl.e ? '' : ' disabled') + '></td>';
-        html += '<td><input type="number" step="0.001" id="psg' + p + '_' + s + '" value="' + st.sgTrigger + '" style="width:80px"' + (fl.g ? '' : ' disabled') + '></td>';
-        html += '<td><input type="number" step="0.1"   id="psd' + p + '_' + s + '" value="' + st.days      + '" style="width:60px"' + (fl.d ? '' : ' disabled') + '></td></tr>';
+        html += '<td><input type="number" step="0.1"   id="pss' + p + '_' + s + '" value="' + st.startTemp + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.s && !locked ? '' : ' disabled') + '></td>';
+        html += '<td><input type="number" step="0.1"   id="pse' + p + '_' + s + '" value="' + st.endTemp   + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.e && !locked ? '' : ' disabled') + '></td>';
+        html += '<td><input type="number" step="0.001" id="psg' + p + '_' + s + '" value="' + st.sgTrigger + '" style="width:80px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.g && !locked ? '' : ' disabled') + '></td>';
+        html += '<td><input type="number" step="0.1"   id="psd' + p + '_' + s + '" value="' + st.days      + '" style="width:60px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.d && !locked ? '' : ' disabled') + '></td></tr>';
       }
       html += '</table>';
-      html += '<button class="save" onclick="saveProfile(' + p + ')">Save Profile ' + (p + 1) + '</button> <span class="msg" id="ppm' + p + '"></span>';
-      html += '</div>';
     }
-    byId('t1').innerHTML = html;
+    var addDisabled = (locked || live >= MAX_STEPS) ? ' disabled' : '';
+    html += '<button class="addstep" onclick="addProfileStep(' + p + ')"' + addDisabled + '>+ Add Step</button><br>';
+    html += '<button class="save" onclick="saveProfile(' + p + ')"' + disAttr + '>Save Profile ' + (p + 1) + '</button> <span class="msg" id="ppm' + p + '"></span>';
+    html += '</div>';
+  }
+  byId('t1').innerHTML = html;
+}
+
+// Fetch profiles + fermenters, build per-profile edit state, then render.
+function loadProfiles() {
+  Promise.all([
+    fetch('/profiles').then(function (r) { return r.json(); }),
+    fetch('/fermenters').then(function (r) { return r.json(); })
+  ]).then(function (res) {
+    var d = res[0];
+    var ferms = res[1] || [];
+    stepTypes = d.stepTypes || [];
+    var ps = d.profiles || [];
+    profileEdits = [];
+    for (var p = 0; p < ps.length; p++) {
+      var pr = ps[p];
+      var steps = [];
+      for (var s = 0; s < pr.steps.length; s++) {
+        var st = pr.steps[s];
+        steps.push({
+          stepType:  st.stepType,
+          startTemp: st.startTemp,
+          endTemp:   st.endTemp,
+          sgTrigger: st.sgTrigger,
+          days:      st.days
+        });
+      }
+      var lockedBy = [];
+      for (var i = 0; i < ferms.length; i++) {
+        if (ferms[i].ProfileRunning && ferms[i].ProfileNo == (p + 1)) {
+          lockedBy.push(ferms[i].FermenterName || ('Fermenter ' + i));
+        }
+      }
+      profileEdits.push({ name: pr.name, steps: steps, lockedBy: lockedBy });
+    }
+    loadProfilesFromState();
   });
 }
 
-// Collect profile p's name and 15 step rows, then POST to /profile.
+// Save profile p — send all 15 slots, padding unused with zeros so backend clears them.
 function saveProfile(p) {
-  var body = { index: p, name: byId('ppn' + p).value, steps: [] };
-  for (var s = 0; s < 15; s++) {
-    body.steps.push({
-      stepType:  parseInt  (byId('pst' + p + '_' + s).value) || 0,
-      startTemp: parseFloat(byId('pss' + p + '_' + s).value) || 0,
-      endTemp:   parseFloat(byId('pse' + p + '_' + s).value) || 0,
-      sgTrigger: parseFloat(byId('psg' + p + '_' + s).value) || 0,
-      days:      parseFloat(byId('psd' + p + '_' + s).value) || 0
-    });
+  var pe = profileEdits[p];
+  if (pe.lockedBy.length > 0) {
+    showMsg('ppm' + p, 'Cannot save: profile is running.', false);
+    return;
+  }
+  var body = { index: p, name: pe.name, steps: [] };
+  for (var s = 0; s < MAX_STEPS; s++) {
+    if (s < pe.steps.length && !isProfileStepEmpty(pe.steps[s])) {
+      body.steps.push({
+        stepType:  pe.steps[s].stepType  || 0,
+        startTemp: pe.steps[s].startTemp || 0,
+        endTemp:   pe.steps[s].endTemp   || 0,
+        sgTrigger: pe.steps[s].sgTrigger || 0,
+        days:      pe.steps[s].days      || 0
+      });
+    } else {
+      body.steps.push({ stepType: 0, startTemp: 0, endTemp: 0, sgTrigger: 0, days: 0 });
+    }
   }
   fetch('/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
