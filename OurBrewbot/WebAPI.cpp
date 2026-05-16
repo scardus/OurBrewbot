@@ -1247,6 +1247,7 @@ void handleMqttConfig(ESP8266WebServer& server) {
   doc["enabled"]      = g_mqttConfig.enabled;
   doc["haDiscovery"]  = g_mqttConfig.haDiscovery;
   doc["allowControl"] = g_mqttConfig.allowControl;
+  doc["logEnabled"]   = g_mqttConfig.logEnabled;
   doc["host"]         = g_mqttConfig.host;
   doc["port"]        = g_mqttConfig.port;
   doc["username"]    = g_mqttConfig.username;
@@ -1278,6 +1279,7 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
     g_mqttConfig.allowControl = doc["allowControl"];
     mqttApplyControlSubscription();  // takes effect immediately on live connection
   }
+  if (!doc["logEnabled"].isNull()) g_mqttConfig.logEnabled = doc["logEnabled"];
   saveMqttConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"MQTT config saved\"}"));
 }

@@ -1153,6 +1153,7 @@ function loadReporting() {
     html += row('Base Topic',        textInput ('mqtopic', mq.baseTopic || 'ourbrewbot', 180));
     html += row('HA Discovery',      switchHtml('mqha',  mq.haDiscovery  || false));
     html += row('Allow HA Control',  switchHtml('mqctl', mq.allowControl || false));
+    html += row('Publish Logs',      switchHtml('mqlog', mq.logEnabled   || false));
     html += '<button class="save" onclick="saveMqtt()">Save</button> ';
     html += '<button class="test" onclick="testMqtt()">Test</button> ';
     html += '<button class="test" onclick="discoverMqtt()">Discover</button> ';
@@ -1290,7 +1291,8 @@ function saveMqtt() {
     password:     byId('mqpass').value,
     baseTopic:    byId('mqtopic').value,
     haDiscovery:  byId('mqha').checked,
-    allowControl: byId('mqctl').checked
+    allowControl: byId('mqctl').checked,
+    logEnabled:   byId('mqlog').checked
   };
   fetch('/mqtt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })

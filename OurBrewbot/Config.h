@@ -396,6 +396,7 @@ struct MqttConfig {
   bool    enabled;
   bool    haDiscovery;            // publish Home Assistant MQTT discovery configs
   bool    allowControl;           // accept inbound commands from HA / MQTT clients
+  bool    logEnabled;             // mirror logMsg() output to <baseTopic>/Device/log
   char    host[64];
   uint16_t port;
   char    username[32];
