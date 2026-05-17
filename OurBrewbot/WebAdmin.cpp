@@ -1241,7 +1241,9 @@ function loadSystemSettings() {
     html += '<button class="danger" onclick="resetWiFiSettings()">Reset WiFi Settings</button>';
     html += '<button class="danger" onclick="window.location.href=\'/rf/sniff\'">RF Sniffer</button>';
     html += '<button class="danger" onclick="window.location.href=\'/ble/sniff\'">BT Sniffer</button>';
-    html += '<button class="test" onclick="exportConfig()">Export Config</button>';
+    html += '<button class="danger" onclick="exportConfig()">Export Config</button>';
+    html += '<button class="danger" onclick="byId(\'cfgImportFile\').click()">Import Config</button>';
+    html += '<input type="file" id="cfgImportFile" accept=".json" style="display:none" onchange="importConfig(this)">';
     html += '</div>';
     html += '<div class="card"><h3>Global Settings</h3>';
     html += '<div class="row"><label>Temp Unit</label><select id="su"><option value="1"' + (d.Unit == 1 ? ' selected' : '') + '>Celsius</option><option value="2"' + (d.Unit == 2 ? ' selected' : '') + '>Fahrenheit</option></select></div>';
@@ -1620,6 +1622,55 @@ function exportConfig() {
       .catch(function() { fetchNext(); });
   }
   fetchNext();
+}
+
+function importConfig(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var bundle;
+    try { bundle = JSON.parse(e.target.result); } catch(ex) { alert('Invalid JSON file.'); input.value = ''; return; }
+    if (!bundle.configs || typeof bundle.configs !== 'object') { alert('Invalid config bundle format.'); input.value = ''; return; }
+    if (!confirm('This will overwrite all device configuration and reboot. Continue?')) { input.value = ''; return; }
+    var fileMap = {
+      global:       '/jsonGlobal.txt',
+      fermenter:    '/jsonFermenter.txt',
+      probe:        '/jsonProbe.txt',
+      smartplugs:   '/jsonSmartPlugs.txt',
+      profile:      '/jsonProfile.txt',
+      profileSteps: '/jsonProfileSteps.txt',
+      tilt:         '/jsonTilt.txt',
+      ispindel:     '/jsoniSpindel.txt',
+      plaato:       '/jsonPlaato.txt',
+      brewservices: '/jsonBrewServices.txt',
+      mqtt:         '/jsonMqtt.txt',
+      syslog:       '/jsonSyslog.txt'
+    };
+    var keys = Object.keys(bundle.configs).filter(function(k) { return fileMap[k]; });
+    var idx = 0;
+    function postNext() {
+      if (idx >= keys.length) {
+        input.value = '';
+        alert('Import complete. Rebooting device...');
+        fetch('/reboot');
+        return;
+      }
+      var key = keys[idx++];
+      fetch('/fs/save?name=' + encodeURIComponent(fileMap[key]), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bundle.configs[key])
+      }).then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.status !== 'ok') throw new Error(d.msg || 'Write failed');
+          postNext();
+        })
+        .catch(function(ex) { alert('Import failed on ' + fileMap[key] + ': ' + ex); input.value = ''; });
+    }
+    postNext();
+  };
+  reader.readAsText(file);
 }
 
 // ---- REFRESH BAR ----
