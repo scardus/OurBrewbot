@@ -232,9 +232,7 @@ void handleRoot(ESP8266WebServer& server) {
 // FERMENTERS — GET /fermenters
 // ============================================================
 
-String buildFermenterJson(uint8_t i) {
-  JsonDocument doc;
-
+void buildFermenterJson(JsonDocument& doc, uint8_t i) {
   doc["Fermenter"]       = i;
   doc["FermenterName"]   = g_fermenters[i].fermenterName;
   doc["BeerName"]        = g_fermenters[i].beerName;
@@ -282,14 +280,9 @@ String buildFermenterJson(uint8_t i) {
   doc["TempUnit"]       = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
   doc["BeerTempSource"] = getBeerTempSource(i);
   doc["GravitySource"]  = getGravitySource(i);
-
-  String out;
-  serializeJson(doc, out);
-  return out;
 }
 
-String buildProfileJson(int p) {
-  JsonDocument doc;
+void buildProfileJson(JsonDocument& doc, int p) {
   doc["index"] = p;
   doc["name"]  = g_profiles[p].profileName;
   JsonArray steps = doc["steps"].to<JsonArray>();
@@ -302,9 +295,6 @@ String buildProfileJson(int p) {
     st["sgTrigger"] = g_profileSteps[base + s].sgTrigger;
     st["days"]      = g_profileSteps[base + s].days;
   }
-  String out;
-  serializeJson(doc, out);
-  return out;
 }
 
 void handleFermenters(ESP8266WebServer& server) {
@@ -316,7 +306,10 @@ void handleFermenters(ESP8266WebServer& server) {
   server.sendContent("[");
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     if (i > 0) server.sendContent(",");
-    String fJson = buildFermenterJson(i);
+    JsonDocument doc;
+    buildFermenterJson(doc, i);
+    String fJson;
+    serializeJson(doc, fJson);
     server.sendContent(fJson);
   }
   server.sendContent("]");
@@ -387,7 +380,9 @@ void handleFermenter(ESP8266WebServer& server) {
   // GET single fermenter
   int idx = server.arg("id").toInt();
   if (idx < 0 || idx >= MAX_FERMENTERS) idx = 0;
-  sendJsonResponse(server, buildFermenterJson(idx));
+  JsonDocument doc;
+  buildFermenterJson(doc, idx);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
@@ -449,9 +444,7 @@ void handleDebug(ESP8266WebServer& server) {
 // Returns global config + smart plug config
 // ============================================================
 
-String buildControllerJson() {
-  JsonDocument doc;
-
+void buildControllerJson(JsonDocument& doc) {
   doc["AuthCode"]      = g_globalConfig.authCode;
   doc["Unit"]          = g_globalConfig.unit;
   doc["BrewService"]   = g_globalConfig.brewService;
@@ -482,10 +475,6 @@ String buildControllerJson() {
     p["Manufacturer"] = g_smartPlugs[i].manufacturer;
     p["State"]        = getPlugState(i);
   }
-
-  String out;
-  serializeJson(doc, out);
-  return out;
 }
 
 void handleController(ESP8266WebServer& server) {
@@ -504,15 +493,16 @@ void handleController(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Configuration invalid\"}"), 400);
     return;
   }
-  sendJsonResponse(server, buildControllerJson());
+  JsonDocument doc;
+  buildControllerJson(doc);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
 // BOARD INFO — GET /board_info.json
 // ============================================================
 
-String buildBoardInfoJson() {
-  JsonDocument doc;
+void buildBoardInfoJson(JsonDocument& doc) {
   doc["chip_id"]     = String(ESP.getChipId(), HEX);
   doc["flash_size"]  = ESP.getFlashChipSize();
   doc["free_heap"]   = ESP.getFreeHeap();
@@ -520,13 +510,12 @@ String buildBoardInfoJson() {
   doc["fw_version"]  = FW_VERSION;
   doc["fw_date"]     = FW_BUILD_DATE;
   doc["reset_reason"]= ESP.getResetReason();
-  String out;
-  serializeJson(doc, out);
-  return out;
 }
 
 void handleBoardInfo(ESP8266WebServer& server) {
-  sendJsonResponse(server, buildBoardInfoJson());
+  JsonDocument doc;
+  buildBoardInfoJson(doc);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
@@ -1304,7 +1293,11 @@ void handleProfiles(ESP8266WebServer& server) {
   server.sendContent("{\"profiles\":[");
   for (int p = 0; p < MAX_PROFILES; p++) {
     if (p > 0) server.sendContent(",");
-    server.sendContent(buildProfileJson(p));
+    JsonDocument doc;
+    buildProfileJson(doc, p);
+    String pJson;
+    serializeJson(doc, pJson);
+    server.sendContent(pJson);
   }
   server.sendContent("],\"stepTypes\":[");
   for (int t = 0; t <= 9; t++) {
