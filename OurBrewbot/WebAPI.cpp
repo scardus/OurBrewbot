@@ -308,9 +308,9 @@ void handleFermenters(ESP8266WebServer& server) {
     if (i > 0) server.sendContent(",");
     JsonDocument doc;
     buildFermenterJson(doc, i);
-    String fJson;
-    serializeJson(doc, fJson);
-    server.sendContent(fJson);
+    char buf[768];
+    size_t n = serializeJson(doc, buf, sizeof(buf));
+    server.sendContent(buf, n);
   }
   server.sendContent("]");
   server.sendContent("");  // end chunked transfer
@@ -1295,9 +1295,9 @@ void handleProfiles(ESP8266WebServer& server) {
     if (p > 0) server.sendContent(",");
     JsonDocument doc;
     buildProfileJson(doc, p);
-    String pJson;
-    serializeJson(doc, pJson);
-    server.sendContent(pJson);
+    char buf[1024];
+    size_t n = serializeJson(doc, buf, sizeof(buf));
+    server.sendContent(buf, n);
   }
   server.sendContent("],\"stepTypes\":[");
   for (int t = 0; t <= 9; t++) {
@@ -1305,9 +1305,9 @@ void handleProfiles(ESP8266WebServer& server) {
     JsonDocument tDoc;
     tDoc["id"]   = t;
     tDoc["name"] = getStepTypeDescription(t);
-    String tJson;
-    serializeJson(tDoc, tJson);
-    server.sendContent(tJson);
+    char buf[96];
+    size_t n = serializeJson(tDoc, buf, sizeof(buf));
+    server.sendContent(buf, n);
   }
   server.sendContent("]}");
   server.sendContent("");  // end chunked transfer
