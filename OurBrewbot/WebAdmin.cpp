@@ -1208,7 +1208,6 @@ function loadReporting() {
 
 // Render the System Settings tab: globals, syslog, system info, action buttons, file browser.
 function loadSystemSettings() {
-  markDirty();
   Promise.all([
     fetch('/controller').then(function (r) { return r.json(); }),
     fetch('/fs/files').then(function (r) { return r.json(); }),
