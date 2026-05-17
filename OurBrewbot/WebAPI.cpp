@@ -119,8 +119,9 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/tilt",  HTTP_POST, [&server]() { logApiCall(server); handleTiltPost(server); });
 
   // Filesystem browser
-  server.on("/fs/files", HTTP_GET, [&server]() { logApiCall(server); handleFsFiles(server); });
-  server.on("/fs/file",  HTTP_GET, [&server]() { logApiCall(server); handleFsFile(server); });
+  server.on("/fs/files", HTTP_GET,  [&server]() { logApiCall(server); handleFsFiles(server); });
+  server.on("/fs/file",  HTTP_GET,  [&server]() { logApiCall(server); handleFsFile(server); });
+  server.on("/fs/save",  HTTP_POST, [&server]() { logApiCall(server); handleFsFileSave(server); });
 
   server.onNotFound([&server]() { logApiCall(server); handleNotFound(server); });
 }
@@ -1480,6 +1481,28 @@ void handleFsFile(ESP8266WebServer& server) {
   sendCORSHeaders(server);
   server.send(200, "text/plain", f.readString());
   f.close();
+}
+
+void handleFsFileSave(ESP8266WebServer& server) {
+  static const char* const ALLOWED[] = {
+    "/jsonGlobal.txt", "/jsonFermenter.txt", "/jsonProbe.txt",
+    "/jsonSmartPlugs.txt", "/jsonProfile.txt", "/jsonProfileSteps.txt",
+    "/jsonTilt.txt", "/jsoniSpindel.txt", "/jsonPlaato.txt",
+    "/jsonBrewServices.txt", "/jsonMqtt.txt", "/jsonSyslog.txt"
+  };
+  String name = server.arg("name");
+  bool ok = false;
+  for (const char* allow : ALLOWED) { if (name == allow) { ok = true; break; } }
+  if (!ok) { server.send(400, "application/json", "{\"status\":\"error\",\"msg\":\"Not allowed\"}"); return; }
+
+  String body = server.arg("plain");
+  if (body.length() == 0) { server.send(400, "application/json", "{\"status\":\"error\",\"msg\":\"Empty body\"}"); return; }
+
+  File f = LittleFS.open(name, "w");
+  if (!f) { server.send(500, "application/json", "{\"status\":\"error\",\"msg\":\"Write failed\"}"); return; }
+  f.print(body);
+  f.close();
+  sendJsonResponse(server, "{\"status\":\"ok\"}");
 }
 
 // ============================================================
