@@ -79,6 +79,7 @@ void handleDebug(ESP8266WebServer& server);
 // Helpers
 void sendCORSHeaders(ESP8266WebServer& server);
 void sendJsonResponse(ESP8266WebServer& server, const String& json, int code = 200);
+void sendJsonDoc(ESP8266WebServer& server, JsonDocument& doc, int code = 200);
 String buildFermenterJson(uint8_t index);
 String buildControllerJson();
 String buildStatusJson();

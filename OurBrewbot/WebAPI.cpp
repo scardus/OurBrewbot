@@ -141,6 +141,16 @@ void sendJsonResponse(ESP8266WebServer& server, const String& json, int code) {
   server.send(code, "application/json", json);
 }
 
+// Stream a JsonDocument straight to the client — no intermediate String.
+// Uses measureJson + setContentLength so the response is not chunked.
+void sendJsonDoc(ESP8266WebServer& server, JsonDocument& doc, int code) {
+  sendCORSHeaders(server);
+  server.setContentLength(measureJson(doc));
+  server.send(code, "application/json", "");
+  WiFiClient client = server.client();
+  serializeJson(doc, client);
+}
+
 // ============================================================
 // ROOT / HOME
 // ============================================================
@@ -431,9 +441,7 @@ void handleDebug(ESP8266WebServer& server) {
     ov["AmbientTemp"] = toDisplayTemp(g_fermenterDebugOverrides[i].ambientTemp);
     ov["SG"]          = g_fermenterDebugOverrides[i].sg;
   }
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
@@ -545,9 +553,7 @@ void handleStatus(ESP8266WebServer& server) {
   doc["uptime"]   = (uint32_t)(millis() / 60000UL);
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["ip"]       = WiFi.localIP().toString();
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
@@ -568,9 +574,7 @@ void handleProbes(ESP8266WebServer& server) {
     p["temperature"] = toDisplayTemp(g_probes[i].temperature);
     p["tempAdjust"]  = g_probes[i].tempAdjust;
   }
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
@@ -585,9 +589,7 @@ void handleHealth(ESP8266WebServer& server) {
   doc["ssid"]        = WiFi.SSID();
   doc["ip"]          = WiFi.localIP().toString();
   doc["resetReason"] = ESP.getResetReason();
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
@@ -716,9 +718,7 @@ void handleiSpindels(ESP8266WebServer& server) {
                           ? 0xFFFF
                           : (uint32_t)(millis() - g_iSpindels[i].lastSeen) / 60000UL;
   }
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
@@ -876,9 +876,7 @@ void handleSmartPlugs(ESP8266WebServer& server) {
     p["fermenter"]    = g_smartPlugs[i].fermenter;
     p["state"]        = getPlugState(i);
   }
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
@@ -972,9 +970,7 @@ void handleRFSniffPoll(ESP8266WebServer& server) {
   } else {
     doc["received"] = false;
   }
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 void handleRFSniff(ESP8266WebServer& server) {
@@ -1064,9 +1060,7 @@ void handleBLESniffPoll(ESP8266WebServer& server) {
   // Clear buffer after sending
   s_bleSniffLen = 0;
 
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 void handleBLESniffSend(ESP8266WebServer& server) {
@@ -1094,9 +1088,7 @@ void handleBLESniffSend(ESP8266WebServer& server) {
   JsonDocument resp;
   resp["status"] = "ok";
   resp["cmd"]    = cmd;
-  String out;
-  serializeJson(resp, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, resp);
 }
 
 void handleBLESniff(ESP8266WebServer& server) {
@@ -1186,9 +1178,7 @@ void handleBrewServices(ESP8266WebServer& server) {
     s["serviceId"]  = g_brewServices[i].serviceId;
     s["deviceName"] = g_brewServices[i].deviceName;
   }
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 void handleBrewServicesPost(ESP8266WebServer& server) {
@@ -1255,9 +1245,7 @@ void handleMqttConfig(ESP8266WebServer& server) {
   doc["username"]    = g_mqttConfig.username;
   doc["password"]    = g_mqttConfig.password;
   doc["baseTopic"]   = g_mqttConfig.baseTopic;
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 void handleMqttConfigPost(ESP8266WebServer& server) {
@@ -1453,9 +1441,7 @@ void handleFsFiles(ESP8266WebServer& server) {
     f["name"] = dir.fileName();
     f["size"] = (unsigned int)dir.fileSize();
   }
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 void handleFsFile(ESP8266WebServer& server) {
@@ -1529,9 +1515,7 @@ void handleTilts(ESP8266WebServer& server) {
     t["sg"]          = g_tilts[i].sg;
     t["temperature"] = toDisplayTemp(g_tilts[i].temperature);
   }
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 // ============================================================
@@ -1585,9 +1569,7 @@ void handleSyslogConfig(ESP8266WebServer& server) {
   doc["port"]     = g_syslogConfig.port;
   doc["facility"] = g_syslogConfig.facility;
   doc["minLevel"] = g_syslogConfig.minLevel;
-  String out;
-  serializeJson(doc, out);
-  sendJsonResponse(server, out);
+  sendJsonDoc(server, doc);
 }
 
 void handleSyslogConfigPost(ESP8266WebServer& server) {
