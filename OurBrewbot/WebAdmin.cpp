@@ -994,20 +994,48 @@ function saveProbe(i) {
 }
 
 // ---- SMART PLUGS TAB ----
-var plugFnNames = {
-  0: 'F1 Hot',  1: 'F1 Cold',
-  2: 'F2 Hot',  3: 'F2 Cold',
-  4: 'F3 Hot',  5: 'F3 Cold',
-  6: 'F4 Hot',  7: 'F4 Cold',
-  8: 'Aux 1',   9: 'Aux 2',
-  99: 'Unassigned'
-};
+// UI presents a simplified Role + Fermenter pair. On save the legacy combined
+// `function` code (PLUG_FN_*) is derived from the pair, so on-disk JSON stays
+// byte-for-byte compatible with the original firmware schema.
+//   Hot/Cold + ferm N → function = (role==Cold ? 1 : 0) + N*2
+//   Aux 1            → function = 8
+//   Aux 2            → function = 9
+//   Unassigned       → function = 99
+var ROLE_HOT = 'hot', ROLE_COLD = 'cold', ROLE_AUX1 = 'aux1', ROLE_AUX2 = 'aux2', ROLE_NONE = 'none';
+var plugRoleNames = { hot: 'Hot', cold: 'Cold', aux1: 'Aux 1', aux2: 'Aux 2', none: 'Unassigned' };
+var plugRoleOrder = ['hot', 'cold', 'aux1', 'aux2', 'none'];
 
-// Render <option> tags for the plug-function dropdown, with `sel` selected.
-function plugFnOpts(sel) {
+// Render <option> tags for the plug-role dropdown, with `sel` selected.
+function plugRoleOpts(sel) {
   var html = '';
-  for (var k in plugFnNames) html += '<option value="' + k + '"' + (k == sel ? ' selected' : '') + '>' + plugFnNames[k] + '</option>';
+  for (var i = 0; i < plugRoleOrder.length; i++) {
+    var k = plugRoleOrder[i];
+    html += '<option value="' + k + '"' + (k == sel ? ' selected' : '') + '>' + plugRoleNames[k] + '</option>';
+  }
   return html;
+}
+
+// Decode a legacy `function` code into {role, fermenter}. For Hot/Cold the
+// fermenter is derived from the function code itself (matches what the firmware
+// control loop actually uses); the stored `fermenter` field is the fallback for
+// Aux1/Aux2/Unassigned only.
+function decodePlugFn(fn, storedFerm) {
+  if (fn >= 0 && fn <= 7) {
+    return { role: (fn % 2 == 0) ? ROLE_HOT : ROLE_COLD, fermenter: Math.floor(fn / 2) };
+  }
+  if (fn == 8) return { role: ROLE_AUX1, fermenter: storedFerm };
+  if (fn == 9) return { role: ROLE_AUX2, fermenter: storedFerm };
+  return     { role: ROLE_NONE, fermenter: storedFerm };
+}
+
+// Encode a UI {role, fermenter} pair back to a legacy `function` code. Returns
+// null if the combination is invalid (Hot/Cold needs a fermenter).
+function encodePlugFn(role, ferm) {
+  if (role == ROLE_HOT)  { if (ferm < 0 || ferm > 3) return null; return 0 + ferm * 2; }
+  if (role == ROLE_COLD) { if (ferm < 0 || ferm > 3) return null; return 1 + ferm * 2; }
+  if (role == ROLE_AUX1) return 8;
+  if (role == ROLE_AUX2) return 9;
+  return 99;
 }
 
 // Preset codes: c = [btn1_on, btn1_off, btn2_on, btn2_off, btn3_on, btn3_off, btn4_on, btn4_off]
@@ -1079,8 +1107,9 @@ function loadPlugs() {
       html += '<div class="row"><label>Protocol</label><input type="number" id="spr' + i + '" value="' + q.protocol + '" style="width:60px">';
       html += ' <label style="min-width:auto">Bits</label><input type="number" id="sbi' + i + '" value="' + q.bits + '" style="width:60px">';
       html += ' <label style="min-width:auto">Delay &mu;s</label><input type="number" id="sdl' + i + '" value="' + q.delay + '" style="width:80px"></div>';
-      html += '<div class="row"><label>Function</label><select id="sf' + i + '">' + plugFnOpts(q['function']) + '</select>';
-      html += ' <label style="min-width:auto">Fermenter</label><select id="sr' + i + '">' + fermOpts(q.fermenter) + '</select></div>';
+      var decoded = decodePlugFn(q['function'], q.fermenter);
+      html += '<div class="row"><label>Role</label><select id="sf' + i + '">' + plugRoleOpts(decoded.role) + '</select>';
+      html += ' <label style="min-width:auto">Fermenter</label><select id="sr' + i + '">' + fermOpts(decoded.fermenter) + '</select></div>';
       html += '<div class="row">';
       html += '<button class="save" onclick="savePlug(' + i + ')">Save</button> ';
       html += '<button class="test" onclick="testPlug(' + i + ',\'on\')">Test On</button> ';
@@ -1094,6 +1123,13 @@ function loadPlugs() {
 
 // Save plug i: codes, RF parameters, function/fermenter assignment.
 function savePlug(i) {
+  var role = byId('sf' + i).value;
+  var ferm = parseInt(byId('sr' + i).value);
+  var fn   = encodePlugFn(role, ferm);
+  if (fn === null) {
+    showMsg('sm' + i + 'm', 'Hot/Cold requires a fermenter.', false);
+    return;
+  }
   var body = {};
   body['index']        = i;
   body['manufacturer'] = byId('sm'  + i).value;
@@ -1103,8 +1139,8 @@ function savePlug(i) {
   body['protocol']     = parseInt(byId('spr' + i).value) || 1;
   body['bits']         = parseInt(byId('sbi' + i).value) || 24;
   body['delay']        = parseInt(byId('sdl' + i).value) || 160;
-  body['function']     = parseInt(byId('sf'  + i).value);
-  body['fermenter']    = parseInt(byId('sr'  + i).value);
+  body['function']     = fn;
+  body['fermenter']    = ferm;
   fetch('/smartplug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
     .then(function (d) { showMsg('sm' + i + 'm', d.msg, d.status == 'ok'); dirty = false; setTimeout(loadPlugs, 500); })
