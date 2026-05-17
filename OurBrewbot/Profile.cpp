@@ -184,6 +184,7 @@ void startProfile(uint8_t i, uint8_t profileIndex) {
   g_fermenters[i].currentStep    = 0;
   g_fermenters[i].currentHour    = 0;
   g_fermenters[i].profileRunning = true;
+  g_fermenters[i].profilePaused  = false;
   g_fermenters[i].startMillis    = millis();
   logMsg("[PROF] F%d (%s): Profile %d started", i, g_fermenters[i].fermenterName, profileIndex);
   saveFermenterConfig();
@@ -192,6 +193,7 @@ void startProfile(uint8_t i, uint8_t profileIndex) {
 void stopProfile(uint8_t i) {
   logMsg("[PROF] F%d (%s): Profile stopped", i, g_fermenters[i].fermenterName);
   g_fermenters[i].profileRunning = false;
+  g_fermenters[i].profilePaused  = false;
   g_fermenters[i].profileNo      = 0;
   g_fermenters[i].currentStep    = 0;
   g_fermenters[i].currentHour    = 0;
@@ -201,6 +203,7 @@ void stopProfile(uint8_t i) {
 void pauseProfile(uint8_t i) {
   logMsg("[PROF] F%d (%s): Profile Paused", i, g_fermenters[i].fermenterName);
   g_fermenters[i].profileRunning = false;
+  g_fermenters[i].profilePaused  = true;
   saveFermenterConfig();
 }
 
@@ -209,6 +212,7 @@ void resumeProfile(uint8_t i) {
   if (g_fermenters[i].profileRunning) return;
   logMsg("[PROF] F%d (%s): Profile resumed at step %d", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
   g_fermenters[i].profileRunning = true;
+  g_fermenters[i].profilePaused  = false;
   saveFermenterConfig();
 }
 

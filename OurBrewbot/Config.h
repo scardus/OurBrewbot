@@ -212,6 +212,7 @@ struct FermenterConfig {
   bool    liveTest;             // live test mode (fast-forward 1hr per 10s)
   uint8_t status;               // current status: 0=idle,1=heating,2=cooling
   bool    profileRunning;       // profile is active
+  bool    profilePaused;        // profile is paused (preserves step + elapsed time)
   uint8_t brewServices;          // bitmask: bit N = send to g_brewServices[N]
   bool    psiCollect;           // collect pressure data
   uint8_t function;             // fermenter function code

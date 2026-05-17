@@ -600,7 +600,14 @@ function loadFermenters() {
       for (var p = 0; p < profileNames.length; p++) html += '<option value="' + (p + 1) + '"' + (f.ProfileNo == (p + 1) ? ' selected' : '') + '>' + profileNames[p] + '</option>';
       html += '</select></div>';
       if (f.ProfileNo >= 1) html += '<div class="row"><label>Profile Control</label>';
-      if (f.ProfileNo >= 1 && !f.ProfileRunning) html += '<button class="test" onclick="profAction(' + i + ',\'start\')">Start</button> ';
+      if (f.ProfileNo >= 1 && !f.ProfileRunning) {
+        if (f.ProfilePaused) {
+          html += '<button class="test" onclick="profAction(' + i + ',\'resume\')">Resume</button> ';
+          html += '<button class="test" onclick="profAction(' + i + ',\'start\')">Restart</button> ';
+        } else {
+          html += '<button class="test" onclick="profAction(' + i + ',\'start\')">Start</button> ';
+        }
+      }
       if (f.ProfileRunning) html += '<button class="test" onclick="profAction(' + i + ',\'pause\')">Pause</button> ';
       if (f.ProfileNo >= 1) html += '<button class="test" onclick="profAction(' + i + ',\'stop\')">Stop</button> ';
       if (f.ProfileRunning) {

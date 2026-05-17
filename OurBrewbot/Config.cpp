@@ -183,6 +183,7 @@ bool loadFermenterConfig() {
     g_fermenters[i].liveTest        = doc["LiveTest"][i]        | false;
     g_fermenters[i].status          = doc["Status"][i]         | 0;
     g_fermenters[i].profileRunning  = doc["ProfileRunning"][i] | false;
+    g_fermenters[i].profilePaused   = doc["ProfilePaused"][i]  | false;
     // Backward compat: migrate old bool BrewServiceSend → bit 0 of new bitmask
     if (!doc["BrewServices"].isNull()) {
       g_fermenters[i].brewServices = doc["BrewServices"][i] | 0;
@@ -250,6 +251,7 @@ bool saveFermenterConfig() {
   JsonArray ltArr    = doc["LiveTest"].to<JsonArray>();
   JsonArray statArr  = doc["Status"].to<JsonArray>();
   JsonArray prRunArr = doc["ProfileRunning"].to<JsonArray>();
+  JsonArray prPauArr = doc["ProfilePaused"].to<JsonArray>();
   JsonArray bsArr    = doc["BrewServices"].to<JsonArray>();
   JsonArray psiArr   = doc["PSI_Collect"].to<JsonArray>();
   JsonArray fnArr    = doc["Function"].to<JsonArray>();
@@ -284,6 +286,7 @@ bool saveFermenterConfig() {
     ltArr.add((bool)g_fermenters[i].liveTest);
     statArr.add(g_fermenters[i].status);
     prRunArr.add((bool)g_fermenters[i].profileRunning);
+    prPauArr.add((bool)g_fermenters[i].profilePaused);
     bsArr.add(g_fermenters[i].brewServices);
     psiArr.add((bool)g_fermenters[i].psiCollect);
     fnArr.add(g_fermenters[i].function);

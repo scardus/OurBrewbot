@@ -241,6 +241,7 @@ String buildFermenterJson(uint8_t i) {
   doc["StatusStr"]       = getFermenterStatusStr(g_fermenters[i].status);
   doc["Alarm"]           = g_fermenters[i].alarm;
   doc["ProfileRunning"]  = g_fermenters[i].profileRunning;
+  doc["ProfilePaused"]   = g_fermenters[i].profilePaused;
   doc["ProfileNo"]       = g_fermenters[i].profileNo;
   doc["CurrentStep"]     = g_fermenters[i].currentStep;
   doc["CurrentHour"]     = g_fermenters[i].currentHour;
