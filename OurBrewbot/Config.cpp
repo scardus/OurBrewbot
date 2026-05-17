@@ -43,6 +43,7 @@ String loadJsonFile(const char* path) {
   return content;
 }
 
+// Legacy String-based saver — only used by recordReboot, removed in next commit.
 bool saveJsonFile(const char* path, const String& json) {
   File f = LittleFS.open(path, "w");
   if (!f) {
@@ -57,6 +58,23 @@ bool saveJsonFile(const char* path, const String& json) {
 bool saveJsonFileSafe(const char* primary, const char* backup, const String& json) {
   if (!saveJsonFile(backup, json)) return false;
   return saveJsonFile(primary, json);
+}
+
+// Stream-serialize a JsonDocument directly to a LittleFS file.
+static bool saveJsonDocToFile(JsonDocument& doc, const char* path) {
+  File f = LittleFS.open(path, "w");
+  if (!f) {
+    logMsg("[CFG] Cannot write: %s", path);
+    return false;
+  }
+  size_t written = serializeJson(doc, f);
+  f.close();
+  return written > 0;
+}
+
+bool saveJsonDocSafe(JsonDocument& doc, const char* primary, const char* backup) {
+  if (!saveJsonDocToFile(doc, backup)) return false;
+  return saveJsonDocToFile(doc, primary);
 }
 
 // Stream-parse a JsonDocument directly from File. Tries primary first, falls
@@ -135,9 +153,7 @@ bool saveGlobalConfig() {
   doc["tuning_chart_no"] = g_globalConfig.tuningChartNo;
   doc["resolution"]      = g_globalConfig.resolution;
 
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_GLOBAL, FILE_GLOBAL_BKP, json);
+  return saveJsonDocSafe(doc, FILE_GLOBAL, FILE_GLOBAL_BKP);
 }
 
 // ============================================================
@@ -294,9 +310,7 @@ bool saveFermenterConfig() {
     smArr.add(g_fermenters[i].startMillis);
   }
 
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_FERMENTER, FILE_FERMENTER_BKP, json);
+  return saveJsonDocSafe(doc, FILE_FERMENTER, FILE_FERMENTER_BKP);
 }
 
 // ============================================================
@@ -347,9 +361,7 @@ bool saveProbeConfig() {
     saArr.add(g_probes[i].sgAdjust);
   }
 
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_PROBE, FILE_PROBE_BKP, json);
+  return saveJsonDocSafe(doc, FILE_PROBE, FILE_PROBE_BKP);
 }
 
 // ============================================================
@@ -411,9 +423,7 @@ bool saveSmartPlugConfig() {
     pnArr.add(g_smartPlugs[i].plugNo);
   }
 
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP, json);
+  return saveJsonDocSafe(doc, FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP);
 }
 
 // ============================================================
@@ -438,9 +448,7 @@ bool saveProfileConfig() {
   for (int i = 0; i < MAX_PROFILES; i++) {
     nameArr.add(g_profiles[i].profileName);
   }
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_PROFILE, FILE_PROFILE_BKP, json);
+  return saveJsonDocSafe(doc, FILE_PROFILE, FILE_PROFILE_BKP);
 }
 
 bool loadProfileSteps() {
@@ -475,9 +483,7 @@ bool saveProfileSteps() {
     sgArr.add(g_profileSteps[i].sgTrigger);
     dArr.add(g_profileSteps[i].days);
   }
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_STEPS, FILE_STEPS_BKP, json);
+  return saveJsonDocSafe(doc, FILE_STEPS, FILE_STEPS_BKP);
 }
 
 // ============================================================
@@ -528,9 +534,7 @@ bool saveiSpindelConfig() {
     taArr.add(g_iSpindels[i].tempAdjust);
     saArr.add(g_iSpindels[i].sgAdjust);
   }
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_ISPINDEL, FILE_ISPINDEL_BKP, json);
+  return saveJsonDocSafe(doc, FILE_ISPINDEL, FILE_ISPINDEL_BKP);
 }
 
 // ============================================================
@@ -558,9 +562,7 @@ bool savePlaatoConfig() {
     acArr.add(g_plaato[i].authCode);
     gdArr.add((bool)g_plaato[i].getData);
   }
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_PLAATO, FILE_PLAATO_BKP, json);
+  return saveJsonDocSafe(doc, FILE_PLAATO, FILE_PLAATO_BKP);
 }
 
 // ============================================================
@@ -630,9 +632,7 @@ bool saveTiltConfig() {
     mbbArr.add(0);
   }
 
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_TILT, FILE_TILT_BKP, json);
+  return saveJsonDocSafe(doc, FILE_TILT, FILE_TILT_BKP);
 }
 
 // ============================================================
@@ -690,9 +690,7 @@ bool saveBrewServiceConfig() {
     idArr.add(g_brewServices[i].serviceId);
     dnArr.add(g_brewServices[i].deviceName);
   }
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_BREWSVC, FILE_BREWSVC_BKP, json);
+  return saveJsonDocSafe(doc, FILE_BREWSVC, FILE_BREWSVC_BKP);
 }
 
 // ============================================================
@@ -728,9 +726,7 @@ bool saveMqttConfig() {
   doc["username"]    = g_mqttConfig.username;
   doc["password"]    = g_mqttConfig.password;
   doc["baseTopic"]   = g_mqttConfig.baseTopic;
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_MQTT, FILE_MQTT_BKP, json);
+  return saveJsonDocSafe(doc, FILE_MQTT, FILE_MQTT_BKP);
 }
 
 // ============================================================
@@ -758,9 +754,7 @@ bool saveSyslogConfig() {
   doc["port"]     = g_syslogConfig.port;
   doc["facility"] = g_syslogConfig.facility;
   doc["minLevel"] = g_syslogConfig.minLevel;
-  String json;
-  serializeJson(doc, json);
-  return saveJsonFileSafe(FILE_SYSLOG, FILE_SYSLOG_BKP, json);
+  return saveJsonDocSafe(doc, FILE_SYSLOG, FILE_SYSLOG_BKP);
 }
 
 // ============================================================
