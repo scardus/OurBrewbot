@@ -1241,6 +1241,7 @@ function loadSystemSettings() {
     html += '<button class="danger" onclick="resetWiFiSettings()">Reset WiFi Settings</button>';
     html += '<button class="danger" onclick="window.location.href=\'/rf/sniff\'">RF Sniffer</button>';
     html += '<button class="danger" onclick="window.location.href=\'/ble/sniff\'">BT Sniffer</button>';
+    html += '<button class="test" onclick="exportConfig()">Export Config</button>';
     html += '</div>';
     html += '<div class="card"><h3>Global Settings</h3>';
     html += '<div class="row"><label>Temp Unit</label><select id="su"><option value="1"' + (d.Unit == 1 ? ' selected' : '') + '>Celsius</option><option value="2"' + (d.Unit == 2 ? ' selected' : '') + '>Fahrenheit</option></select></div>';
@@ -1576,6 +1577,49 @@ function downloadFile() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function exportConfig() {
+  var files = [
+    { key: 'global',       name: '/jsonGlobal.txt' },
+    { key: 'fermenter',    name: '/jsonFermenter.txt' },
+    { key: 'probe',        name: '/jsonProbe.txt' },
+    { key: 'smartplugs',   name: '/jsonSmartPlugs.txt' },
+    { key: 'profile',      name: '/jsonProfile.txt' },
+    { key: 'profileSteps', name: '/jsonProfileSteps.txt' },
+    { key: 'tilt',         name: '/jsonTilt.txt' },
+    { key: 'ispindel',     name: '/jsoniSpindel.txt' },
+    { key: 'plaato',       name: '/jsonPlaato.txt' },
+    { key: 'brewservices', name: '/jsonBrewServices.txt' },
+    { key: 'mqtt',         name: '/jsonMqtt.txt' },
+    { key: 'syslog',       name: '/jsonSyslog.txt' }
+  ];
+  var bundle = { timestamp: new Date().toISOString(), configs: {} };
+  var idx = 0;
+  function fetchNext() {
+    if (idx >= files.length) {
+      var date = new Date().toISOString().slice(0, 10);
+      var blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'brewbot-config-' + date + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return;
+    }
+    var f = files[idx++];
+    fetch('/fs/file?name=' + encodeURIComponent(f.name))
+      .then(function(r) { return r.ok ? r.text() : null; })
+      .then(function(text) {
+        if (text) { try { bundle.configs[f.key] = JSON.parse(text); } catch(e) {} }
+        fetchNext();
+      })
+      .catch(function() { fetchNext(); });
+  }
+  fetchNext();
 }
 
 // ---- REFRESH BAR ----
