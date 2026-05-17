@@ -28,38 +28,6 @@ SyslogConfig      g_syslogConfig;
 // FILE UTILITIES
 // ============================================================
 
-String loadJsonFile(const char* path) {
-  if (!LittleFS.exists(path)) {
-    logMsg("[CFG] File not found: %s", path);
-    return "";
-  }
-  File f = LittleFS.open(path, "r");
-  if (!f) {
-    logMsg("[CFG] Cannot open: %s", path);
-    return "";
-  }
-  String content = f.readString();
-  f.close();
-  return content;
-}
-
-// Legacy String-based saver — only used by recordReboot, removed in next commit.
-bool saveJsonFile(const char* path, const String& json) {
-  File f = LittleFS.open(path, "w");
-  if (!f) {
-    logMsg("[CFG] Cannot write: %s", path);
-    return false;
-  }
-  f.print(json);
-  f.close();
-  return true;
-}
-
-bool saveJsonFileSafe(const char* primary, const char* backup, const String& json) {
-  if (!saveJsonFile(backup, json)) return false;
-  return saveJsonFile(primary, json);
-}
-
 // Stream-serialize a JsonDocument directly to a LittleFS file.
 static bool saveJsonDocToFile(JsonDocument& doc, const char* path) {
   File f = LittleFS.open(path, "w");
@@ -969,19 +937,18 @@ void resetAllConfig() {
 // ============================================================
 
 void recordReboot(const String& reason) {
+  // Single streaming doc — load existing reboot log directly from File, append
+  // the new entry, write back. Avoids holding a loaded-String + two JsonDocuments
+  // + a serialized-String all at once (the worst single peak in the codebase).
   JsonDocument doc;
-  String existing = loadJsonFile(FILE_REBOOT);
-  if (existing.length() > 2) {
-    deserializeJson(doc, existing);
-  }
+  loadJsonDocSafe(doc, FILE_REBOOT, FILE_REBOOT_BKP);  // ok if file missing
 
-  // Keep a rolling log of last 10 reboots
   JsonArray log = !doc["log"].isNull() ? doc["log"].as<JsonArray>()
                                        : doc["log"].to<JsonArray>();
 
   struct rst_info *ri = ESP.getResetInfoPtr();
 
-  JsonDocument entry;
+  JsonObject entry = log.add<JsonObject>();
   entry["reason"]   = reason;
   entry["uptime"]   = g_globalConfig.lastUptime;
   entry["heap"]     = ESP.getFreeHeap();
@@ -992,10 +959,8 @@ void recordReboot(const String& reason) {
     entry["excvaddr"]  = ri->excvaddr;
   }
 
-  if (log.size() >= 10) log.remove(0);
-  log.add(entry.as<JsonObject>());
+  // Trim to last 10 entries
+  while (log.size() > 10) log.remove(0);
 
-  String json;
-  serializeJson(doc, json);
-  saveJsonFileSafe(FILE_REBOOT, FILE_REBOOT_BKP, json);
+  saveJsonDocSafe(doc, FILE_REBOOT, FILE_REBOOT_BKP);
 }
