@@ -59,12 +59,22 @@ bool saveJsonFileSafe(const char* primary, const char* backup, const String& jso
   return saveJsonFile(primary, json);
 }
 
-// Try primary, fall back to backup if primary missing/corrupt
-String loadJsonFileSafe(const char* primary, const char* backup) {
-  String content = loadJsonFile(primary);
-  if (content.length() > 2) return content;
+// Stream-parse a JsonDocument directly from File. Tries primary first, falls
+// back to backup on missing file or parse error. Returns true on success.
+static bool loadJsonDocFromFile(JsonDocument& doc, const char* path) {
+  if (!LittleFS.exists(path)) return false;
+  File f = LittleFS.open(path, "r");
+  if (!f) return false;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  return !err;
+}
+
+bool loadJsonDocSafe(JsonDocument& doc, const char* primary, const char* backup) {
+  if (loadJsonDocFromFile(doc, primary)) return true;
+  doc.clear();
   logMsg("[CFG] Falling back to backup: %s", backup);
-  return loadJsonFile(backup);
+  return loadJsonDocFromFile(doc, backup);
 }
 
 // ============================================================
@@ -73,17 +83,9 @@ String loadJsonFileSafe(const char* primary, const char* backup) {
 // ============================================================
 
 bool loadGlobalConfig() {
-  String json = loadJsonFileSafe(FILE_GLOBAL, FILE_GLOBAL_BKP);
-  if (json.length() < 2) {
-    logMsg("[CFG] Global config not found - using defaults");
-    initDefaultGlobalConfig();
-    return false;
-  }
-
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, json);
-  if (err) {
-    logMsg("[CFG] Global JSON parse error: %s", err.c_str());
+  if (!loadJsonDocSafe(doc, FILE_GLOBAL, FILE_GLOBAL_BKP)) {
+    logMsg("[CFG] Global config not found or invalid - using defaults");
     initDefaultGlobalConfig();
     return false;
   }
@@ -143,16 +145,9 @@ bool saveGlobalConfig() {
 // ============================================================
 
 bool loadFermenterConfig() {
-  String json = loadJsonFileSafe(FILE_FERMENTER, FILE_FERMENTER_BKP);
-  if (json.length() < 2) {
-    initDefaultFermenterConfig();
-    return false;
-  }
-
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, json);
-  if (err) {
-    logMsg("[CFG] Fermenter JSON error: %s", err.c_str());
+  if (!loadJsonDocSafe(doc, FILE_FERMENTER, FILE_FERMENTER_BKP)) {
+    logMsg("[CFG] Fermenter config not found or invalid - using defaults");
     initDefaultFermenterConfig();
     return false;
   }
@@ -309,14 +304,8 @@ bool saveFermenterConfig() {
 // ============================================================
 
 bool loadProbeConfig() {
-  String json = loadJsonFileSafe(FILE_PROBE, FILE_PROBE_BKP);
-  if (json.length() < 2) {
-    initDefaultProbeConfig();
-    return false;
-  }
-
   JsonDocument doc;
-  if (deserializeJson(doc, json)) {
+  if (!loadJsonDocSafe(doc, FILE_PROBE, FILE_PROBE_BKP)) {
     initDefaultProbeConfig();
     return false;
   }
@@ -368,14 +357,8 @@ bool saveProbeConfig() {
 // ============================================================
 
 bool loadSmartPlugConfig() {
-  String json = loadJsonFileSafe(FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP);
-  if (json.length() < 2) {
-    initDefaultSmartPlugConfig();
-    return false;
-  }
-
   JsonDocument doc;
-  if (deserializeJson(doc, json)) {
+  if (!loadJsonDocSafe(doc, FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP)) {
     initDefaultSmartPlugConfig();
     return false;
   }
@@ -438,13 +421,8 @@ bool saveSmartPlugConfig() {
 // ============================================================
 
 bool loadProfileConfig() {
-  String json = loadJsonFileSafe(FILE_PROFILE, FILE_PROFILE_BKP);
-  if (json.length() < 2) {
-    initDefaultProfileConfig();
-    return false;
-  }
   JsonDocument doc;
-  if (deserializeJson(doc, json)) {
+  if (!loadJsonDocSafe(doc, FILE_PROFILE, FILE_PROFILE_BKP)) {
     initDefaultProfileConfig();
     return false;
   }
@@ -466,11 +444,8 @@ bool saveProfileConfig() {
 }
 
 bool loadProfileSteps() {
-  String json = loadJsonFileSafe(FILE_STEPS, FILE_STEPS_BKP);
-  if (json.length() < 2) return false;
-
   JsonDocument doc;
-  if (deserializeJson(doc, json)) return false;
+  if (!loadJsonDocSafe(doc, FILE_STEPS, FILE_STEPS_BKP)) return false;
 
   for (int i = 0; i < MAX_PROFILE_STEPS; i++) {
     g_profileSteps[i].stepNo    = doc["StepNo"][i]    | 0;
@@ -510,13 +485,8 @@ bool saveProfileSteps() {
 // ============================================================
 
 bool loadiSpindelConfig() {
-  String json = loadJsonFileSafe(FILE_ISPINDEL, FILE_ISPINDEL_BKP);
-  if (json.length() < 2) {
-    initDefaultiSpindelConfig();
-    return false;
-  }
   JsonDocument doc;
-  if (deserializeJson(doc, json)) {
+  if (!loadJsonDocSafe(doc, FILE_ISPINDEL, FILE_ISPINDEL_BKP)) {
     initDefaultiSpindelConfig();
     return false;
   }
@@ -568,13 +538,8 @@ bool saveiSpindelConfig() {
 // ============================================================
 
 bool loadPlaatoConfig() {
-  String json = loadJsonFileSafe(FILE_PLAATO, FILE_PLAATO_BKP);
-  if (json.length() < 2) {
-    initDefaultPlaatoConfig();
-    return false;
-  }
   JsonDocument doc;
-  if (deserializeJson(doc, json)) {
+  if (!loadJsonDocSafe(doc, FILE_PLAATO, FILE_PLAATO_BKP)) {
     initDefaultPlaatoConfig();
     return false;
   }
@@ -609,12 +574,9 @@ bool savePlaatoConfig() {
 bool loadTiltConfig() {
   initDefaultTiltConfig();  // start from known defaults
 
-  String json = loadJsonFileSafe(FILE_TILT, FILE_TILT_BKP);
-  if (json.length() < 2) return false;
-
   JsonDocument doc;
-  if (deserializeJson(doc, json)) {
-    logMsg("[CFG] Tilt JSON parse error");
+  if (!loadJsonDocSafe(doc, FILE_TILT, FILE_TILT_BKP)) {
+    logMsg("[CFG] Tilt config not found or invalid");
     return false;
   }
 
@@ -678,25 +640,22 @@ bool saveTiltConfig() {
 // ============================================================
 
 bool loadBrewServiceConfig() {
-  String json = loadJsonFileSafe(FILE_BREWSVC, FILE_BREWSVC_BKP);
-  if (json.length() < 2) {
-    // Migrate from old single-service global config
-    // Old service types: 1=BF, 2=Monitor Beer (removed), 3=Brewfather (now index 1)
-    initDefaultBrewServiceConfig();
-    int legacySvc = g_globalConfig.brewService;
-    int idx = (legacySvc == 1) ? 0 : (legacySvc == 3) ? 1 : -1;
-    if (idx >= 0) {
-      g_brewServices[idx].enabled = true;
-      strlcpy(g_brewServices[idx].serviceId, g_globalConfig.brewServiceId, sizeof(g_brewServices[idx].serviceId));
-      logMsg("[CFG] Migrated legacy brew service %d to slot %d", legacySvc, idx);
-      saveBrewServiceConfig();
-    }
-    return false;
-  }
-
   JsonDocument doc;
-  if (deserializeJson(doc, json)) {
+  if (!loadJsonDocSafe(doc, FILE_BREWSVC, FILE_BREWSVC_BKP)) {
     initDefaultBrewServiceConfig();
+    // Migrate from old single-service global config — only when both files are truly
+    // absent (first boot after upgrade), not on parse failure.
+    if (!LittleFS.exists(FILE_BREWSVC) && !LittleFS.exists(FILE_BREWSVC_BKP)) {
+      // Old service types: 1=BF, 2=Monitor Beer (removed), 3=Brewfather (now index 1)
+      int legacySvc = g_globalConfig.brewService;
+      int idx = (legacySvc == 1) ? 0 : (legacySvc == 3) ? 1 : -1;
+      if (idx >= 0) {
+        g_brewServices[idx].enabled = true;
+        strlcpy(g_brewServices[idx].serviceId, g_globalConfig.brewServiceId, sizeof(g_brewServices[idx].serviceId));
+        logMsg("[CFG] Migrated legacy brew service %d to slot %d", legacySvc, idx);
+        saveBrewServiceConfig();
+      }
+    }
     return false;
   }
 
@@ -741,13 +700,8 @@ bool saveBrewServiceConfig() {
 // ============================================================
 
 bool loadMqttConfig() {
-  String json = loadJsonFileSafe(FILE_MQTT, FILE_MQTT_BKP);
-  if (json.length() < 2) {
-    initDefaultMqttConfig();
-    return false;
-  }
   JsonDocument doc;
-  if (deserializeJson(doc, json)) {
+  if (!loadJsonDocSafe(doc, FILE_MQTT, FILE_MQTT_BKP)) {
     initDefaultMqttConfig();
     return false;
   }
@@ -784,13 +738,8 @@ bool saveMqttConfig() {
 // ============================================================
 
 bool loadSyslogConfig() {
-  String json = loadJsonFileSafe(FILE_SYSLOG, FILE_SYSLOG_BKP);
-  if (json.length() < 2) {
-    initDefaultSyslogConfig();
-    return false;
-  }
   JsonDocument doc;
-  if (deserializeJson(doc, json)) {
+  if (!loadJsonDocSafe(doc, FILE_SYSLOG, FILE_SYSLOG_BKP)) {
     initDefaultSyslogConfig();
     return false;
   }

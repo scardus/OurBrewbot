@@ -475,6 +475,7 @@ void resetAllConfig();
 String loadJsonFile(const char* path);
 bool   saveJsonFile(const char* path, const String& json);
 bool   saveJsonFileSafe(const char* primary, const char* backup, const String& json);
+bool   loadJsonDocSafe(JsonDocument& doc, const char* primary, const char* backup);
 
 // Reboot logging
 void recordReboot(const String& reason);
