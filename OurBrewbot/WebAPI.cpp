@@ -14,6 +14,7 @@
 #include "Profile.h"
 #include "Tilt.h"
 #include "Https.h"
+#include "Webhook.h"
 #include <umm_malloc/umm_heap_select.h>
 
 // Forward refs to global server (defined in .ino)
@@ -107,6 +108,9 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/mqtt/discover",    HTTP_POST, [&server]() { logApiCall(server); handleMqttDiscover(server); });
   server.on("/syslog",           HTTP_GET,  [&server]() { logApiCall(server); handleSyslogConfig(server); });
   server.on("/syslog",           HTTP_POST, [&server]() { logApiCall(server); handleSyslogConfigPost(server); });
+  server.on("/webhooks",         HTTP_GET,  [&server]() { logApiCall(server); handleWebhooks(server); });
+  server.on("/webhook",          HTTP_POST, [&server]() { logApiCall(server); handleWebhookPost(server); });
+  server.on("/webhook/test",     HTTP_POST, [&server]() { logApiCall(server); handleWebhookTest(server); });
 
   // Fermenter debug mode
   server.on("/debug",            HTTP_GET,  [&server]() { logApiCall(server); handleDebug(server); });
@@ -1635,6 +1639,82 @@ void handleHttpsTest(ESP8266WebServer& server) {
   resp["dramAfter"]     = (uint32_t)dramAfter;
   resp["iramBefore"]    = (uint32_t)iramBefore;
   resp["iramAfter"]     = (uint32_t)iramAfter;
+  sendJsonDoc(server, resp);
+}
+
+// ============================================================
+// WEBHOOKS — GET /webhooks, POST /webhook, POST /webhook/test
+// ============================================================
+
+void handleWebhooks(ESP8266WebServer& server) {
+  JsonDocument doc;
+  JsonArray arr = doc["webhooks"].to<JsonArray>();
+  for (int i = 0; i < MAX_WEBHOOKS; i++) {
+    JsonObject s = arr.add<JsonObject>();
+    s["index"]        = i;
+    s["enabled"]      = (bool)g_webhooks[i].enabled;
+    s["name"]         = g_webhooks[i].name;
+    s["url"]          = g_webhooks[i].url;
+    s["method"]       = g_webhooks[i].method;
+    s["contentType"]  = g_webhooks[i].contentType;
+    s["bodyTemplate"] = g_webhooks[i].bodyTemplate;
+    s["authHeader"]   = g_webhooks[i].authHeader;
+    s["minLevel"]     = g_webhooks[i].minLevel;
+    s["eventMask"]    = g_webhooks[i].eventMask;
+    s["rateLimitSec"] = g_webhooks[i].rateLimitSec;
+    s["lastFireMs"]   = g_webhooks[i].lastFireMs;
+    s["lastHttpCode"] = g_webhooks[i].lastHttpCode;
+  }
+  sendJsonDoc(server, doc);
+}
+
+void handleWebhookPost(ESP8266WebServer& server) {
+  JsonDocument doc;
+  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
+    return;
+  }
+  int idx = doc["index"] | -1;
+  if (idx < 0 || idx >= MAX_WEBHOOKS) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid webhook index\"}"), 400);
+    return;
+  }
+  if (!doc["enabled"].isNull())      g_webhooks[idx].enabled      = doc["enabled"];
+  if (!doc["name"].isNull())         strlcpy(g_webhooks[idx].name,         doc["name"],         sizeof(g_webhooks[idx].name));
+  if (!doc["url"].isNull())          strlcpy(g_webhooks[idx].url,          doc["url"],          sizeof(g_webhooks[idx].url));
+  if (!doc["method"].isNull())       g_webhooks[idx].method       = doc["method"];
+  if (!doc["contentType"].isNull())  strlcpy(g_webhooks[idx].contentType,  doc["contentType"],  sizeof(g_webhooks[idx].contentType));
+  if (!doc["bodyTemplate"].isNull()) strlcpy(g_webhooks[idx].bodyTemplate, doc["bodyTemplate"], sizeof(g_webhooks[idx].bodyTemplate));
+  if (!doc["authHeader"].isNull())   strlcpy(g_webhooks[idx].authHeader,   doc["authHeader"],   sizeof(g_webhooks[idx].authHeader));
+  if (!doc["minLevel"].isNull())     g_webhooks[idx].minLevel     = doc["minLevel"];
+  if (!doc["eventMask"].isNull())    g_webhooks[idx].eventMask    = doc["eventMask"];
+  if (!doc["rateLimitSec"].isNull()) g_webhooks[idx].rateLimitSec = doc["rateLimitSec"];
+  saveWebhookConfig();
+  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Webhook saved\"}"));
+}
+
+void handleWebhookTest(ESP8266WebServer& server) {
+  JsonDocument doc;
+  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
+    return;
+  }
+  int idx = doc["index"] | -1;
+  if (idx < 0 || idx >= MAX_WEBHOOKS) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid webhook index\"}"), 400);
+    return;
+  }
+  uint32_t t0 = millis();
+  int code = webhookFireTest((uint8_t)idx);
+  uint32_t elapsed = millis() - t0;
+
+  JsonDocument resp;
+  resp["httpCode"] = code;
+  resp["timeMs"]   = elapsed;
+  resp["status"]   = (code >= 200 && code < 400) ? "ok" : "error";
+  if (code == -3) resp["msg"] = "Slot has no URL configured";
+  else if (code < 0) resp["msg"] = "Transport error";
+  else { String m = "HTTP "; m += code; resp["msg"] = m; }
   sendJsonDoc(server, resp);
 }
 
