@@ -176,6 +176,15 @@ button.test:hover {
   background: #1a4a8a;
 }
 
+.whlink {
+  color: #53d8fb;
+  text-decoration: none;
+  cursor: pointer;
+}
+.whlink:hover {
+  text-decoration: underline;
+}
+
 button.danger {
   background: #600;
   color: #faa;
@@ -1242,6 +1251,11 @@ function whStatusSummary(w){
   return parts.join(' · ');
 }
 function whBuildSlot(i,w){
+  var presetBtns='';
+  var keys=['discord','slack','ntfy','pushover','ifttt','ha','custom'];
+  for(var k=0;k<keys.length;k++){
+    presetBtns+='<button class="test" onclick="whPreset('+i+',\''+keys[k]+'\')">'+WH_PRESETS[keys[k]].name+'</button> ';
+  }
   return '<div class="card" id="whcard'+i+'" style="padding:0">'+
     '<div onclick="whToggle('+i+')" style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none">'+
       '<span class="arr" id="wharr'+i+'" style="color:#888;width:14px">&#9654;</span>'+
@@ -1251,6 +1265,10 @@ function whBuildSlot(i,w){
       '<span style="color:#666;font-size:11px" id="whsub'+i+'">'+whStatusSummary(w)+'</span>'+
     '</div>'+
     '<div id="whbody'+i+'" style="display:none;padding:0 12px 12px 12px">'+
+      '<div style="margin:6px 0 10px 0">'+
+        '<a href="#" onclick="whTogglePresets('+i+');return false" id="whpresettoggle'+i+'" class="whlink" style="font-size:12px">&#9654; Apply preset (overwrites this slot)</a>'+
+        '<div id="whpresets'+i+'" style="display:none;margin-top:6px">'+presetBtns+'</div>'+
+      '</div>'+
       '<div class="row"><label>Enabled</label>'+switchHtml('when'+i,w.enabled)+'</div>'+
       '<div class="row"><label>Name</label>'+textInput('whnm'+i,w.name,200)+'</div>'+
       '<div class="row"><label>URL</label><input type="text" id="whurl'+i+'" maxlength="159" value="'+whEsc(w.url)+'" oninput="markDirty()" style="flex:1;min-width:240px"></div>'+
@@ -1273,6 +1291,11 @@ function whToggle(i){
   var b=byId('whbody'+i),a=byId('wharr'+i);
   if(b.style.display=='none'){b.style.display='block';a.innerHTML='&#9660;'}
   else {b.style.display='none';a.innerHTML='&#9654;'}
+}
+function whTogglePresets(i){
+  var p=byId('whpresets'+i),t=byId('whpresettoggle'+i);
+  if(p.style.display=='none'){p.style.display='block';t.innerHTML='&#9660; Apply preset (overwrites this slot)'}
+  else{p.style.display='none';t.innerHTML='&#9654; Apply preset (overwrites this slot)'}
 }
 function whToggleVars(){
   var v=byId('whvars');v.style.display=(v.style.display=='none'?'block':'none');
@@ -1303,34 +1326,22 @@ function whTest(i){
     })
     .catch(function(e){showMsg('whmsg'+i,'Error: '+e,false)});
 }
-function whPreset(p){
+function whPreset(i,p){
   var t=WH_PRESETS[p];if(!t)return;
-  for(var i=0;i<4;i++){
-    if(!byId('whurl'+i).value){
-      byId('whnm'+i).value=t.name;byId('whurl'+i).value=t.url;byId('whmt'+i).value=t.method;
-      byId('whct'+i).value=t.contentType;byId('whtmpl'+i).value=t.bodyTemplate;byId('whah'+i).value=t.authHeader||'';
-      byId('whttl'+i).textContent=t.name;
-      if(byId('whbody'+i).style.display=='none')whToggle(i);
-      byId('whcard'+i).scrollIntoView({behavior:'smooth',block:'start'});
-      markDirty();
-      return;
-    }
-  }
-  alert('All 4 slots already have a URL. Clear one first.');
+  byId('whnm'+i).value=t.name;
+  byId('whurl'+i).value=t.url;
+  byId('whmt'+i).value=t.method;
+  byId('whct'+i).value=t.contentType;
+  byId('whtmpl'+i).value=t.bodyTemplate;
+  byId('whah'+i).value=t.authHeader||'';
+  byId('whttl'+i).textContent=t.name;
+  markDirty();
 }
 function loadWebhooks() {
   fetch('/webhooks/list').then(function(r){return r.json()}).then(function(d){
-    var html='<p style="color:#aaa;font-size:13px;margin-bottom:10px">Send event notifications to external services. Defaults: critical-only (WARNING+ severity, ALARM category).</p>';
+    var html='<p style="color:#aaa;font-size:13px;margin-bottom:10px">Send event notifications to external services. Defaults: critical-only (WARNING+ severity, ALARM category). Open a slot to apply a preset.</p>';
     html+='<div class="card" style="padding:10px 12px">';
-    html+='<strong style="font-size:12px;color:#aaa">Quickstart presets:</strong> ';
-    html+='<button class="test" onclick="whPreset(\'discord\')">Discord</button> ';
-    html+='<button class="test" onclick="whPreset(\'slack\')">Slack</button> ';
-    html+='<button class="test" onclick="whPreset(\'ntfy\')">ntfy.sh</button> ';
-    html+='<button class="test" onclick="whPreset(\'pushover\')">Pushover</button> ';
-    html+='<button class="test" onclick="whPreset(\'ifttt\')">IFTTT</button> ';
-    html+='<button class="test" onclick="whPreset(\'ha\')">Home Assistant</button> ';
-    html+='<button class="test" onclick="whPreset(\'custom\')">Custom JSON</button>';
-    html+=' <a href="#" onclick="whToggleVars();return false" style="margin-left:8px;font-size:12px">Show variables &#9662;</a>';
+    html+='<a href="#" onclick="whToggleVars();return false" class="whlink" style="font-size:12px">Show variables &#9662;</a>';
     html+='<div id="whvars" style="display:none;margin-top:10px;padding:8px;background:#0a1628;border-radius:3px;font-family:monospace;font-size:11px">';
     html+='<table style="border-collapse:collapse;width:100%">';
     html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$MSG / $JSON_MSG / $URL_MSG</td><td style="color:#888">full message body</td></tr>';
