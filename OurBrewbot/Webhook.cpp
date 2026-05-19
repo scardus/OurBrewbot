@@ -352,21 +352,35 @@ static const char* methodName(uint8_t m) {
 
 // Deliver one slot from one event. Updates the slot's lastFireMs/lastHttpCode
 // and clears its bit from the subscriber mask. Returns HTTP code (or negative).
+// URL, body template, and auth header are all run through renderTemplate so
+// $VARS work in any of them (e.g. ntfy's "Title: OurBrewbot $TAG" header).
 static int deliverOne(uint8_t slotIndex, WebhookEvent& evt) {
   WebhookConfig& s = g_webhooks[slotIndex];
 
-  int rlen = renderTemplate(s.bodyTemplate, evt, s_renderBuf, RENDER_BUF_SIZE);
-  if (rlen < 0) {
-    logMsgL(SYSLOG_WARNING, "[HOOK] Slot %u: render overflow", slotIndex);
+  char urlBuf[200];
+  char authBuf[200];
+
+  if (renderTemplate(s.url, evt, urlBuf, sizeof(urlBuf)) < 0) {
+    logMsgL(SYSLOG_WARNING, "[HOOK] Slot %u: URL render overflow", slotIndex);
+    evt.subscriberMask &= (uint8_t)~(1u << slotIndex);
+    return -100;
+  }
+  if (renderTemplate(s.authHeader, evt, authBuf, sizeof(authBuf)) < 0) {
+    logMsgL(SYSLOG_WARNING, "[HOOK] Slot %u: auth header render overflow", slotIndex);
+    evt.subscriberMask &= (uint8_t)~(1u << slotIndex);
+    return -100;
+  }
+  if (renderTemplate(s.bodyTemplate, evt, s_renderBuf, RENDER_BUF_SIZE) < 0) {
+    logMsgL(SYSLOG_WARNING, "[HOOK] Slot %u: body render overflow", slotIndex);
     evt.subscriberMask &= (uint8_t)~(1u << slotIndex);
     return -100;
   }
 
   int code = httpsRequest(methodName(s.method),
-                          s.url,
+                          urlBuf,
                           s.contentType,
                           s_renderBuf,
-                          s.authHeader,
+                          authBuf,
                           10000,
                           nullptr);
 
@@ -374,7 +388,7 @@ static int deliverOne(uint8_t slotIndex, WebhookEvent& evt) {
   s.lastHttpCode = (uint16_t)((code < 0 || code > 0xFFFF) ? 0xFFFF : code);
   evt.subscriberMask &= (uint8_t)~(1u << slotIndex);
 
-  logMsg("[HOOK] Slot %u %s %s -> %d", slotIndex, methodName(s.method), s.url, code);
+  logMsg("[HOOK] Slot %u %s %s -> %d", slotIndex, methodName(s.method), urlBuf, code);
   return code;
 }
 
