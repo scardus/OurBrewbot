@@ -289,11 +289,28 @@ static void extractTag(const char* msg, char* out, size_t outLen) {
   out[n] = '\0';
 }
 
-void webhookEnqueue(uint8_t level, const char* msg, uint8_t fermIndex) {
+// Best-effort: look for " F<digits>" pattern in tagged messages (e.g.
+// "[ALARM] F0 (Fermenter 1)..."). Returns MAX_FERMENTERS if not found.
+static uint8_t extractFermIndex(const char* msg) {
+  if (!msg) return MAX_FERMENTERS;
+  const char* p = strstr(msg, " F");
+  if (!p) return MAX_FERMENTERS;
+  p += 2;
+  if (*p < '0' || *p > '9') return MAX_FERMENTERS;
+  uint8_t idx = (uint8_t)(*p - '0');
+  p++;
+  if (*p >= '0' && *p <= '9') idx = (uint8_t)(idx * 10 + (*p - '0'));
+  if (idx >= MAX_FERMENTERS) return MAX_FERMENTERS;
+  return idx;
+}
+
+void webhookEnqueue(uint8_t level, const char* msg) {
   if (!s_queue || !msg) return;
 
   uint32_t category = tagToCategory(msg);
   if (category == 0) return;
+
+  uint8_t fermIndex = extractFermIndex(msg);
 
   // Compute which slots want this event
   uint8_t mask = 0;

@@ -46,7 +46,8 @@ void webhookInit();
 // Enqueue an event for delivery. Computes the subscriber mask from configured
 // slots; drops silently if no slot wants it (unknown tag, all slots disabled,
 // or all slot filters reject the level/category). Drops oldest on overflow.
-void webhookEnqueue(uint8_t level, const char* msg, uint8_t fermIndex);
+// Fermenter index is best-effort extracted from " F<digits>" pattern in msg.
+void webhookEnqueue(uint8_t level, const char* msg);
 
 // Drain at most one delivery per call. Intended to run from the main loop;
 // each delivery is a blocking HTTPS request (~2-8 s).

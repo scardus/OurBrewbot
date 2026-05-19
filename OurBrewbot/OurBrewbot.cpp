@@ -40,6 +40,7 @@
 #include "Reports.h"
 #include "Mqtt.h"
 #include "WebAPI.h"
+#include "Webhook.h"
 
 // ============================================================
 // TIMING CONSTANTS (milliseconds)
@@ -134,6 +135,7 @@ void setup() {
 
   // Load all config from flash
   loadAllConfig();
+  webhookInit();
 
   // Record startup (must be after loadAllConfig so lastUptime is available)
   recordReboot(g_rebootReason);
@@ -201,6 +203,7 @@ void loop() {
   MDNS.update();
   mqttLoop();
   mqttPendingSaveCheck();
+  webhookLoop();
 
   // LED: double-blink every 5s when WiFi connected, fast-flash when disconnected (active low)
   if (WiFi.isConnected()) {
