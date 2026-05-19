@@ -42,6 +42,26 @@
 #define MQTT_SERVICE_BIT            3   // Bit index in fermenter brewServices bitmask (matches BREW_SERVICE_MQTT)
 
 // ============================================================
+// WEBHOOKS
+// ============================================================
+#define MAX_WEBHOOKS                4
+
+// HTTP methods
+#define WEBHOOK_METHOD_POST         0
+#define WEBHOOK_METHOD_GET          1
+#define WEBHOOK_METHOD_PUT          2
+
+// Event categories — bit positions for WebhookConfig.eventMask
+#define WEBHOOK_CAT_ALARM           (1u << 0)
+#define WEBHOOK_CAT_FERM            (1u << 1)
+#define WEBHOOK_CAT_SYS             (1u << 2)
+#define WEBHOOK_CAT_WIFI            (1u << 3)
+#define WEBHOOK_CAT_PLUG            (1u << 4)
+#define WEBHOOK_CAT_CFG             (1u << 5)
+#define WEBHOOK_CAT_OTA             (1u << 6)
+#define WEBHOOK_CAT_PROF            (1u << 7)
+
+// ============================================================
 // PROBE FUNCTION CODES
 // ============================================================
 #define PROBE_FN_UNASSIGNED  99
@@ -152,6 +172,8 @@ enum ControllerVersion {
 #define FILE_MQTT_BKP       "/jsonMqttbkup.txt"
 #define FILE_SYSLOG         "/jsonSyslog.txt"
 #define FILE_SYSLOG_BKP     "/jsonSyslogbkup.txt"
+#define FILE_WEBHOOK        "/jsonWebhook.txt"
+#define FILE_WEBHOOK_BKP    "/jsonWebhookbkup.txt"
 #define FILE_REBOOT         "/jsonReBoot.txt"
 #define FILE_REBOOT_BKP     "/jsonReBootbkup.txt"
 #define FILE_CHART_SERIES   "/jsonchartSeries.txt"
@@ -380,6 +402,28 @@ struct BrewServiceConfig {
 };
 
 // ============================================================
+// STRUCT: WebhookConfig
+// Persisted in jsonWebhook.txt — up to MAX_WEBHOOKS slots.
+// Each slot subscribes to events via minLevel + eventMask and renders
+// outbound HTTPS requests using a body template with $VAR substitutions.
+// ============================================================
+struct WebhookConfig {
+  bool     enabled;              // slot active
+  char     name[24];             // UI label, e.g. "Discord alerts"
+  char     url[160];             // https:// endpoint
+  uint8_t  method;               // WEBHOOK_METHOD_xxx
+  char     contentType[40];      // e.g. "application/json"
+  char     bodyTemplate[200];    // template string with $RAW / $JSON_* / $URL_* variables
+  char     authHeader[80];       // optional, full header line e.g. "Authorization: Bearer ..."
+  uint8_t  minLevel;             // SYSLOG_* threshold (lower = more critical)
+  uint32_t eventMask;            // bitmask of WEBHOOK_CAT_xxx — which categories this slot wants
+  uint16_t rateLimitSec;         // minimum seconds between fires; 0 = no limit
+  // Runtime only — not persisted
+  uint32_t lastFireMs;
+  uint16_t lastHttpCode;
+};
+
+// ============================================================
 // STRUCT: SyslogConfig
 // ============================================================
 struct SyslogConfig {
@@ -421,6 +465,7 @@ extern WiFiConfig      g_wifiConfig;
 extern BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 extern MqttConfig        g_mqttConfig;
 extern SyslogConfig      g_syslogConfig;
+extern WebhookConfig     g_webhooks[MAX_WEBHOOKS];
 
 // ============================================================
 // FUNCTION DECLARATIONS
@@ -455,6 +500,8 @@ bool loadMqttConfig();
 bool saveMqttConfig();
 bool loadSyslogConfig();
 bool saveSyslogConfig();
+bool loadWebhookConfig();
+bool saveWebhookConfig();
 
 // Defaults / factory reset
 void initDefaultGlobalConfig();
@@ -468,6 +515,7 @@ void initDefaultPlaatoConfig();
 void initDefaultBrewServiceConfig();
 void initDefaultMqttConfig();
 void initDefaultSyslogConfig();
+void initDefaultWebhookConfig();
 void resetWiFiConfig();
 void resetAllConfig();
 

@@ -23,6 +23,7 @@ WiFiConfig      g_wifiConfig;
 BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 MqttConfig        g_mqttConfig;
 SyslogConfig      g_syslogConfig;
+WebhookConfig     g_webhooks[MAX_WEBHOOKS];
 
 // ============================================================
 // FILE UTILITIES
@@ -726,6 +727,53 @@ bool saveSyslogConfig() {
 }
 
 // ============================================================
+// WEBHOOK CONFIG (multi-slot)
+// ============================================================
+
+bool loadWebhookConfig() {
+  JsonDocument doc;
+  if (!loadJsonDocSafe(doc, FILE_WEBHOOK, FILE_WEBHOOK_BKP)) {
+    initDefaultWebhookConfig();
+    return false;
+  }
+  JsonArray arr = doc["webhooks"].as<JsonArray>();
+  initDefaultWebhookConfig();  // base state; then overlay anything present
+  for (int i = 0; i < MAX_WEBHOOKS && i < (int)arr.size(); i++) {
+    JsonObject s = arr[i].as<JsonObject>();
+    g_webhooks[i].enabled      = s["enabled"]      | false;
+    g_webhooks[i].method       = s["method"]       | WEBHOOK_METHOD_POST;
+    g_webhooks[i].minLevel     = s["minLevel"]     | SYSLOG_WARNING;
+    g_webhooks[i].eventMask    = s["eventMask"]    | WEBHOOK_CAT_ALARM;
+    g_webhooks[i].rateLimitSec = s["rateLimitSec"] | 30;
+    strlcpy(g_webhooks[i].name,         s["name"]         | "", sizeof(g_webhooks[i].name));
+    strlcpy(g_webhooks[i].url,          s["url"]          | "", sizeof(g_webhooks[i].url));
+    strlcpy(g_webhooks[i].contentType,  s["contentType"]  | "application/json", sizeof(g_webhooks[i].contentType));
+    strlcpy(g_webhooks[i].bodyTemplate, s["bodyTemplate"] | "", sizeof(g_webhooks[i].bodyTemplate));
+    strlcpy(g_webhooks[i].authHeader,   s["authHeader"]   | "", sizeof(g_webhooks[i].authHeader));
+  }
+  return true;
+}
+
+bool saveWebhookConfig() {
+  JsonDocument doc;
+  JsonArray arr = doc["webhooks"].to<JsonArray>();
+  for (int i = 0; i < MAX_WEBHOOKS; i++) {
+    JsonObject s = arr.add<JsonObject>();
+    s["enabled"]      = (bool)g_webhooks[i].enabled;
+    s["name"]         = g_webhooks[i].name;
+    s["url"]          = g_webhooks[i].url;
+    s["method"]       = g_webhooks[i].method;
+    s["contentType"]  = g_webhooks[i].contentType;
+    s["bodyTemplate"] = g_webhooks[i].bodyTemplate;
+    s["authHeader"]   = g_webhooks[i].authHeader;
+    s["minLevel"]     = g_webhooks[i].minLevel;
+    s["eventMask"]    = g_webhooks[i].eventMask;
+    s["rateLimitSec"] = g_webhooks[i].rateLimitSec;
+  }
+  return saveJsonDocSafe(doc, FILE_WEBHOOK, FILE_WEBHOOK_BKP);
+}
+
+// ============================================================
 // LOAD ALL / SAVE ALL
 // ============================================================
 
@@ -743,6 +791,7 @@ void loadAllConfig() {
   loadBrewServiceConfig();
   loadMqttConfig();
   loadSyslogConfig();
+  loadWebhookConfig();
   logMsg("[CFG] All configuration loaded");
 }
 
@@ -758,6 +807,7 @@ void saveAllConfig() {
   saveBrewServiceConfig();
   saveMqttConfig();
   saveSyslogConfig();
+  saveWebhookConfig();
 }
 
 // ============================================================
@@ -894,6 +944,23 @@ void initDefaultSyslogConfig() {
   g_syslogConfig.minLevel  = 7;   // DEBUG
 }
 
+void initDefaultWebhookConfig() {
+  for (int i = 0; i < MAX_WEBHOOKS; i++) {
+    g_webhooks[i].enabled      = false;
+    g_webhooks[i].name[0]      = '\0';
+    g_webhooks[i].url[0]       = '\0';
+    g_webhooks[i].method       = WEBHOOK_METHOD_POST;
+    strlcpy(g_webhooks[i].contentType, "application/json", sizeof(g_webhooks[i].contentType));
+    g_webhooks[i].bodyTemplate[0] = '\0';
+    g_webhooks[i].authHeader[0]   = '\0';
+    g_webhooks[i].minLevel     = SYSLOG_WARNING;
+    g_webhooks[i].eventMask    = WEBHOOK_CAT_ALARM;
+    g_webhooks[i].rateLimitSec = 30;
+    g_webhooks[i].lastFireMs   = 0;
+    g_webhooks[i].lastHttpCode = 0;
+  }
+}
+
 static void clearWiFiProvisioningArtifacts() {
   if (LittleFS.exists(FILE_CONFIG))     LittleFS.remove(FILE_CONFIG);
   if (LittleFS.exists(FILE_CONFIG_BKP)) LittleFS.remove(FILE_CONFIG_BKP);
@@ -924,6 +991,7 @@ void resetAllConfig() {
   initDefaultBrewServiceConfig();
   initDefaultMqttConfig();
   initDefaultSyslogConfig();
+  initDefaultWebhookConfig();
   saveAllConfig();
 
   // Remove WiFi config so WiFiManager re-runs the portal
