@@ -28,7 +28,7 @@ void logInit() {
   }
 }
 
-void logMsg(const char* fmt, ...) {
+static void vlogMsg(uint8_t level, const char* fmt, va_list args) {
   // Timestamp: [HHH:MM:SS]
   unsigned long ms = millis();
   unsigned long totalSec = ms / 1000;
@@ -42,23 +42,21 @@ void logMsg(const char* fmt, ...) {
 
   // Format message
   char buf[192];
-  va_list args;
-  va_start(args, fmt);
   vsnprintf(buf, sizeof(buf), fmt, args);
-  va_end(args);
 
   Serial.print(buf);
   Serial.print("\r\n");
 
-  // Syslog output
+  // Syslog output. RFC 5424 levels: lower number = more critical.
+  // minLevel = 7 (DEBUG) → allow everything; minLevel = 4 (WARNING) → only
+  // WARNING and worse.
   if (g_syslogConfig.enabled && s_ipResolved &&
       WiFi.status() == WL_CONNECTED &&
-      SYSLOG_DEBUG <= g_syslogConfig.minLevel) {
+      level <= g_syslogConfig.minLevel) {
 
     // RFC 3164: <PRI>TIMESTAMP HOSTNAME TAG: MESSAGE
-    uint8_t pri = (g_syslogConfig.facility * 8) + SYSLOG_DEBUG;
+    uint8_t pri = (g_syslogConfig.facility * 8) + level;
     char pkt[256];
-    // Use zero-padded millis-derived time as a simple timestamp (no RTC)
     snprintf(pkt, sizeof(pkt), "<%u>ourbrewbot ourbrewbot: %s", pri, buf);
     s_udp.beginPacket(s_syslogIP, g_syslogConfig.port);
     s_udp.write((const uint8_t*)pkt, strlen(pkt));
@@ -73,4 +71,18 @@ void logMsg(const char* fmt, ...) {
     snprintf(line, sizeof(line), "%s%s", ts, buf);
     mqttPublishLog(line);
   }
+}
+
+void logMsg(const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  vlogMsg(SYSLOG_INFO, fmt, args);
+  va_end(args);
+}
+
+void logMsgL(uint8_t level, const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  vlogMsg(level, fmt, args);
+  va_end(args);
 }

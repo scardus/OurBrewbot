@@ -179,11 +179,11 @@ void checkFermenterAlarm(uint8_t i) {
   bool alarmActive = false;
 
   if (temp > ceiling + tolerance) {
-    logMsg("[ALARM] F%d (%s): over temperature threshold! %.1f > %.1f",
+    logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): over temperature threshold! %.1f > %.1f",
       i, g_fermenters[i].fermenterName, temp, ceiling + tolerance);
     alarmActive = true;
   } else if (temp < floor_ - tolerance) {
-    logMsg("[ALARM] F%d (%s): under temperature threshold! %.1f < %.1f",
+    logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): under temperature threshold! %.1f < %.1f",
       i, g_fermenters[i].fermenterName, temp, floor_ - tolerance);
     alarmActive = true;
   }
@@ -192,7 +192,7 @@ void checkFermenterAlarm(uint8_t i) {
 
   // To re-add notifications: send HTTP POST to webhook here
   if (alarmActive && g_globalConfig.notifyOn) {
-    logMsg("[ALARM] F%d (%s): alarm active", i, g_fermenters[i].fermenterName);
+    logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): alarm active", i, g_fermenters[i].fermenterName);
   }
 }
 

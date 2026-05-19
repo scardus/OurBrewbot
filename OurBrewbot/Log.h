@@ -30,5 +30,9 @@
 // WiFi connects (or after syslog config is saved) to resolve the syslog host.
 void logInit();
 
-// Log a formatted message with timestamp + \r\n
+// Log a formatted message with timestamp + \r\n at SYSLOG_INFO severity.
 void logMsg(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+
+// Log a formatted message at an explicit RFC 5424 severity level.
+// level: one of SYSLOG_EMERG..SYSLOG_DEBUG (lower = more critical).
+void logMsgL(uint8_t level, const char* fmt, ...) __attribute__((format(printf, 2, 3)));

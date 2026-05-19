@@ -32,7 +32,7 @@ void processProfiles() {
 
 void advanceProfileStep(uint8_t i) {
   if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
-    logMsg("[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
+    logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
     g_fermenters[i].profileRunning = false;
     saveFermenterConfig();
     return;
@@ -43,7 +43,7 @@ void advanceProfileStep(uint8_t i) {
 
   // If the current step is empty, profile is done
   if (isStepEmpty(step)) {
-    logMsg("[PROF] F%d (%s): Profile Finished (empty step %d)", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
+    logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished (empty step %d)", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
     g_fermenters[i].profileRunning = false;
     saveFermenterConfig();
     return;
@@ -62,19 +62,19 @@ void advanceProfileStep(uint8_t i) {
 
   // Check if step completion conditions are met
   if (isStepComplete(i, step)) {
-    logMsg("[PROF] F%d (%s): Step %d complete -> Step %d",
+    logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Step %d complete -> Step %d",
       i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep, g_fermenters[i].currentStep + 1);
     g_fermenters[i].currentStep++;
     g_fermenters[i].currentHour = 0;
 
     // Check for profile end
     if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
-      logMsg("[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
+      logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
       g_fermenters[i].profileRunning = false;
     } else {
       uint8_t nextIdx = flatStepIndex(i);
       if (isStepEmpty(g_profileSteps[nextIdx])) {
-        logMsg("[PROF] F%d (%s): Profile Finished (no more steps)", i, g_fermenters[i].fermenterName);
+        logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished (no more steps)", i, g_fermenters[i].fermenterName);
         g_fermenters[i].profileRunning = false;
       }
     }
@@ -186,12 +186,12 @@ void startProfile(uint8_t i, uint8_t profileIndex) {
   g_fermenters[i].profileRunning = true;
   g_fermenters[i].profilePaused  = false;
   g_fermenters[i].startMillis    = millis();
-  logMsg("[PROF] F%d (%s): Profile %d started", i, g_fermenters[i].fermenterName, profileIndex);
+  logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile %d started", i, g_fermenters[i].fermenterName, profileIndex);
   saveFermenterConfig();
 }
 
 void stopProfile(uint8_t i) {
-  logMsg("[PROF] F%d (%s): Profile stopped", i, g_fermenters[i].fermenterName);
+  logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile stopped", i, g_fermenters[i].fermenterName);
   g_fermenters[i].profileRunning = false;
   g_fermenters[i].profilePaused  = false;
   g_fermenters[i].profileNo      = 0;
@@ -223,7 +223,7 @@ bool nextProfileStep(uint8_t i) {
   uint8_t maxStep = countProfileSteps(g_fermenters[i].profileNo - 1);
   if (g_fermenters[i].currentStep + 1 >= maxStep) {
     // Past the end — finish the profile
-    logMsg("[PROF] F%d (%s): Next step past end -> Profile Finished", i, g_fermenters[i].fermenterName);
+    logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Next step past end -> Profile Finished", i, g_fermenters[i].fermenterName);
     g_fermenters[i].profileRunning = false;
     saveFermenterConfig();
     return false;

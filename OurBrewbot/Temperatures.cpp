@@ -211,7 +211,7 @@ void readTempResults() {
     } else {
       g_probes[i].failCount++;
       if (g_probes[i].failCount <= PROBE_FAIL_THRESHOLD) {
-        logMsg("[TEMP] Probe %s not responding (fail %d/%d)",
+        logMsgL(SYSLOG_WARNING, "[TEMP] Probe %s not responding (fail %d/%d)",
           g_probes[i].address, g_probes[i].failCount, PROBE_FAIL_THRESHOLD);
       }
       if (g_probes[i].failCount >= PROBE_FAIL_THRESHOLD) {

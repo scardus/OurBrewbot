@@ -110,9 +110,9 @@ void setup() {
   // Log reboot reason with full rst_info detail
   {
     struct rst_info *ri = ESP.getResetInfoPtr();
-    logMsg("[SYS] Reset reason: %s (code %u)", ESP.getResetReason().c_str(), ri->reason);
+    logMsgL(SYSLOG_NOTICE, "[SYS] Reset reason: %s (code %u)", ESP.getResetReason().c_str(), ri->reason);
     if (ri->reason == REASON_EXCEPTION_RST) {
-      logMsg("[SYS] Exception cause: %u, EPC1: 0x%08x, EXCVADDR: 0x%08x",
+      logMsgL(SYSLOG_ERR, "[SYS] Exception cause: %u, EPC1: 0x%08x, EXCVADDR: 0x%08x",
         ri->exccause, ri->epc1, ri->excvaddr);
     }
   }
@@ -168,15 +168,18 @@ void setup() {
   g_webServer.begin();
   logMsg("[WEB] Server started on port 80");
 
-  // Re-send boot messages via syslog now that WiFi (and syslog host) is available
+  // Re-send boot messages via syslog now that WiFi (and syslog host) is available.
+  // Severity here mirrors the original pre-WiFi logMsgL calls so syslog/webhook
+  // filtering treats them consistently.
   if (g_syslogConfig.enabled) {
     struct rst_info *ri = ESP.getResetInfoPtr();
     logMsg("DEFERRED [SYS] OurBrewbot Firmware %s - Built: %s", FW_VERSION, FW_BUILD_DATE);
-    logMsg("DEFERRED [SYS] Reset reason: %s (code %u)", ESP.getResetReason().c_str(), ri->reason);
+    logMsgL(SYSLOG_NOTICE, "DEFERRED [SYS] Reset reason: %s (code %u)", ESP.getResetReason().c_str(), ri->reason);
     if (ri->reason == REASON_EXCEPTION_RST) {
-      logMsg("DEFERRED [SYS] Exception cause: %u, EPC1: 0x%08x, EXCVADDR: 0x%08x",
+      logMsgL(SYSLOG_ERR, "DEFERRED [SYS] Exception cause: %u, EPC1: 0x%08x, EXCVADDR: 0x%08x",
         ri->exccause, ri->epc1, ri->excvaddr);
     }
+    logMsgL(SYSLOG_NOTICE, "DEFERRED [WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
   }
 
   // MQTT client setup
@@ -289,7 +292,7 @@ void loop() {
       break;
 
     case RESET_CONFIG:
-      logMsg("[SYS] Resetting all config...");
+      logMsgL(SYSLOG_NOTICE, "[SYS] Resetting all config...");
       resetAllConfig();
       g_state = WAIT_CONFIG;
       ESP.restart();
@@ -340,13 +343,13 @@ void setupWiFi() {
   logMsg("[WIFI] Connecting... AP name if needed: %s", apName.c_str());
 
   if (!wifiManager.autoConnect(apName.c_str())) {
-    logMsg("[WIFI] Failed to connect - restarting");
+    logMsgL(SYSLOG_ERR, "[WIFI] Failed to connect - restarting");
     delay(3000);
     ESP.restart();
   }
 
   g_wifiConnected = true;
-  logMsg("[WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
+  logMsgL(SYSLOG_NOTICE, "[WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
 
   // Re-initialise log system now that WiFi is up so syslog host can be resolved
   logInit();

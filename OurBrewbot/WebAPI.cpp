@@ -652,7 +652,7 @@ void handleOTAUpload(ESP8266WebServer& server) {
   HTTPUpload& upload = server.upload();
 
   if (upload.status == UPLOAD_FILE_START) {
-    logMsg("[OTA] Update started: %s", upload.filename.c_str());
+    logMsgL(SYSLOG_NOTICE, "[OTA] Update started: %s", upload.filename.c_str());
     uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     if (!Update.begin(maxSketchSpace)) {
       Update.printError(Serial);
@@ -663,7 +663,7 @@ void handleOTAUpload(ESP8266WebServer& server) {
     }
   } else if (upload.status == UPLOAD_FILE_END) {
     if (Update.end(true)) {
-      logMsg("[OTA] Update success: %u bytes", upload.totalSize);
+      logMsgL(SYSLOG_NOTICE, "[OTA] Update success: %u bytes", upload.totalSize);
     } else {
       Update.printError(Serial);
     }

@@ -32,7 +32,7 @@ SyslogConfig      g_syslogConfig;
 static bool saveJsonDocToFile(JsonDocument& doc, const char* path) {
   File f = LittleFS.open(path, "w");
   if (!f) {
-    logMsg("[CFG] Cannot write: %s", path);
+    logMsgL(SYSLOG_WARNING, "[CFG] Cannot write: %s", path);
     return false;
   }
   size_t written = serializeJson(doc, f);
@@ -59,7 +59,7 @@ static bool loadJsonDocFromFile(JsonDocument& doc, const char* path) {
 bool loadJsonDocSafe(JsonDocument& doc, const char* primary, const char* backup) {
   if (loadJsonDocFromFile(doc, primary)) return true;
   doc.clear();
-  logMsg("[CFG] Falling back to backup: %s", backup);
+  logMsgL(SYSLOG_WARNING, "[CFG] Falling back to backup: %s", backup);
   return loadJsonDocFromFile(doc, backup);
 }
 
@@ -901,7 +901,7 @@ static void clearWiFiProvisioningArtifacts() {
 }
 
 void resetWiFiConfig() {
-  logMsg("[CFG] Resetting WiFi configuration");
+  logMsgL(SYSLOG_NOTICE, "[CFG] Resetting WiFi configuration");
   memset(&g_wifiConfig, 0, sizeof(g_wifiConfig));
   clearWiFiProvisioningArtifacts();
   logMsg("[CFG] WiFi reset complete - restart required");
@@ -912,7 +912,7 @@ void resetWiFiConfig() {
 // ============================================================
 
 void resetAllConfig() {
-  logMsg("[CFG] Resetting all configuration to defaults");
+  logMsgL(SYSLOG_NOTICE, "[CFG] Resetting all configuration to defaults");
   initDefaultGlobalConfig();
   initDefaultFermenterConfig();
   initDefaultProbeConfig();
