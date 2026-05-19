@@ -38,3 +38,20 @@ uint32_t tagToCategory(const char* msg);
 // Returns rendered length on success, or -1 on overflow. The output is always
 // null-terminated when the function returns >= 0.
 int renderTemplate(const char* tmpl, const WebhookEvent& evt, char* out, size_t outLen);
+
+// Allocate the dispatcher queue + render buffer on the IRAM second heap.
+// Idempotent. Call once at boot after Config is loaded.
+void webhookInit();
+
+// Enqueue an event for delivery. Computes the subscriber mask from configured
+// slots; drops silently if no slot wants it (unknown tag, all slots disabled,
+// or all slot filters reject the level/category). Drops oldest on overflow.
+void webhookEnqueue(uint8_t level, const char* msg, uint8_t fermIndex);
+
+// Drain at most one delivery per call. Intended to run from the main loop;
+// each delivery is a blocking HTTPS request (~2-8 s).
+void webhookLoop();
+
+// Render + send a single test event to one slot. Returns HTTP status code
+// (or negative transport error). Used by the /webhook/test endpoint.
+int webhookFireTest(uint8_t slotIndex);

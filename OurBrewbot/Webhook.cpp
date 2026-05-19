@@ -7,8 +7,12 @@
 
 #include "Webhook.h"
 #include "Temperatures.h"
+#include "Https.h"
+#include "Log.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <umm_malloc/umm_heap_select.h>
 
 // ============================================================
 // Tag → category mapping
@@ -245,4 +249,168 @@ int renderTemplate(const char* tmpl, const WebhookEvent& evt, char* out, size_t 
   if (pos >= outLen) return -1;
   out[pos] = '\0';
   return (int)pos;
+}
+
+// ============================================================
+// Dispatcher queue (ring buffer in IRAM heap)
+// ============================================================
+
+static const size_t QUEUE_SIZE      = 8;
+static const size_t RENDER_BUF_SIZE = 512;
+
+static WebhookEvent* s_queue     = nullptr;
+static char*         s_renderBuf = nullptr;
+static size_t        s_head      = 0;
+static size_t        s_tail      = 0;
+static size_t        s_count     = 0;
+
+void webhookInit() {
+  if (s_queue && s_renderBuf) return;
+  {
+    HeapSelectIram ephemeral;
+    if (!s_queue)     s_queue     = (WebhookEvent*)calloc(QUEUE_SIZE, sizeof(WebhookEvent));
+    if (!s_renderBuf) s_renderBuf = (char*)malloc(RENDER_BUF_SIZE);
+  }
+  if (!s_queue || !s_renderBuf) {
+    logMsgL(SYSLOG_WARNING, "[HOOK] IRAM alloc failed; webhooks disabled this boot");
+  }
+}
+
+// Extract the [TAG] from msg into `out` (without brackets).
+static void extractTag(const char* msg, char* out, size_t outLen) {
+  out[0] = '\0';
+  while (*msg == ' ') msg++;
+  if (*msg != '[') return;
+  msg++;
+  size_t n = 0;
+  while (n < outLen - 1 && *msg && *msg != ']') {
+    out[n++] = *msg++;
+  }
+  out[n] = '\0';
+}
+
+void webhookEnqueue(uint8_t level, const char* msg, uint8_t fermIndex) {
+  if (!s_queue || !msg) return;
+
+  uint32_t category = tagToCategory(msg);
+  if (category == 0) return;
+
+  // Compute which slots want this event
+  uint8_t mask = 0;
+  for (uint8_t i = 0; i < MAX_WEBHOOKS; i++) {
+    if (!g_webhooks[i].enabled) continue;
+    if (g_webhooks[i].url[0] == '\0') continue;
+    if (level > g_webhooks[i].minLevel) continue;     // syslog convention: lower = more critical
+    if (!(g_webhooks[i].eventMask & category)) continue;
+    mask |= (uint8_t)(1u << i);
+  }
+  if (mask == 0) return;
+
+  // Drop oldest on overflow (lossy). Do NOT logMsg from here — would recurse.
+  if (s_count == QUEUE_SIZE) {
+    s_head = (s_head + 1) % QUEUE_SIZE;
+    s_count--;
+  }
+
+  WebhookEvent& evt = s_queue[s_tail];
+  evt.level          = level;
+  evt.ts             = millis();
+  evt.fermIndex      = fermIndex;
+  evt.category       = category;
+  evt.subscriberMask = mask;
+  extractTag(msg, evt.tag, sizeof(evt.tag));
+  strlcpy(evt.msg, msg, sizeof(evt.msg));
+
+  s_tail = (s_tail + 1) % QUEUE_SIZE;
+  s_count++;
+}
+
+static const char* methodName(uint8_t m) {
+  switch (m) {
+    case WEBHOOK_METHOD_GET: return "GET";
+    case WEBHOOK_METHOD_PUT: return "PUT";
+    default:                 return "POST";
+  }
+}
+
+// Deliver one slot from one event. Updates the slot's lastFireMs/lastHttpCode
+// and clears its bit from the subscriber mask. Returns HTTP code (or negative).
+static int deliverOne(uint8_t slotIndex, WebhookEvent& evt) {
+  WebhookConfig& s = g_webhooks[slotIndex];
+
+  int rlen = renderTemplate(s.bodyTemplate, evt, s_renderBuf, RENDER_BUF_SIZE);
+  if (rlen < 0) {
+    logMsgL(SYSLOG_WARNING, "[HOOK] Slot %u: render overflow", slotIndex);
+    evt.subscriberMask &= (uint8_t)~(1u << slotIndex);
+    return -100;
+  }
+
+  int code = httpsRequest(methodName(s.method),
+                          s.url,
+                          s.contentType,
+                          s_renderBuf,
+                          s.authHeader,
+                          10000,
+                          nullptr);
+
+  s.lastFireMs   = millis();
+  s.lastHttpCode = (uint16_t)((code < 0 || code > 0xFFFF) ? 0xFFFF : code);
+  evt.subscriberMask &= (uint8_t)~(1u << slotIndex);
+
+  logMsg("[HOOK] Slot %u %s %s -> %d", slotIndex, methodName(s.method), s.url, code);
+  return code;
+}
+
+void webhookLoop() {
+  if (s_count == 0 || !s_queue || !s_renderBuf) return;
+
+  WebhookEvent& evt = s_queue[s_head];
+
+  // Find first subscribed slot that isn't currently rate-limited
+  for (uint8_t i = 0; i < MAX_WEBHOOKS; i++) {
+    if (!(evt.subscriberMask & (1u << i))) continue;
+    if (!g_webhooks[i].enabled) {
+      evt.subscriberMask &= (uint8_t)~(1u << i);
+      continue;
+    }
+    // Rate limit
+    if (g_webhooks[i].rateLimitSec > 0 && g_webhooks[i].lastFireMs > 0) {
+      uint32_t since = millis() - g_webhooks[i].lastFireMs;
+      if (since < (uint32_t)g_webhooks[i].rateLimitSec * 1000) {
+        // Drop this slot for this event — don't hold the queue waiting
+        evt.subscriberMask &= (uint8_t)~(1u << i);
+        continue;
+      }
+    }
+
+    deliverOne(i, evt);
+    // One HTTPS call per loop tick — yield
+    if (evt.subscriberMask == 0) {
+      s_head = (s_head + 1) % QUEUE_SIZE;
+      s_count--;
+    }
+    return;
+  }
+
+  // No remaining subscribers — dequeue
+  s_head = (s_head + 1) % QUEUE_SIZE;
+  s_count--;
+}
+
+int webhookFireTest(uint8_t slotIndex) {
+  if (slotIndex >= MAX_WEBHOOKS) return -1;
+  if (!s_renderBuf) return -2;
+  if (g_webhooks[slotIndex].url[0] == '\0') return -3;
+
+  // Synthetic event: pretend it's an ALARM on fermenter 0
+  WebhookEvent evt = {};
+  evt.level     = SYSLOG_WARNING;
+  evt.ts        = millis();
+  evt.fermIndex = 0;
+  evt.category  = WEBHOOK_CAT_ALARM;
+  evt.subscriberMask = (uint8_t)(1u << slotIndex);
+  strlcpy(evt.tag, "ALARM", sizeof(evt.tag));
+  strlcpy(evt.msg, "[ALARM] Test event from OurBrewbot", sizeof(evt.msg));
+
+  return deliverOne(slotIndex, evt);
 }
