@@ -18,7 +18,7 @@
 // Tag → category mapping
 // ============================================================
 
-uint32_t tagToCategory(const char* msg) {
+uint32_t tagToCategory(const char* msg, uint8_t level) {
   if (!msg) return 0;
   while (*msg == ' ') msg++;
   if (*msg != '[') return 0;
@@ -32,7 +32,9 @@ uint32_t tagToCategory(const char* msg) {
   tag[len] = '\0';
 
   if      (!strcmp(tag, "ALARM"))  return WEBHOOK_CAT_ALARM;
-  else if (!strcmp(tag, "TEMP"))   return WEBHOOK_CAT_ALARM;  // probe failures grouped with alarms
+  // [TEMP] WARNING+ = probe failure → alarm-class. Routine INFO probe
+  // readings (every 10s) are noise and never fire webhooks.
+  else if (!strcmp(tag, "TEMP"))   return (level <= SYSLOG_WARNING) ? WEBHOOK_CAT_ALARM : 0;
   else if (!strcmp(tag, "FERM"))   return WEBHOOK_CAT_FERM;
   else if (!strcmp(tag, "SYS"))    return WEBHOOK_CAT_SYS;
   else if (!strcmp(tag, "WIFI"))   return WEBHOOK_CAT_WIFI;
@@ -307,7 +309,7 @@ static uint8_t extractFermIndex(const char* msg) {
 void webhookEnqueue(uint8_t level, const char* msg) {
   if (!s_queue || !msg) return;
 
-  uint32_t category = tagToCategory(msg);
+  uint32_t category = tagToCategory(msg, level);
   if (category == 0) return;
 
   uint8_t fermIndex = extractFermIndex(msg);

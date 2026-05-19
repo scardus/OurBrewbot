@@ -32,7 +32,10 @@ struct WebhookEvent {
 
 // Return the WEBHOOK_CAT_* bit corresponding to the [TAG] at the start of msg,
 // or 0 if the tag is unrecognised (in which case no webhook should fire).
-uint32_t tagToCategory(const char* msg);
+// `level` allows tag-specific severity gating: e.g. routine [TEMP] INFO
+// readings (10s probe polls) do not fire webhooks, but [TEMP] WARNING (probe
+// failure) does.
+uint32_t tagToCategory(const char* msg, uint8_t level);
 
 // Render `tmpl` into `out` (size outLen) using `evt` for variable substitution.
 // Returns rendered length on success, or -1 on overflow. The output is always
