@@ -13,6 +13,8 @@
 #include "Pins.h"
 #include "Profile.h"
 #include "Tilt.h"
+#include "Https.h"
+#include <umm_malloc/umm_heap_select.h>
 
 // Forward refs to global server (defined in .ino)
 extern ESP8266WebServer g_webServer;
@@ -87,6 +89,7 @@ void setupWebServer(ESP8266WebServer& server) {
 
   // Admin configuration page
   server.on("/admin",         HTTP_GET,  [&server]() { logApiCall(server); handleAdmin(server); });
+  server.on("/admin/https-test", HTTP_POST, [&server]() { logApiCall(server); handleHttpsTest(server); });
   server.on("/smartplugs",    HTTP_GET,  [&server]() { logApiCall(server); handleSmartPlugs(server); });
   server.on("/smartplug",     HTTP_POST, [&server]() { logApiCall(server); handleSmartPlugPost(server); });
   server.on("/smartplug/test",HTTP_POST, [&server]() { logApiCall(server); handleSmartPlugTest(server); });
@@ -1579,6 +1582,60 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
   saveSyslogConfig();
   logInit();  // re-resolve host with new config
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Syslog config saved\"}"));
+}
+
+// ============================================================
+// HTTPS TEST — POST /admin/https-test
+// Diagnostic endpoint to verify BearSSL + IRAM-heap allocation path.
+// Body: {"url":"https://...","method":"POST","contentType":"...","body":"...","authHeader":"..."}
+// ============================================================
+
+void handleHttpsTest(ESP8266WebServer& server) {
+  JsonDocument doc;
+  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
+    return;
+  }
+  const char* url = doc["url"] | "";
+  if (strlen(url) == 0) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"URL required\"}"), 400);
+    return;
+  }
+  if (strncmp(url, "https://", 8) != 0) {
+    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"URL must start with https://\"}"), 400);
+    return;
+  }
+  const char* method      = doc["method"]      | "POST";
+  const char* contentType = doc["contentType"] | "application/json";
+  const char* body        = doc["body"]        | "";
+  const char* authHeader  = doc["authHeader"]  | "";
+
+  size_t dramBefore = ESP.getFreeHeap();
+  size_t iramBefore;
+  { HeapSelectIram s; iramBefore = ESP.getFreeHeap(); }
+
+  logMsg("[HTTPS] Test %s %s", method, url);
+  uint32_t t0 = millis();
+  String response;
+  int code = httpsRequest(method, url, contentType, body, authHeader, 10000, &response);
+  uint32_t elapsed = millis() - t0;
+  logMsg("[HTTPS] Test result: %d (%u ms)", code, elapsed);
+
+  if (response.length() > 200) response.remove(200);
+
+  size_t dramAfter = ESP.getFreeHeap();
+  size_t iramAfter;
+  { HeapSelectIram s; iramAfter = ESP.getFreeHeap(); }
+
+  JsonDocument resp;
+  resp["httpCode"]      = code;
+  resp["timeMs"]        = elapsed;
+  resp["response"]      = response;
+  resp["dramBefore"]    = (uint32_t)dramBefore;
+  resp["dramAfter"]     = (uint32_t)dramAfter;
+  resp["iramBefore"]    = (uint32_t)iramBefore;
+  resp["iramAfter"]     = (uint32_t)iramAfter;
+  sendJsonDoc(server, resp);
 }
 
 // ============================================================

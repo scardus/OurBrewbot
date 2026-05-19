@@ -41,6 +41,7 @@ void handleNotFound(ESP8266WebServer& server);
 
 // Admin page
 void handleAdmin(ESP8266WebServer& server);
+void handleHttpsTest(ESP8266WebServer& server);
 void handleProbePost(ESP8266WebServer& server);
 void handleSmartPlugs(ESP8266WebServer& server);
 void handleSmartPlugPost(ESP8266WebServer& server);
