@@ -1240,6 +1240,7 @@ function loadSystemSettings() {
     html += '<button class="danger" onclick="resetWiFiSettings()">Reset WiFi Settings</button>';
     html += '<button class="danger" onclick="window.location.href=\'/rf/sniff\'">RF Sniffer</button>';
     html += '<button class="danger" onclick="window.location.href=\'/ble/sniff\'">BT Sniffer</button>';
+    html += '<button class="danger" onclick="window.location.href=\'/webhooks\'">Webhooks</button>';
     html += '<button class="danger" onclick="exportConfig()">Export Config</button>';
     html += '<button class="danger" onclick="byId(\'cfgImportFile\').click()">Import Config</button>';
     html += '<input type="file" id="cfgImportFile" accept=".json" style="display:none" onchange="importConfig(this)">';
@@ -1773,4 +1774,224 @@ void handleAdmin(ESP8266WebServer& server) {
   server.setContentLength(strlen_P(ADMIN_PAGE));
   server.send(200, "text/html", "");
   server.sendContent_P(ADMIN_PAGE);
+}
+
+// ============================================================
+// WEBHOOKS PAGE — GET /webhooks (HTML)
+// Data comes from GET /webhooks/list (JSON), saves via POST /webhook,
+// tests via POST /webhook/test.
+// ============================================================
+
+static const char WEBHOOKS_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
+<html><head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Webhooks - OurBrewbot</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px;max-width:880px;margin:0 auto}
+h2{color:#e94560;margin-bottom:6px}
+h3{color:#e94560;font-size:14px;margin-bottom:8px}
+p.intro{color:#aaa;font-size:13px;margin-bottom:14px}
+a{color:#53d8fb;text-decoration:none;font-size:13px}
+a:hover{text-decoration:underline}
+.card{background:#16213e;border:1px solid #333;border-radius:6px;margin-bottom:10px;overflow:hidden}
+.card-head{padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none}
+.card-head:hover{background:#1d2a4a}
+.card-head .arr{color:#888;font-size:11px;width:14px}
+.card-head .dot{width:8px;height:8px;border-radius:50%;background:#666}
+.card-head .dot.on{background:#4ade80}
+.card-head .lbl{font-weight:bold;font-size:13px;color:#e0e0e0}
+.card-head .ttl{color:#aaa;font-size:13px;flex:1}
+.card-head .sub{color:#666;font-size:11px}
+.card-body{padding:0 12px 12px 12px;display:none}
+.card.open .card-body{display:block}
+.card.open .card-head .arr{color:#e94560}
+.row{margin:8px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.row label{font-size:12px;color:#aaa;min-width:110px}
+.row input[type=text],.row input[type=number],.row select{
+  background:#0a1628;color:#e0e0e0;border:1px solid #333;border-radius:3px;padding:5px 8px;font-size:13px;font-family:inherit;flex:1;min-width:160px}
+.row input[type=text].wide{width:100%;flex-basis:100%}
+.row select{flex:0 0 auto}
+.row textarea{width:100%;background:#0a1628;color:#e0e0e0;border:1px solid #333;border-radius:3px;padding:6px 8px;font-family:monospace;font-size:12px;height:70px;resize:vertical}
+.row .num{flex:0 0 80px;min-width:0}
+.row.col{flex-direction:column;align-items:stretch}
+.row.col label{min-width:0}
+.cats{display:flex;flex-wrap:wrap;gap:4px 12px;padding:6px 0}
+.cats label{font-size:12px;color:#e0e0e0;min-width:0;display:flex;align-items:center;gap:4px}
+.btns{margin-top:10px}
+.btns button{background:#e94560;color:#fff;border:none;padding:6px 14px;border-radius:3px;font-size:12px;cursor:pointer;margin-right:6px}
+.btns button:hover{background:#c73650}
+.btns button.test{background:#2d4a6e}
+.btns button.test:hover{background:#3d5e8a}
+.msg{font-size:12px;margin-left:8px}
+.msg.ok{color:#4ade80}
+.msg.err{color:#e94560}
+pre.out{display:none;margin-top:8px;padding:8px;background:#0a1628;border:1px solid #333;border-radius:3px;font-family:monospace;font-size:11px;color:#e0e0e0;white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto}
+.tools{background:#16213e;border:1px solid #333;border-radius:6px;padding:12px;margin-bottom:12px}
+.tools button{background:#2d4a6e;color:#fff;border:none;padding:5px 12px;border-radius:3px;font-size:12px;cursor:pointer;margin:2px}
+.tools button:hover{background:#3d5e8a}
+.vars{font-family:monospace;font-size:11px;color:#aaa;background:#0a1628;padding:8px;border-radius:3px;margin-top:6px;display:none}
+.vars.open{display:block}
+.vars table{border-collapse:collapse;width:100%}
+.vars td{padding:1px 8px 1px 0;color:#53d8fb}
+.vars td.desc{color:#888}
+</style>
+</head><body>
+<h2>Webhooks</h2>
+<p class='intro'>Send event notifications to external services. Default: critical-only (WARNING+ severity, ALARM category). Use the Variables panel for substitutions inside the body template.</p>
+
+<div class='tools'>
+  <strong style='font-size:12px;color:#aaa'>Quickstart presets (fills the next empty slot):</strong><br>
+  <button onclick="preset('discord')">Discord</button>
+  <button onclick="preset('slack')">Slack</button>
+  <button onclick="preset('ntfy')">ntfy.sh</button>
+  <button onclick="preset('pushover')">Pushover</button>
+  <button onclick="preset('ifttt')">IFTTT</button>
+  <button onclick="preset('ha')">Home Assistant</button>
+  <button onclick="preset('custom')">Custom JSON</button>
+  <a href='#' onclick="toggleVars();return false" style='margin-left:12px'>Show variables ▾</a>
+  <div class='vars' id='varsPanel'>
+    <table>
+    <tr><td>$MSG / $JSON_MSG / $URL_MSG</td><td class='desc'>full message body</td></tr>
+    <tr><td>$TAG / $JSON_TAG / $URL_TAG</td><td class='desc'>e.g. ALARM, FERM, SYS</td></tr>
+    <tr><td>$LEVEL / $JSON_LEVEL / $URL_LEVEL</td><td class='desc'>severity name (WARNING, NOTICE, ...)</td></tr>
+    <tr><td>$TS / $JSON_TS / $URL_TS</td><td class='desc'>uptime ms</td></tr>
+    <tr><td>$DEVICE / $JSON_DEVICE / $URL_DEVICE</td><td class='desc'>ourbrewbot-CHIPID</td></tr>
+    <tr><td>$FERM_INDEX</td><td class='desc'>0..3 or empty</td></tr>
+    <tr><td>$FERM_NAME / $JSON_FERM_NAME / $URL_FERM_NAME</td><td class='desc'>fermenter name (empty if N/A)</td></tr>
+    <tr><td>$FERM_TEMP</td><td class='desc'>current beer temp (e.g. 22.4) or empty</td></tr>
+    <tr><td>$FERM_TARGET</td><td class='desc'>target temp midpoint or empty</td></tr>
+    </table>
+    <div style='margin-top:6px;color:#888'>Use $JSON_* inside JSON strings, $URL_* in form bodies or URL paths, $RAW only for text/plain.</div>
+  </div>
+</div>
+
+<div id='slots'></div>
+
+<p style='margin-top:12px'><a href='/admin'>&#8592; Admin</a></p>
+
+<script>
+var SEV=['0 EMERG','1 ALERT','2 CRIT','3 ERR','4 WARNING','5 NOTICE','6 INFO','7 DEBUG'];
+var CATS=['Alarm','Fermenter','System','WiFi','SmartPlug','Config','OTA','Profile'];
+var PRESETS={
+  discord:{name:'Discord',url:'https://discord.com/api/webhooks/PASTE/HERE',method:0,contentType:'application/json',
+    bodyTemplate:'{"content":"[$LEVEL] $JSON_TAG $JSON_MSG"}',authHeader:''},
+  slack:{name:'Slack',url:'https://hooks.slack.com/services/PASTE/HERE',method:0,contentType:'application/json',
+    bodyTemplate:'{"text":"[$LEVEL] $JSON_TAG $JSON_MSG"}',authHeader:''},
+  ntfy:{name:'ntfy.sh',url:'https://ntfy.sh/your-topic',method:0,contentType:'text/plain',
+    bodyTemplate:'$MSG',authHeader:'Title: OurBrewbot $TAG'},
+  pushover:{name:'Pushover',url:'https://api.pushover.net/1/messages.json',method:0,contentType:'application/x-www-form-urlencoded',
+    bodyTemplate:'token=APP_TOKEN&user=USER_KEY&message=$URL_MSG&title=OurBrewbot+$URL_TAG&priority=1',authHeader:''},
+  ifttt:{name:'IFTTT',url:'https://maker.ifttt.com/trigger/EVENT/with/key/YOUR_KEY',method:0,contentType:'application/json',
+    bodyTemplate:'{"value1":"$JSON_TAG","value2":"$JSON_LEVEL","value3":"$JSON_MSG"}',authHeader:''},
+  ha:{name:'Home Assistant',url:'https://homeassistant.local:8123/api/webhook/brewbot',method:0,contentType:'application/json',
+    bodyTemplate:'{"event":"$JSON_TAG","level":"$JSON_LEVEL","msg":"$JSON_MSG","ferm":$FERM_INDEX}',authHeader:''},
+  custom:{name:'Custom',url:'https://your-endpoint.example/hook',method:0,contentType:'application/json',
+    bodyTemplate:'{"ts":$TS,"level":"$JSON_LEVEL","tag":"$JSON_TAG","msg":"$JSON_MSG","device":"$JSON_DEVICE"}',authHeader:''}
+};
+function $(id){return document.getElementById(id)}
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function severityOpts(sel){var o='';for(var i=0;i<SEV.length;i++)o+='<option value="'+i+'"'+(i==sel?' selected':'')+'>'+SEV[i]+'</option>';return o}
+function methodOpts(sel){var ms=['POST','GET','PUT'],o='';for(var i=0;i<3;i++)o+='<option value="'+i+'"'+(i==sel?' selected':'')+'>'+ms[i]+'</option>';return o}
+function catChecks(i,mask){var h='';for(var b=0;b<8;b++){var c=(mask&(1<<b))?' checked':'';h+='<label><input type="checkbox" id="cat'+i+'_'+b+'" onchange="markDirty('+i+')"'+c+'>'+CATS[b]+'</label>'}return h}
+function buildSlot(i,w){
+  return '<div class="card" id="card'+i+'">'+
+    '<div class="card-head" onclick="toggleCard('+i+')">'+
+      '<span class="arr">&#9654;</span>'+
+      '<span class="dot'+(w.enabled?' on':'')+'" id="dot'+i+'"></span>'+
+      '<span class="lbl">Slot '+(i+1)+'</span>'+
+      '<span class="ttl" id="ttl'+i+'">'+(esc(w.name)||'(unconfigured)')+'</span>'+
+      '<span class="sub" id="sub'+i+'">'+statusSummary(w)+'</span>'+
+    '</div>'+
+    '<div class="card-body">'+
+      '<div class="row"><label>Enabled</label><input type="checkbox" id="en'+i+'"'+(w.enabled?' checked':'')+' onchange="markDirty('+i+')"></div>'+
+      '<div class="row"><label>Name</label><input type="text" id="nm'+i+'" maxlength="23" value="'+esc(w.name)+'" oninput="markDirty('+i+')"></div>'+
+      '<div class="row col"><label>URL</label><input type="text" class="wide" id="url'+i+'" maxlength="159" value="'+esc(w.url)+'" oninput="markDirty('+i+')"></div>'+
+      '<div class="row"><label>Method</label><select id="mt'+i+'" onchange="markDirty('+i+')">'+methodOpts(w.method)+'</select>'+
+        '<label style="min-width:90px">Content-Type</label><input type="text" id="ct'+i+'" maxlength="39" value="'+esc(w.contentType)+'" oninput="markDirty('+i+')"></div>'+
+      '<div class="row col"><label>Body template (max 199 chars)</label><textarea id="tmpl'+i+'" maxlength="199" oninput="markDirty('+i+')">'+esc(w.bodyTemplate)+'</textarea></div>'+
+      '<div class="row col"><label>Auth header (optional)</label><input type="text" class="wide" id="ah'+i+'" maxlength="79" placeholder="e.g. Authorization: Bearer ..." value="'+esc(w.authHeader)+'" oninput="markDirty('+i+')"></div>'+
+      '<div class="row"><label>Min severity</label><select id="ml'+i+'" onchange="markDirty('+i+')">'+severityOpts(w.minLevel)+'</select>'+
+        '<label style="min-width:90px">Rate limit (s)</label><input type="number" class="num" id="rl'+i+'" min="0" max="3600" value="'+w.rateLimitSec+'" oninput="markDirty('+i+')"></div>'+
+      '<div class="row col"><label>Event categories</label><div class="cats">'+catChecks(i,w.eventMask)+'</div></div>'+
+      '<div class="btns"><button onclick="save('+i+')">Save</button><button class="test" onclick="testSlot('+i+')">Test</button><span class="msg" id="msg'+i+'"></span></div>'+
+      '<pre class="out" id="out'+i+'"></pre>'+
+    '</div>'+
+  '</div>';
+}
+function statusSummary(w){
+  if(!w.enabled)return 'disabled';
+  var parts=[];
+  var cats=[];
+  for(var b=0;b<8;b++)if(w.eventMask&(1<<b))cats.push(CATS[b]);
+  if(cats.length)parts.push(cats.join(','));
+  parts.push(SEV[w.minLevel].split(' ')[1]+'+');
+  if(w.lastHttpCode)parts.push('last HTTP '+w.lastHttpCode);
+  return parts.join(' · ');
+}
+function toggleCard(i){var c=$('card'+i);c.classList.toggle('open');var a=c.querySelector('.arr');a.innerHTML=c.classList.contains('open')?'&#9660;':'&#9654;';}
+function toggleVars(){$('varsPanel').classList.toggle('open')}
+function markDirty(i){$('msg'+i).textContent='unsaved';$('msg'+i).className='msg err';$('dot'+i).className='dot'+($('en'+i).checked?' on':'')}
+function gather(i){
+  var mask=0;for(var b=0;b<8;b++)if($('cat'+i+'_'+b).checked)mask|=(1<<b);
+  return{index:i,enabled:$('en'+i).checked,name:$('nm'+i).value,url:$('url'+i).value,
+    method:parseInt($('mt'+i).value),contentType:$('ct'+i).value,authHeader:$('ah'+i).value,
+    bodyTemplate:$('tmpl'+i).value,minLevel:parseInt($('ml'+i).value),
+    eventMask:mask,rateLimitSec:parseInt($('rl'+i).value)||0};
+}
+function save(i){
+  var b=gather(i);
+  fetch('/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(function(r){return r.json()})
+    .then(function(d){$('msg'+i).textContent=d.msg;$('msg'+i).className='msg '+(d.status=='ok'?'ok':'err');$('ttl'+i).textContent=b.name||'(unconfigured)';$('sub'+i).textContent=statusSummary(b)})
+    .catch(function(e){$('msg'+i).textContent='Error: '+e;$('msg'+i).className='msg err'});
+}
+function testSlot(i){
+  $('msg'+i).textContent='Testing (TLS handshake 2-8 s)...';$('msg'+i).className='msg ok';$('out'+i).style.display='none';
+  fetch('/webhook/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i})})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      $('msg'+i).textContent=d.msg+' ('+d.timeMs+' ms)';
+      $('msg'+i).className='msg '+(d.status=='ok'?'ok':'err');
+      $('out'+i).textContent='HTTP '+d.httpCode+'\nElapsed: '+d.timeMs+' ms';
+      $('out'+i).style.display='block';
+    })
+    .catch(function(e){$('msg'+i).textContent='Error: '+e;$('msg'+i).className='msg err'});
+}
+function preset(p){
+  var t=PRESETS[p];if(!t)return;
+  // find first empty (no url) slot
+  for(var i=0;i<4;i++){
+    if(!$('url'+i).value){
+      $('nm'+i).value=t.name;$('url'+i).value=t.url;$('mt'+i).value=t.method;
+      $('ct'+i).value=t.contentType;$('tmpl'+i).value=t.bodyTemplate;$('ah'+i).value=t.authHeader||'';
+      $('ttl'+i).textContent=t.name;
+      markDirty(i);
+      var card=$('card'+i);if(!card.classList.contains('open'))toggleCard(i);
+      card.scrollIntoView({behavior:'smooth',block:'start'});
+      return;
+    }
+  }
+  alert('All 4 slots already have a URL — clear one first.');
+}
+function load(){
+  fetch('/webhooks/list').then(function(r){return r.json()}).then(function(d){
+    var html='';for(var i=0;i<d.webhooks.length;i++)html+=buildSlot(i,d.webhooks[i]);
+    $('slots').innerHTML=html;
+    // open first enabled, else first
+    var first=-1;for(var i=0;i<d.webhooks.length;i++)if(d.webhooks[i].enabled){first=i;break}
+    if(first<0)first=0;
+    toggleCard(first);
+  });
+}
+load();
+</script>
+</body></html>
+)rawliteral";
+
+void handleWebhooksPage(ESP8266WebServer& server) {
+  server.setContentLength(strlen_P(WEBHOOKS_PAGE));
+  server.send(200, "text/html", "");
+  server.sendContent_P(WEBHOOKS_PAGE);
 }

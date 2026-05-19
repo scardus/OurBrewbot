@@ -108,7 +108,8 @@ void setupWebServer(ESP8266WebServer& server) {
   server.on("/mqtt/discover",    HTTP_POST, [&server]() { logApiCall(server); handleMqttDiscover(server); });
   server.on("/syslog",           HTTP_GET,  [&server]() { logApiCall(server); handleSyslogConfig(server); });
   server.on("/syslog",           HTTP_POST, [&server]() { logApiCall(server); handleSyslogConfigPost(server); });
-  server.on("/webhooks",         HTTP_GET,  [&server]() { logApiCall(server); handleWebhooks(server); });
+  server.on("/webhooks",         HTTP_GET,  [&server]() { logApiCall(server); handleWebhooksPage(server); });
+  server.on("/webhooks/list",    HTTP_GET,  [&server]() { logApiCall(server); handleWebhooks(server); });
   server.on("/webhook",          HTTP_POST, [&server]() { logApiCall(server); handleWebhookPost(server); });
   server.on("/webhook/test",     HTTP_POST, [&server]() { logApiCall(server); handleWebhookTest(server); });
 

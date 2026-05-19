@@ -42,7 +42,8 @@ void handleNotFound(ESP8266WebServer& server);
 // Admin page
 void handleAdmin(ESP8266WebServer& server);
 void handleHttpsTest(ESP8266WebServer& server);
-void handleWebhooks(ESP8266WebServer& server);
+void handleWebhooks(ESP8266WebServer& server);       // JSON list at /webhooks/list
+void handleWebhooksPage(ESP8266WebServer& server);   // HTML page at /webhooks
 void handleWebhookPost(ESP8266WebServer& server);
 void handleWebhookTest(ESP8266WebServer& server);
 void handleProbePost(ESP8266WebServer& server);
