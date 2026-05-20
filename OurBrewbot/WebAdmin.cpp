@@ -603,6 +603,7 @@ function loadFermenters() {
       html += row('Ceiling Temp',     numInput ('ct' + i, f.CeilingTemp, 0.1));
       html += row('Floor Temp',       numInput ('ft' + i, f.FloorTemp,   0.1));
       html += row('Hysteresis',       numInput ('hy' + i, f.Hysteresis,  0.1));
+      html += row('Alarm Tolerance',  numInput ('at' + i, f.AlarmTolerance, 0.1) + ' &deg;' + tempUnit + ' <span style="color:#888;font-size:11px">(deviation that fires alarm immediately; smaller deviations wait the global Alarm Delay)</span>');
       html += row('Compressor Delay', numInput ('cd' + i, f.CompressorDelay) + ' min');
       html += row('Yeast',            textInput('yn' + i, f.YeastName));
       html += '<div class="row"><label>OG</label><input type="number" step="0.001" min="1.0" max="1.2" id="og' + i + '" value="' + f.OG + '" style="width:80px"> <label style="min-width:auto">TG</label><input type="number" step="0.001" min="1.0" max="1.2" id="tg' + i + '" value="' + f.TG + '" style="width:80px"></div>';
@@ -678,6 +679,7 @@ function saveFerm(i) {
     CeilingTemp:     parseFloat(byId('ct' + i).value),
     FloorTemp:       parseFloat(byId('ft' + i).value),
     Hysteresis:      parseFloat(byId('hy' + i).value),
+    AlarmTolerance:  parseFloat(byId('at' + i).value),
     CompressorDelay: parseInt(byId('cd' + i).value),
     Power:           byId('pw' + i).checked,
     TempControl:     byId('tc' + i).checked,
@@ -1408,6 +1410,7 @@ function loadSystemSettings() {
     html += '<div class="row"><label>Resolution</label><select id="sres">';
     for (var r = 9; r <= 12; r++) html += '<option value="' + r + '"' + (d.Resolution == r ? ' selected' : '') + '>' + r + '-bit</option>';
     html += '</select></div>';
+    html += row('Alarm Delay',      numInput('sadwell', d.AlarmDwellSec || 600, null, 90) + ' s <span style="color:#888;font-size:11px">(mild deviations wait this long before alarming; severe deviations bypass it)</span>');
     html += row('<span style="color:#8b5cf6">Fermenter Debug Mode</span>', switchHtml('dbmode', dbg.DebugMode || false));
     html += '<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
     html += '</div>';
@@ -1461,8 +1464,9 @@ function loadSystemSettings() {
 // Save the global controller settings (temp unit, resolution, debug mode).
 function saveSettings() {
   var body = {
-    Unit:       parseInt(byId('su').value),
-    Resolution: parseInt(byId('sres').value)
+    Unit:          parseInt(byId('su').value),
+    Resolution:    parseInt(byId('sres').value),
+    AlarmDwellSec: parseInt(byId('sadwell').value)
   };
   fetch('/controller', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })

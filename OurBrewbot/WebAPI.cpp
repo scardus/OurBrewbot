@@ -250,6 +250,7 @@ void buildFermenterJson(JsonDocument& doc, uint8_t i) {
   doc["OG"]              = g_fermenters[i].og;
   doc["TG"]              = g_fermenters[i].tg;
   doc["Hysteresis"]      = g_fermenters[i].hysteresis;
+  doc["AlarmTolerance"]  = g_fermenters[i].alarmTolerance;
   doc["CompressorDelay"] = g_fermenters[i].compressorDelay;
   doc["TempControl"]     = g_fermenters[i].tempControl;
   doc["SGControl"]       = g_fermenters[i].sgControl;
@@ -367,6 +368,15 @@ void handleFermenter(ESP8266WebServer& server) {
         #undef VALIDATE_AND_SET
         #undef REJECT
 
+        if (!doc["AlarmTolerance"].isNull()) {
+          float v = doc["AlarmTolerance"];
+          if (v < 0.0f || v > 10.0f) {
+            sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"alarm tolerance out of range (0 to 10)\"}"), 400);
+            return;
+          }
+          g_fermenters[idx].alarmTolerance = v;
+        }
+
         if (!doc["Power"].isNull())           g_fermenters[idx].power           = doc["Power"];
         if (!doc["TempControl"].isNull())     g_fermenters[idx].tempControl     = doc["TempControl"];
         if (!doc["BeerName"].isNull())        strlcpy(g_fermenters[idx].beerName,      doc["BeerName"],      sizeof(g_fermenters[0].beerName));
@@ -459,6 +469,7 @@ void buildControllerJson(JsonDocument& doc) {
   doc["BrewServiceId"] = g_globalConfig.brewServiceId;
   doc["NotifyOn"]      = g_globalConfig.notifyOn;
   doc["Resolution"]    = g_globalConfig.resolution;
+  doc["AlarmDwellSec"] = g_globalConfig.alarmDwellSec;
   doc["FirmwareVersion"] = FW_VERSION;
   doc["ChipId"]        = String(ESP.getChipId(), HEX);
   doc["FreeHeap"]      = ESP.getFreeHeap();
@@ -491,6 +502,7 @@ void handleController(ESP8266WebServer& server) {
     if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
       if (!doc["Unit"].isNull())       { uint8_t v = doc["Unit"];       if (v == UNIT_CELSIUS || v == UNIT_FAHRENHEIT) g_globalConfig.unit       = v; }
       if (!doc["Resolution"].isNull()) { uint8_t v = doc["Resolution"]; if (v >= 9 && v <= 12)                        g_globalConfig.resolution = v; }
+      if (!doc["AlarmDwellSec"].isNull()) { uint32_t v = doc["AlarmDwellSec"]; if (v <= 3600) g_globalConfig.alarmDwellSec = (uint16_t)v; }
       if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
       if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
       if (!doc["BrewServiceId"].isNull()) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"], sizeof(g_globalConfig.brewServiceId));

@@ -13,6 +13,11 @@ static unsigned long s_lastCoolingStop[MAX_FERMENTERS] = {0};
 // Per-fermenter control state for the hysteresis state machine
 static uint8_t s_state[MAX_FERMENTERS] = {STATUS_IDLE};  // STATUS_IDLE / STATUS_HEATING / STATUS_COOLING
 
+// millis() when this fermenter first went out-of-band (and stayed there).
+// 0 means "currently in band". Resets the instant temp returns to band.
+// Runtime-only — fresh dwell on every boot.
+static uint32_t s_outOfRangeSince[MAX_FERMENTERS] = {0};
+
 // ============================================================
 // MAIN PROCESSOR
 // ============================================================
@@ -176,21 +181,48 @@ void checkFermenterAlarm(uint8_t i) {
   float floor_    = g_fermenters[i].floorTemp;
   float tolerance = g_fermenters[i].alarmTolerance;
 
-  bool alarmActive = false;
+  // Model A: tolerance = severe-deviation threshold. Mild deviations wait
+  // for the global dwell; severe deviations bypass it.
+  float overBy  = temp - ceiling;
+  float underBy = floor_ - temp;
+  float deviation = (overBy > underBy) ? overBy : underBy;
 
-  if (temp > ceiling + tolerance) {
-    logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): over temperature threshold! %.1f > %.1f",
-      i, g_fermenters[i].fermenterName, temp, ceiling + tolerance);
-    alarmActive = true;
-  } else if (temp < floor_ - tolerance) {
-    logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): under temperature threshold! %.1f < %.1f",
-      i, g_fermenters[i].fermenterName, temp, floor_ - tolerance);
-    alarmActive = true;
+  bool alarmActive = false;
+  bool overTemp    = (overBy > underBy);
+
+  if (deviation > 0.0f) {
+    if (deviation >= tolerance) {
+      // Severe — fire immediately, bypass dwell
+      if (overTemp) {
+        logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): over temperature threshold (severe)! %.1f > %.1f",
+          i, g_fermenters[i].fermenterName, temp, ceiling);
+      } else {
+        logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): under temperature threshold (severe)! %.1f < %.1f",
+          i, g_fermenters[i].fermenterName, temp, floor_);
+      }
+      alarmActive = true;
+    } else {
+      // Mild — start (or continue) the dwell timer
+      if (s_outOfRangeSince[i] == 0) s_outOfRangeSince[i] = millis();
+      uint32_t dwellMs = (uint32_t)g_globalConfig.alarmDwellSec * 1000UL;
+      if ((millis() - s_outOfRangeSince[i]) >= dwellMs) {
+        if (overTemp) {
+          logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): over temperature threshold (dwell %us elapsed)! %.1f > %.1f",
+            i, g_fermenters[i].fermenterName, g_globalConfig.alarmDwellSec, temp, ceiling);
+        } else {
+          logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): under temperature threshold (dwell %us elapsed)! %.1f < %.1f",
+            i, g_fermenters[i].fermenterName, g_globalConfig.alarmDwellSec, temp, floor_);
+        }
+        alarmActive = true;
+      }
+    }
+  } else {
+    // Back in band — reset dwell timer
+    s_outOfRangeSince[i] = 0;
   }
 
   g_fermenters[i].alarm = alarmActive;
 
-  // To re-add notifications: send HTTP POST to webhook here
   if (alarmActive && g_globalConfig.notifyOn) {
     logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): alarm active", i, g_fermenters[i].fermenterName);
   }

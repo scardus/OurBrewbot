@@ -96,6 +96,7 @@ bool loadGlobalConfig() {
   g_globalConfig.mbbHardReset   = doc["mbbhardreset"]  | 0;
   g_globalConfig.tuningChartNo  = doc["tuning_chart_no"] | 0;
   g_globalConfig.resolution     = doc["resolution"]    | 11;
+  g_globalConfig.alarmDwellSec  = doc["alarm_dwell_sec"] | 600;
 
   return true;
 }
@@ -121,6 +122,7 @@ bool saveGlobalConfig() {
   doc["mbbhardreset"]    = g_globalConfig.mbbHardReset;
   doc["tuning_chart_no"] = g_globalConfig.tuningChartNo;
   doc["resolution"]      = g_globalConfig.resolution;
+  doc["alarm_dwell_sec"] = g_globalConfig.alarmDwellSec;
 
   return saveJsonDocSafe(doc, FILE_GLOBAL, FILE_GLOBAL_BKP);
 }
@@ -154,7 +156,7 @@ bool loadFermenterConfig() {
     g_fermenters[i].tempControl     = doc["TempControl"][i]    | true;
     g_fermenters[i].sgControl       = doc["SGControl"][i]      | false;
     g_fermenters[i].power           = doc["Power"][i]          | false;
-    g_fermenters[i].alarmTolerance  = doc["AlarmTolerance"][i] | 0.0f;
+    g_fermenters[i].alarmTolerance  = doc["AlarmTolerance"][i] | 3.0f;
     g_fermenters[i].ambientSG       = doc["AmbientSG"][i]      | 0.0f;
     g_fermenters[i].alarm           = doc["Alarm"][i]          | false;
     g_fermenters[i].profileNo       = doc["ProfileNo"][i]      | 0;
@@ -792,6 +794,25 @@ void loadAllConfig() {
   loadMqttConfig();
   loadSyslogConfig();
   loadWebhookConfig();
+
+  // One-shot migration: bump any AlarmTolerance==0 to 3.0 (the new default
+  // for the severe-deviation escape hatch). Old configs never exposed this
+  // field, so 0.0 was always an unset state. Guarded by g_globalConfig.migrated
+  // so we don't re-bump if the user deliberately sets 0 later.
+  if (!g_globalConfig.migrated) {
+    bool changed = false;
+    for (int i = 0; i < MAX_FERMENTERS; i++) {
+      if (g_fermenters[i].alarmTolerance == 0.0f) {
+        g_fermenters[i].alarmTolerance = 3.0f;
+        changed = true;
+      }
+    }
+    if (changed) saveFermenterConfig();
+    g_globalConfig.migrated = true;
+    saveGlobalConfig();
+    logMsg("[CFG] One-shot migration applied: AlarmTolerance defaults set to 3.0");
+  }
+
   logMsg("[CFG] All configuration loaded");
 }
 
@@ -824,6 +845,7 @@ void initDefaultGlobalConfig() {
   g_globalConfig.plugCategory = true;
   g_globalConfig.fNo        = 1;
   g_globalConfig.resolution = 11;
+  g_globalConfig.alarmDwellSec = 600;
 }
 
 void initDefaultFermenterConfig() {
@@ -843,6 +865,7 @@ void initDefaultFermenterConfig() {
     g_fermenters[i].power           = false;
     g_fermenters[i].series1 = 1; g_fermenters[i].series2 = 3;
     g_fermenters[i].series3 = 8; g_fermenters[i].series4 = 2;
+    g_fermenters[i].alarmTolerance = 3.0f;
   }
 }
 

@@ -205,6 +205,7 @@ struct GlobalConfig {
   uint8_t  mbbHardReset;        // MyBrewBuddy hard reset flag
   uint8_t  tuningChartNo;       // tuning chart number
   uint8_t  resolution;          // DS18B20 resolution 9-12 bits (e.g. 11)
+  uint16_t alarmDwellSec;       // dwell time before mild deviations raise an alarm
 };
 
 // ============================================================
