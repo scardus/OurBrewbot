@@ -563,6 +563,34 @@ function numInput(id, value, step, width) {
   return '<input type="number"' + stepAttr + ' id="' + id + '" value="' + value + '"' + styleAttr + '>';
 }
 
+// Render a collapsible card: header with arrow + dot + title + status summary, body hidden by default.
+function collCard(id, title, enabled, summary, body, opened) {
+  return '<div class="card" id="cc-' + id + '" style="padding:0">' +
+    '<div onclick="collToggle(\'' + id + '\')" style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none">' +
+      '<span class="arr" id="ccarr-' + id + '" style="color:#888;width:14px">' + (opened ? '&#9660;' : '&#9654;') + '</span>' +
+      '<span style="width:8px;height:8px;border-radius:50%;background:' + (enabled ? '#4ade80' : '#666') + '" id="ccdot-' + id + '"></span>' +
+      '<span style="font-weight:bold;font-size:13px;flex:1" id="cctitle-' + id + '">' + title + '</span>' +
+      '<span style="color:#666;font-size:11px" id="ccsub-' + id + '">' + (summary || '') + '</span>' +
+    '</div>' +
+    '<div id="ccbody-' + id + '" style="display:' + (opened ? 'block' : 'none') + ';padding:0 12px 12px 12px">' + body + '</div>' +
+  '</div>';
+}
+
+// Expand or collapse a collCard by id.
+function collToggle(id) {
+  var b = byId('ccbody-' + id), a = byId('ccarr-' + id);
+  if (b.style.display == 'none') { b.style.display = 'block'; a.innerHTML = '&#9660;'; }
+  else                            { b.style.display = 'none';  a.innerHTML = '&#9654;'; }
+}
+
+// Update a collCard header's dot colour, title, and status summary after a save.
+function collUpdate(id, enabled, summary, title) {
+  var d = byId('ccdot-' + id), s = byId('ccsub-' + id), t = byId('cctitle-' + id);
+  if (d) d.style.background = enabled ? '#4ade80' : '#666';
+  if (s) s.textContent = summary || '';
+  if (t && title !== undefined) t.textContent = title;
+}
+
 // ---- FERMENTERS TAB ----
 var brewServices = [];
 var mqttEnabled = false;
@@ -1181,6 +1209,19 @@ function fmtUptime(m) {
   return mn + 'm';
 }
 
+// Build the status summary string for a brew-service slot (used in collapsed-card header).
+function svcSummary(sv) {
+  if (!sv.enabled) return 'disabled';
+  return (sv.serviceId ? 'enabled · id set' : 'enabled · no credentials');
+}
+
+// Build the status summary string for the MQTT card (used in collapsed-card header).
+function mqttSummary(mq) {
+  if (!mq.enabled) return 'disabled';
+  if (!mq.host)    return 'enabled · no host';
+  return 'enabled · ' + mq.host + ':' + (mq.port || 1883);
+}
+
 // Render the Reporting tab: Brewer's Friend / Brewfather / MQTT settings cards.
 function loadReporting() {
   Promise.all([
@@ -1189,33 +1230,37 @@ function loadReporting() {
   ]).then(function (res) {
     var svcs = res[0].services || [];
     var mq = res[1];
+    var firstEnabled = -1;
+    for (var i = 0; i < svcs.length; i++) if (svcs[i].enabled) { firstEnabled = i; break; }
+    if (firstEnabled < 0 && mq.enabled) firstEnabled = svcs.length; // MQTT card
+    if (firstEnabled < 0) firstEnabled = 0;
     var html = '';
     for (var s = 0; s < svcs.length; s++) {
       var sv = svcs[s];
-      html += '<div class="card"><h3>' + sv.name + '</h3>';
-      html += row('Enabled',     switchHtml('sven' + s, sv.enabled));
-      html += row('Device Name', textInput('svn' + s, sv.deviceName || 'OurBrewbot', 180));
-      html += row(bsIdLabel[s],  textInput('svi' + s, sv.serviceId || '',           260));
-      html += '<button class="save" onclick="saveSvc(' + s + ')">Save</button> ';
-      html += '<button class="test" onclick="testSvc(' + s + ')">Test</button> ';
-      html += '<span class="msg" id="svm' + s + '"></span>';
-      html += '</div>';
+      var body = '';
+      body += row('Enabled',     switchHtml('sven' + s, sv.enabled));
+      body += row('Device Name', textInput('svn' + s, sv.deviceName || 'OurBrewbot', 180));
+      body += row(bsIdLabel[s],  textInput('svi' + s, sv.serviceId || '',           260));
+      body += '<div style="margin-top:8px"><button class="save" onclick="saveSvc(' + s + ')">Save</button> ';
+      body += '<button class="test" onclick="testSvc(' + s + ')">Test</button> ';
+      body += '<span class="msg" id="svm' + s + '"></span></div>';
+      html += collCard('svc' + s, sv.name, sv.enabled, svcSummary(sv), body, s == firstEnabled);
     }
-    html += '<div class="card"><h3>MQTT</h3>';
-    html += row('Enabled',          switchHtml('mqen',  mq.enabled));
-    html += row('Broker Host',       textInput ('mqhost',  mq.host     || '',          220));
-    html += row('Port',              numInput  ('mqport',  mq.port     || 1883, null,   80));
-    html += row('Username',          textInput ('mquser',  mq.username || '',          180));
-    html += '<div class="row"><label>Password</label><input type="password" id="mqpass" value="' + (mq.password || '') + '" style="width:180px"></div>';
-    html += row('Base Topic',        textInput ('mqtopic', mq.baseTopic || 'ourbrewbot', 180));
-    html += row('HA Discovery',      switchHtml('mqha',  mq.haDiscovery  || false));
-    html += row('Allow HA Control',  switchHtml('mqctl', mq.allowControl || false));
-    html += row('Publish Logs',      switchHtml('mqlog', mq.logEnabled   || false));
-    html += '<button class="save" onclick="saveMqtt()">Save</button> ';
-    html += '<button class="test" onclick="testMqtt()">Test</button> ';
-    html += '<button class="test" onclick="discoverMqtt()">Discover</button> ';
-    html += '<span class="msg" id="mqm"></span>';
-    html += '</div>';
+    var mqBody = '';
+    mqBody += row('Enabled',          switchHtml('mqen',  mq.enabled));
+    mqBody += row('Broker Host',       textInput ('mqhost',  mq.host     || '',          220));
+    mqBody += row('Port',              numInput  ('mqport',  mq.port     || 1883, null,   80));
+    mqBody += row('Username',          textInput ('mquser',  mq.username || '',          180));
+    mqBody += '<div class="row"><label>Password</label><input type="password" id="mqpass" value="' + (mq.password || '') + '" style="width:180px"></div>';
+    mqBody += row('Base Topic',        textInput ('mqtopic', mq.baseTopic || 'ourbrewbot', 180));
+    mqBody += row('HA Discovery',      switchHtml('mqha',  mq.haDiscovery  || false));
+    mqBody += row('Allow HA Control',  switchHtml('mqctl', mq.allowControl || false));
+    mqBody += row('Publish Logs',      switchHtml('mqlog', mq.logEnabled   || false));
+    mqBody += '<div style="margin-top:8px"><button class="save" onclick="saveMqtt()">Save</button> ';
+    mqBody += '<button class="test" onclick="testMqtt()">Test</button> ';
+    mqBody += '<button class="test" onclick="discoverMqtt()">Discover</button> ';
+    mqBody += '<span class="msg" id="mqm"></span></div>';
+    html += collCard('mqtt', 'MQTT', mq.enabled, mqttSummary(mq), mqBody, svcs.length == firstEnabled);
     byId('t6').innerHTML = html;
   });
 }
@@ -1252,47 +1297,34 @@ function whStatusSummary(w){
   if(w.lastHttpCode)parts.push('last HTTP '+w.lastHttpCode);
   return parts.join(' · ');
 }
-function whBuildSlot(i,w){
+function whBuildSlot(i,w,opened){
   var presetBtns='';
   var keys=['discord','slack','ntfy','pushover','ifttt','ha','custom'];
   for(var k=0;k<keys.length;k++){
     presetBtns+='<button class="test" onclick="whPreset('+i+',\''+keys[k]+'\')">'+WH_PRESETS[keys[k]].name+'</button> ';
   }
-  return '<div class="card" id="whcard'+i+'" style="padding:0">'+
-    '<div onclick="whToggle('+i+')" style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none">'+
-      '<span class="arr" id="wharr'+i+'" style="color:#888;width:14px">&#9654;</span>'+
-      '<span style="width:8px;height:8px;border-radius:50%;background:'+(w.enabled?'#4ade80':'#666')+'" id="whdot'+i+'"></span>'+
-      '<span style="font-weight:bold;font-size:13px">Slot '+(i+1)+'</span>'+
-      '<span style="color:#aaa;font-size:13px;flex:1" id="whttl'+i+'">'+(whEsc(w.name)||'(unconfigured)')+'</span>'+
-      '<span style="color:#666;font-size:11px" id="whsub'+i+'">'+whStatusSummary(w)+'</span>'+
+  var title='Slot '+(i+1)+' — '+(whEsc(w.name)||'(unconfigured)');
+  var body=
+    '<div style="margin:6px 0 10px 0">'+
+      '<a href="#" onclick="whTogglePresets('+i+');return false" id="whpresettoggle'+i+'" class="whlink" style="font-size:12px">&#9654; Apply preset (overwrites this slot)</a>'+
+      '<div id="whpresets'+i+'" style="display:none;margin-top:6px">'+presetBtns+'</div>'+
     '</div>'+
-    '<div id="whbody'+i+'" style="display:none;padding:0 12px 12px 12px">'+
-      '<div style="margin:6px 0 10px 0">'+
-        '<a href="#" onclick="whTogglePresets('+i+');return false" id="whpresettoggle'+i+'" class="whlink" style="font-size:12px">&#9654; Apply preset (overwrites this slot)</a>'+
-        '<div id="whpresets'+i+'" style="display:none;margin-top:6px">'+presetBtns+'</div>'+
-      '</div>'+
-      '<div class="row"><label>Enabled</label>'+switchHtml('when'+i,w.enabled)+'</div>'+
-      '<div class="row"><label>Name</label>'+textInput('whnm'+i,w.name,200)+'</div>'+
-      '<div class="row"><label>URL</label><input type="text" id="whurl'+i+'" maxlength="159" value="'+whEsc(w.url)+'" oninput="markDirty()" style="flex:1;min-width:240px"></div>'+
-      '<div class="row"><label>Method</label><select id="whmt'+i+'" onchange="markDirty()">'+whMethodOpts(w.method)+'</select>'+
-        '<label style="min-width:auto">Content-Type</label><input type="text" id="whct'+i+'" maxlength="39" value="'+whEsc(w.contentType)+'" oninput="markDirty()" style="width:200px"></div>'+
-      '<div class="row"><label>Body template</label></div>'+
-      '<textarea id="whtmpl'+i+'" maxlength="199" oninput="markDirty()" style="width:100%;height:70px;background:#0a1628;color:#e0e0e0;border:1px solid #333;border-radius:3px;font-family:monospace;font-size:12px;padding:6px 8px;resize:vertical">'+whEsc(w.bodyTemplate)+'</textarea>'+
-      '<div class="row"><label>Auth header</label><input type="text" id="whah'+i+'" maxlength="79" placeholder="optional: Authorization: Bearer ..." value="'+whEsc(w.authHeader)+'" oninput="markDirty()" style="flex:1;min-width:240px"></div>'+
-      '<div class="row"><label>Min severity</label><select id="whml'+i+'" onchange="markDirty()">'+whSevOpts(w.minLevel)+'</select>'+
-        '<label style="min-width:auto">Rate limit (s)</label><input type="number" id="whrl'+i+'" min="0" max="3600" value="'+w.rateLimitSec+'" oninput="markDirty()" style="width:80px"></div>'+
-      '<div class="row"><label>Categories</label><div style="flex:1">'+whCatChecks(i,w.eventMask)+'</div></div>'+
-      '<div style="margin-top:8px"><button class="save" onclick="whSave('+i+')">Save</button> '+
-        '<button class="test" onclick="whTest('+i+')">Test</button> '+
-        '<span class="msg" id="whmsg'+i+'"></span></div>'+
-      '<pre id="whout'+i+'" style="display:none;margin-top:8px;padding:8px;background:#0a1628;border:1px solid #333;border-radius:3px;font-family:monospace;font-size:11px;color:#e0e0e0;white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto"></pre>'+
-    '</div>'+
-  '</div>';
-}
-function whToggle(i){
-  var b=byId('whbody'+i),a=byId('wharr'+i);
-  if(b.style.display=='none'){b.style.display='block';a.innerHTML='&#9660;'}
-  else {b.style.display='none';a.innerHTML='&#9654;'}
+    '<div class="row"><label>Enabled</label>'+switchHtml('when'+i,w.enabled)+'</div>'+
+    '<div class="row"><label>Name</label>'+textInput('whnm'+i,w.name,200)+'</div>'+
+    '<div class="row"><label>URL</label><input type="text" id="whurl'+i+'" maxlength="159" value="'+whEsc(w.url)+'" oninput="markDirty()" style="flex:1;min-width:240px"></div>'+
+    '<div class="row"><label>Method</label><select id="whmt'+i+'" onchange="markDirty()">'+whMethodOpts(w.method)+'</select>'+
+      '<label style="min-width:auto">Content-Type</label><input type="text" id="whct'+i+'" maxlength="39" value="'+whEsc(w.contentType)+'" oninput="markDirty()" style="width:200px"></div>'+
+    '<div class="row"><label>Body template</label></div>'+
+    '<textarea id="whtmpl'+i+'" maxlength="199" oninput="markDirty()" style="width:100%;height:70px;background:#0a1628;color:#e0e0e0;border:1px solid #333;border-radius:3px;font-family:monospace;font-size:12px;padding:6px 8px;resize:vertical">'+whEsc(w.bodyTemplate)+'</textarea>'+
+    '<div class="row"><label>Auth header</label><input type="text" id="whah'+i+'" maxlength="79" placeholder="optional: Authorization: Bearer ..." value="'+whEsc(w.authHeader)+'" oninput="markDirty()" style="flex:1;min-width:240px"></div>'+
+    '<div class="row"><label>Min severity</label><select id="whml'+i+'" onchange="markDirty()">'+whSevOpts(w.minLevel)+'</select>'+
+      '<label style="min-width:auto">Rate limit (s)</label><input type="number" id="whrl'+i+'" min="0" max="3600" value="'+w.rateLimitSec+'" oninput="markDirty()" style="width:80px"></div>'+
+    '<div class="row"><label>Categories</label><div style="flex:1">'+whCatChecks(i,w.eventMask)+'</div></div>'+
+    '<div style="margin-top:8px"><button class="save" onclick="whSave('+i+')">Save</button> '+
+      '<button class="test" onclick="whTest('+i+')">Test</button> '+
+      '<span class="msg" id="whmsg'+i+'"></span></div>'+
+    '<pre id="whout'+i+'" style="display:none;margin-top:8px;padding:8px;background:#0a1628;border:1px solid #333;border-radius:3px;font-family:monospace;font-size:11px;color:#e0e0e0;white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto"></pre>';
+  return collCard('wh'+i, title, w.enabled, whStatusSummary(w), body, !!opened);
 }
 function whTogglePresets(i){
   var p=byId('whpresets'+i),t=byId('whpresettoggle'+i);
@@ -1313,7 +1345,11 @@ function whSave(i){
   var b=whGather(i);
   fetch('/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
     .then(function(r){return r.json()})
-    .then(function(d){showMsg('whmsg'+i,d.msg,d.status=='ok');dirty=false;byId('whttl'+i).textContent=b.name||'(unconfigured)';byId('whsub'+i).textContent=whStatusSummary(b);byId('whdot'+i).style.background=b.enabled?'#4ade80':'#666'})
+    .then(function(d){
+      showMsg('whmsg'+i,d.msg,d.status=='ok');
+      dirty=false;
+      collUpdate('wh'+i, b.enabled, whStatusSummary(b), 'Slot '+(i+1)+' — '+(b.name||'(unconfigured)'));
+    })
     .catch(function(e){showMsg('whmsg'+i,'Error: '+e,false)});
 }
 function whTest(i){
@@ -1336,7 +1372,7 @@ function whPreset(i,p){
   byId('whct'+i).value=t.contentType;
   byId('whtmpl'+i).value=t.bodyTemplate;
   byId('whah'+i).value=t.authHeader||'';
-  byId('whttl'+i).textContent=t.name;
+  byId('cctitle-wh'+i).textContent='Slot '+(i+1)+' — '+t.name;
   markDirty();
 }
 function loadWebhooks() {
@@ -1358,12 +1394,11 @@ function loadWebhooks() {
     html+='</table>';
     html+='<div style="margin-top:6px;color:#888">Use $JSON_* inside JSON strings, $URL_* in form bodies or URL paths.</div>';
     html+='</div></div>';
-    for(var i=0;i<d.webhooks.length;i++)html+=whBuildSlot(i,d.webhooks[i]);
-    byId('t7').innerHTML=html;
     // Open first enabled, else first
     var first=-1;for(var i=0;i<d.webhooks.length;i++)if(d.webhooks[i].enabled){first=i;break}
     if(first<0)first=0;
-    whToggle(first);
+    for(var i=0;i<d.webhooks.length;i++)html+=whBuildSlot(i,d.webhooks[i],i==first);
+    byId('t7').innerHTML=html;
   });
 }
 
@@ -1486,7 +1521,11 @@ function saveSvc(s) {
   };
   fetch('/brewservices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('svm' + s, d.msg, d.status == 'ok'); dirty = false; })
+    .then(function (d) {
+      showMsg('svm' + s, d.msg, d.status == 'ok');
+      dirty = false;
+      collUpdate('svc' + s, body.enabled, svcSummary(body));
+    })
     .catch(function (e) { showMsg('svm' + s, 'Error: ' + e, false); });
 }
 
@@ -1514,7 +1553,11 @@ function saveMqtt() {
   };
   fetch('/mqtt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('mqm', d.msg, d.status == 'ok'); dirty = false; })
+    .then(function (d) {
+      showMsg('mqm', d.msg, d.status == 'ok');
+      dirty = false;
+      collUpdate('mqtt', body.enabled, mqttSummary(body));
+    })
     .catch(function (e) { showMsg('mqm', 'Error: ' + e, false); });
 }
 
