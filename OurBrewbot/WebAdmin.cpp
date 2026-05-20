@@ -451,8 +451,7 @@ button.stepact.del:hover:not(:disabled) {
     <button onclick="showTab(4)" id="tb4">iSpindels</button>
     <button onclick="showTab(5)" id="tb5">Smart Plugs</button>
     <button onclick="showTab(6)" id="tb6">Reporting</button>
-    <button onclick="showTab(7)" id="tb7">Webhooks</button>
-    <button onclick="showTab(8)" id="tb8">System Settings</button>
+    <button onclick="showTab(7)" id="tb7">System Settings</button>
   </div>
   <div id="t0" class="tab active"></div>
   <div id="t1" class="tab"></div>
@@ -462,7 +461,6 @@ button.stepact.del:hover:not(:disabled) {
   <div id="t5" class="tab"></div>
   <div id="t6" class="tab"></div>
   <div id="t7" class="tab"></div>
-  <div id="t8" class="tab"></div>
 
 <script>
 var activeTab = 0;
@@ -488,7 +486,7 @@ function showTab(n) {
   activeTab = n;
   dirty = false;
   refreshStart = Date.now();
-  for (var i = 0; i < 9; i++) {
+  for (var i = 0; i < 8; i++) {
     document.getElementById('t' + i).className = 'tab' + (i == n ? ' active' : '');
     document.getElementById('tb' + i).className = i == n ? 'active' : '';
   }
@@ -527,8 +525,7 @@ function loadTab() {
   else if (activeTab == 4) loadISpindels();
   else if (activeTab == 5) loadPlugs();
   else if (activeTab == 6) loadReporting();
-  else if (activeTab == 7) loadWebhooks();
-  else if (activeTab == 8) loadSystemSettings();
+  else if (activeTab == 7) loadSystemSettings();
 }
 
 // Render a coloured status badge for a fermenter (Idle/Heating/Cooling/Alarm/Off).
@@ -1222,19 +1219,17 @@ function mqttSummary(mq) {
   return 'enabled · ' + mq.host + ':' + (mq.port || 1883);
 }
 
-// Render the Reporting tab: Brewer's Friend / Brewfather / MQTT settings cards.
+// Render the Reporting tab: Services section (BF / BFR / MQTT) and Webhooks section (4 slots).
 function loadReporting() {
   Promise.all([
     fetch('/brewservices').then(function (r) { return r.json(); }),
-    fetch('/mqtt').then(function (r) { return r.json(); })
+    fetch('/mqtt').then(function (r) { return r.json(); }),
+    fetch('/webhooks/list').then(function (r) { return r.json(); })
   ]).then(function (res) {
     var svcs = res[0].services || [];
     var mq = res[1];
-    var firstEnabled = -1;
-    for (var i = 0; i < svcs.length; i++) if (svcs[i].enabled) { firstEnabled = i; break; }
-    if (firstEnabled < 0 && mq.enabled) firstEnabled = svcs.length; // MQTT card
-    if (firstEnabled < 0) firstEnabled = 0;
-    var html = '';
+    var whs = res[2].webhooks || [];
+    var html = '<h3 style="color:#e94560;margin:6px 0 8px 0;font-size:14px">Services</h3>';
     for (var s = 0; s < svcs.length; s++) {
       var sv = svcs[s];
       var body = '';
@@ -1244,7 +1239,7 @@ function loadReporting() {
       body += '<div style="margin-top:8px"><button class="save" onclick="saveSvc(' + s + ')">Save</button> ';
       body += '<button class="test" onclick="testSvc(' + s + ')">Test</button> ';
       body += '<span class="msg" id="svm' + s + '"></span></div>';
-      html += collCard('svc' + s, sv.name, sv.enabled, svcSummary(sv), body, s == firstEnabled);
+      html += collCard('svc' + s, sv.name, sv.enabled, svcSummary(sv), body, false);
     }
     var mqBody = '';
     mqBody += row('Enabled',          switchHtml('mqen',  mq.enabled));
@@ -1260,7 +1255,26 @@ function loadReporting() {
     mqBody += '<button class="test" onclick="testMqtt()">Test</button> ';
     mqBody += '<button class="test" onclick="discoverMqtt()">Discover</button> ';
     mqBody += '<span class="msg" id="mqm"></span></div>';
-    html += collCard('mqtt', 'MQTT', mq.enabled, mqttSummary(mq), mqBody, svcs.length == firstEnabled);
+    html += collCard('mqtt', 'MQTT', mq.enabled, mqttSummary(mq), mqBody, false);
+    html += '<h3 style="color:#e94560;margin:16px 0 8px 0;font-size:14px">Webhooks</h3>';
+    html += '<p style="color:#aaa;font-size:13px;margin-bottom:10px">Send event notifications to external services. Defaults: critical-only (WARNING+ severity, ALARM category). Open a slot to apply a preset.</p>';
+    html += '<div class="card" style="padding:10px 12px">';
+    html += '<a href="#" onclick="whToggleVars();return false" class="whlink" style="font-size:12px">Show variables &#9662;</a>';
+    html += '<div id="whvars" style="display:none;margin-top:10px;padding:8px;background:#0a1628;border-radius:3px;font-family:monospace;font-size:11px">';
+    html += '<table style="border-collapse:collapse;width:100%">';
+    html += '<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$MSG / $JSON_MSG / $URL_MSG</td><td style="color:#888">full message body</td></tr>';
+    html += '<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$TAG / $JSON_TAG / $URL_TAG</td><td style="color:#888">e.g. ALARM, FERM, SYS</td></tr>';
+    html += '<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$LEVEL / $JSON_LEVEL / $URL_LEVEL</td><td style="color:#888">severity name</td></tr>';
+    html += '<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$TS / $JSON_TS / $URL_TS</td><td style="color:#888">uptime ms</td></tr>';
+    html += '<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$DEVICE / $JSON_DEVICE / $URL_DEVICE</td><td style="color:#888">ourbrewbot-CHIPID</td></tr>';
+    html += '<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$FERM_INDEX</td><td style="color:#888">0..3 or empty</td></tr>';
+    html += '<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$FERM_NAME / $JSON_FERM_NAME / $URL_FERM_NAME</td><td style="color:#888">fermenter name</td></tr>';
+    html += '<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$FERM_TEMP</td><td style="color:#888">beer temp or empty</td></tr>';
+    html += '<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$FERM_TARGET</td><td style="color:#888">target midpoint or empty</td></tr>';
+    html += '</table>';
+    html += '<div style="margin-top:6px;color:#888">Use $JSON_* inside JSON strings, $URL_* in form bodies or URL paths.</div>';
+    html += '</div></div>';
+    for (var i = 0; i < whs.length; i++) html += whBuildSlot(i, whs[i], false);
     byId('t6').innerHTML = html;
   });
 }
@@ -1375,33 +1389,6 @@ function whPreset(i,p){
   byId('cctitle-wh'+i).textContent='Slot '+(i+1)+' — '+t.name;
   markDirty();
 }
-function loadWebhooks() {
-  fetch('/webhooks/list').then(function(r){return r.json()}).then(function(d){
-    var html='<p style="color:#aaa;font-size:13px;margin-bottom:10px">Send event notifications to external services. Defaults: critical-only (WARNING+ severity, ALARM category). Open a slot to apply a preset.</p>';
-    html+='<div class="card" style="padding:10px 12px">';
-    html+='<a href="#" onclick="whToggleVars();return false" class="whlink" style="font-size:12px">Show variables &#9662;</a>';
-    html+='<div id="whvars" style="display:none;margin-top:10px;padding:8px;background:#0a1628;border-radius:3px;font-family:monospace;font-size:11px">';
-    html+='<table style="border-collapse:collapse;width:100%">';
-    html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$MSG / $JSON_MSG / $URL_MSG</td><td style="color:#888">full message body</td></tr>';
-    html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$TAG / $JSON_TAG / $URL_TAG</td><td style="color:#888">e.g. ALARM, FERM, SYS</td></tr>';
-    html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$LEVEL / $JSON_LEVEL / $URL_LEVEL</td><td style="color:#888">severity name</td></tr>';
-    html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$TS / $JSON_TS / $URL_TS</td><td style="color:#888">uptime ms</td></tr>';
-    html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$DEVICE / $JSON_DEVICE / $URL_DEVICE</td><td style="color:#888">ourbrewbot-CHIPID</td></tr>';
-    html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$FERM_INDEX</td><td style="color:#888">0..3 or empty</td></tr>';
-    html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$FERM_NAME / $JSON_FERM_NAME / $URL_FERM_NAME</td><td style="color:#888">fermenter name</td></tr>';
-    html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$FERM_TEMP</td><td style="color:#888">beer temp or empty</td></tr>';
-    html+='<tr><td style="color:#53d8fb;padding:1px 8px 1px 0">$FERM_TARGET</td><td style="color:#888">target midpoint or empty</td></tr>';
-    html+='</table>';
-    html+='<div style="margin-top:6px;color:#888">Use $JSON_* inside JSON strings, $URL_* in form bodies or URL paths.</div>';
-    html+='</div></div>';
-    // Open first enabled, else first
-    var first=-1;for(var i=0;i<d.webhooks.length;i++)if(d.webhooks[i].enabled){first=i;break}
-    if(first<0)first=0;
-    for(var i=0;i<d.webhooks.length;i++)html+=whBuildSlot(i,d.webhooks[i],i==first);
-    byId('t7').innerHTML=html;
-  });
-}
-
 // Render the System Settings tab: globals, syslog, system info, action buttons, file browser.
 function loadSystemSettings() {
   Promise.all([
@@ -1490,9 +1477,9 @@ function loadSystemSettings() {
     html += '<textarea id="sysfc" readonly style="width:100%;height:140px;background:#0a1628;border:1px solid #333;color:#e0e0e0;font-family:monospace;font-size:12px;padding:6px;border-radius:3px;resize:vertical"></textarea>';
     html += '<div style="margin-top:6px"><button class="save" onclick="downloadFile()">Download</button></div>';
     html += '</div>';
-    byId('t8').innerHTML = html;
+    byId('t7').innerHTML = html;
   }).catch(function (e) {
-    byId('t8').innerHTML = '<div class="card"><p style="color:#f44">Error: ' + e + '</p></div>';
+    byId('t7').innerHTML = '<div class="card"><p style="color:#f44">Error: ' + e + '</p></div>';
   });
 }
 
