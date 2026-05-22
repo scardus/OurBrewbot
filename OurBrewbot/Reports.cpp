@@ -10,7 +10,7 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 
-#define HTTP_TIMEOUT_MS  10000  // 10 second timeout for all HTTP requests
+#define HTTP_TIMEOUT_MS  5000   // 5 second timeout — brew services respond in <1 s normally
 
 // ============================================================
 // MAIN REPORT DISPATCHER
