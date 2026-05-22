@@ -970,17 +970,37 @@ void mqttPendingSaveCheck() {
 // to see on the topic. The guard only prevents the publish-from-within-publish
 // recursion that would form an infinite loop.
 
-void mqttPublishLog(const char* line) {
+void mqttPublishLog(uint8_t level, const char* line) {
   static bool s_inLogPublish = false;
   if (s_inLogPublish) return;
   if (!g_mqttConfig.enabled || !g_mqttConfig.logEnabled) return;
   if (!g_mqtt.connected()) return;
   if (!line || !line[0]) return;
 
+  static const char* const kSev[] = {
+    "EMERG","ALERT","CRIT","ERR","WARNING","NOTICE","INFO","DEBUG"
+  };
+  const char* sev = (level < 8) ? kSev[level] : "INFO";
+
+  // Escape " and \ so the JSON string is always valid.
+  // Buffers are static — safe because s_inLogPublish prevents re-entry, keeping
+  // ~490 bytes off the call stack per log call.
+  static char safe[210];
+  size_t j = 0;
+  for (size_t i = 0; line[i] && j < sizeof(safe) - 2; ++i) {
+    if (line[i] == '"' || line[i] == '\\') safe[j++] = '\\';
+    safe[j++] = line[i];
+  }
+  safe[j] = '\0';
+
+  static char payload[290];  // 40 JSON overhead + 210 safe + closing + margin
+  snprintf(payload, sizeof(payload),
+           "{\"level\":%u,\"severity\":\"%s\",\"msg\":\"%s\"}", level, sev, safe);
+
   s_inLogPublish = true;
   char topic[64];
   snprintf(topic, sizeof(topic), "%s/Device/log", g_mqttConfig.baseTopic);
-  g_mqtt.publish(topic, line, false);  // non-retained
+  g_mqtt.publish(topic, payload, false);  // non-retained
   s_inLogPublish = false;
 }
 

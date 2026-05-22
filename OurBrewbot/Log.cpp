@@ -69,7 +69,7 @@ static void vlogMsg(uint8_t level, const char* fmt, va_list args) {
   if (g_mqttConfig.enabled && g_mqttConfig.logEnabled) {
     char line[208];
     snprintf(line, sizeof(line), "%s%s", ts, buf);
-    mqttPublishLog(line);
+    mqttPublishLog(level, line);
   }
 
 }
