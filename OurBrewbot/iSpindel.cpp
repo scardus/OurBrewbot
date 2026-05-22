@@ -39,6 +39,16 @@ void handleiSpindelPost(const String& body) {
   float       runTime     = doc["run-time"]     | 0.0f;
   const char* gravityUnit = doc["gravity-unit"] | "";
 
+  // Reject physically impossible values — guards against corrupted payloads or wrong unit config
+  if (sg != 0.0f && (sg < 0.900f || sg > 1.200f)) {
+    logMsg("[ISPINDEL] %s (ID:%s): gravity %.4f out of range, ignoring", name, id, sg);
+    sg = 0.0f;
+  }
+  if (temp != 0.0f && (temp < -40.0f || temp > 80.0f)) {
+    logMsg("[ISPINDEL] %s (ID:%s): temperature %.1f out of range, ignoring", name, id, temp);
+    temp = 0.0f;
+  }
+
   // Match by device ID first (primary key), then by name as fallback
   int matched = -1;
   for (int i = 0; i < MAX_ISPINDELS; i++) {
