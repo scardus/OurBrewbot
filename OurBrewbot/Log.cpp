@@ -5,7 +5,6 @@
 #include "Log.h"
 #include "Config.h"
 #include "Mqtt.h"
-#include "Webhook.h"
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <stdarg.h>
@@ -73,10 +72,6 @@ static void vlogMsg(uint8_t level, const char* fmt, va_list args) {
     mqttPublishLog(line);
   }
 
-  // Webhook dispatch — only fires if any configured slot subscribes to this
-  // event's tag + severity. Enqueue is fast and non-blocking; the HTTPS POST
-  // happens later from the main loop.
-  webhookEnqueue(level, buf);
 }
 
 void logMsg(const char* fmt, ...) {
