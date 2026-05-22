@@ -379,9 +379,9 @@ void handleFermenter(ESP8266WebServer& server) {
 
         if (!doc["Power"].isNull())           g_fermenters[idx].power           = doc["Power"];
         if (!doc["TempControl"].isNull())     g_fermenters[idx].tempControl     = doc["TempControl"];
-        if (!doc["BeerName"].isNull())        strlcpy(g_fermenters[idx].beerName,      doc["BeerName"],      sizeof(g_fermenters[0].beerName));
-        if (!doc["FermenterName"].isNull())   strlcpy(g_fermenters[idx].fermenterName, doc["FermenterName"], sizeof(g_fermenters[0].fermenterName));
-        if (!doc["YeastName"].isNull())       strlcpy(g_fermenters[idx].yeastName,     doc["YeastName"],     sizeof(g_fermenters[0].yeastName));
+        if (doc["BeerName"].is<const char*>())      strlcpy(g_fermenters[idx].beerName,      doc["BeerName"].as<const char*>(),      sizeof(g_fermenters[0].beerName));
+        if (doc["FermenterName"].is<const char*>()) strlcpy(g_fermenters[idx].fermenterName, doc["FermenterName"].as<const char*>(), sizeof(g_fermenters[0].fermenterName));
+        if (doc["YeastName"].is<const char*>())     strlcpy(g_fermenters[idx].yeastName,     doc["YeastName"].as<const char*>(),     sizeof(g_fermenters[0].yeastName));
         if (!doc["BrewServices"].isNull())    g_fermenters[idx].brewServices    = doc["BrewServices"];
         if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"]; if (v >= 0 && v <= MAX_PROFILES) g_fermenters[idx].profileNo = (uint8_t)v; }
         if (!doc["LiveTest"].isNull())        g_fermenters[idx].liveTest        = doc["LiveTest"];
@@ -505,7 +505,7 @@ void handleController(ESP8266WebServer& server) {
       if (!doc["AlarmDwellSec"].isNull()) { uint32_t v = doc["AlarmDwellSec"]; if (v <= 3600) g_globalConfig.alarmDwellSec = (uint16_t)v; }
       if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
       if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
-      if (!doc["BrewServiceId"].isNull()) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"], sizeof(g_globalConfig.brewServiceId));
+      if (doc["BrewServiceId"].is<const char*>()) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
       saveGlobalConfig();
       sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Configuration saved\"}"));
       return;
@@ -905,8 +905,8 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
   }
   if (!doc["function"].isNull())     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           g_smartPlugs[idx].function    = v; }
   if (!doc["fermenter"].isNull())    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_smartPlugs[idx].fermenter   = v; }
-  if (!doc["manufacturer"].isNull()) strlcpy(g_smartPlugs[idx].manufacturer, doc["manufacturer"], sizeof(g_smartPlugs[0].manufacturer));
-  if (!doc["model"].isNull())        strlcpy(g_smartPlugs[idx].model, doc["model"], sizeof(g_smartPlugs[0].model));
+  if (doc["manufacturer"].is<const char*>()) strlcpy(g_smartPlugs[idx].manufacturer, doc["manufacturer"].as<const char*>(), sizeof(g_smartPlugs[0].manufacturer));
+  if (doc["model"].is<const char*>())        strlcpy(g_smartPlugs[idx].model,         doc["model"].as<const char*>(),         sizeof(g_smartPlugs[0].model));
   if (!doc["onCode"].isNull())       g_smartPlugs[idx].onCode      = doc["onCode"];
   if (!doc["offCode"].isNull())      g_smartPlugs[idx].offCode     = doc["offCode"];
   if (!doc["protocol"].isNull())     { uint8_t v = doc["protocol"]; if (v >= 1)              g_smartPlugs[idx].protocol    = v; }
@@ -1202,8 +1202,8 @@ void handleBrewServicesPost(ESP8266WebServer& server) {
     return;
   }
   if (!doc["enabled"].isNull())    g_brewServices[idx].enabled = doc["enabled"];
-  if (!doc["serviceId"].isNull())  strlcpy(g_brewServices[idx].serviceId, doc["serviceId"], sizeof(g_brewServices[0].serviceId));
-  if (!doc["deviceName"].isNull()) strlcpy(g_brewServices[idx].deviceName, doc["deviceName"], sizeof(g_brewServices[0].deviceName));
+  if (doc["serviceId"].is<const char*>())  strlcpy(g_brewServices[idx].serviceId,  doc["serviceId"].as<const char*>(),  sizeof(g_brewServices[0].serviceId));
+  if (doc["deviceName"].is<const char*>()) strlcpy(g_brewServices[idx].deviceName, doc["deviceName"].as<const char*>(), sizeof(g_brewServices[0].deviceName));
   saveBrewServiceConfig();
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Brew service saved\"}"));
 }
@@ -1263,12 +1263,19 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
     return;
   }
-  if (!doc["enabled"].isNull())   g_mqttConfig.enabled = doc["enabled"];
-  if (!doc["host"].isNull())      strlcpy(g_mqttConfig.host,      doc["host"],      sizeof(g_mqttConfig.host));
-  if (!doc["port"].isNull())      g_mqttConfig.port = doc["port"];
-  if (!doc["username"].isNull())  strlcpy(g_mqttConfig.username,  doc["username"],  sizeof(g_mqttConfig.username));
-  if (!doc["password"].isNull())  strlcpy(g_mqttConfig.password,  doc["password"],  sizeof(g_mqttConfig.password));
-  if (!doc["baseTopic"].isNull()) strlcpy(g_mqttConfig.baseTopic, doc["baseTopic"], sizeof(g_mqttConfig.baseTopic));
+  if (!doc["enabled"].isNull())          g_mqttConfig.enabled = doc["enabled"];
+  if (doc["host"].is<const char*>())     strlcpy(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
+  if (!doc["port"].isNull())             g_mqttConfig.port = doc["port"];
+  if (doc["username"].is<const char*>()) strlcpy(g_mqttConfig.username, doc["username"].as<const char*>(), sizeof(g_mqttConfig.username));
+  if (doc["password"].is<const char*>()) strlcpy(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
+  if (doc["baseTopic"].is<const char*>()) {
+    const char* bt = doc["baseTopic"].as<const char*>();
+    if (bt[0] == '\0') {
+      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"baseTopic cannot be empty\"}"), 400);
+      return;
+    }
+    strlcpy(g_mqttConfig.baseTopic, bt, sizeof(g_mqttConfig.baseTopic));
+  }
   if (!doc["haDiscovery"].isNull()) {
     bool newHa = doc["haDiscovery"];
     if (g_mqttConfig.haDiscovery && !newHa) cleanupAllHaDiscovery();
@@ -1348,8 +1355,8 @@ void handleProfilePost(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid profile index\"}"), 400);
     return;
   }
-  if (!doc["name"].isNull()) {
-    strlcpy(g_profiles[idx].profileName, doc["name"] | "Empty Profile", sizeof(g_profiles[0].profileName));
+  if (doc["name"].is<const char*>()) {
+    strlcpy(g_profiles[idx].profileName, doc["name"].as<const char*>(), sizeof(g_profiles[0].profileName));
   }
   if (!doc["steps"].isNull()) {
     JsonArray steps = doc["steps"];
@@ -1592,7 +1599,7 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
     return;
   }
   if (!doc["enabled"].isNull())  g_syslogConfig.enabled  = doc["enabled"];
-  if (!doc["host"].isNull())     strlcpy(g_syslogConfig.host, doc["host"], sizeof(g_syslogConfig.host));
+  if (doc["host"].is<const char*>()) strlcpy(g_syslogConfig.host, doc["host"].as<const char*>(), sizeof(g_syslogConfig.host));
   if (!doc["port"].isNull())     g_syslogConfig.port     = doc["port"];
   if (!doc["facility"].isNull()) { uint8_t v = doc["facility"]; if (v <= 23) g_syslogConfig.facility = v; }
   if (!doc["minLevel"].isNull()) { uint8_t v = doc["minLevel"]; if (v <= 7)  g_syslogConfig.minLevel = v; }
