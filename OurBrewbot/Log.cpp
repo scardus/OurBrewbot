@@ -20,9 +20,10 @@ void logInit() {
   if (!g_syslogConfig.enabled || g_syslogConfig.host[0] == '\0') return;
   if (WiFi.status() != WL_CONNECTED) return;
 
-  // Try to resolve hostname; WiFi.hostByName is synchronous on ESP8266
+  // Try to resolve hostname. hostByName is synchronous; cap at 2 s to avoid
+  // blocking setup/reconnect for an unreachable or misconfigured syslog host.
   IPAddress resolved;
-  if (WiFi.hostByName(g_syslogConfig.host, resolved)) {
+  if (WiFi.hostByName(g_syslogConfig.host, resolved, 2000)) {
     s_syslogIP   = resolved;
     s_ipResolved = true;
   }
