@@ -41,6 +41,7 @@
 #include "Mqtt.h"
 #include "WebAPI.h"
 #include "Webhook.h"
+#include "Crash.h"
 
 // ============================================================
 // TIMING CONSTANTS (milliseconds)
@@ -135,7 +136,6 @@ void setup() {
 
   // Load all config from flash
   loadAllConfig();
-  webhookInit();
 
   // Record startup (must be after loadAllConfig so lastUptime is available)
   recordReboot(g_rebootReason);
@@ -181,6 +181,7 @@ void setup() {
       logMsgL(SYSLOG_ERR, "DEFERRED [SYS] Exception cause: %u, EPC1: 0x%08x, EXCVADDR: 0x%08x",
         ri->exccause, ri->epc1, ri->excvaddr);
     }
+    crashLogPendingDeferred();
     logMsgL(SYSLOG_NOTICE, "DEFERRED [WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
   }
 
@@ -197,13 +198,24 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  // Handle web server requests, BLE sniff mode timeout, mDNS, and MQTT client loop
-  g_webServer.handleClient();
-  checkBLESniffTimeout();
-  MDNS.update();
-  mqttLoop();
-  mqttPendingSaveCheck();
-  webhookLoop();
+  // Handle web server requests, BLE sniff mode timeout, mDNS, and MQTT client loop.
+  // checkpoint() drops a one-byte breadcrumb to RTC so a hardware-watchdog reset
+  // (which bypasses custom_crash_callback) still tells us which subsystem hung.
+  checkpoint(CP_WEB);          g_webServer.handleClient();
+  checkpoint(CP_BLE);          checkBLESniffTimeout();
+  // mDNS is gated on largest contiguous heap block. The ESP8266mDNS lib
+  // (LEAmDNS v1) allocates ~544 B per inbound Resource Record via operator
+  // new, with no graceful failure path — when that allocation fails it
+  // panics (soft restart) or writes through a NULL pointer (cause 29).
+  // We skip MDNS.update() while the heap is too tight to safely service a
+  // packet; queries dropped during the gap retry via the protocol's normal
+  // timeout/retry behaviour and resume cleanly once the heap recovers.
+  checkpoint(CP_MDNS);
+  if (ESP.getMaxFreeBlockSize() >= 1024) {
+    MDNS.update();
+  }
+  checkpoint(CP_MQTT);         mqttLoop();
+  checkpoint(CP_MQTT_PEND);    mqttPendingSaveCheck();
 
   // LED: double-blink every 5s when WiFi connected, fast-flash when disconnected (active low)
   if (WiFi.isConnected()) {
@@ -220,6 +232,7 @@ void loop() {
       // Phase 1: fire conversion request and return immediately.
       if (now - g_lastTempTime >= INTERVAL_TEMPS_MS) {
         g_lastTempTime = now;
+        checkpoint(CP_TEMP_REQ);
         requestTempConversion();
         g_tempConversionPending = true;
         g_tempRequestTime = now;
@@ -230,6 +243,7 @@ void loop() {
       if (g_tempConversionPending &&
           now - g_tempRequestTime >= (94u << (g_globalConfig.resolution - 9))) {
         g_tempConversionPending = false;
+        checkpoint(CP_TEMP_READ);
         readTempResults();
         allocateProbeTemperatures();
 
@@ -248,18 +262,21 @@ void loop() {
       // which sends a OneWire reset that cancels the in-progress conversion.
       if (!g_tempConversionPending && now - g_lastProbeScanTime >= INTERVAL_PROBE_SCAN_MS) {
         g_lastProbeScanTime = now;
+        checkpoint(CP_PROBE_SCAN);
         periodicProbeScan();
       }
 
       // Tilt BLE scanning
       if (now - g_lastTiltTime >= INTERVAL_TILT_MS) {
         g_lastTiltTime = now;
+        checkpoint(CP_TILT);
         checkTilt();
       }
 
       // Fermenter control loop
       if (now - g_lastFermTime >= INTERVAL_FERMENTER_MS) {
         g_lastFermTime = now;
+        checkpoint(CP_FERM);
         // LiveTest mode: advance 1 hour per 10-second tick
         for (int i = 0; i < MAX_FERMENTERS; i++) {
           if (g_fermenters[i].liveTest && g_fermenters[i].profileRunning && g_fermenters[i].power) {
@@ -272,18 +289,21 @@ void loop() {
       // Cloud / service reporting (HTTP services only)
       if (now - g_lastCloudTime >= INTERVAL_CLOUD_MS) {
         g_lastCloudTime = now;
+        checkpoint(CP_CLOUD);
         sendReports();
       }
 
       // MQTT publish (separate timer, more frequent)
       if (now - g_lastMqttTime >= INTERVAL_MQTT_MS) {
         g_lastMqttTime = now;
+        checkpoint(CP_MQTT_PUB);
         reportMqtt();
       }
 
       // Ten-minute periodic tasks
       if (now - g_lastTenMinTime >= INTERVAL_TEN_MIN_MS) {
         g_lastTenMinTime = now;
+        checkpoint(CP_TEN_MIN);
         onTenMinuteTimer();
       }
 
