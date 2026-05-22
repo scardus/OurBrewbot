@@ -36,8 +36,9 @@ static void logApiCall(ESP8266WebServer& server) {
     case HTTP_DELETE: method = "DELETE"; break;
     default:          method = "GET";    break;
   }
-  logMsg("[API] %s %s from %s", method, server.uri().c_str(),
-         server.client().remoteIP().toString().c_str());
+  WiFiClient c = server.client();
+  String ip = c.connected() ? c.remoteIP().toString() : String("?");
+  logMsg("[API] %s %s from %s", method, server.uri().c_str(), ip.c_str());
 }
 
 void setupWebServer(ESP8266WebServer& server) {
@@ -148,6 +149,7 @@ void sendJsonDoc(ESP8266WebServer& server, JsonDocument& doc, int code) {
   server.setContentLength(measureJson(doc));
   server.send(code, "application/json", "");
   WiFiClient client = server.client();
+  if (!client.connected()) return;  // guard: client may disconnect between header send and body write
   serializeJson(doc, client);
 }
 
