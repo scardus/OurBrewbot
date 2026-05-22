@@ -168,13 +168,14 @@ extern "C" void custom_crash_callback(struct rst_info* info,
   rec.stackEnd       = stack_end;
   rec.lastCheckpoint = s_lastModule;
 
-  const uint32_t* sp = reinterpret_cast<const uint32_t*>(stack);
-  size_t available = (stack < stack_end)
-                   ? (stack_end - stack) / sizeof(uint32_t)
-                   : 0;
-  size_t n = available < STACK_WORDS ? available : STACK_WORDS;
-  for (size_t i = 0; i < n; i++) {
-    rec.stack[i] = sp[i];
+  // Guard against misaligned SP — Xtensa ABI normally guarantees 16-byte alignment
+  // but the value passed here at crash time can be unaligned, which would itself
+  // trigger an Exception 28 (LoadStoreAlignmentCause) inside the crash handler.
+  if (!(stack & 3) && stack < stack_end) {
+    const uint32_t* sp = reinterpret_cast<const uint32_t*>(stack);
+    size_t available = (stack_end - stack) / sizeof(uint32_t);
+    size_t n = available < STACK_WORDS ? available : STACK_WORDS;
+    for (size_t i = 0; i < n; i++) rec.stack[i] = sp[i];
   }
 
   ESP.rtcUserMemoryWrite(CRASH_OFFSET, (uint32_t*)&rec, sizeof(rec));
