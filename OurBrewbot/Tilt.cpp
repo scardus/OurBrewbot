@@ -129,6 +129,7 @@ void initBLE() {
 //   Colon-delimited (newer firmware): OK+DISC:CompanyID:UUID:MajorMinorPower:MAC:RSSI
 //   Legacy concatenated (older firmware): ...4C000215A495BBx0...{major}{minor}{rssi}
 static void parseDiscLine(const char* line) {
+  if (!line || strlen(line) < 16) return;  // too short to be a valid DISC record
   logMsg("[TILT] Parsing: %.80s", line);
 
   // ---- Colon-delimited format ----
