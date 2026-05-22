@@ -133,6 +133,18 @@ void setup() {
   }
   logMsg("[FS] LittleFS mounted OK");
 
+  // One-shot orphan cleanup: webhook support was removed, so its config
+  // files (if present from a previous firmware) are dead weight on flash.
+  // Idempotent — leaves the call permanently in setup().
+  if (LittleFS.exists("/jsonWebhook.txt")) {
+    LittleFS.remove("/jsonWebhook.txt");
+    logMsg("[FS] Removed orphan /jsonWebhook.txt");
+  }
+  if (LittleFS.exists("/jsonWebhookbkup.txt")) {
+    LittleFS.remove("/jsonWebhookbkup.txt");
+    logMsg("[FS] Removed orphan /jsonWebhookbkup.txt");
+  }
+
   // Load all config from flash
   loadAllConfig();
 
