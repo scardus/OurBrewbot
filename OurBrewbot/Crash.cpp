@@ -83,7 +83,7 @@ void checkpoint(uint8_t module) {
   if (module == s_lastModule) return;
   s_lastModule = module;
   CheckpointRecord rec = { CP_MAGIC, module };
-  ESP.rtcUserMemoryWrite(CHECKPOINT_OFFSET, (uint32_t*)&rec, sizeof(rec));
+  ESP.rtcUserMemoryWrite(CHECKPOINT_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
 }
 
 void crashLogPendingDeferred() {
@@ -93,7 +93,7 @@ void crashLogPendingDeferred() {
   // (OTA, /reboot, RESET_CONFIG), the resulting `last=<subsystem>` line is
   // mild noise but tells us which path initiated the restart, so it's worth
   // keeping uniform.
-  struct rst_info* ri = ESP.getResetInfoPtr();
+  const struct rst_info* ri = ESP.getResetInfoPtr();
   const bool unexpected = (ri->reason == REASON_WDT_RST) ||
                           (ri->reason == REASON_EXCEPTION_RST) ||
                           (ri->reason == REASON_SOFT_WDT_RST) ||
@@ -102,7 +102,7 @@ void crashLogPendingDeferred() {
 
   CrashRecord crashRec;
   const bool haveCrash =
-    ESP.rtcUserMemoryRead(CRASH_OFFSET, (uint32_t*)&crashRec, sizeof(crashRec))
+    ESP.rtcUserMemoryRead(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&crashRec), sizeof(crashRec))
     && crashRec.magic == CRASH_MAGIC;
 
   if (haveCrash) {
@@ -135,7 +135,7 @@ void crashLogPendingDeferred() {
   // distinct from intentional reboots in the log.
   CheckpointRecord cpRec;
   const bool haveCp =
-    ESP.rtcUserMemoryRead(CHECKPOINT_OFFSET, (uint32_t*)&cpRec, sizeof(cpRec))
+    ESP.rtcUserMemoryRead(CHECKPOINT_OFFSET, reinterpret_cast<uint32_t*>(&cpRec), sizeof(cpRec))
     && cpRec.magic == CP_MAGIC;
   if (haveCp) {
     logMsgL(SYSLOG_ERR,
@@ -178,5 +178,5 @@ extern "C" void custom_crash_callback(struct rst_info* info,
     for (size_t i = 0; i < n; i++) rec.stack[i] = sp[i];
   }
 
-  ESP.rtcUserMemoryWrite(CRASH_OFFSET, (uint32_t*)&rec, sizeof(rec));
+  ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
 }
