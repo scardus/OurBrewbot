@@ -31,7 +31,6 @@ New/Updated Features:
 - LittleFS file browser in admin page for inspecting config files
 - BLE AT command console for debugging HM-10 Bluetooth module
 - Rebuilt Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation
-- Webhook support - Sent alerts/notices etc to external notification providers (ntfy.sh, Slack, Discord, IFTTT, etc) to receive messages directly to your devices.
 
 Not yet implemented / tested:
 - Pressure sensor - __Untested - No hardware__
@@ -39,6 +38,7 @@ Not yet implemented / tested:
 Removed:
 - mybrewbot.co.uk cloud backend (server gone)
 - Blynk dashboard (replaced with REST API + admin page)
+- Webhook support - Was added in v0.3, but due to stability & memory issues had to be removed.
 
 ---
 
