@@ -1,0 +1,28 @@
+#
+# Brewbot Alarm Notification
+#
+# Sends a mobile notification whenever OurBrewbot publishes a log message at
+# WARNING severity or worse (RFC 5424 level <= 4: WARNING, ERR, CRIT, ALERT, EMERG).
+#
+# Paste into Home Assistant  Settings → Automations → + New Automation
+#   → (top-right) ⋮ → Edit in YAML
+#
+# Adjust the notify target if your mobile app entity name differs.
+#
+
+alias: Brewbot Alarm Notification
+description: >
+  Monitors ourbrewbot/Device/log and sends a push notification for any message
+  at WARNING level or worse (level 0-4).
+trigger:
+  - platform: mqtt
+    topic: ourbrewbot/Device/log
+condition:
+  - condition: template
+    value_template: "{{ trigger.payload_json.level <= 4 }}"
+action:
+  - service: notify.mobile_app_my_phone
+    data:
+      title: "Brewbot {{ trigger.payload_json.severity }}"
+      message: "{{ trigger.payload_json.msg }}"
+mode: single
