@@ -1317,16 +1317,6 @@ function loadSystemSettings() {
     html += '</select></div>';
     html += '<button class="save" onclick="saveSyslog()">Save</button> <span class="msg" id="slm"></span>';
     html += '</div>';
-    html += '<div class="card"><h3>HTTPS Test</h3>';
-    html += '<p style="color:#888;font-size:12px;margin-bottom:8px">Diagnostic for BearSSL on IRAM heap. Default URL echoes the request back.</p>';
-    html += '<div class="row"><label>URL</label><input type="text" id="htUrl" value="https://httpbin.org/post" style="width:300px"></div>';
-    html += '<div class="row"><label>Method</label><select id="htMethod"><option value="POST" selected>POST</option><option value="GET">GET</option><option value="PUT">PUT</option></select></div>';
-    html += '<div class="row"><label>Content-Type</label><input type="text" id="htCT" value="application/json" style="width:220px"></div>';
-    html += '<div class="row"><label>Auth Header</label><input type="text" id="htAuth" value="" placeholder="optional: Authorization: Bearer ..." style="width:300px"></div>';
-    html += '<div class="row"><label>Body</label><textarea id="htBody" style="width:100%;height:60px;background:#0a1628;border:1px solid #333;color:#e0e0e0;font-family:monospace;font-size:12px;padding:6px;border-radius:3px">{"hello":"world"}</textarea></div>';
-    html += '<button class="save" onclick="testHttps()">Send Test</button> <span class="msg" id="htMsg"></span>';
-    html += '<pre id="htOut" style="display:none;margin-top:8px;padding:6px;background:#0a1628;border:1px solid #333;border-radius:3px;font-family:monospace;font-size:12px;color:#e0e0e0;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto"></pre>';
-    html += '</div>';
     var files = fs.files || [];
     html += '<div class="card"><h3>LittleFS Files</h3>';
     if (files.length == 0) {
@@ -1430,37 +1420,6 @@ function saveSyslog() {
     .then(function (r) { return r.json(); })
     .then(function (d) { showMsg('slm', d.msg, d.status == 'ok'); dirty = false; })
     .catch(function (e) { showMsg('slm', 'Error: ' + e, false); });
-}
-
-// Send a one-shot HTTPS request via the firmware to verify BearSSL/IRAM-heap.
-function testHttps() {
-  showMsg('htMsg', 'Sending (TLS handshake takes 2-8 s)...', true);
-  byId('htOut').style.display = 'none';
-  var body = {
-    url:         byId('htUrl').value,
-    method:      byId('htMethod').value,
-    contentType: byId('htCT').value,
-    authHeader:  byId('htAuth').value,
-    body:        byId('htBody').value
-  };
-  fetch('/admin/https-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-      if (d.status == 'error') { showMsg('htMsg', d.msg, false); return; }
-      var ok = d.httpCode >= 200 && d.httpCode < 400;
-      showMsg('htMsg', 'HTTP ' + d.httpCode + ' in ' + d.timeMs + ' ms', ok);
-      var lines = [];
-      lines.push('HTTP code:   ' + d.httpCode);
-      lines.push('Elapsed:     ' + d.timeMs + ' ms');
-      lines.push('DRAM heap:   ' + d.dramBefore + ' → ' + d.dramAfter + ' bytes');
-      lines.push('IRAM heap:   ' + d.iramBefore + ' → ' + d.iramAfter + ' bytes');
-      lines.push('');
-      lines.push('Response (first 200 chars):');
-      lines.push(d.response || '(empty)');
-      byId('htOut').textContent = lines.join('\n');
-      byId('htOut').style.display = 'block';
-    })
-    .catch(function (e) { showMsg('htMsg', 'Error: ' + e, false); });
 }
 
 // Trigger an MQTT broker connectivity test.
