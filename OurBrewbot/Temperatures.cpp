@@ -196,6 +196,15 @@ void readTempResults() {
       temp = g_sensors2.getTempC(addr);
     }
 
+    // First-failure blocking retry — catches transient read errors on marginal connections.
+    // Costs up to 750 ms on first miss per probe per cycle, but avoids false fail-counts.
+    if (temp == DEVICE_DISCONNECTED_C && g_probes[i].failCount == 0) {
+      sensors->setWaitForConversion(true);
+      sensors->requestTemperatures();
+      temp = sensors->getTempC(addr);
+      sensors->setWaitForConversion(false);
+    }
+
     if (temp != DEVICE_DISCONNECTED_C) {
       g_probes[i].rawTemperature = temp;
       g_probes[i].temperature = temp + g_probes[i].tempAdjust;
