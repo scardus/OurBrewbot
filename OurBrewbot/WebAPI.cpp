@@ -180,6 +180,9 @@ static const char ROOT_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <h2>OurBrewbot</h2>
     <a class='btn' href='/admin'>Open Admin Dashboard</a>
     <div class='card'><h3>REST API</h3><ul>
+    <li><span class='method'>GET</span><a href='/ble/sniff'>/ble/sniff</a><span class='desc'> &mdash; BLE sniff page</span></li>
+    <li><span class='method'>GET</span><a href='/ble/sniff/poll'>/ble/sniff/poll</a><span class='desc'> &mdash; poll BLE sniff results</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/ble/sniff/send</span><span class='desc'> &mdash; send BLE AT command</span></li>
     <li><span class='method'>GET</span><a href='/board_info.json'>/board_info.json</a><span class='desc'> &mdash; board info</span></li>
     <li><span class='method'>GET</span><a href='/brewservices'>/brewservices</a><span class='desc'> &mdash; brew service config</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/brewservices</span><span class='desc'> &mdash; update brew service</span></li>
@@ -188,12 +191,15 @@ static const char ROOT_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/wifi/reset</span><span class='desc'> &mdash; clear WiFi settings and reboot into setup portal</span></li>
     <li><span class='method'>GET</span><a href='/controller'>/controller</a><span class='desc'> &mdash; controller config</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/controller</span><span class='desc'> &mdash; update global config</span></li>
+    <li><span class='method'>GET</span><a href='/debug'>/debug</a><span class='desc'> &mdash; debug config &amp; overrides</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/debug</span><span class='desc'> &mdash; update debug config</span></li>
     <li><span class='method'>GET</span><a href='/fermenters'>/fermenters</a><span class='desc'> &mdash; all fermenter data</span></li>
     <li><span class='method'>GET</span><a href='/fermenter?id=0'>/fermenter?id=N</a><span class='desc'> &mdash; single fermenter</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter</span><span class='desc'> &mdash; update fermenter config</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter/profile</span><span class='desc'> &mdash; profile control (start/stop/pause/resume/next/prev)</span></li>
     <li><span class='method'>GET</span><a href='/fs/files'>/fs/files</a><span class='desc'> &mdash; list LittleFS files</span></li>
     <li><span class='method'>GET</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/file?name=...</span><span class='desc'> &mdash; read file content</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/save</span><span class='desc'> &mdash; save config file to LittleFS</span></li>
     <li><span class='method'>GET</span><a href='/health'>/health</a><span class='desc'> &mdash; system health</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/iSpindel</span><span class='desc'> &mdash; iSpindel gravity data</span></li>
     <li><span class='method'>GET</span><a href='/ispindels'>/ispindels</a><span class='desc'> &mdash; iSpindel config &amp; live data</span></li>
