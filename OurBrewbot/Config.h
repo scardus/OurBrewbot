@@ -44,7 +44,12 @@
 // ============================================================
 // WEBHOOKS
 // ============================================================
-#define MAX_WEBHOOKS                4
+// One slot is enough for the typical ntfy/Discord/Telegram setup, and each
+// WebhookConfig struct burns ~524 bytes of BSS regardless of whether the
+// slot is enabled. Reduced from 4 to 1 to recover ~1.5 KB of DRAM. The
+// loader is bounded by min(MAX_WEBHOOKS, arr.size()), so legacy 4-slot JSON
+// configs load cleanly: slot 0 kept, slots 1-3 silently dropped.
+#define MAX_WEBHOOKS                1
 
 // HTTP methods
 #define WEBHOOK_METHOD_POST         0
