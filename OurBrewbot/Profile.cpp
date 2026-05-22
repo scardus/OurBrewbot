@@ -13,7 +13,18 @@
 
 // Helper: get flat array index for a fermenter's current profile step
 static inline uint8_t flatStepIndex(uint8_t i) {
+  if (g_fermenters[i].profileNo == 0) return 0;  // guard against uint8 underflow
   return (g_fermenters[i].profileNo - 1) * MAX_STEPS_PER_PROFILE + g_fermenters[i].currentStep;
+}
+
+// Helper: mark a profile as naturally finished and clear all state so saved
+// config matches stopProfile(). Called from all natural-finish paths.
+static void finishProfile(uint8_t i) {
+  g_fermenters[i].profileRunning = false;
+  g_fermenters[i].profilePaused  = false;
+  g_fermenters[i].profileNo      = 0;
+  g_fermenters[i].currentStep    = 0;
+  g_fermenters[i].currentHour    = 0;
 }
 
 // Helper: check if a step is empty (unused slot)
@@ -33,7 +44,7 @@ void processProfiles() {
 void advanceProfileStep(uint8_t i) {
   if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
-    g_fermenters[i].profileRunning = false;
+    finishProfile(i);
     saveFermenterConfig();
     return;
   }
@@ -44,7 +55,7 @@ void advanceProfileStep(uint8_t i) {
   // If the current step is empty, profile is done
   if (isStepEmpty(step)) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished (empty step %d)", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
-    g_fermenters[i].profileRunning = false;
+    finishProfile(i);
     saveFermenterConfig();
     return;
   }
@@ -70,12 +81,12 @@ void advanceProfileStep(uint8_t i) {
     // Check for profile end
     if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
       logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
-      g_fermenters[i].profileRunning = false;
+      finishProfile(i);
     } else {
       uint8_t nextIdx = flatStepIndex(i);
       if (isStepEmpty(g_profileSteps[nextIdx])) {
         logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished (no more steps)", i, g_fermenters[i].fermenterName);
-        g_fermenters[i].profileRunning = false;
+        finishProfile(i);
       }
     }
     saveFermenterConfig();
@@ -224,7 +235,7 @@ bool nextProfileStep(uint8_t i) {
   if (g_fermenters[i].currentStep + 1 >= maxStep) {
     // Past the end — finish the profile
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Next step past end -> Profile Finished", i, g_fermenters[i].fermenterName);
-    g_fermenters[i].profileRunning = false;
+    finishProfile(i);
     saveFermenterConfig();
     return false;
   }
