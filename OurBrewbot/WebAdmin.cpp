@@ -1258,6 +1258,39 @@ function loadReporting() {
   });
 }
 
+function checkFwUpdate(current) {
+  var el = byId('fwcheck');
+  if (!el) return;
+  markDirty();
+  el.textContent = '[checking...]';
+  el.style.color = '#53d8fb';
+  el.onclick = function() { return false; };
+  fetch('https://api.github.com/repos/scardus/OurBrewbot/releases/latest')
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      var latest = data.tag_name.replace(/^v/, '');
+      if (latest === current) {
+        el.textContent = '[on latest]';
+        el.style.color = '#4f4';
+        el.onclick = function() { return false; };
+      } else {
+        el.textContent = '[update available]';
+        el.style.color = '#fa0';
+        el.href = data.html_url;
+        el.target = '_blank';
+        el.onclick = null;
+      }
+    })
+    .catch(function() {
+      el.textContent = '[check failed]';
+      el.style.color = '#f44';
+      el.onclick = function() { checkFwUpdate(current); return false; };
+    });
+}
+
 // Render the System Settings tab: globals, syslog, system info, action buttons, file browser.
 function loadSystemSettings() {
   Promise.all([
@@ -1276,7 +1309,9 @@ function loadSystemSettings() {
       '0 Emergency', '1 Alert', '2 Critical', '3 Error', '4 Warning', '5 Notice', '6 Info', '7 Debug'
     ];
     var html = '<div class="info"><h3 style="color:#e94560;margin-bottom:8px">System Info</h3>';
-    html += '<div class="r"><span>Firmware</span><span class="v">' + d.FirmwareVersion + '</span></div>';
+    html += '<div class="r"><span>Firmware</span><span class="v">' + d.FirmwareVersion
+          + ' <a id="fwcheck" href="#" onclick="checkFwUpdate(\'' + d.FirmwareVersion
+          + '\');return false;" style="color:#53d8fb;font-size:11px">[check]</a></span></div>';
     html += '<div class="r"><span>IP Address</span><span class="v">' + d.IP + '</span></div>';
     html += '<div class="r"><span>mDNS Name</span><span class="v"><a href="http://' + d.mDNSName + '/" style="color:#53d8fb">' + d.mDNSName + '</a></span></div>';
     html += '<div class="r"><span>WiFi SSID</span><span class="v">' + d.WiFiSSID + '</span></div>';
