@@ -96,6 +96,7 @@ bool loadGlobalConfig() {
   g_globalConfig.tuningChartNo  = doc["tuning_chart_no"] | 0;
   g_globalConfig.resolution     = doc["resolution"]    | 11;
   g_globalConfig.alarmDwellSec  = doc["alarm_dwell_sec"] | 600;
+  g_globalConfig.mdnsEnabled    = doc["mdns_enabled"]  | true;
 
   return true;
 }
@@ -122,6 +123,7 @@ bool saveGlobalConfig() {
   doc["tuning_chart_no"] = g_globalConfig.tuningChartNo;
   doc["resolution"]      = g_globalConfig.resolution;
   doc["alarm_dwell_sec"] = g_globalConfig.alarmDwellSec;
+  doc["mdns_enabled"]    = g_globalConfig.mdnsEnabled;
 
   return saveJsonDocSafe(doc, FILE_GLOBAL, FILE_GLOBAL_BKP);
 }
@@ -796,6 +798,7 @@ void initDefaultGlobalConfig() {
   g_globalConfig.fNo        = 1;
   g_globalConfig.resolution = 11;
   g_globalConfig.alarmDwellSec = 600;
+  g_globalConfig.mdnsEnabled = true;
 }
 
 void initDefaultFermenterConfig() {

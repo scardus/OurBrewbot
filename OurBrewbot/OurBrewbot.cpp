@@ -210,7 +210,8 @@ void loop() {
   // packet; queries dropped during the gap retry via the protocol's normal
   // timeout/retry behaviour and resume cleanly once the heap recovers.
   checkpoint(CP_MDNS);
-  if (ESP.getMaxFreeBlockSize() >= 1024) {
+  if (g_globalConfig.mdnsEnabled && ESP.getMaxFreeBlockSize() >= 1024) {
+    ESP.wdtFeed();   // LEAmDNS can block >8 s on busy networks — reset HW WDT first
     MDNS.update();
   }
   checkpoint(CP_MQTT);         mqttLoop();
@@ -376,14 +377,18 @@ void setupWiFi() {
   // Re-initialise log system now that WiFi is up so syslog host can be resolved
   logInit();
 
-  // mDNS: register as ourbrewbot-CHIPID.local
-  String mdnsName = "ourbrewbot-" + String(ESP.getChipId(), HEX);
-  mdnsName.toLowerCase();
-  if (MDNS.begin(mdnsName.c_str())) {
-    MDNS.addService("http", "tcp", 80);
-    logMsg("[MDNS] Registered as %s.local", mdnsName.c_str());
+  // mDNS: register as ourbrewbot-CHIPID.local (only if enabled in settings)
+  if (g_globalConfig.mdnsEnabled) {
+    String mdnsName = "ourbrewbot-" + String(ESP.getChipId(), HEX);
+    mdnsName.toLowerCase();
+    if (MDNS.begin(mdnsName.c_str())) {
+      MDNS.addService("http", "tcp", 80);
+      logMsg("[MDNS] Registered as %s.local", mdnsName.c_str());
+    } else {
+      logMsg("[MDNS] Failed to start");
+    }
   } else {
-    logMsg("[MDNS] Failed to start");
+    logMsg("[MDNS] Disabled");
   }
 }
 

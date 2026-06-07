@@ -1313,7 +1313,7 @@ function loadSystemSettings() {
           + ' <a id="fwcheck" href="#" onclick="checkFwUpdate(\'' + d.FirmwareVersion
           + '\');return false;" style="color:#53d8fb;font-size:11px">[check]</a></span></div>';
     html += '<div class="r"><span>IP Address</span><span class="v">' + d.IP + '</span></div>';
-    html += '<div class="r"><span>mDNS Name</span><span class="v"><a href="http://' + d.mDNSName + '/" style="color:#53d8fb">' + d.mDNSName + '</a></span></div>';
+    html += '<div class="r"><span>mDNS Name</span><span class="v">' + (d.MdnsEnabled ? '<a href="http://' + d.mDNSName + '/" style="color:#53d8fb">' + d.mDNSName + '</a>' : '<span style="color:#888">disabled</span>') + '</span></div>';
     html += '<div class="r"><span>WiFi SSID</span><span class="v">' + d.WiFiSSID + '</span></div>';
     html += '<div class="r"><span>RSSI</span><span class="v">' + d.RSSI + ' dBm</span></div>';
     html += '<div class="r"><span>Free Heap</span><span class="v">' + d.FreeHeap + ' bytes</span></div>';
@@ -1337,6 +1337,7 @@ function loadSystemSettings() {
     for (var r = 9; r <= 12; r++) html += '<option value="' + r + '"' + (d.Resolution == r ? ' selected' : '') + '>' + r + '-bit</option>';
     html += '</select></div>';
     html += row('Alarm Delay',      numInput('sadwell', d.AlarmDwellSec || 600, null, 90) + ' s <span style="color:#888;font-size:11px">(mild deviations wait this long before alarming; severe deviations bypass it)</span>');
+    html += row('mDNS', switchHtml('smdns', d.MdnsEnabled !== false) + ' <span style="color:#888;font-size:11px">(takes effect after reboot; disable on networks with heavy mDNS traffic to improve stability)</span>');
     html += row('<span style="color:#8b5cf6">Fermenter Debug Mode</span>', switchHtml('dbmode', dbg.DebugMode || false));
     html += '<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
     html += '</div>';
@@ -1377,12 +1378,13 @@ function loadSystemSettings() {
   });
 }
 
-// Save the global controller settings (temp unit, resolution, debug mode).
+// Save the global controller settings (temp unit, resolution, mDNS, debug mode).
 function saveSettings() {
   var body = {
     Unit:          parseInt(byId('su').value),
     Resolution:    parseInt(byId('sres').value),
-    AlarmDwellSec: parseInt(byId('sadwell').value)
+    AlarmDwellSec: parseInt(byId('sadwell').value),
+    MdnsEnabled:   byId('smdns').checked
   };
   fetch('/controller', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
