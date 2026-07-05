@@ -371,6 +371,12 @@ void setupWiFi() {
     ESP.restart();
   }
 
+  // Modem sleep's periodic DTIM beacon wake/parse cycle is the known trigger
+  // for a null-pointer crash inside the closed-source SDK's beacon parser
+  // (scan_parse_beacon/cnx_update_bss_more, cause 29). Disabling sleep avoids
+  // that code path; cost is higher idle draw, irrelevant on mains power.
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
+
   g_wifiConnected = true;
   logMsgL(SYSLOG_NOTICE, "[WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
 
