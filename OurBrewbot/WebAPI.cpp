@@ -441,20 +441,29 @@ void handleDebug(ESP8266WebServer& server) {
     return;
   }
 
-  // GET — return current debug state
-  JsonDocument doc;
-  doc["DebugMode"] = g_fermenterDebugMode;
-  doc["TempUnit"]  = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
-  JsonArray overrides = doc["Overrides"].to<JsonArray>();
+  // GET — return current debug state, chunked per-fermenter (see handleFermenters)
+  sendCORSHeaders(server);
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  char head[64];
+  int hn = snprintf(head, sizeof(head), "{\"DebugMode\":%s,\"TempUnit\":\"%s\",\"Overrides\":[",
+                    g_fermenterDebugMode ? "true" : "false",
+                    (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F");
+  server.sendContent(head, hn);
   for (int i = 0; i < MAX_FERMENTERS; i++) {
-    JsonObject ov = overrides.add<JsonObject>();
+    if (i > 0) server.sendContent(",");
+    JsonDocument ov;
     ov["Fermenter"]   = i;
     ov["Enabled"]     = g_fermenterDebugOverrides[i].enabled;
     ov["BeerTemp"]    = toDisplayTemp(g_fermenterDebugOverrides[i].beerTemp);
     ov["AmbientTemp"] = toDisplayTemp(g_fermenterDebugOverrides[i].ambientTemp);
     ov["SG"]          = g_fermenterDebugOverrides[i].sg;
+    char buf[192];
+    size_t n = serializeJson(ov, buf, sizeof(buf));
+    server.sendContent(buf, n);
   }
-  sendJsonDoc(server, doc);
+  server.sendContent("]}");
+  server.sendContent("");  // end chunked transfer
 }
 
 // ============================================================
@@ -549,26 +558,36 @@ void handleBoardInfo(ESP8266WebServer& server) {
 // ============================================================
 
 void handleStatus(ESP8266WebServer& server) {
-  JsonDocument doc;
-  JsonArray fermenters = doc["fermenters"].to<JsonArray>();
+  // Chunked per-fermenter streaming (same pattern as handleFermenters) —
+  // avoids building the whole response in one elastic JsonDocument
+  sendCORSHeaders(server);
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  server.sendContent("{\"fermenters\":[");
   for (int i = 0; i < MAX_FERMENTERS; i++) {
-    JsonObject f = fermenters.add<JsonObject>();
-    f["id"]          = i;
-    f["name"]        = g_fermenters[i].fermenterName;
-    f["beer"]        = g_fermenters[i].beerName;
-    f["power"]       = g_fermenters[i].power;
-    f["status"]      = getFermenterStatusStr(g_fermenters[i].status);
+    if (i > 0) server.sendContent(",");
+    JsonDocument doc;
+    doc["id"]          = i;
+    doc["name"]        = g_fermenters[i].fermenterName;
+    doc["beer"]        = g_fermenters[i].beerName;
+    doc["power"]       = g_fermenters[i].power;
+    doc["status"]      = getFermenterStatusStr(g_fermenters[i].status);
     float bt = getBeerTemp(i);
     float at = getAmbientTemp(i);
-    f["beerTemp"]    = (bt > -100.0f) ? toDisplayTemp(bt) : -127.0f;
-    f["ambientTemp"] = (at > -100.0f) ? toDisplayTemp(at) : -127.0f;
-    f["sg"]          = getCurrentSG(i);
-    f["alarm"]       = g_fermenters[i].alarm;
+    doc["beerTemp"]    = (bt > -100.0f) ? toDisplayTemp(bt) : -127.0f;
+    doc["ambientTemp"] = (at > -100.0f) ? toDisplayTemp(at) : -127.0f;
+    doc["sg"]          = getCurrentSG(i);
+    doc["alarm"]       = g_fermenters[i].alarm;
+    char buf[384];
+    size_t n = serializeJson(doc, buf, sizeof(buf));
+    server.sendContent(buf, n);
   }
-  doc["uptime"]   = (uint32_t)(millis() / 60000UL);
-  doc["freeHeap"] = ESP.getFreeHeap();
-  doc["ip"]       = WiFi.localIP().toString();
-  sendJsonDoc(server, doc);
+  char tail[96];
+  int n = snprintf(tail, sizeof(tail), "],\"uptime\":%u,\"freeHeap\":%u,\"ip\":\"%s\"}",
+                   (unsigned)(millis() / 60000UL), (unsigned)ESP.getFreeHeap(),
+                   WiFi.localIP().toString().c_str());
+  server.sendContent(tail, n);
+  server.sendContent("");  // end chunked transfer
 }
 
 // ============================================================
@@ -712,10 +731,14 @@ void handleiSpindel(ESP8266WebServer& server) {
 // ============================================================
 
 void handleiSpindels(ESP8266WebServer& server) {
-  JsonDocument doc;
-  JsonArray arr = doc["ispindels"].to<JsonArray>();
+  // Chunked per-item streaming (same pattern as handleFermenters)
+  sendCORSHeaders(server);
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  server.sendContent("{\"ispindels\":[");
   for (int i = 0; i < MAX_ISPINDELS; i++) {
-    JsonObject s = arr.add<JsonObject>();
+    if (i > 0) server.sendContent(",");
+    JsonDocument s;
     s["index"]       = i;
     s["name"]        = g_iSpindels[i].name;
     s["id"]          = g_iSpindels[i].id;
@@ -737,8 +760,12 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["minutesSince"] = g_iSpindels[i].lastSeen == 0
                           ? 0xFFFF
                           : (uint32_t)(millis() - g_iSpindels[i].lastSeen) / 60000UL;
+    char buf[512];
+    size_t n = serializeJson(s, buf, sizeof(buf));
+    server.sendContent(buf, n);
   }
-  sendJsonDoc(server, doc);
+  server.sendContent("]}");
+  server.sendContent("");  // end chunked transfer
 }
 
 // ============================================================
@@ -883,10 +910,14 @@ void handleProbePost(ESP8266WebServer& server) {
 // ============================================================
 
 void handleSmartPlugs(ESP8266WebServer& server) {
-  JsonDocument doc;
-  JsonArray arr = doc["plugs"].to<JsonArray>();
+  // Chunked per-item streaming (same pattern as handleFermenters)
+  sendCORSHeaders(server);
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  server.sendContent("{\"plugs\":[");
   for (int i = 0; i < MAX_SMART_PLUGS; i++) {
-    JsonObject p = arr.add<JsonObject>();
+    if (i > 0) server.sendContent(",");
+    JsonDocument p;
     p["index"]        = i;
     p["manufacturer"] = g_smartPlugs[i].manufacturer;
     p["model"]        = g_smartPlugs[i].model;
@@ -899,8 +930,12 @@ void handleSmartPlugs(ESP8266WebServer& server) {
     p["function"]     = g_smartPlugs[i].function;
     p["fermenter"]    = g_smartPlugs[i].fermenter;
     p["state"]        = getPlugState(i);
+    char buf[384];
+    size_t n = serializeJson(p, buf, sizeof(buf));
+    server.sendContent(buf, n);
   }
-  sendJsonDoc(server, doc);
+  server.sendContent("]}");
+  server.sendContent("");  // end chunked transfer
 }
 
 // ============================================================
