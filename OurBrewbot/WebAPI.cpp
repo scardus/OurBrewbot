@@ -1552,7 +1552,8 @@ void handleFsFile(ESP8266WebServer& server) {
     return;
   }
   sendCORSHeaders(server);
-  server.send(200, "text/plain", f.readString());
+  // Stream straight from LittleFS — readString() held the whole file in heap twice
+  server.streamFile(f, "text/plain");
   f.close();
 }
 
