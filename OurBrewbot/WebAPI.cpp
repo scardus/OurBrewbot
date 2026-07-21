@@ -992,6 +992,7 @@ void handleSmartPlugTest(ESP8266WebServer& server) {
   logMsg("[PLUG] Test plug %d %s: code=%u (0x%06X), bits=%d, delay=%d, proto=%d",
     idx, on ? "ON" : "OFF", code, code, plug.bits, plug.delayLength, plug.protocol);
 
+  ESP.wdtFeed();  // RF transmit bit-bangs for ~1-2 s inside this handler
   rfTransmit(code, plug.bits, plug.delayLength, plug.protocol);
   sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"RF code sent\"}"));
 }
@@ -1287,6 +1288,7 @@ void handleBrewServiceTest(ESP8266WebServer& server) {
     sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"No service ID configured\"}"), 400);
     return;
   }
+  ESP.wdtFeed();  // synchronous outbound HTTP POST, bounded by the 5 s HTTP timeout
   int httpCode = testBrewService(idx);
   String resp = "{\"status\":";
   resp += (httpCode == 200) ? "\"ok\"" : "\"error\"";
@@ -1358,6 +1360,7 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
 }
 
 void handleMqttTest(ESP8266WebServer& server) {
+  ESP.wdtFeed();  // blocking broker connect, bounded by the 5 s socket timeout
   bool ok = testMqtt();
   if (ok) {
     sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"MQTT connected and test message published\"}"));
@@ -1367,6 +1370,7 @@ void handleMqttTest(ESP8266WebServer& server) {
 }
 
 void handleMqttDiscover(ESP8266WebServer& server) {
+  ESP.wdtFeed();  // discovery burst takes ~2-4 s (yields per entity)
   if (forcePublishAllHaDiscovery()) {
     sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"HA discovery published\"}"));
   } else {

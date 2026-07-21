@@ -911,6 +911,7 @@ static bool mqttConnect() {
 
   // Always set buffer and callback here (in case initMqtt() was skipped when MQTT was disabled at boot)
   g_mqtt.setBufferSize(1024);
+  g_mqtt.setSocketTimeout(5);  // default 15 s connect stall starves the loop when broker is unreachable
   g_mqtt.setCallback(mqttMessageCallback);
 
   bool ok;
@@ -1056,6 +1057,7 @@ void initMqtt() {
   g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
   g_mqtt.setCallback(mqttMessageCallback);
   g_mqtt.setBufferSize(1024);  // writable-entity discovery payloads can reach ~900 bytes; measure in testing
+  g_mqtt.setSocketTimeout(5);  // bound connect stalls (default 15 s)
   logMsg("[MQTT] Configured: %s:%d base=%s ha_discovery=%s",
     g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.baseTopic,
     g_mqttConfig.haDiscovery ? "on" : "off");
@@ -1254,6 +1256,7 @@ bool testMqtt() {
   }
 
   g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
+  g_mqtt.setSocketTimeout(5);  // bound the blocking connect (default 15 s)
 
   char clientId[24];
   snprintf(clientId, sizeof(clientId), "ourbrewbot-%06X", ESP.getChipId());
@@ -1261,6 +1264,9 @@ bool testMqtt() {
   logMsg("[MQTT] Test connecting to %s:%d user=%s",
     g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.username);
 
+  // Known quirk (deliberate non-change): this reconnects the shared client
+  // WITHOUT the LWT/availability/subscriptions, so after a successful test the
+  // connection stays in that degraded state until the next natural disconnect.
   bool ok;
   if (strlen(g_mqttConfig.username) > 0) {
     ok = g_mqtt.connect(clientId, g_mqttConfig.username, g_mqttConfig.password);
