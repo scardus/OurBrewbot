@@ -55,9 +55,24 @@ static unsigned long g_mqttPendingSaveAt = 0;
 static char s_topicBuf[128];
 static char s_availTopic[64];   // "<baseTopic>/availability", built on connect
 
+// Throttled publish-failure logger — one syslog line per 30 s with a suppressed
+// count, so a broker dropping mid-burst can't cause a log storm.
+static void logPublishFailure(const char* topic) {
+  static uint32_t s_failCount = 0;
+  static unsigned long s_lastLogMs = 0;
+  s_failCount++;
+  if (millis() - s_lastLogMs >= 30000) {
+    logMsgL(SYSLOG_WARNING, "[MQTT] publish failed: %s (%u failure(s)), state=%d",
+            topic, (unsigned)s_failCount, g_mqtt.state());
+    s_lastLogMs = millis();
+    s_failCount = 0;
+  }
+}
+
 static void publishValue(const char* base, const char* key, const char* value) {
   snprintf(s_topicBuf, sizeof(s_topicBuf), "%s/%s", base, key);
-  g_mqtt.publish(s_topicBuf, value, true);  // retained
+  if (!g_mqtt.publish(s_topicBuf, value, true))  // retained
+    logPublishFailure(s_topicBuf);
 }
 
 static void publishFloat(const char* base, const char* key, float value, int decimals = 1) {
@@ -105,15 +120,26 @@ static void buildDiscoveryBase(JsonDocument& doc,
 }
 
 // Serialize doc to the entity's discovery topic, publish retained, clear doc, yield.
+// Serializes into a static buffer rather than a heap String — a discovery burst
+// publishes ~70 entities back-to-back and the alloc/free churn was the main
+// fragmentation source on this heap-constrained device.
+static char s_discPayload[1024];  // sized to the PubSubClient buffer (setBufferSize)
+
 static void publishAndReset(JsonDocument& doc,
     const char* component, const char* devId, const char* objectId)
 {
   char discTopic[128];
   snprintf(discTopic, sizeof(discTopic), "homeassistant/%s/%s/%s/config",
     component, devId, objectId);
-  String payload;
-  serializeJson(doc, payload);
-  g_mqtt.publish(discTopic, payload.c_str(), true);
+  const size_t len = measureJson(doc);
+  if (len + 1 > sizeof(s_discPayload)) {
+    logMsgL(SYSLOG_ERR, "[MQTT] discovery payload too large (%u B): %s — skipped",
+            (unsigned)len, discTopic);
+  } else {
+    serializeJson(doc, s_discPayload, sizeof(s_discPayload));
+    if (!g_mqtt.publish(discTopic, s_discPayload, true))
+      logPublishFailure(discTopic);
+  }
   doc.clear();
   yield();  // feed WDT between successive publishes
 }
@@ -589,7 +615,8 @@ static void removeOneEntity(const char* component, const char* devId, const char
   char discTopic[128];
   snprintf(discTopic, sizeof(discTopic), "homeassistant/%s/%s/%s/config",
     component, devId, objectId);
-  g_mqtt.publish(discTopic, (const uint8_t*)"", 0, true);
+  if (!g_mqtt.publish(discTopic, (const uint8_t*)"", 0, true))
+    logPublishFailure(discTopic);
   yield();
 }
 
@@ -892,7 +919,8 @@ static bool mqttConnect() {
     g_mqttBackoffMs = 5000;  // reset backoff on success
 
     // Mark device online
-    g_mqtt.publish(s_availTopic, "online", true);
+    if (!g_mqtt.publish(s_availTopic, "online", true))
+      logPublishFailure(s_availTopic);
 
     // Subscribe to HA birth message to re-publish discovery after HA restarts
     g_mqtt.subscribe("homeassistant/status");
@@ -1000,6 +1028,8 @@ void mqttPublishLog(uint8_t level, const char* line) {
   s_inLogPublish = true;
   char topic[64];
   snprintf(topic, sizeof(topic), "%s/Device/log", g_mqttConfig.baseTopic);
+  // Deliberately unchecked: logging a failure here would re-enter the log
+  // path this function mirrors (the s_inLogPublish guard would swallow it).
   g_mqtt.publish(topic, payload, false);  // non-retained
   s_inLogPublish = false;
 }
