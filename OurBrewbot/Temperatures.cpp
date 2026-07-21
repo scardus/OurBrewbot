@@ -194,6 +194,12 @@ void readTempResults() {
     float temp = sensors->getTempC(addr);
     if (temp == DEVICE_DISCONNECTED_C && g_probes[i].busId == 0) {
       temp = g_sensors2.getTempC(addr);
+      if (temp != DEVICE_DISCONNECTED_C) {
+        // Remember the bus that served the read so the retry below (and the
+        // next cycles until the scan updates it) target the right bus.
+        g_probes[i].busId = 2;
+        sensors = &g_sensors2;
+      }
     }
 
     // First-failure blocking retry — catches transient read errors on marginal connections.
@@ -203,6 +209,13 @@ void readTempResults() {
       sensors->requestTemperatures();
       temp = sensors->getTempC(addr);
       sensors->setWaitForConversion(false);
+      // Probe never seen on a scan (busId 0) and bus 1 retry failed: try bus 2 once.
+      if (temp == DEVICE_DISCONNECTED_C && g_probes[i].busId == 0) {
+        g_sensors2.setWaitForConversion(true);
+        g_sensors2.requestTemperatures();
+        temp = g_sensors2.getTempC(addr);
+        g_sensors2.setWaitForConversion(false);
+      }
     }
 
     if (temp != DEVICE_DISCONNECTED_C) {
