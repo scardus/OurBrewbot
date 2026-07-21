@@ -30,6 +30,7 @@ SyslogConfig      g_syslogConfig;
 
 // Stream-serialize a JsonDocument directly to a LittleFS file.
 static bool saveJsonDocToFile(JsonDocument& doc, const char* path) {
+  const size_t expected = measureJson(doc);
   File f = LittleFS.open(path, "w");
   if (!f) {
     logMsgL(SYSLOG_WARNING, "[CFG] Cannot write: %s", path);
@@ -37,7 +38,13 @@ static bool saveJsonDocToFile(JsonDocument& doc, const char* path) {
   }
   size_t written = serializeJson(doc, f);
   f.close();
-  return written > 0;
+  if (written != expected) {
+    // Partial write (e.g. filesystem full) — the file on disk is corrupt.
+    logMsgL(SYSLOG_ERR, "[CFG] Truncated write: %s (%u/%u bytes)",
+            path, (unsigned)written, (unsigned)expected);
+    return false;
+  }
+  return true;
 }
 
 bool saveJsonDocSafe(JsonDocument& doc, const char* primary, const char* backup) {
@@ -770,17 +777,20 @@ void loadAllConfig() {
 }
 
 void saveAllConfig() {
-  saveGlobalConfig();
-  saveFermenterConfig();
-  saveProbeConfig();
-  saveSmartPlugConfig();
-  saveProfileConfig();
-  saveProfileSteps();
-  saveiSpindelConfig();
-  savePlaatoConfig();
-  saveBrewServiceConfig();
-  saveMqttConfig();
-  saveSyslogConfig();
+  bool ok = true;
+  ok &= saveGlobalConfig();
+  ok &= saveFermenterConfig();
+  ok &= saveProbeConfig();
+  ok &= saveSmartPlugConfig();
+  ok &= saveProfileConfig();
+  ok &= saveProfileSteps();
+  ok &= saveiSpindelConfig();
+  ok &= savePlaatoConfig();
+  ok &= saveBrewServiceConfig();
+  ok &= saveMqttConfig();
+  ok &= saveSyslogConfig();
+  if (!ok)
+    logMsgL(SYSLOG_ERR, "[CFG] One or more config saves failed");
 }
 
 // ============================================================
