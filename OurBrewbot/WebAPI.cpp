@@ -642,8 +642,9 @@ void handleReboot(ESP8266WebServer& server) {
 // OTA UPDATE — GET /update + POST /update
 // ============================================================
 
-void handleOTAPage(ESP8266WebServer& server) {
-  server.send(200, "text/html", F(
+// Served from PROGMEM via sendContent_P — server.send(F(...)) would copy the
+// whole page into a heap String per request.
+static const char OTA_PAGE[] PROGMEM =
     "<!DOCTYPE html><html><head>"
     "<meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -667,8 +668,12 @@ void handleOTAPage(ESP8266WebServer& server) {
     "<input type='submit' value='Upload Firmware'>"
     "</form></div>"
     "<p style='margin-top:12px'><a href='/'>&#8592; Cancel</a></p>"
-    "</body></html>"
-  ));
+    "</body></html>";
+
+void handleOTAPage(ESP8266WebServer& server) {
+  server.setContentLength(strlen_P(OTA_PAGE));
+  server.send(200, "text/html", "");
+  server.sendContent_P(OTA_PAGE);
 }
 
 void handleOTAUpload(ESP8266WebServer& server) {
@@ -797,8 +802,8 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
 // WIFI RESET PAGE + ACTION
 // ============================================================
 
-void handleConfigPage(ESP8266WebServer& server) {
-  server.send(200, "text/html", F(
+// Served from PROGMEM via sendContent_P — see OTA_PAGE note above.
+static const char CONFIG_PAGE[] PROGMEM =
     "<!DOCTYPE html><html><head>"
     "<meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -833,8 +838,12 @@ void handleConfigPage(ESP8266WebServer& server) {
     ".catch(function(e){msg.textContent='Error: '+e});"
     "}"
     "</script>"
-    "</body></html>"
-  ));
+    "</body></html>";
+
+void handleConfigPage(ESP8266WebServer& server) {
+  server.setContentLength(strlen_P(CONFIG_PAGE));
+  server.send(200, "text/html", "");
+  server.sendContent_P(CONFIG_PAGE);
 }
 
 void handleWiFiReset(ESP8266WebServer& server) {
