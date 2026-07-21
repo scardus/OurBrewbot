@@ -1506,6 +1506,21 @@ void handleFsFileSave(ESP8266WebServer& server) {
   String body = server.arg("plain");
   if (body.length() == 0) { server.send(400, "application/json", "{\"status\":\"error\",\"msg\":\"Empty body\"}"); return; }
 
+  // Validate JSON syntax before persisting — a corrupt file here is parsed at
+  // next boot. The empty filter makes the parser walk the whole input without
+  // materialising it, so even the largest file validates with ~no heap.
+  {
+    JsonDocument filter;
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, body, DeserializationOption::Filter(filter));
+    if (err) {
+      char msg[96];
+      snprintf(msg, sizeof(msg), "{\"status\":\"error\",\"msg\":\"Invalid JSON: %s\"}", err.c_str());
+      sendJsonResponse(server, msg, 400);
+      return;
+    }
+  }
+
   File f = LittleFS.open(name, "w");
   if (!f) { server.send(500, "application/json", "{\"status\":\"error\",\"msg\":\"Write failed\"}"); return; }
   f.print(body);
