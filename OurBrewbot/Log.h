@@ -30,9 +30,15 @@
 // WiFi connects (or after syslog config is saved) to resolve the syslog host.
 void logInit();
 
+// Implementation — do not call directly; use the logMsg()/logMsgL() macros
+// below, which move the format literal to flash via PSTR(). Format strings
+// were the largest block of .rodata held in DRAM (~160 call sites).
+void logMsgImpl(uint8_t level, PGM_P fmt, ...) __attribute__((format(printf, 2, 3)));
+
 // Log a formatted message with timestamp + \r\n at SYSLOG_INFO severity.
-void logMsg(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+// fmt must be a string literal (PSTR requirement).
+#define logMsg(fmt, ...)         logMsgImpl(SYSLOG_INFO, PSTR(fmt), ##__VA_ARGS__)
 
 // Log a formatted message at an explicit RFC 5424 severity level.
 // level: one of SYSLOG_EMERG..SYSLOG_DEBUG (lower = more critical).
-void logMsgL(uint8_t level, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+#define logMsgL(level, fmt, ...) logMsgImpl((level),     PSTR(fmt), ##__VA_ARGS__)

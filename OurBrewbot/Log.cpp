@@ -29,7 +29,7 @@ void logInit() {
   }
 }
 
-static void vlogMsg(uint8_t level, const char* fmt, va_list args) {
+static void vlogMsg(uint8_t level, PGM_P fmt, va_list args) {
   // Timestamp: [HHH:MM:SS]
   unsigned long ms = millis();
   unsigned long totalSec = ms / 1000;
@@ -41,9 +41,9 @@ static void vlogMsg(uint8_t level, const char* fmt, va_list args) {
   snprintf(ts, sizeof(ts), "[%03lu:%02lu:%02lu] ", hours, mins, secs);
   Serial.print(ts);
 
-  // Format message
+  // Format message — vsnprintf_P reads the format string from flash
   char buf[192];
-  vsnprintf(buf, sizeof(buf), fmt, args);
+  vsnprintf_P(buf, sizeof(buf), fmt, args);
 
   Serial.print(buf);
   Serial.print("\r\n");
@@ -58,7 +58,7 @@ static void vlogMsg(uint8_t level, const char* fmt, va_list args) {
     // RFC 3164: <PRI>TIMESTAMP HOSTNAME TAG: MESSAGE
     uint8_t pri = (g_syslogConfig.facility * 8) + level;
     char pkt[256];
-    snprintf(pkt, sizeof(pkt), "<%u>ourbrewbot ourbrewbot: %s", pri, buf);
+    snprintf_P(pkt, sizeof(pkt), PSTR("<%u>ourbrewbot ourbrewbot: %s"), pri, buf);
     s_udp.beginPacket(s_syslogIP, g_syslogConfig.port);
     s_udp.write((const uint8_t*)pkt, strlen(pkt));
     s_udp.endPacket();
@@ -75,14 +75,7 @@ static void vlogMsg(uint8_t level, const char* fmt, va_list args) {
 
 }
 
-void logMsg(const char* fmt, ...) {
-  va_list args;
-  va_start(args, fmt);
-  vlogMsg(SYSLOG_INFO, fmt, args);
-  va_end(args);
-}
-
-void logMsgL(uint8_t level, const char* fmt, ...) {
+void logMsgImpl(uint8_t level, PGM_P fmt, ...) {
   va_list args;
   va_start(args, fmt);
   vlogMsg(level, fmt, args);
