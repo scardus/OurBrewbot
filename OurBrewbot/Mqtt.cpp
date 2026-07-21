@@ -91,6 +91,11 @@ static void publishBool(const char* base, const char* key, bool value) {
   publishValue(base, key, value ? "ON" : "OFF");
 }
 
+// HA discovery unit-of-measurement string for the configured display unit.
+static const char* haTempUnit() {
+  return (g_globalConfig.unit == UNIT_FAHRENHEIT) ? "\xC2\xB0""F" : "\xC2\xB0""C";
+}
+
 // ============================================================
 // HOME ASSISTANT DISCOVERY
 // ============================================================
@@ -272,9 +277,9 @@ static void publishFermenterField(int i, const char* key) {
   if      (strcmp(key, "power")               == 0) publishBool (base, "power",               g_fermenters[i].power);
   else if (strcmp(key, "temp_control")        == 0) publishBool (base, "temp_control",         g_fermenters[i].tempControl);
   else if (strcmp(key, "profile_running")     == 0) publishBool (base, "profile_running",      g_fermenters[i].profileRunning);
-  else if (strcmp(key, "ceiling_temperature") == 0) publishFloat(base, "ceiling_temperature",  g_fermenters[i].ceilingTemp);
-  else if (strcmp(key, "floor_temperature")   == 0) publishFloat(base, "floor_temperature",    g_fermenters[i].floorTemp);
-  else if (strcmp(key, "hysteresis")          == 0) publishFloat(base, "hysteresis",           g_fermenters[i].hysteresis);
+  else if (strcmp(key, "ceiling_temperature") == 0) publishFloat(base, "ceiling_temperature",  toDisplayTemp(g_fermenters[i].ceilingTemp));
+  else if (strcmp(key, "floor_temperature")   == 0) publishFloat(base, "floor_temperature",    toDisplayTemp(g_fermenters[i].floorTemp));
+  else if (strcmp(key, "hysteresis")          == 0) publishFloat(base, "hysteresis",           toDisplayTempDelta(g_fermenters[i].hysteresis));
   else if (strcmp(key, "compressor_delay")    == 0) publishInt  (base, "compressor_delay",     g_fermenters[i].compressorDelay);
   else if (strcmp(key, "og")                  == 0) publishFloat(base, "og",                   g_fermenters[i].og, 4);
   else if (strcmp(key, "tg")                  == 0) publishFloat(base, "tg",                   g_fermenters[i].tg, 4);
@@ -350,7 +355,7 @@ static void publishHaDiscovery(int i) {
   snprintf(devId,     sizeof(devId),     "ourbrewbot_%06X_f%d", ESP.getChipId(), i);
   snprintf(fermBase,  sizeof(fermBase),  "%s/Fermenter%d", g_mqttConfig.baseTopic, i);
   snprintf(fermLabel, sizeof(fermLabel), "OurBrewbot F%d", i);  // stable — not user-editable name
-  const char* tempUnit = "\xC2\xB0""C";
+  const char* tempUnit = haTempUnit();
 
   JsonDocument doc;
 
@@ -368,17 +373,17 @@ static void publishHaDiscovery(int i) {
   publishNumberEntity(doc, devId, fermBase, fermLabel,
     "ceiling_temperature", "Ceiling Temperature",
     "ceiling_temperature", "ceiling_temperature/set",
-    -20.0f, 50.0f, 0.1f, tempUnit, "temperature");
+    toDisplayTemp(-20.0f), toDisplayTemp(50.0f), 0.1f, tempUnit, "temperature");
   publishNumberEntity(doc, devId, fermBase, fermLabel,
     "floor_temperature", "Floor Temperature",
     "floor_temperature", "floor_temperature/set",
-    -20.0f, 50.0f, 0.1f, tempUnit, "temperature");
+    toDisplayTemp(-20.0f), toDisplayTemp(50.0f), 0.1f, tempUnit, "temperature");
   publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
     "temperature_unit", "Temperature Unit", "temperature_unit", nullptr, nullptr, "mdi:thermometer", nullptr, nullptr);
   publishNumberEntity(doc, devId, fermBase, fermLabel,
     "hysteresis", "Hysteresis",
     "hysteresis", "hysteresis/set",
-    0.0f, 10.0f, 0.1f, tempUnit);
+    0.0f, toDisplayTempDelta(10.0f), 0.1f, tempUnit);
   publishNumberEntity(doc, devId, fermBase, fermLabel,
     "compressor_delay", "Compressor Delay",
     "compressor_delay", "compressor_delay/set",
@@ -443,7 +448,7 @@ static void publishProbeDiscovery(int idx) {
   if (!g_mqtt.connected()) return;
   if (strlen(g_probes[idx].address) == 0) return;
 
-  const char* tempUnit = "\xC2\xB0""C";
+  const char* tempUnit = haTempUnit();
   char devId[48], base[96], devName[48];
   snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X_probe_%s",
     ESP.getChipId(), g_probes[idx].address);
@@ -477,7 +482,7 @@ static void publishTiltDiscovery(int colour) {
   if (!g_mqtt.connected()) return;
   if (g_tilts[colour].colour == PROBE_UNASSIGNED) return;
 
-  const char* tempUnit = "\xC2\xB0""C";
+  const char* tempUnit = haTempUnit();
   const char* colourName = getTiltColourName(colour);
   char devId[48], base[96], devName[48];
   snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X_tilt_%s",
@@ -515,7 +520,7 @@ static void publishIspindelDiscovery(int idx) {
   if (strlen(g_iSpindels[idx].id) == 0) return;
   if (strcmp(g_iSpindels[idx].name, "None") == 0) return;
 
-  const char* tempUnit = "\xC2\xB0""C";
+  const char* tempUnit = haTempUnit();
   char devId[48], base[96], devName[48];
   snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X_ispindel_%s",
     ESP.getChipId(), g_iSpindels[idx].id);
@@ -823,6 +828,14 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
              strcmp(key, "tg")                  == 0) {
     const char* errMsg;
     float v = atof(pl);
+    // Commands arrive in the configured display unit (HA discovery advertises it);
+    // convert to internal Celsius before validation (Celsius ranges).
+    if (strcmp(key, "ceiling_temperature") == 0 ||
+        strcmp(key, "floor_temperature")   == 0) {
+      v = toCelsius(v);
+    } else if (strcmp(key, "hysteresis") == 0) {
+      v = toCelsiusTempDelta(v);
+    }
     if (!validateFermenterField(idx, key, v, &errMsg)) {
       logMsg("[MQTT] cmd rejected (%s): %s", key, errMsg);
       return;
@@ -1066,7 +1079,9 @@ static void publishProbes() {
     snprintf(base, sizeof(base), "%s/Probe/%s",
       g_mqttConfig.baseTopic, g_probes[i].address);
     publishBool (base, "active",      g_probes[i].failCount < PROBE_FAIL_THRESHOLD);
-    publishFloat(base, "temperature", g_probes[i].temperature);
+    // Preserve the -127 "no reading" sentinel — only real readings are unit-converted
+    float probeTemp = g_probes[i].temperature;
+    publishFloat(base, "temperature", probeTemp > -100.0f ? toDisplayTemp(probeTemp) : probeTemp);
     publishValue(base, "name",        g_probes[i].probeName);
     publishValue(base, "function",    probeFunctionName(g_probes[i].function));
     publishInt  (base, "fermenter",   g_probes[i].fermenter);
@@ -1082,7 +1097,7 @@ static void publishTilts() {
     snprintf(base, sizeof(base), "%s/Tilt/%s",
       g_mqttConfig.baseTopic, getTiltColourName(i));
     publishBool (base, "active",      g_tilts[i].active);
-    publishFloat(base, "temperature", g_tilts[i].temperature);
+    publishFloat(base, "temperature", toDisplayTemp(g_tilts[i].temperature));
     publishFloat(base, "gravity",     g_tilts[i].sg, 4);
     publishBool (base, "is_pro",      g_tilts[i].isPro);
     publishInt  (base, "fermenter",   g_tilts[i].fermenter);
@@ -1099,7 +1114,7 @@ static void publishIspindels() {
     if (strcmp(g_iSpindels[i].name, "None") == 0) continue;
     snprintf(base, sizeof(base), "%s/iSpindel/%s",
       g_mqttConfig.baseTopic, g_iSpindels[i].id);
-    publishFloat(base, "temperature",       g_iSpindels[i].temperature);
+    publishFloat(base, "temperature",       toDisplayTemp(g_iSpindels[i].temperature));
     publishFloat(base, "gravity",           g_iSpindels[i].sg, 4);
     publishFloat(base, "corrected_gravity", g_iSpindels[i].corrGravity, 4);
     publishFloat(base, "battery",           g_iSpindels[i].battery, 3);
@@ -1173,18 +1188,19 @@ void reportMqtt() {
     float beerTemp    = getBeerTemp(i);
     float ambientTemp = getAmbientTemp(i);
     float sg          = getCurrentSG(i);
-    const char* unit  = "C";
+    const char* unit  = (g_globalConfig.unit == UNIT_FAHRENHEIT) ? "F" : "C";
 
-    // Temperatures
+    // Temperatures — published in the configured display unit (internal values
+    // are always Celsius; conversions are identity in Celsius mode)
     if (beerTemp > -100.0f)
-      publishFloat(base, "beer_temperature", beerTemp);
+      publishFloat(base, "beer_temperature", toDisplayTemp(beerTemp));
     publishValue(base, "beer_temperature_source", getBeerTempSource(i));
     if (ambientTemp > -100.0f)
-      publishFloat(base, "ambient_temperature", ambientTemp);
-    publishFloat(base, "ceiling_temperature", g_fermenters[i].ceilingTemp);
-    publishFloat(base, "floor_temperature", g_fermenters[i].floorTemp);
+      publishFloat(base, "ambient_temperature", toDisplayTemp(ambientTemp));
+    publishFloat(base, "ceiling_temperature", toDisplayTemp(g_fermenters[i].ceilingTemp));
+    publishFloat(base, "floor_temperature", toDisplayTemp(g_fermenters[i].floorTemp));
     publishValue(base, "temperature_unit", unit);
-    publishFloat(base, "hysteresis", g_fermenters[i].hysteresis);
+    publishFloat(base, "hysteresis", toDisplayTempDelta(g_fermenters[i].hysteresis));
 
     // Gravity
     if (sg > 0.0f)

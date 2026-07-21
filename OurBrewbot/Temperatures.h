@@ -62,3 +62,7 @@ float getControlTemp(uint8_t fermenterIndex);
 // Convert temperature between units
 float toDisplayTemp(float celsius);
 float toCelsius(float displayTemp);
+
+// Delta (span) conversions for values like hysteresis — scale only, no offset
+float toDisplayTempDelta(float dCelsius);
+float toCelsiusTempDelta(float dDisplay);

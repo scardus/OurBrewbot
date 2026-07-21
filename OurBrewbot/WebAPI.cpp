@@ -501,6 +501,7 @@ void handleController(ESP8266WebServer& server) {
   if (server.method() == HTTP_POST) {
     JsonDocument doc;
     if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
+      uint8_t oldUnit = g_globalConfig.unit;
       if (!doc["Unit"].isNull())       { uint8_t v = doc["Unit"];       if (v == UNIT_CELSIUS || v == UNIT_FAHRENHEIT) g_globalConfig.unit       = v; }
       if (!doc["Resolution"].isNull()) { uint8_t v = doc["Resolution"]; if (v >= 9 && v <= 12)                        g_globalConfig.resolution = v; }
       if (!doc["AlarmDwellSec"].isNull()) { uint32_t v = doc["AlarmDwellSec"]; if (v <= 3600) g_globalConfig.alarmDwellSec = (uint16_t)v; }
@@ -509,6 +510,9 @@ void handleController(ESP8266WebServer& server) {
       if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
       if (doc["BrewServiceId"].is<const char*>()) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
       saveGlobalConfig();
+      // HA discovery advertises the temperature unit — republish so entities
+      // pick up the new unit (retained topics are overwritten in place).
+      if (g_globalConfig.unit != oldUnit) publishAllHaDiscovery();
       sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Configuration saved\"}"));
       return;
     }

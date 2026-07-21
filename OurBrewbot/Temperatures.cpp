@@ -398,3 +398,18 @@ float toCelsius(float displayTemp) {
   }
   return displayTemp;
 }
+
+// Delta (span) conversions for values like hysteresis — scale only, no +32 offset.
+float toDisplayTempDelta(float dCelsius) {
+  if (g_globalConfig.unit == UNIT_FAHRENHEIT) {
+    return dCelsius * 9.0f / 5.0f;
+  }
+  return dCelsius;
+}
+
+float toCelsiusTempDelta(float dDisplay) {
+  if (g_globalConfig.unit == UNIT_FAHRENHEIT) {
+    return dDisplay * 5.0f / 9.0f;
+  }
+  return dDisplay;
+}
