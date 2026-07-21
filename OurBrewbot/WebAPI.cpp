@@ -1267,7 +1267,14 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
   }
   if (!doc["enabled"].isNull())          g_mqttConfig.enabled = doc["enabled"];
   if (doc["host"].is<const char*>())     strlcpy(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
-  if (!doc["port"].isNull())             g_mqttConfig.port = doc["port"];
+  if (!doc["port"].isNull()) {
+    uint32_t port = doc["port"];
+    if (port < 1 || port > 65535) {
+      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"port out of range (1-65535)\"}"), 400);
+      return;
+    }
+    g_mqttConfig.port = (uint16_t)port;
+  }
   if (doc["username"].is<const char*>()) strlcpy(g_mqttConfig.username, doc["username"].as<const char*>(), sizeof(g_mqttConfig.username));
   if (doc["password"].is<const char*>()) strlcpy(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
   if (doc["baseTopic"].is<const char*>()) {
@@ -1617,7 +1624,14 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
   }
   if (!doc["enabled"].isNull())  g_syslogConfig.enabled  = doc["enabled"];
   if (doc["host"].is<const char*>()) strlcpy(g_syslogConfig.host, doc["host"].as<const char*>(), sizeof(g_syslogConfig.host));
-  if (!doc["port"].isNull())     g_syslogConfig.port     = doc["port"];
+  if (!doc["port"].isNull()) {
+    uint32_t port = doc["port"];
+    if (port < 1 || port > 65535) {
+      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"port out of range (1-65535)\"}"), 400);
+      return;
+    }
+    g_syslogConfig.port = (uint16_t)port;
+  }
   if (!doc["facility"].isNull()) { uint8_t v = doc["facility"]; if (v <= 23) g_syslogConfig.facility = v; }
   if (!doc["minLevel"].isNull()) { uint8_t v = doc["minLevel"]; if (v <= 7)  g_syslogConfig.minLevel = v; }
   saveSyslogConfig();
