@@ -997,11 +997,9 @@ void handleRFSniffPoll(ESP8266WebServer& server) {
   sendJsonDoc(server, doc);
 }
 
-void handleRFSniff(ESP8266WebServer& server) {
-  // Stop receiver when leaving (will restart on poll)
-  s_sniffActive = false;
-
-  String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'>"
+// Served from PROGMEM via sendContent_P — was a ~1.9 KB heap String per request.
+static const char RF_SNIFF_PAGE[] PROGMEM =
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
     "<title>RF Sniffer</title>"
     "<style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui,sans-serif;padding:16px}"
     "h2{color:#e94560}a{color:#53d8fb}"
@@ -1043,8 +1041,15 @@ void handleRFSniff(ESP8266WebServer& server) {
     "setInterval(poll,500);"
     "</script>"
     "<br><a href='/admin'>Back to Admin</a>"
-    "</body></html>");
-  server.send(200, "text/html", html);
+    "</body></html>";
+
+void handleRFSniff(ESP8266WebServer& server) {
+  // Stop receiver when leaving (will restart on poll)
+  s_sniffActive = false;
+
+  server.setContentLength(strlen_P(RF_SNIFF_PAGE));
+  server.send(200, "text/html", "");
+  server.sendContent_P(RF_SNIFF_PAGE);
 }
 
 // ============================================================
@@ -1115,13 +1120,9 @@ void handleBLESniffSend(ESP8266WebServer& server) {
   sendJsonDoc(server, resp);
 }
 
-void handleBLESniff(ESP8266WebServer& server) {
-  // Reset sniff state
-  s_bleSniffLen = 0;
-  g_bleSniffActive = true;
-  s_bleSniffLastPoll = millis();
-
-  String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'>"
+// Served from PROGMEM via sendContent_P — was a ~2.7 KB heap String per request.
+static const char BLE_SNIFF_PAGE[] PROGMEM =
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
     "<title>BLE AT Console</title>"
     "<style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui,sans-serif;padding:16px}"
     "h2{color:#e94560}a{color:#53d8fb}"
@@ -1181,8 +1182,17 @@ void handleBLESniff(ESP8266WebServer& server) {
     "setInterval(poll,300);"
     "</script>"
     "<br><a href='/admin'>Back to Admin</a>"
-    "</body></html>");
-  server.send(200, "text/html", html);
+    "</body></html>";
+
+void handleBLESniff(ESP8266WebServer& server) {
+  // Reset sniff state
+  s_bleSniffLen = 0;
+  g_bleSniffActive = true;
+  s_bleSniffLastPoll = millis();
+
+  server.setContentLength(strlen_P(BLE_SNIFF_PAGE));
+  server.send(200, "text/html", "");
+  server.sendContent_P(BLE_SNIFF_PAGE);
 }
 
 // ============================================================
