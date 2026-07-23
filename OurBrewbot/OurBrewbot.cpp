@@ -337,13 +337,9 @@ void loop() {
 // ============================================================
 // WIFI SETUP
 // ============================================================
-void setupWiFi() {
-  WiFiManager wifiManager;
-  wifiManager.setConnectTimeout(20);
-  wifiManager.setConfigPortalTimeout(180);
-
-  wifiManager.setTitle("OurBrewbot Setup");
-  wifiManager.setCustomHeadElement(
+// Config-portal dark theme. PROGMEM: WiFiManager stores the pointer and
+// byte-reads it when serving the portal — works from flash on core 3.x.
+static const char WM_PORTAL_CSS[] PROGMEM =
     "<style>"
     "body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui,sans-serif}"
     "h1,h2,h3{color:#e94560}"
@@ -355,8 +351,15 @@ void setupWiFi() {
     "input[type=submit]:hover{background:#c73650}"
     ".wrap{background:#16213e;border:1px solid #333;border-radius:6px}"
     "a{color:#e0e0e0}.q a{color:#fff}"
-    "</style>"
-  );
+    "</style>";
+
+void setupWiFi() {
+  WiFiManager wifiManager;
+  wifiManager.setConnectTimeout(20);
+  wifiManager.setConfigPortalTimeout(180);
+
+  wifiManager.setTitle("OurBrewbot Setup");
+  wifiManager.setCustomHeadElement(WM_PORTAL_CSS);
 
   // Use chip ID in AP name to make it unique per device
   String apName = "OurBrewbot-" + String(ESP.getChipId(), HEX);
