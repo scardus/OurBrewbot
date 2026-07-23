@@ -269,15 +269,21 @@ float getTempQuick(const char* addressStr) {
   return (temp == DEVICE_DISCONNECTED_C) ? TEMP_NONE : temp;
 }
 
-float getBeerTemp(uint8_t fermenterIndex) {
+// Single resolver behind getBeerTemp()/getBeerTempSource() — one priority
+// chain (Tilt > Probe > iSpindel) shared by both, so the value and its
+// source label cannot drift apart.
+enum BeerTempSrc : int8_t { BEER_SRC_NONE = -1, BEER_SRC_DEBUG, BEER_SRC_TILT, BEER_SRC_PROBE, BEER_SRC_ISPINDEL };
+
+static BeerTempSrc findBeerTempSource(uint8_t fermenterIndex, int& slot) {
   if (g_fermenterDebugMode && g_fermenterDebugOverrides[fermenterIndex].enabled)
-    return g_fermenterDebugOverrides[fermenterIndex].beerTemp;
+    return BEER_SRC_DEBUG;
   // Priority 1: Tilt assigned to this fermenter with Beer function
   for (int i = 0; i < MAX_TILTS; i++) {
     if (g_tilts[i].active &&
         g_tilts[i].fermenter == fermenterIndex &&
         g_tilts[i].function  == PROBE_FN_BEER) {
-      return g_tilts[i].temperature;
+      slot = i;
+      return BEER_SRC_TILT;
     }
   }
   // Priority 2: DS18B20 Beer probe
@@ -285,7 +291,8 @@ float getBeerTemp(uint8_t fermenterIndex) {
     if (g_probes[i].fermenter == fermenterIndex &&
         g_probes[i].function  == PROBE_FN_BEER &&
         strlen(g_probes[i].address) > 0) {
-      return g_probes[i].temperature;
+      slot = i;
+      return BEER_SRC_PROBE;
     }
   }
   // Priority 3: iSpindel (only when configured to provide beer temp)
@@ -293,38 +300,33 @@ float getBeerTemp(uint8_t fermenterIndex) {
     if (g_iSpindels[i].collectData &&
         g_iSpindels[i].fermenter == fermenterIndex &&
         g_iSpindels[i].function  == PROBE_FN_BEER) {
-      return g_iSpindels[i].temperature;
+      slot = i;
+      return BEER_SRC_ISPINDEL;
     }
   }
-  return TEMP_NONE;
+  return BEER_SRC_NONE;
+}
+
+float getBeerTemp(uint8_t fermenterIndex) {
+  int slot = -1;
+  switch (findBeerTempSource(fermenterIndex, slot)) {
+    case BEER_SRC_DEBUG:    return g_fermenterDebugOverrides[fermenterIndex].beerTemp;
+    case BEER_SRC_TILT:     return g_tilts[slot].temperature;
+    case BEER_SRC_PROBE:    return g_probes[slot].temperature;
+    case BEER_SRC_ISPINDEL: return g_iSpindels[slot].temperature;
+    default:                return TEMP_NONE;
+  }
 }
 
 const char* getBeerTempSource(uint8_t fermenterIndex) {
-  if (g_fermenterDebugMode && g_fermenterDebugOverrides[fermenterIndex].enabled)
-    return "Debug";
-  // Mirror getBeerTemp() priority chain exactly
-  for (int i = 0; i < MAX_TILTS; i++) {
-    if (g_tilts[i].active &&
-        g_tilts[i].fermenter == fermenterIndex &&
-        g_tilts[i].function  == PROBE_FN_BEER) {
-      return "Tilt";
-    }
+  int slot = -1;
+  switch (findBeerTempSource(fermenterIndex, slot)) {
+    case BEER_SRC_DEBUG:    return "Debug";
+    case BEER_SRC_TILT:     return "Tilt";
+    case BEER_SRC_PROBE:    return "Probe";
+    case BEER_SRC_ISPINDEL: return "iSpindel";
+    default:                return "None";
   }
-  for (int i = 0; i < MAX_PROBES; i++) {
-    if (g_probes[i].fermenter == fermenterIndex &&
-        g_probes[i].function  == PROBE_FN_BEER &&
-        strlen(g_probes[i].address) > 0) {
-      return "Probe";
-    }
-  }
-  for (int i = 0; i < MAX_ISPINDELS; i++) {
-    if (g_iSpindels[i].collectData &&
-        g_iSpindels[i].fermenter == fermenterIndex &&
-        g_iSpindels[i].function  == PROBE_FN_BEER) {
-      return "iSpindel";
-    }
-  }
-  return "None";
 }
 
 float getAmbientTemp(uint8_t fermenterIndex) {

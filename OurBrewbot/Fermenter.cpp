@@ -253,38 +253,48 @@ float estimateGravity(uint8_t i) {
   }
 }
 
-float getCurrentSG(uint8_t i) {
+// Single resolver behind getCurrentSG()/getGravitySource() — one priority
+// chain (Tilt > iSpindel > Estimate) shared by both, so the value and its
+// source label cannot drift apart.
+enum GravitySrc : int8_t { SG_SRC_ESTIMATE = -1, SG_SRC_DEBUG, SG_SRC_TILT, SG_SRC_ISPINDEL };
+
+static GravitySrc findGravitySource(uint8_t i, int& slot) {
   if (g_fermenterDebugMode && g_fermenterDebugOverrides[i].enabled)
-    return g_fermenterDebugOverrides[i].sg;
-  // Priority: Tilt > iSpindel > Estimate
+    return SG_SRC_DEBUG;
   for (int t = 0; t < MAX_TILTS; t++) {
     if (g_tilts[t].active && g_tilts[t].fermenter == i) {
-      return g_tilts[t].sg;
+      slot = t;
+      return SG_SRC_TILT;
     }
   }
   for (int s = 0; s < MAX_ISPINDELS; s++) {
     if (g_iSpindels[s].collectData && g_iSpindels[s].fermenter == i) {
-      return g_iSpindels[s].corrGravity > 0.0f ? g_iSpindels[s].corrGravity : g_iSpindels[s].sg;
+      slot = s;
+      return SG_SRC_ISPINDEL;
     }
   }
-  return estimateGravity(i);
+  return SG_SRC_ESTIMATE;
+}
+
+float getCurrentSG(uint8_t i) {
+  int slot = -1;
+  switch (findGravitySource(i, slot)) {
+    case SG_SRC_DEBUG:    return g_fermenterDebugOverrides[i].sg;
+    case SG_SRC_TILT:     return g_tilts[slot].sg;
+    case SG_SRC_ISPINDEL: return g_iSpindels[slot].corrGravity > 0.0f ? g_iSpindels[slot].corrGravity
+                                                                      : g_iSpindels[slot].sg;
+    default:              return estimateGravity(i);
+  }
 }
 
 const char* getGravitySource(uint8_t i) {
-  if (g_fermenterDebugMode && g_fermenterDebugOverrides[i].enabled)
-    return "Debug";
-  // Mirror getCurrentSG() priority chain exactly
-  for (int t = 0; t < MAX_TILTS; t++) {
-    if (g_tilts[t].active && g_tilts[t].fermenter == i) {
-      return "Tilt";
-    }
+  int slot = -1;
+  switch (findGravitySource(i, slot)) {
+    case SG_SRC_DEBUG:    return "Debug";
+    case SG_SRC_TILT:     return "Tilt";
+    case SG_SRC_ISPINDEL: return "iSpindel";
+    default:              return "Estimated";
   }
-  for (int s = 0; s < MAX_ISPINDELS; s++) {
-    if (g_iSpindels[s].collectData && g_iSpindels[s].fermenter == i) {
-      return "iSpindel";
-    }
-  }
-  return "Estimated";
 }
 
 float getAttenuation(uint8_t i) {
