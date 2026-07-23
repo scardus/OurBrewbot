@@ -289,6 +289,236 @@ static void publishFermenterField(int i, const char* key) {
   else if (strcmp(key, "profile_no")          == 0) publishInt  (base, "profile_no",           g_fermenters[i].profileNo);
 }
 
+// ============================================================
+// HA ENTITY DESCRIPTOR TABLES
+//
+// One table per device scope drives BOTH discovery publish and removal, so
+// an entity added to a table can never leak a retained HA config by being
+// forgotten on the remove side. Tables live in PROGMEM (rows are memcpy_P'd
+// to the stack before use); publish order matches table order.
+// ============================================================
+
+enum HaKind : uint8_t { HA_SENSOR, HA_BINARY, HA_NUMBER, HA_SWITCH, HA_SELECT, HA_TEXT, HA_BUTTON };
+
+// Flags for discovery fields that depend on the configured temperature unit
+#define HAF_TEMP_UNIT    0x01   // unit_of_meas = haTempUnit()
+#define HAF_MINMAX_TEMP  0x02   // min/max converted via toDisplayTemp()
+#define HAF_MAX_DELTA    0x04   // max converted via toDisplayTempDelta()
+
+struct HaEntityDesc {
+  uint8_t     kind;        // HaKind
+  uint8_t     flags;
+  const char* objectId;    // entity slug == state topic key; command topic = "<objectId>/set"
+  const char* name;        // friendly name
+  const char* devClass;    // HA device_class (nullptr = omit)
+  const char* unit;        // unit_of_measurement (nullptr = omit or via HAF_TEMP_UNIT)
+  const char* icon;        // mdi icon (nullptr = omit)
+  const char* entityCat;   // entity_category (nullptr = omit)
+  const char* stateClass;  // state_class (nullptr = omit)
+  float       minVal, maxVal, step;  // HA_NUMBER only
+};
+
+#define HA_COUNT(t) (sizeof(t) / sizeof((t)[0]))
+
+static const HaEntityDesc kDeviceEntities[] PROGMEM = {
+  // Static text diagnostics
+  { HA_SENSOR, 0, "firmware_version", "Firmware Version", nullptr, nullptr, "mdi:tag",           "diagnostic", nullptr },
+  { HA_SENSOR, 0, "ip_address",       "IP Address",       nullptr, nullptr, "mdi:ip-network",    "diagnostic", nullptr },
+  { HA_SENSOR, 0, "mdns_name",        "mDNS Name",        nullptr, nullptr, "mdi:lan",           "diagnostic", nullptr },
+  { HA_SENSOR, 0, "wifi_ssid",        "WiFi SSID",        nullptr, nullptr, "mdi:wifi",          "diagnostic", nullptr },
+  // Numeric diagnostics
+  { HA_SENSOR, 0, "rssi",             "RSSI",             "signal_strength", "dBm", nullptr,     "diagnostic", "measurement" },
+  { HA_SENSOR, 0, "free_heap",        "Free Heap",        nullptr, "B",       "mdi:memory",      "diagnostic", "measurement" },
+  { HA_SENSOR, 0, "uptime",           "Uptime",           "duration", "min", "mdi:clock-outline","diagnostic", "measurement" },
+  // Identity & reboot info
+  { HA_SENSOR, 0, "chip_id",          "Chip ID",          nullptr, nullptr, "mdi:chip",          "diagnostic", nullptr },
+  { HA_SENSOR, 0, "reboot_reason",    "Reboot Reason",    nullptr, nullptr, "mdi:restart",       "diagnostic", nullptr },
+  { HA_SENSOR, 0, "reboot_code",      "Reboot Code",      nullptr, nullptr, "mdi:restart-alert", "diagnostic", "measurement" },
+  // Device control buttons — always advertised; ignored by device when allowControl is off,
+  // state topic publishes correct device state within 60s regardless
+  { HA_BUTTON, 0, "reboot",           "Reboot",           nullptr, nullptr, "mdi:restart",       nullptr, nullptr },
+  { HA_BUTTON, 0, "all_off",          "All Off",          nullptr, nullptr, "mdi:power-off",     nullptr, nullptr },
+};
+
+static const HaEntityDesc kFermenterEntities[] PROGMEM = {
+  // Temperature sensors — numeric, use state_class measurement.
+  // Entity names are the plain property names; HA prefixes them with dev.name ("OurBrewbot F0")
+  // when displaying and when generating entity IDs (sensor.ourbrewbot_f0_beer_temperature).
+  { HA_SENSOR, HAF_TEMP_UNIT, "beer_temperature",        "Beer Temperature",        "temperature", nullptr, nullptr, nullptr, "measurement" },
+  { HA_SENSOR, 0,             "beer_temperature_source", "Beer Temperature Source", nullptr, nullptr, "mdi:information-outline", nullptr, nullptr },
+  { HA_SENSOR, HAF_TEMP_UNIT, "ambient_temperature",     "Ambient Temperature",     "temperature", nullptr, nullptr, nullptr, "measurement" },
+  // Setpoint numbers — always number entities; device ignores commands when allowControl is off,
+  // and the 60s state publish corrects any HA UI changes within one interval
+  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "ceiling_temperature", "Ceiling Temperature", "temperature", nullptr, nullptr, nullptr, nullptr, -20.0f, 50.0f, 0.1f },
+  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "floor_temperature",   "Floor Temperature",   "temperature", nullptr, nullptr, nullptr, nullptr, -20.0f, 50.0f, 0.1f },
+  { HA_SENSOR, 0,             "temperature_unit",        "Temperature Unit",        nullptr, nullptr, "mdi:thermometer", nullptr, nullptr },
+  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MAX_DELTA,   "hysteresis",          "Hysteresis",          nullptr, nullptr, nullptr, nullptr, nullptr, 0.0f, 10.0f, 0.1f },
+  { HA_NUMBER, 0,             "compressor_delay",        "Compressor Delay",        nullptr, "min", "mdi:timer-outline", nullptr, nullptr, 0.0f, 1440.0f, 1.0f },
+  // Gravity — read-only sensors plus writable OG/TG numbers
+  { HA_SENSOR, 0, "gravity",        "Gravity",        nullptr, "SG",    "mdi:test-tube",           nullptr, "measurement" },
+  { HA_SENSOR, 0, "gravity_source", "Gravity Source", nullptr, nullptr, "mdi:information-outline", nullptr, nullptr },
+  { HA_NUMBER, 0, "og",             "OG",             nullptr, "SG",    "mdi:test-tube",           nullptr, nullptr, 0.990f, 1.200f, 0.001f },
+  { HA_NUMBER, 0, "tg",             "TG",             nullptr, "SG",    "mdi:test-tube",           nullptr, nullptr, 0.990f, 1.200f, 0.001f },
+  { HA_SENSOR, 0, "attenuation",    "Attenuation",    nullptr, "%",     "mdi:percent",             nullptr, "measurement" },
+  // Status — read-only text sensor
+  { HA_SENSOR, 0, "status", "Status", nullptr, nullptr, "mdi:thermometer", nullptr, nullptr },
+  // Alarm — over/under temperature beyond tolerance
+  { HA_BINARY, 0, "alarm",  "Alarm",  "problem", nullptr, "mdi:alarm-light", nullptr, nullptr },
+  // Text fields — always text entities; device ignores commands when allowControl is off
+  { HA_TEXT, 0, "name",      "Name",      nullptr, nullptr, "mdi:label", nullptr, nullptr },
+  { HA_TEXT, 0, "beer_name", "Beer Name", nullptr, nullptr, "mdi:beer",  nullptr, nullptr },
+  { HA_TEXT, 0, "yeast",     "Yeast",     nullptr, nullptr, "mdi:flask", nullptr, nullptr },
+  // ON/OFF state — always switches; device ignores commands when allowControl is off
+  // and the 60s state publish corrects any HA UI changes within one interval
+  { HA_SWITCH, 0, "power",           "Power",           nullptr, nullptr, "mdi:power",       nullptr, nullptr },
+  { HA_SWITCH, 0, "temp_control",    "Temp Control",    nullptr, nullptr, "mdi:thermostat",  nullptr, nullptr },
+  { HA_SWITCH, 0, "profile_running", "Profile Running", nullptr, nullptr, "mdi:play-circle", nullptr, nullptr },
+  // Profile select + step progress (profile_no is the only HA_SELECT — its
+  // options list lives in publishEntityFromDesc)
+  { HA_SELECT, 0, "profile_no",    "Profile No",    nullptr, nullptr, "mdi:playlist-play", nullptr, nullptr },
+  { HA_SENSOR, 0, "profile_step",  "Profile Step",  nullptr, "#", "mdi:counter", nullptr, "measurement" },
+  { HA_SENSOR, 0, "profile_steps", "Profile Steps", nullptr, "#", "mdi:counter", nullptr, "measurement" },
+};
+
+static const HaEntityDesc kProbeEntities[] PROGMEM = {
+  { HA_BINARY, 0,             "active",      "Active",      "connectivity", nullptr, nullptr,                "diagnostic", nullptr },
+  { HA_SENSOR, HAF_TEMP_UNIT, "temperature", "Temperature", "temperature",  nullptr, nullptr,                nullptr, "measurement" },
+  { HA_SENSOR, 0,             "name",        "Name",        nullptr, nullptr, "mdi:label",            "diagnostic", nullptr },
+  { HA_SENSOR, 0,             "function",    "Function",    nullptr, nullptr, "mdi:function-variant", "diagnostic", nullptr },
+  { HA_SENSOR, 0,             "fermenter",   "Fermenter",   nullptr, nullptr, "mdi:tank",             "diagnostic", nullptr },
+};
+
+static const HaEntityDesc kTiltEntities[] PROGMEM = {
+  { HA_BINARY, 0,             "active",      "Active",              "connectivity", nullptr, nullptr,    "diagnostic", nullptr },
+  { HA_SENSOR, HAF_TEMP_UNIT, "temperature", "Temperature",         "temperature",  nullptr, nullptr,    nullptr, "measurement" },
+  { HA_SENSOR, 0,             "gravity",     "Gravity",             nullptr, "SG",    "mdi:test-tube",   nullptr, "measurement" },
+  { HA_BINARY, 0,             "is_pro",      "Tilt Pro",            nullptr, nullptr, "mdi:bluetooth",   "diagnostic", nullptr },
+  { HA_SENSOR, 0,             "fermenter",   "Fermenter",           nullptr, nullptr, "mdi:tank",        "diagnostic", nullptr },
+  { HA_SENSOR, 0,             "function",    "Temperature Reading", nullptr, nullptr, "mdi:thermometer", "diagnostic", nullptr },
+};
+
+static const HaEntityDesc kIspindelEntities[] PROGMEM = {
+  { HA_SENSOR, HAF_TEMP_UNIT, "temperature",       "Temperature",         "temperature", nullptr, nullptr,       nullptr, "measurement" },
+  { HA_SENSOR, 0,             "gravity",           "Gravity",             nullptr, "SG",  "mdi:test-tube",       nullptr, "measurement" },
+  { HA_SENSOR, 0,             "corrected_gravity", "Corrected Gravity",   nullptr, "SG",  "mdi:test-tube",       nullptr, "measurement" },
+  { HA_SENSOR, 0,             "battery",           "Battery",             "voltage", "V", nullptr,               "diagnostic", "measurement" },
+  { HA_SENSOR, 0,             "rssi",              "RSSI",                "signal_strength", "dBm", nullptr,     "diagnostic", "measurement" },
+  { HA_SENSOR, 0,             "angle",             "Angle",               nullptr, "\xC2\xB0", "mdi:angle-acute","diagnostic", "measurement" },
+  { HA_SENSOR, 0,             "velocity",          "Velocity",            nullptr, nullptr, "mdi:speedometer",   "diagnostic", "measurement" },
+  { HA_SENSOR, 0,             "run_time",          "Run Time",            "duration", "s", "mdi:timer-outline",  "diagnostic", "measurement" },
+  { HA_SENSOR, 0,             "name",              "Name",                nullptr, nullptr, "mdi:label",         "diagnostic", nullptr },
+  { HA_SENSOR, 0,             "fermenter",         "Fermenter",           nullptr, nullptr, "mdi:tank",          "diagnostic", nullptr },
+  { HA_SENSOR, 0,             "function",          "Temperature Reading", nullptr, nullptr, "mdi:thermometer",   "diagnostic", nullptr },
+};
+
+// Older releases published fermenter entities under different components /
+// object ids. Removal cleans these up too, so upgrades don't leak retained
+// configs in HA. (Publish never uses this list.)
+struct HaLegacyEntity { const char* component; const char* objectId; };
+
+static const HaLegacyEntity kFermenterLegacyEntities[] PROGMEM = {
+  // v0.1.20 abbreviated IDs (wrong)
+  { "sensor", "beer_temp" }, { "sensor", "ambient_temp" },
+  { "sensor", "ceil_temp" }, { "sensor", "floor_temp" },
+  // sensor versions of entities that are now number/text (pre-Patch 4/5)
+  { "sensor", "ceiling_temperature" }, { "sensor", "floor_temperature" },
+  { "sensor", "hysteresis" }, { "sensor", "og" }, { "sensor", "tg" },
+  { "sensor", "name" }, { "sensor", "beer_name" }, { "sensor", "yeast" },
+  { "sensor", "compressor_delay" },
+  // per-fermenter diagnostics that moved to the device scope
+  { "sensor", "rssi" }, { "sensor", "free_heap" },
+  // binary_sensor versions from v0.1.22 — changed to sensor in v0.1.23
+  { "binary_sensor", "power" }, { "binary_sensor", "temp_control" },
+  { "binary_sensor", "profile_running" },
+  // sensor versions of ON/OFF entities (pre-Patch 3 switches)
+  { "sensor", "power" }, { "sensor", "temp_control" }, { "sensor", "profile_running" },
+};
+
+static const char* haComponentName(uint8_t kind) {
+  switch (kind) {
+    case HA_BINARY: return "binary_sensor";
+    case HA_NUMBER: return "number";
+    case HA_SWITCH: return "switch";
+    case HA_SELECT: return "select";
+    case HA_TEXT:   return "text";
+    case HA_BUTTON: return "button";
+    default:        return "sensor";
+  }
+}
+
+static void removeOneEntity(const char* component, const char* devId, const char* objectId);
+
+// Publish one entity from its descriptor row (copied out of PROGMEM).
+static void publishEntityFromDesc(JsonDocument& doc, const HaEntityDesc* row,
+    const char* devId, const char* base, const char* devName)
+{
+  HaEntityDesc d;
+  memcpy_P(&d, row, sizeof(d));
+  const char* unit = (d.flags & HAF_TEMP_UNIT) ? haTempUnit() : d.unit;
+  char cmdKey[48];
+  snprintf(cmdKey, sizeof(cmdKey), "%s/set", d.objectId);
+
+  switch (d.kind) {
+    case HA_SENSOR:
+    case HA_BINARY:
+      publishOneEntity(doc, haComponentName(d.kind), devId, base, devName,
+        d.objectId, d.name, d.objectId, d.devClass, unit, d.icon, d.entityCat, d.stateClass);
+      break;
+    case HA_NUMBER: {
+      float mn = d.minVal, mx = d.maxVal;
+      if (d.flags & HAF_MINMAX_TEMP) { mn = toDisplayTemp(mn); mx = toDisplayTemp(mx); }
+      if (d.flags & HAF_MAX_DELTA)   { mx = toDisplayTempDelta(mx); }
+      publishNumberEntity(doc, devId, base, devName, d.objectId, d.name,
+        d.objectId, cmdKey, mn, mx, d.step, unit, d.devClass, d.icon);
+      break;
+    }
+    case HA_SWITCH:
+      publishSwitchEntity(doc, devId, base, devName, d.objectId, d.name,
+        d.objectId, cmdKey, d.icon);
+      break;
+    case HA_SELECT: {
+      // profile_no is the only select entity: options 0..MAX_PROFILES
+      static const char* profileOpts[] = {"0","1","2","3","4"};
+      publishSelectEntity(doc, devId, base, devName, d.objectId, d.name,
+        d.objectId, cmdKey, profileOpts, MAX_PROFILES + 1, d.icon);
+      break;
+    }
+    case HA_TEXT:
+      publishTextEntity(doc, devId, base, devName, d.objectId, d.name,
+        d.objectId, cmdKey, 31, d.icon);
+      break;
+    case HA_BUTTON:
+      publishButtonEntity(doc, devId, base, devName, d.objectId, d.name,
+        cmdKey, d.icon);
+      break;
+  }
+}
+
+static void publishEntityTable(JsonDocument& doc, const HaEntityDesc* table, size_t n,
+    const char* devId, const char* base, const char* devName)
+{
+  for (size_t k = 0; k < n; k++) {
+    publishEntityFromDesc(doc, &table[k], devId, base, devName);
+  }
+}
+
+// Remove every entity in a descriptor table (publishes empty retained configs).
+static void removeEntityTable(const HaEntityDesc* table, size_t n, const char* devId) {
+  for (size_t k = 0; k < n; k++) {
+    HaEntityDesc d;
+    memcpy_P(&d, &table[k], sizeof(d));
+    removeOneEntity(haComponentName(d.kind), devId, d.objectId);
+  }
+}
+
+static void removeLegacyEntityTable(const HaLegacyEntity* table, size_t n, const char* devId) {
+  for (size_t k = 0; k < n; k++) {
+    HaLegacyEntity e;
+    memcpy_P(&e, &table[k], sizeof(e));
+    removeOneEntity(e.component, devId, e.objectId);
+  }
+}
+
 // Publish HA discovery entity configs for the device itself (not per-fermenter).
 // Uses device ID ourbrewbot_{CHIPID} and base topic {baseTopic}/Device.
 static void publishDeviceDiscovery() {
@@ -299,49 +529,8 @@ static void publishDeviceDiscovery() {
   snprintf(devBase, sizeof(devBase), "%s/Device",           g_mqttConfig.baseTopic);
 
   JsonDocument doc;
-
-  // Static text diagnostics
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "firmware_version", "Firmware Version", "firmware_version",
-    nullptr, nullptr, "mdi:tag", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "ip_address", "IP Address", "ip_address",
-    nullptr, nullptr, "mdi:ip-network", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "mdns_name", "mDNS Name", "mdns_name",
-    nullptr, nullptr, "mdi:lan", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "wifi_ssid", "WiFi SSID", "wifi_ssid",
-    nullptr, nullptr, "mdi:wifi", "diagnostic", nullptr);
-
-  // Numeric diagnostics
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "rssi",      "RSSI",      "rssi",
-    "signal_strength", "dBm", nullptr, "diagnostic", "measurement");
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "free_heap", "Free Heap", "free_heap",
-    nullptr, "B", "mdi:memory", "diagnostic", "measurement");
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "uptime",    "Uptime",    "uptime",
-    "duration", "min", "mdi:clock-outline", "diagnostic", "measurement");
-
-  // Identity & reboot info
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "chip_id", "Chip ID", "chip_id",
-    nullptr, nullptr, "mdi:chip", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "reboot_reason", "Reboot Reason", "reboot_reason",
-    nullptr, nullptr, "mdi:restart", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, devBase, "OurBrewbot",
-    "reboot_code", "Reboot Code", "reboot_code",
-    nullptr, nullptr, "mdi:restart-alert", "diagnostic", "measurement");
-
-  // Device control buttons — always advertised; ignored by device when allowControl is off,
-  // state topic publishes correct device state within 60s regardless
-  publishButtonEntity(doc, devId, devBase, "OurBrewbot",
-    "reboot",  "Reboot",  "reboot/set",  "mdi:restart");
-  publishButtonEntity(doc, devId, devBase, "OurBrewbot",
-    "all_off", "All Off", "all_off/set", "mdi:power-off");
+  publishEntityTable(doc, kDeviceEntities, HA_COUNT(kDeviceEntities),
+                     devId, devBase, "OurBrewbot");
 
   logMsg("[MQTT] HA discovery published for device: base=%s", devBase);
 }
@@ -355,90 +544,10 @@ static void publishHaDiscovery(int i) {
   snprintf(devId,     sizeof(devId),     "ourbrewbot_%06X_f%d", ESP.getChipId(), i);
   snprintf(fermBase,  sizeof(fermBase),  "%s/Fermenter%d", g_mqttConfig.baseTopic, i);
   snprintf(fermLabel, sizeof(fermLabel), "OurBrewbot F%d", i);  // stable — not user-editable name
-  const char* tempUnit = haTempUnit();
 
   JsonDocument doc;
-
-  // Temperature sensors — numeric, use state_class measurement
-  // Entity names are the plain property names; HA prefixes them with dev.name ("OurBrewbot F0")
-  // when displaying and when generating entity IDs (sensor.ourbrewbot_f0_beer_temperature).
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "beer_temperature",    "Beer Temperature",    "beer_temperature",    "temperature", tempUnit, nullptr,           nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "beer_temperature_source", "Beer Temperature Source", "beer_temperature_source", nullptr, nullptr, "mdi:information-outline", nullptr, nullptr);
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "ambient_temperature", "Ambient Temperature", "ambient_temperature", "temperature", tempUnit, nullptr,           nullptr, "measurement");
-  // Setpoint numbers — always number entities; device ignores commands when allowControl is off,
-  // and the 60s state publish corrects any HA UI changes within one interval
-  publishNumberEntity(doc, devId, fermBase, fermLabel,
-    "ceiling_temperature", "Ceiling Temperature",
-    "ceiling_temperature", "ceiling_temperature/set",
-    toDisplayTemp(-20.0f), toDisplayTemp(50.0f), 0.1f, tempUnit, "temperature");
-  publishNumberEntity(doc, devId, fermBase, fermLabel,
-    "floor_temperature", "Floor Temperature",
-    "floor_temperature", "floor_temperature/set",
-    toDisplayTemp(-20.0f), toDisplayTemp(50.0f), 0.1f, tempUnit, "temperature");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "temperature_unit", "Temperature Unit", "temperature_unit", nullptr, nullptr, "mdi:thermometer", nullptr, nullptr);
-  publishNumberEntity(doc, devId, fermBase, fermLabel,
-    "hysteresis", "Hysteresis",
-    "hysteresis", "hysteresis/set",
-    0.0f, toDisplayTempDelta(10.0f), 0.1f, tempUnit);
-  publishNumberEntity(doc, devId, fermBase, fermLabel,
-    "compressor_delay", "Compressor Delay",
-    "compressor_delay", "compressor_delay/set",
-    0.0f, 1440.0f, 1.0f, "min", nullptr, "mdi:timer-outline");
-
-  // Gravity sensors — read-only numeric sensors
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "gravity",     "Gravity",     "gravity",     nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "gravity_source", "Gravity Source", "gravity_source", nullptr, nullptr, "mdi:information-outline", nullptr, nullptr);
-  publishNumberEntity(doc, devId, fermBase, fermLabel,
-    "og", "OG",
-    "og", "og/set",
-    0.990f, 1.200f, 0.001f, "SG", nullptr, "mdi:test-tube");
-  publishNumberEntity(doc, devId, fermBase, fermLabel,
-    "tg", "TG",
-    "tg", "tg/set",
-    0.990f, 1.200f, 0.001f, "SG", nullptr, "mdi:test-tube");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "attenuation", "Attenuation", "attenuation", nullptr, "%",  "mdi:percent",   nullptr, "measurement");
-
-  // Status — read-only text sensor
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "status", "Status", "status", nullptr, nullptr, "mdi:thermometer", nullptr, nullptr);
-
-  // Alarm — over/under temperature beyond tolerance
-  publishOneEntity(doc, "binary_sensor", devId, fermBase, fermLabel,
-    "alarm", "Alarm", "alarm", "problem", nullptr, "mdi:alarm-light", nullptr, nullptr);
-
-  // Text fields — always text entities; device ignores commands when allowControl is off
-  publishTextEntity(doc, devId, fermBase, fermLabel,
-    "name",      "Name",      "name",      "name/set",      31, "mdi:label");
-  publishTextEntity(doc, devId, fermBase, fermLabel,
-    "beer_name", "Beer Name", "beer_name", "beer_name/set", 31, "mdi:beer");
-  publishTextEntity(doc, devId, fermBase, fermLabel,
-    "yeast",     "Yeast",     "yeast",     "yeast/set",     31, "mdi:flask");
-
-  // ON/OFF state — always switches; device ignores commands when allowControl is off
-  // and the 60s state publish corrects any HA UI changes within one interval
-  publishSwitchEntity(doc, devId, fermBase, fermLabel,
-    "power",           "Power",           "power",           "power/set",           "mdi:power");
-  publishSwitchEntity(doc, devId, fermBase, fermLabel,
-    "temp_control",    "Temp Control",    "temp_control",    "temp_control/set",    "mdi:thermostat");
-  publishSwitchEntity(doc, devId, fermBase, fermLabel,
-    "profile_running", "Profile Running", "profile_running", "profile_running/set", "mdi:play-circle");
-
-  // Profile select + step progress
-  static const char* profileOpts[] = {"0","1","2","3","4"};
-  publishSelectEntity(doc, devId, fermBase, fermLabel,
-    "profile_no", "Profile No", "profile_no", "profile_no/set",
-    profileOpts, MAX_PROFILES + 1, "mdi:playlist-play");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "profile_step",  "Profile Step",  "profile_step",  nullptr, "#", "mdi:counter", nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, fermBase, fermLabel,
-    "profile_steps", "Profile Steps", "profile_steps", nullptr, "#", "mdi:counter", nullptr, "measurement");
+  publishEntityTable(doc, kFermenterEntities, HA_COUNT(kFermenterEntities),
+                     devId, fermBase, fermLabel);
 
   logMsg("[MQTT] HA discovery published for F%d: base=%s", i, fermBase);
 }
@@ -448,7 +557,6 @@ static void publishProbeDiscovery(int idx) {
   if (!g_mqtt.connected()) return;
   if (strlen(g_probes[idx].address) == 0) return;
 
-  const char* tempUnit = haTempUnit();
   char devId[48], base[96], devName[48];
   snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X_probe_%s",
     ESP.getChipId(), g_probes[idx].address);
@@ -458,21 +566,7 @@ static void publishProbeDiscovery(int idx) {
     strlen(g_probes[idx].probeName) > 0 ? g_probes[idx].probeName : g_probes[idx].address);
 
   JsonDocument doc;
-  publishOneEntity(doc, "binary_sensor", devId, base, devName,
-    "active", "Active", "active",
-    "connectivity", nullptr, nullptr, "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "temperature", "Temperature", "temperature",
-    "temperature", tempUnit, nullptr, nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "name", "Name", "name",
-    nullptr, nullptr, "mdi:label", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "function", "Function", "function",
-    nullptr, nullptr, "mdi:function-variant", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "fermenter", "Fermenter", "fermenter",
-    nullptr, nullptr, "mdi:tank", "diagnostic", nullptr);
+  publishEntityTable(doc, kProbeEntities, HA_COUNT(kProbeEntities), devId, base, devName);
 
   logMsg("[MQTT] HA discovery published for probe %s", g_probes[idx].address);
 }
@@ -482,7 +576,6 @@ static void publishTiltDiscovery(int colour) {
   if (!g_mqtt.connected()) return;
   if (g_tilts[colour].colour == PROBE_UNASSIGNED) return;
 
-  const char* tempUnit = haTempUnit();
   const char* colourName = getTiltColourName(colour);
   char devId[48], base[96], devName[48];
   snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X_tilt_%s",
@@ -492,24 +585,7 @@ static void publishTiltDiscovery(int colour) {
   snprintf(devName, sizeof(devName), "OurBrewbot Tilt %s", colourName);
 
   JsonDocument doc;
-  publishOneEntity(doc, "binary_sensor", devId, base, devName,
-    "active", "Active", "active",
-    "connectivity", nullptr, nullptr, "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "temperature", "Temperature", "temperature",
-    "temperature", tempUnit, nullptr, nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "gravity", "Gravity", "gravity",
-    nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
-  publishOneEntity(doc, "binary_sensor", devId, base, devName,
-    "is_pro", "Tilt Pro", "is_pro",
-    nullptr, nullptr, "mdi:bluetooth", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "fermenter", "Fermenter", "fermenter",
-    nullptr, nullptr, "mdi:tank", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "function", "Temperature Reading", "function",
-    nullptr, nullptr, "mdi:thermometer", "diagnostic", nullptr);
+  publishEntityTable(doc, kTiltEntities, HA_COUNT(kTiltEntities), devId, base, devName);
 
   logMsg("[MQTT] HA discovery published for tilt %s", colourName);
 }
@@ -520,7 +596,6 @@ static void publishIspindelDiscovery(int idx) {
   if (strlen(g_iSpindels[idx].id) == 0) return;
   if (strcmp(g_iSpindels[idx].name, "None") == 0) return;
 
-  const char* tempUnit = haTempUnit();
   char devId[48], base[96], devName[48];
   snprintf(devId,   sizeof(devId),   "ourbrewbot_%06X_ispindel_%s",
     ESP.getChipId(), g_iSpindels[idx].id);
@@ -530,44 +605,10 @@ static void publishIspindelDiscovery(int idx) {
     strlen(g_iSpindels[idx].name) > 0 ? g_iSpindels[idx].name : g_iSpindels[idx].id);
 
   JsonDocument doc;
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "temperature", "Temperature", "temperature",
-    "temperature", tempUnit, nullptr, nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "gravity", "Gravity", "gravity",
-    nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "corrected_gravity", "Corrected Gravity", "corrected_gravity",
-    nullptr, "SG", "mdi:test-tube", nullptr, "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "battery", "Battery", "battery",
-    "voltage", "V", nullptr, "diagnostic", "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "rssi", "RSSI", "rssi",
-    "signal_strength", "dBm", nullptr, "diagnostic", "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "angle", "Angle", "angle",
-    nullptr, "\xC2\xB0", "mdi:angle-acute", "diagnostic", "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "velocity", "Velocity", "velocity",
-    nullptr, nullptr, "mdi:speedometer", "diagnostic", "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "run_time", "Run Time", "run_time",
-    "duration", "s", "mdi:timer-outline", "diagnostic", "measurement");
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "name", "Name", "name",
-    nullptr, nullptr, "mdi:label", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "fermenter", "Fermenter", "fermenter",
-    nullptr, nullptr, "mdi:tank", "diagnostic", nullptr);
-  publishOneEntity(doc, "sensor", devId, base, devName,
-    "function", "Temperature Reading", "function",
-    nullptr, nullptr, "mdi:thermometer", "diagnostic", nullptr);
+  publishEntityTable(doc, kIspindelEntities, HA_COUNT(kIspindelEntities), devId, base, devName);
 
   logMsg("[MQTT] HA discovery published for ispindel %s", g_iSpindels[idx].id);
 }
-
-static void removeOneEntity(const char* component, const char* devId, const char* objectId);
 
 // Remove HA discovery for one Probe by its OneWire address.
 static void removeProbeDiscovery(const char* address) {
@@ -575,11 +616,7 @@ static void removeProbeDiscovery(const char* address) {
   if (strlen(address) == 0) return;
   char devId[48];
   snprintf(devId, sizeof(devId), "ourbrewbot_%06X_probe_%s", ESP.getChipId(), address);
-  removeOneEntity("binary_sensor", devId, "active");
-  removeOneEntity("sensor", devId, "temperature");
-  removeOneEntity("sensor", devId, "name");
-  removeOneEntity("sensor", devId, "function");
-  removeOneEntity("sensor", devId, "fermenter");
+  removeEntityTable(kProbeEntities, HA_COUNT(kProbeEntities), devId);
 }
 
 // Remove HA discovery for one Tilt colour.
@@ -588,12 +625,7 @@ static void removeTiltDiscovery(int colour) {
   const char* colourName = getTiltColourName(colour);
   char devId[48];
   snprintf(devId, sizeof(devId), "ourbrewbot_%06X_tilt_%s", ESP.getChipId(), colourName);
-  removeOneEntity("binary_sensor", devId, "active");
-  removeOneEntity("sensor", devId, "temperature");
-  removeOneEntity("sensor", devId, "gravity");
-  removeOneEntity("binary_sensor", devId, "is_pro");
-  removeOneEntity("sensor", devId, "fermenter");
-  removeOneEntity("sensor", devId, "function");
+  removeEntityTable(kTiltEntities, HA_COUNT(kTiltEntities), devId);
 }
 
 // Remove HA discovery for one iSpindel by its hex id.
@@ -602,17 +634,7 @@ static void removeIspindelDiscovery(const char* id) {
   if (strlen(id) == 0) return;
   char devId[48];
   snprintf(devId, sizeof(devId), "ourbrewbot_%06X_ispindel_%s", ESP.getChipId(), id);
-  removeOneEntity("sensor", devId, "temperature");
-  removeOneEntity("sensor", devId, "gravity");
-  removeOneEntity("sensor", devId, "corrected_gravity");
-  removeOneEntity("sensor", devId, "battery");
-  removeOneEntity("sensor", devId, "rssi");
-  removeOneEntity("sensor", devId, "angle");
-  removeOneEntity("sensor", devId, "velocity");
-  removeOneEntity("sensor", devId, "run_time");
-  removeOneEntity("sensor", devId, "name");
-  removeOneEntity("sensor", devId, "fermenter");
-  removeOneEntity("sensor", devId, "function");
+  removeEntityTable(kIspindelEntities, HA_COUNT(kIspindelEntities), devId);
 }
 
 // Remove one HA entity by publishing an empty retained payload to its discovery topic.
@@ -625,76 +647,14 @@ static void removeOneEntity(const char* component, const char* devId, const char
   yield();
 }
 
-// Remove all HA discovery entities for one fermenter.
-// Includes old abbreviated IDs from v0.1.20 to ensure full cleanup on upgrade.
+// Remove all HA discovery entities for one fermenter — every entity in the
+// current table plus the legacy IDs older releases published.
 static void removeHaDiscovery(int i) {
   if (!g_mqtt.connected()) return;
   char devId[32];
   snprintf(devId, sizeof(devId), "ourbrewbot_%06X_f%d", ESP.getChipId(), i);
-
-  // v0.1.20 abbreviated IDs (wrong) — remove so HA doesn't keep stale entities
-  removeOneEntity("sensor", devId, "beer_temp");
-  removeOneEntity("sensor", devId, "ambient_temp");
-  removeOneEntity("sensor", devId, "ceil_temp");
-  removeOneEntity("sensor", devId, "floor_temp");
-
-  // Current full-name sensor IDs
-  removeOneEntity("sensor", devId, "beer_temperature");
-  removeOneEntity("sensor", devId, "beer_temperature_source");
-  removeOneEntity("sensor", devId, "ambient_temperature");
-  removeOneEntity("sensor", devId, "ceiling_temperature");
-  removeOneEntity("sensor", devId, "floor_temperature");
-  removeOneEntity("sensor", devId, "temperature_unit");
-  removeOneEntity("sensor", devId, "hysteresis");
-  removeOneEntity("sensor", devId, "gravity");
-  removeOneEntity("sensor", devId, "gravity_source");
-  removeOneEntity("sensor", devId, "og");
-  removeOneEntity("sensor", devId, "tg");
-  removeOneEntity("sensor", devId, "attenuation");
-  removeOneEntity("sensor", devId, "status");
-  removeOneEntity("sensor", devId, "name");
-  removeOneEntity("sensor", devId, "beer_name");
-  removeOneEntity("sensor", devId, "yeast");
-  removeOneEntity("sensor", devId, "compressor_delay");
-  removeOneEntity("sensor", devId, "rssi");
-  removeOneEntity("sensor", devId, "free_heap");
-
-  // Binary sensor versions from v0.1.22 — changed to sensor in v0.1.23, clean up old topics
-  removeOneEntity("binary_sensor", devId, "power");
-  removeOneEntity("binary_sensor", devId, "temp_control");
-  removeOneEntity("binary_sensor", devId, "profile_running");
-
-  // Alarm binary_sensor (added v0.1.84)
-  removeOneEntity("binary_sensor", devId, "alarm");
-
-  // Current sensor versions of ON/OFF entities
-  removeOneEntity("sensor", devId, "power");
-  removeOneEntity("sensor", devId, "temp_control");
-  removeOneEntity("sensor", devId, "profile_running");
-  removeOneEntity("sensor", devId, "profile_step");
-  removeOneEntity("sensor", devId, "profile_steps");
-
-  // Switch versions (present from Patch 3+)
-  removeOneEntity("switch", devId, "power");
-  removeOneEntity("switch", devId, "temp_control");
-  removeOneEntity("switch", devId, "profile_running");
-
-  // Number versions (present from Patch 4+)
-  removeOneEntity("number", devId, "ceiling_temperature");
-  removeOneEntity("number", devId, "floor_temperature");
-  removeOneEntity("number", devId, "hysteresis");
-  removeOneEntity("number", devId, "compressor_delay");
-  removeOneEntity("number", devId, "og");
-  removeOneEntity("number", devId, "tg");
-
-  // Text versions (present from Patch 5+)
-  removeOneEntity("text",   devId, "name");
-  removeOneEntity("text",   devId, "beer_name");
-  removeOneEntity("text",   devId, "yeast");
-
-  // Select versions (present from Patch 5+)
-  removeOneEntity("select", devId, "profile_no");
-
+  removeLegacyEntityTable(kFermenterLegacyEntities, HA_COUNT(kFermenterLegacyEntities), devId);
+  removeEntityTable(kFermenterEntities, HA_COUNT(kFermenterEntities), devId);
   logMsg("[MQTT] HA discovery removed for F%d", i);
 }
 
@@ -703,18 +663,7 @@ static void removeDeviceDiscovery() {
   if (!g_mqtt.connected()) return;
   char devId[24];
   snprintf(devId, sizeof(devId), "ourbrewbot_%06X", ESP.getChipId());
-  removeOneEntity("sensor", devId, "firmware_version");
-  removeOneEntity("sensor", devId, "ip_address");
-  removeOneEntity("sensor", devId, "mdns_name");
-  removeOneEntity("sensor", devId, "wifi_ssid");
-  removeOneEntity("sensor", devId, "rssi");
-  removeOneEntity("sensor", devId, "free_heap");
-  removeOneEntity("sensor", devId, "uptime");
-  removeOneEntity("sensor", devId, "chip_id");
-  removeOneEntity("sensor", devId, "reboot_reason");
-  removeOneEntity("sensor", devId, "reboot_code");
-  removeOneEntity("button", devId, "reboot");
-  removeOneEntity("button", devId, "all_off");
+  removeEntityTable(kDeviceEntities, HA_COUNT(kDeviceEntities), devId);
   logMsg("[MQTT] HA discovery removed for device");
 }
 
