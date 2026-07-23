@@ -12,9 +12,8 @@
 // Send all configured reports
 void sendReports();
 
-// Individual service reporters — svcIndex selects the brew service config slot
-void reportBrewfather(uint8_t fermenterIndex, uint8_t svcIndex);
-void reportBrewersFriend(uint8_t fermenterIndex, uint8_t svcIndex);
+// Report one fermenter to one brew service slot (0=Brewer's Friend, 1=Brewfather)
+void reportBrewService(uint8_t fermenterIndex, uint8_t svcIndex);
 
 // Test a brew service connection — returns HTTP status code or error
 int testBrewService(uint8_t svcIndex);
