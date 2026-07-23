@@ -31,12 +31,6 @@ void periodicProbeScan();
 // Clean up duplicate probes caused by old truncated addresses
 void cleanupDuplicateProbes();
 
-// Map probe temperature readings to fermenter beer/ambient slots
-void allocateProbeTemperatures();
-
-// Get temperature for a probe slot by index
-float getTempByIndex(uint8_t index);
-
 // Fast single-probe read by OneWire address string
 float getTempQuick(const char* addressStr);
 

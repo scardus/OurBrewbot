@@ -245,7 +245,6 @@ void loop() {
         g_tempConversionPending = false;
         checkpoint(CP_TEMP_READ);
         readTempResults();
-        allocateProbeTemperatures();
 
         // Print probe temperatures to serial console
         for (int i = 0; i < MAX_PROBES; i++) {

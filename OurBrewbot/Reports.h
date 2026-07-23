@@ -17,6 +17,3 @@ void reportBrewService(uint8_t fermenterIndex, uint8_t svcIndex);
 
 // Test a brew service connection — returns HTTP status code or error
 int testBrewService(uint8_t svcIndex);
-
-// Health check — free heap, uptime etc.
-void reportHealth();

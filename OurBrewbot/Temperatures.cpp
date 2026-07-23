@@ -253,46 +253,8 @@ void periodicProbeScan() {
 }
 
 // ============================================================
-// PROBE TEMPERATURE ALLOCATION
-// Maps probe readings to fermenter beer/ambient/control slots
-// ============================================================
-
-void allocateProbeTemperatures() {
-  for (int f = 0; f < MAX_FERMENTERS; f++) {
-    if (!g_fermenters[f].power) continue;  // fermenter off
-
-    // Find probes assigned to this fermenter
-    for (int p = 0; p < MAX_PROBES; p++) {
-      if (g_probes[p].fermenter != f) continue;
-      if (strlen(g_probes[p].address) == 0) continue;
-
-      switch (g_probes[p].function) {
-        case PROBE_FN_BEER:
-          // Beer probe drives the control loop
-          break;
-        case PROBE_FN_AMBIENT:
-          // Ambient probe for fridge/chamber monitoring
-          break;
-        case PROBE_FN_TILT:
-          break;
-        case PROBE_FN_ISPINDEL:
-          // iSpindel temp handled via getBeerTemp() fallback chain — don't overwrite probe reading
-          break;
-        default:
-          break;
-      }
-    }
-  }
-}
-
-// ============================================================
 // TEMPERATURE GETTERS
 // ============================================================
-
-float getTempByIndex(uint8_t index) {
-  if (index >= MAX_PROBES) return -127.0f;
-  return g_probes[index].temperature;
-}
 
 float getTempQuick(const char* addressStr) {
   DeviceAddress addr;

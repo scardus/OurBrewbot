@@ -28,7 +28,6 @@ ProfileConfig   g_profiles[MAX_PROFILES];
 ProfileStep     g_profileSteps[MAX_PROFILE_STEPS];
 TiltConfig      g_tilts[MAX_TILTS];
 iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
-PlaatoConfig    g_plaato[MAX_ISPINDELS];
 WiFiConfig      g_wifiConfig;
 BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 MqttConfig        g_mqttConfig;
@@ -415,21 +414,6 @@ static const CfgField kiSpindelFields[] PROGMEM = { ISPINDEL_CONFIG_FIELDS(CFG_R
 #undef CFG_CHK
 #undef CFG_ROW
 
-// ---------- PlaatoConfig (jsonPlaato.txt) ----------
-#define PLAATO_CONFIG_FIELDS(X) \
-  X("AuthCode", authCode, STR,  "Plaato Authcode")  \
-  X("GetData",  getData,  BOOL, false)
-
-#define CFG_KEY(key, member, type, def) static const char kPLKey_##member[] PROGMEM = key;
-#define CFG_CHK(key, member, type, def) CFG_ASSERT_TYPE(PlaatoConfig, member, type)
-#define CFG_ROW(key, member, type, def) CFG_FIELD(PlaatoConfig, kPLKey_##member, member, type, def)
-PLAATO_CONFIG_FIELDS(CFG_KEY)
-PLAATO_CONFIG_FIELDS(CFG_CHK)
-static const CfgField kPlaatoFields[] PROGMEM = { PLAATO_CONFIG_FIELDS(CFG_ROW) };
-#undef CFG_KEY
-#undef CFG_CHK
-#undef CFG_ROW
-
 // ---------- BrewServiceConfig (jsonBrewServices.txt) ----------
 #define BREWSVC_CONFIG_FIELDS(X) \
   X("Enabled",    enabled,    BOOL, false)         \
@@ -685,28 +669,6 @@ bool saveiSpindelConfig() {
 }
 
 // ============================================================
-// PLAATO CONFIG
-// ============================================================
-
-bool loadPlaatoConfig() {
-  JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_PLAATO, FILE_PLAATO_BKP)) {
-    initDefaultPlaatoConfig();
-    return false;
-  }
-  cfgLoadArray(doc, g_plaato, sizeof(PlaatoConfig), MAX_ISPINDELS,
-               kPlaatoFields, CFG_COUNT(kPlaatoFields));
-  return true;
-}
-
-bool savePlaatoConfig() {
-  JsonDocument doc;
-  cfgSaveArray(doc, g_plaato, sizeof(PlaatoConfig), MAX_ISPINDELS,
-               kPlaatoFields, CFG_COUNT(kPlaatoFields));
-  return saveJsonDocSafe(doc, FILE_PLAATO, FILE_PLAATO_BKP);
-}
-
-// ============================================================
 // TILT CONFIG
 // 4-slot format matching original firmware jsonTilt.txt:
 //   {"Address":[c,c,c,c],"Function":[...],"Fermenter":[...],
@@ -881,7 +843,6 @@ void loadAllConfig() {
   loadProfileConfig();
   loadProfileSteps();
   loadiSpindelConfig();
-  loadPlaatoConfig();
   loadTiltConfig();
   loadBrewServiceConfig();
   loadMqttConfig();
@@ -917,7 +878,6 @@ void saveAllConfig() {
   ok &= saveProfileConfig();
   ok &= saveProfileSteps();
   ok &= saveiSpindelConfig();
-  ok &= savePlaatoConfig();
   ok &= saveBrewServiceConfig();
   ok &= saveMqttConfig();
   ok &= saveSyslogConfig();
@@ -1027,13 +987,6 @@ void initDefaultiSpindelConfig() {
   }
 }
 
-void initDefaultPlaatoConfig() {
-  for (int i = 0; i < MAX_ISPINDELS; i++) {
-    strlcpy(g_plaato[i].authCode, "Plaato Authcode", sizeof(g_plaato[i].authCode));
-    g_plaato[i].getData = false;
-  }
-}
-
 void initDefaultBrewServiceConfig() {
   for (int i = 0; i < MAX_BREW_SERVICES; i++) {
     g_brewServices[i].enabled = false;
@@ -1088,7 +1041,6 @@ void resetAllConfig() {
   initDefaultProfileConfig();
   initDefaultTiltConfig();
   initDefaultiSpindelConfig();
-  initDefaultPlaatoConfig();
   initDefaultBrewServiceConfig();
   initDefaultMqttConfig();
   initDefaultSyslogConfig();

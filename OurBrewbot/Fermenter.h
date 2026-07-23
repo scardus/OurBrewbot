@@ -25,7 +25,7 @@ void checkFermenterAlarm(uint8_t index);
 // Estimate current gravity from OG + attenuation model
 float estimateGravity(uint8_t index);
 
-// Get current SG (from Tilt/iSpindel/Plaato, or estimate)
+// Get current SG (from Tilt/iSpindel, or estimate)
 float getCurrentSG(uint8_t index);
 
 // Get the source of the current SG reading ("Tilt", "iSpindel", or "Estimated")

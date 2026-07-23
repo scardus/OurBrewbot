@@ -1577,7 +1577,7 @@ void handleFsFileSave(ESP8266WebServer& server) {
   static const char* const ALLOWED[] = {
     "/jsonGlobal.txt", "/jsonFermenter.txt", "/jsonProbe.txt",
     "/jsonSmartPlugs.txt", "/jsonProfile.txt", "/jsonProfileSteps.txt",
-    "/jsonTilt.txt", "/jsoniSpindel.txt", "/jsonPlaato.txt",
+    "/jsonTilt.txt", "/jsoniSpindel.txt",
     "/jsonBrewServices.txt", "/jsonMqtt.txt", "/jsonSyslog.txt"
   };
   String name = server.arg("name");

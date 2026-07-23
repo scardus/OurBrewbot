@@ -64,25 +64,3 @@ bool getPlugState(uint8_t plugIndex) {
   return s_plugState[plugIndex];
 }
 
-void refreshPlugStates() {
-  // Re-transmit current state of all active plugs
-  for (int i = 0; i < MAX_SMART_PLUGS; i++) {
-    if (g_smartPlugs[i].function == PLUG_FN_UNASSIGNED) continue;
-    if (g_smartPlugs[i].onCode == 0) continue;
-    smartPlugSwitch(i, s_plugState[i]);
-    delay(50);  // Small gap between transmissions
-  }
-}
-
-// ============================================================
-// PROGRAMMING MODE
-// ============================================================
-
-void enterPlugProgramMode(uint8_t plugIndex) {
-  if (plugIndex >= MAX_SMART_PLUGS) return;
-
-  logMsg("[PLUG] Put Smartplug in Program Mode then Press On Button");
-  logMsg("[PLUG] Waiting for plug to enter program mode...");
-  logMsg("[PLUG] Manual programming: use REST API to set plug codes");
-  logMsg("[PLUG] POST to /controller with SmartPlug configuration for slot %d", plugIndex);
-}

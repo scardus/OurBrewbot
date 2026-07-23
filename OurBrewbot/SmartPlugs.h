@@ -15,11 +15,5 @@ void smartPlugSwitch(uint8_t plugIndex, bool on);
 // Get current state of a plug (on/off)
 bool getPlugState(uint8_t plugIndex);
 
-// Re-transmit current state of all active plugs
-void refreshPlugStates();
-
-// Enter plug programming/learning mode
-void enterPlugProgramMode(uint8_t plugIndex);
-
 // RF transmission via RCSwitch
 void rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol);

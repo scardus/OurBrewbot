@@ -256,7 +256,7 @@ float estimateGravity(uint8_t i) {
 float getCurrentSG(uint8_t i) {
   if (g_fermenterDebugMode && g_fermenterDebugOverrides[i].enabled)
     return g_fermenterDebugOverrides[i].sg;
-  // Priority: Tilt > iSpindel > Plaato > Estimate
+  // Priority: Tilt > iSpindel > Estimate
   for (int t = 0; t < MAX_TILTS; t++) {
     if (g_tilts[t].active && g_tilts[t].fermenter == i) {
       return g_tilts[t].sg;

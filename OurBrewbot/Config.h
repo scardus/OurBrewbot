@@ -144,8 +144,6 @@ enum ControllerVersion {
 #define FILE_TILT_BKP       "/jsonTiltbkup.txt"
 #define FILE_ISPINDEL       "/jsoniSpindel.txt"
 #define FILE_ISPINDEL_BKP   "/jsoniSpindelbkup.txt"
-#define FILE_PLAATO         "/jsonPlaato.txt"
-#define FILE_PLAATO_BKP     "/jsonPlaatobkup.txt"
 #define FILE_BREWSVC        "/jsonBrewServices.txt"
 #define FILE_BREWSVC_BKP    "/jsonBrewServicesbkup.txt"
 #define FILE_MQTT           "/jsonMqtt.txt"
@@ -289,7 +287,6 @@ struct ProfileStep {
   float   endTemp;              // target/ending temperature °C
   float   sgTrigger;            // SG trigger value
   float   days;                 // days for time-based steps (supports fractional)
-  float   endSG;                // end gravity (alias for sgTrigger in some steps)
 };
 
 struct ProfileConfig {
@@ -341,15 +338,6 @@ struct iSpindelConfig {
   float    runTime;             // per-wake cycle duration: wake-up to report sent (seconds)
   char     gravityUnit[4];      // unit string from device ("SG", "G", "P")
   uint32_t lastSeen;            // millis() of last POST received (0 = never seen since boot)
-};
-
-// ============================================================
-// STRUCT: PlaatoConfig
-// Persisted in jsonPlaato.txt
-// ============================================================
-struct PlaatoConfig {
-  char    authCode[48];         // Plaato auth code
-  bool    getData;              // fetch data from Plaato
 };
 
 // ============================================================
@@ -418,7 +406,6 @@ extern ProfileConfig   g_profiles[MAX_PROFILES];
 extern ProfileStep     g_profileSteps[MAX_PROFILE_STEPS];
 extern TiltConfig      g_tilts[MAX_TILTS];
 extern iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
-extern PlaatoConfig    g_plaato[MAX_ISPINDELS];
 extern WiFiConfig      g_wifiConfig;
 extern BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 extern MqttConfig        g_mqttConfig;
@@ -449,8 +436,6 @@ bool loadTiltConfig();
 bool saveTiltConfig();
 bool loadiSpindelConfig();
 bool saveiSpindelConfig();
-bool loadPlaatoConfig();
-bool savePlaatoConfig();
 bool loadBrewServiceConfig();
 bool saveBrewServiceConfig();
 bool loadMqttConfig();
@@ -466,7 +451,6 @@ void initDefaultSmartPlugConfig();
 void initDefaultProfileConfig();
 void initDefaultTiltConfig();
 void initDefaultiSpindelConfig();
-void initDefaultPlaatoConfig();
 void initDefaultBrewServiceConfig();
 void initDefaultMqttConfig();
 void initDefaultSyslogConfig();

@@ -1689,7 +1689,6 @@ function exportConfig() {
     { key: 'profileSteps', name: '/jsonProfileSteps.txt' },
     { key: 'tilt',         name: '/jsonTilt.txt' },
     { key: 'ispindel',     name: '/jsoniSpindel.txt' },
-    { key: 'plaato',       name: '/jsonPlaato.txt' },
     { key: 'brewservices', name: '/jsonBrewServices.txt' },
     { key: 'mqtt',         name: '/jsonMqtt.txt' },
     { key: 'syslog',       name: '/jsonSyslog.txt' }
@@ -1740,7 +1739,6 @@ function importConfig(input) {
       profileSteps: '/jsonProfileSteps.txt',
       tilt:         '/jsonTilt.txt',
       ispindel:     '/jsoniSpindel.txt',
-      plaato:       '/jsonPlaato.txt',
       brewservices: '/jsonBrewServices.txt',
       mqtt:         '/jsonMqtt.txt',
       syslog:       '/jsonSyslog.txt'
