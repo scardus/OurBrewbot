@@ -82,7 +82,13 @@ static int identifyTiltColour(const char* uuidHex) {
 }
 
 void initBLE() {
-  g_bleSerial.begin(g_globalConfig.bleBaud);
+  // Hold a full AT+DISI? response (<=320 B, see BLE_BUF_SIZE) even if a loop
+  // pass stalls mid-scan. isrBufCapacity is passed EXPLICITLY: left at 0 the
+  // library derives it as bufCapacity*10 uint32 entries, so bufCapacity=384
+  // with default ISR sizing would cost ~15 KB; capping the edge buffer keeps
+  // the total near ~2.4 KB (384 B byte queue + 512*4 B edge queue).
+  g_bleSerial.begin(g_globalConfig.bleBaud, SWSERIAL_8N1, PIN_BLE_RX, PIN_BLE_TX,
+                    false, /*bufCapacity=*/384, /*isrBufCapacity=*/512);
   delay(100);
 
   // Send AT to test module responsiveness
