@@ -838,6 +838,33 @@ void mqttApplyControlSubscription() {
 
 }
 
+// Post-connect setup shared by mqttConnect() and testMqtt(): mark the device
+// online, restore subscriptions and (re)publish HA discovery.  Keeping this in
+// one place guarantees a test-initiated connection is indistinguishable from a
+// normal reconnect.
+static void onMqttConnected() {
+  if (!g_mqttWasConnected) {
+    logMsg("[MQTT] Connected to %s:%d", g_mqttConfig.host, g_mqttConfig.port);
+  }
+  g_mqttWasConnected = true;
+  g_mqttBackoffMs = 5000;  // reset backoff on success
+
+  // Mark device online
+  if (!g_mqtt.publish(s_availTopic, "online", true))
+    logPublishFailure(s_availTopic);
+
+  // Subscribe to HA birth message to re-publish discovery after HA restarts
+  g_mqtt.subscribe("homeassistant/status");
+
+  // Subscribe/unsubscribe command wildcard based on current allowControl state
+  mqttApplyControlSubscription();
+
+  // Publish discovery configs for all MQTT-enabled fermenters
+  if (g_mqttConfig.haDiscovery) {
+    publishAllHaDiscovery();
+  }
+}
+
 static bool mqttConnect() {
   if (!g_mqttConfig.enabled) return false;
   if (strlen(g_mqttConfig.host) == 0) return false;
@@ -875,26 +902,7 @@ static bool mqttConnect() {
   }
 
   if (ok) {
-    if (!g_mqttWasConnected) {
-      logMsg("[MQTT] Connected to %s:%d", g_mqttConfig.host, g_mqttConfig.port);
-    }
-    g_mqttWasConnected = true;
-    g_mqttBackoffMs = 5000;  // reset backoff on success
-
-    // Mark device online
-    if (!g_mqtt.publish(s_availTopic, "online", true))
-      logPublishFailure(s_availTopic);
-
-    // Subscribe to HA birth message to re-publish discovery after HA restarts
-    g_mqtt.subscribe("homeassistant/status");
-
-    // Subscribe/unsubscribe command wildcard based on current allowControl state
-    mqttApplyControlSubscription();
-
-    // Publish discovery configs for all MQTT-enabled fermenters
-    if (g_mqttConfig.haDiscovery) {
-      publishAllHaDiscovery();
-    }
+    onMqttConnected();
   } else {
     logMsg("[MQTT] Connection failed, rc=%d (retry in %lus)",
       g_mqtt.state(), g_mqttBackoffMs / 1000);
@@ -1204,33 +1212,45 @@ bool testMqtt() {
     return false;
   }
 
-  g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
-  g_mqtt.setSocketTimeout(5);  // bound the blocking connect (default 15 s)
+  // Connect only if needed, with the same LWT/availability arguments and
+  // post-connect setup as the normal reconnect path — a test-initiated
+  // connection is indistinguishable from a regular one.  When already
+  // connected, connect() would be a no-op anyway; just publish on the
+  // existing connection.
+  if (!g_mqtt.connected()) {
+    g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
+    g_mqtt.setBufferSize(1024);
+    g_mqtt.setSocketTimeout(5);  // bound the blocking connect (default 15 s)
+    g_mqtt.setCallback(mqttMessageCallback);
 
-  char clientId[24];
-  snprintf(clientId, sizeof(clientId), "ourbrewbot-%06X", ESP.getChipId());
+    char clientId[24];
+    snprintf(clientId, sizeof(clientId), "ourbrewbot-%06X", ESP.getChipId());
+    snprintf(s_availTopic, sizeof(s_availTopic), "%s/availability", g_mqttConfig.baseTopic);
 
-  logMsg("[MQTT] Test connecting to %s:%d user=%s",
-    g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.username);
+    logMsg("[MQTT] Test connecting to %s:%d user=%s",
+      g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.username);
 
-  // Known quirk (deliberate non-change): this reconnects the shared client
-  // WITHOUT the LWT/availability/subscriptions, so after a successful test the
-  // connection stays in that degraded state until the next natural disconnect.
-  bool ok;
-  if (strlen(g_mqttConfig.username) > 0) {
-    ok = g_mqtt.connect(clientId, g_mqttConfig.username, g_mqttConfig.password);
-  } else {
-    ok = g_mqtt.connect(clientId);
-  }
+    bool connected;
+    if (strlen(g_mqttConfig.username) > 0) {
+      connected = g_mqtt.connect(clientId,
+                                 g_mqttConfig.username, g_mqttConfig.password,
+                                 s_availTopic, 0, true, "offline");
+    } else {
+      connected = g_mqtt.connect(clientId,
+                                 nullptr, nullptr,
+                                 s_availTopic, 0, true, "offline");
+    }
 
-  if (!ok) {
-    logMsg("[MQTT] Test failed, rc=%d", g_mqtt.state());
-    return false;
+    if (!connected) {
+      logMsg("[MQTT] Test failed, rc=%d", g_mqtt.state());
+      return false;
+    }
+    onMqttConnected();
   }
 
   char topic[48];
   snprintf(topic, sizeof(topic), "%s/test", g_mqttConfig.baseTopic);
-  ok = g_mqtt.publish(topic, "OurBrewbot MQTT test OK");
+  bool ok = g_mqtt.publish(topic, "OurBrewbot MQTT test OK");
   logMsg("[MQTT] Test publish to %s: %s", topic, ok ? "OK" : "FAIL");
 
   return ok;
