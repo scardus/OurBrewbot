@@ -347,8 +347,8 @@ void buildFermenterJson(JsonDocument& doc, uint8_t i) {
   float ambientTemp = getAmbientTemp(i);
   float sg          = getCurrentSG(i);
 
-  doc["BeerTemp"]       = (beerTemp    > -100.0f) ? toDisplayTemp(beerTemp)    : -127.0f;
-  doc["AmbientTemp"]    = (ambientTemp > -100.0f) ? toDisplayTemp(ambientTemp) : -127.0f;
+  doc["BeerTemp"]       = (beerTemp    > TEMP_VALID_MIN) ? toDisplayTemp(beerTemp)    : TEMP_NONE;
+  doc["AmbientTemp"]    = (ambientTemp > TEMP_VALID_MIN) ? toDisplayTemp(ambientTemp) : TEMP_NONE;
   doc["SG"]             = sg;
   doc["Attenuation"]    = getAttenuation(i);
   doc["EstABV"]         = getEstABV(i);
@@ -637,8 +637,8 @@ void handleStatus(ESP8266WebServer& server) {
     doc["status"]      = getFermenterStatusStr(g_fermenters[i].status);
     float bt = getBeerTemp(i);
     float at = getAmbientTemp(i);
-    doc["beerTemp"]    = (bt > -100.0f) ? toDisplayTemp(bt) : -127.0f;
-    doc["ambientTemp"] = (at > -100.0f) ? toDisplayTemp(at) : -127.0f;
+    doc["beerTemp"]    = (bt > TEMP_VALID_MIN) ? toDisplayTemp(bt) : TEMP_NONE;
+    doc["ambientTemp"] = (at > TEMP_VALID_MIN) ? toDisplayTemp(at) : TEMP_NONE;
     doc["sg"]          = getCurrentSG(i);
     doc["alarm"]       = g_fermenters[i].alarm;
     char buf[384];

@@ -66,9 +66,9 @@ void advanceProfileStep(uint8_t i) {
     // Free Rise: use startTemp as floor and endTemp as ceiling
     g_fermenters[i].floorTemp   = step.startTemp;
     g_fermenters[i].ceilingTemp = step.endTemp;
-  } else if (target > -100.0f) {
-    g_fermenters[i].floorTemp   = target - 0.5f;
-    g_fermenters[i].ceilingTemp = target + 0.5f;
+  } else if (target > TEMP_VALID_MIN) {
+    g_fermenters[i].floorTemp   = target - PROFILE_TEMP_BAND;
+    g_fermenters[i].ceilingTemp = target + PROFILE_TEMP_BAND;
   }
 
   // Check if step completion conditions are met
@@ -104,8 +104,8 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
     case STEP_TEMP_OVER_TIME:
       // Days elapsed AND temp at target
       if (hours < daysInHours) return false;
-      if (temp < -100.0f) return false;
-      if (fabs(temp - step.endTemp) > 0.5f) {
+      if (temp < TEMP_VALID_MIN) return false;
+      if (fabs(temp - step.endTemp) > PROFILE_TEMP_BAND) {
         logMsg("[PROF] Profile stalled on Temp/Time: %.1f != %.1f", temp, step.endTemp);
         return false;
       }
@@ -122,7 +122,7 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
     case STEP_SPECIFIC_GRAVITY:
       // Minimum time must elapse, then SG at or below trigger
       if (hours < daysInHours) return false;
-      if (sg <= 0.5f) return false;
+      if (sg <= SG_VALID_MIN) return false;
       if (sg <= step.sgTrigger) {
         logMsg("[PROF] SG Target reached: %.4f <= %.4f", sg, step.sgTrigger);
         return true;
@@ -147,15 +147,15 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
 
     case STEP_TEMP_REACHED:
       // Temperature reached target
-      if (temp < -100.0f) return false;
-      if (fabs(temp - step.endTemp) <= 0.5f) {
+      if (temp < TEMP_VALID_MIN) return false;
+      if (fabs(temp - step.endTemp) <= PROFILE_TEMP_BAND) {
         logMsg("[PROF] Temp target reached: %.1f", temp);
         return true;
       }
       return false;
 
     case STEP_SG_REACHED:
-      if (sg <= 0.5f) return false;
+      if (sg <= SG_VALID_MIN) return false;
       return sg <= step.sgTrigger;
 
     case STEP_ATTN_REACHED:
@@ -163,7 +163,7 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
 
     case STEP_TIME_AND_SG:
       if (hours < daysInHours) return false;
-      return (sg > 0.5f && sg <= step.sgTrigger);
+      return (sg > SG_VALID_MIN && sg <= step.sgTrigger);
 
     case STEP_TIME_AND_ATTN:
       if (hours < daysInHours) return false;
@@ -175,9 +175,9 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
 }
 
 float getProfileTargetTemp(uint8_t i) {
-  if (!g_fermenters[i].profileRunning) return -127.0f;
-  if (g_fermenters[i].profileNo == 0) return -127.0f;
-  if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) return -127.0f;
+  if (!g_fermenters[i].profileRunning) return TEMP_NONE;
+  if (g_fermenters[i].profileNo == 0) return TEMP_NONE;
+  if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) return TEMP_NONE;
 
   uint8_t idx = flatStepIndex(i);
   ProfileStep& step = g_profileSteps[idx];

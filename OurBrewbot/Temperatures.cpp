@@ -229,8 +229,8 @@ void readTempResults() {
           g_probes[i].address, g_probes[i].failCount, PROBE_FAIL_THRESHOLD);
       }
       if (g_probes[i].failCount >= PROBE_FAIL_THRESHOLD) {
-        g_probes[i].temperature = -127.0f;
-        g_probes[i].rawTemperature = -127.0f;
+        g_probes[i].temperature = TEMP_NONE;
+        g_probes[i].rawTemperature = TEMP_NONE;
       }
     }
   }
@@ -258,7 +258,7 @@ void periodicProbeScan() {
 
 float getTempQuick(const char* addressStr) {
   DeviceAddress addr;
-  if (!stringToAddress(addressStr, addr)) return -127.0f;
+  if (!stringToAddress(addressStr, addr)) return TEMP_NONE;
 
   float temp = g_sensors1.getTempC(addr);
 
@@ -266,7 +266,7 @@ float getTempQuick(const char* addressStr) {
     temp = g_sensors2.getTempC(addr);
   }
 
-  return (temp == DEVICE_DISCONNECTED_C) ? -127.0f : temp;
+  return (temp == DEVICE_DISCONNECTED_C) ? TEMP_NONE : temp;
 }
 
 float getBeerTemp(uint8_t fermenterIndex) {
@@ -296,7 +296,7 @@ float getBeerTemp(uint8_t fermenterIndex) {
       return g_iSpindels[i].temperature;
     }
   }
-  return -127.0f;
+  return TEMP_NONE;
 }
 
 const char* getBeerTempSource(uint8_t fermenterIndex) {
@@ -337,13 +337,13 @@ float getAmbientTemp(uint8_t fermenterIndex) {
       return g_probes[i].temperature;
     }
   }
-  return -127.0f;
+  return TEMP_NONE;
 }
 
 float getControlTemp(uint8_t fermenterIndex) {
   // Beer probe is preferred for temperature control
   float beer = getBeerTemp(fermenterIndex);
-  if (beer > -100.0f) return beer;
+  if (beer > TEMP_VALID_MIN) return beer;
   return getAmbientTemp(fermenterIndex);
 }
 

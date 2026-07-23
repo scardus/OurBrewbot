@@ -65,7 +65,7 @@ void processSingleFermenter(uint8_t i) {
   float temp = getControlTemp(i);
 
   // Can't control without a temperature reading
-  if (temp < -100.0f) {
+  if (temp < TEMP_VALID_MIN) {
     logMsg("[FERM] F%d (%s): no temperature reading", i, g_fermenters[i].fermenterName);
     setFermenterPlugs(i, false, false);
     g_fermenters[i].status = STATUS_IDLE;
@@ -83,13 +83,13 @@ void processSingleFermenter(uint8_t i) {
         s_state[i] = STATUS_HEATING;
       } else if (temp > ceiling) {
         // Enforce compressor delay — protects refrigeration compressor
-        unsigned long delaySec = (unsigned long)g_fermenters[i].compressorDelay * 60000UL;
+        unsigned long delayMs = (unsigned long)g_fermenters[i].compressorDelay * 60000UL;
         unsigned long now = millis();
-        if ((now - s_lastCoolingStop[i]) >= delaySec) {
+        if ((now - s_lastCoolingStop[i]) >= delayMs) {
           s_state[i] = STATUS_COOLING;
         } else {
           logMsg("[FERM] F%d (%s): in compressor delay (%.0fs remaining)",
-            i, g_fermenters[i].fermenterName, (delaySec - (now - s_lastCoolingStop[i])) / 1000.0f);
+            i, g_fermenters[i].fermenterName, (delayMs - (now - s_lastCoolingStop[i])) / 1000.0f);
         }
       }
       break;
@@ -120,7 +120,7 @@ void processSingleFermenter(uint8_t i) {
   // SG-based control (if enabled and gravity source available)
   if (g_fermenters[i].sgControl) {
     float sg = getCurrentSG(i);
-    if (sg > 0.5f) {
+    if (sg > SG_VALID_MIN) {
       // SG reached target — could stop heating (e.g. diacetyl rest trigger)
       if (sg <= (g_fermenters[i].tg + 0.002f)) {
         // Near or past target gravity — notify via serial
@@ -175,7 +175,7 @@ void checkFermenterAlarm(uint8_t i) {
   if (!g_fermenters[i].power) return;
 
   float temp = getControlTemp(i);
-  if (temp < -100.0f) return;
+  if (temp < TEMP_VALID_MIN) return;
 
   float ceiling   = g_fermenters[i].ceilingTemp;
   float floor_    = g_fermenters[i].floorTemp;

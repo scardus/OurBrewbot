@@ -19,6 +19,12 @@
 #define MAX_PROFILE_STEPS   60
 #define MAX_PROFILES        4
 #define MAX_STEPS_PER_PROFILE 15  // Steps per profile (4 profiles × 15 = 60)
+
+// Sensor-reading sentinels and shared thresholds
+#define TEMP_NONE          -127.0f  // "no reading" sentinel (DS18B20 disconnected value)
+#define TEMP_VALID_MIN     -100.0f  // temperatures above this are treated as real readings
+#define SG_VALID_MIN       0.5f    // SG readings above this are treated as real
+#define PROFILE_TEMP_BAND  0.5f    // °C: floor/ceiling band around a profile target and end-temp tolerance
 #define MAX_ISPINDELS       4
 #define MAX_TILTS           8       // 8 Tilt colours supported (indexed by colour)
 #define MAX_TILT_SLOTS      4       // Configurable Tilt slots persisted in jsonTilt.txt

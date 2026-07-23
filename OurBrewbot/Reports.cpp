@@ -94,8 +94,8 @@ void reportBrewService(uint8_t i, uint8_t svcIndex) {
   // Each fermenter gets its own identity; deviceName goes to device_source
   doc["name"]           = g_fermenters[i].fermenterName;
   doc["device_source"]  = g_brewServices[svcIndex].deviceName;
-  if (beerTemp > -100.0f)    doc["temp"]           = toDisplayTemp(beerTemp);
-  if (ambientTemp > -100.0f) doc[svc.ambientKey]   = toDisplayTemp(ambientTemp);
+  if (beerTemp > TEMP_VALID_MIN)    doc["temp"]           = toDisplayTemp(beerTemp);
+  if (ambientTemp > TEMP_VALID_MIN) doc[svc.ambientKey]   = toDisplayTemp(ambientTemp);
   doc["temp_unit"]      = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
   doc["temp_target"]    = toDisplayTemp((g_fermenters[i].floorTemp + g_fermenters[i].ceilingTemp) / 2.0f);
   if (sg > 0.0f)             doc["gravity"]        = sg;

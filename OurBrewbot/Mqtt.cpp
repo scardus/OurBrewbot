@@ -1040,7 +1040,7 @@ static void publishProbes() {
     publishBool (base, "active",      g_probes[i].failCount < PROBE_FAIL_THRESHOLD);
     // Preserve the -127 "no reading" sentinel — only real readings are unit-converted
     float probeTemp = g_probes[i].temperature;
-    publishFloat(base, "temperature", probeTemp > -100.0f ? toDisplayTemp(probeTemp) : probeTemp);
+    publishFloat(base, "temperature", probeTemp > TEMP_VALID_MIN ? toDisplayTemp(probeTemp) : probeTemp);
     publishValue(base, "name",        g_probes[i].probeName);
     publishValue(base, "function",    probeFunctionName(g_probes[i].function));
     publishInt  (base, "fermenter",   g_probes[i].fermenter);
@@ -1151,10 +1151,10 @@ void reportMqtt() {
 
     // Temperatures — published in the configured display unit (internal values
     // are always Celsius; conversions are identity in Celsius mode)
-    if (beerTemp > -100.0f)
+    if (beerTemp > TEMP_VALID_MIN)
       publishFloat(base, "beer_temperature", toDisplayTemp(beerTemp));
     publishValue(base, "beer_temperature_source", getBeerTempSource(i));
-    if (ambientTemp > -100.0f)
+    if (ambientTemp > TEMP_VALID_MIN)
       publishFloat(base, "ambient_temperature", toDisplayTemp(ambientTemp));
     publishFloat(base, "ceiling_temperature", toDisplayTemp(g_fermenters[i].ceilingTemp));
     publishFloat(base, "floor_temperature", toDisplayTemp(g_fermenters[i].floorTemp));
