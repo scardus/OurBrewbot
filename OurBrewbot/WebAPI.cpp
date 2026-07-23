@@ -153,6 +153,49 @@ void sendJsonDoc(ESP8266WebServer& server, JsonDocument& doc, int code) {
   serializeJson(doc, client);
 }
 
+// The ubiquitous {"status":"...","msg":"..."} response, built from a flash
+// string. Message must not contain JSON-special characters.
+static void sendStatusMsg(ESP8266WebServer& server, int code, bool ok,
+                          const __FlashStringHelper* msg) {
+  char m[112];
+  strncpy_P(m, (PGM_P)msg, sizeof(m) - 1);
+  m[sizeof(m) - 1] = '\0';
+  char buf[144];
+  snprintf_P(buf, sizeof(buf), PSTR("{\"status\":\"%s\",\"msg\":\"%s\"}"),
+             ok ? "ok" : "error", m);
+  sendJsonResponse(server, buf, code);
+}
+
+static void sendOk(ESP8266WebServer& server, const __FlashStringHelper* msg) {
+  sendStatusMsg(server, 200, true, msg);
+}
+
+static void sendErr(ESP8266WebServer& server, int code, const __FlashStringHelper* msg) {
+  sendStatusMsg(server, code, false, msg);
+}
+
+// Parse the POST body into doc; sends the 400 error and returns false on
+// malformed JSON.
+static bool parseJsonBody(ESP8266WebServer& server, JsonDocument& doc) {
+  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
+    sendErr(server, 400, F("Invalid JSON"));
+    return false;
+  }
+  return true;
+}
+
+// Validated integer field in [0, max) from a parsed body; sends the 400 error
+// and returns -1 when the field is missing or out of range.
+static int getValidIndex(ESP8266WebServer& server, const JsonDocument& doc,
+                         const char* key, int max, const __FlashStringHelper* errMsg) {
+  int idx = doc[key] | -1;
+  if (idx < 0 || idx >= max) {
+    sendErr(server, 400, errMsg);
+    return -1;
+  }
+  return idx;
+}
+
 // ============================================================
 // ROOT / HOME
 // ============================================================
@@ -371,7 +414,7 @@ void handleFermenter(ESP8266WebServer& server) {
         if (!doc["AlarmTolerance"].isNull()) {
           float v = doc["AlarmTolerance"];
           if (v < 0.0f || v > 10.0f) {
-            sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"alarm tolerance out of range (0 to 10)\"}"), 400);
+            sendErr(server, 400, F("alarm tolerance out of range (0 to 10)"));
             return;
           }
           g_fermenters[idx].alarmTolerance = v;
@@ -387,11 +430,11 @@ void handleFermenter(ESP8266WebServer& server) {
         if (!doc["LiveTest"].isNull())        g_fermenters[idx].liveTest        = doc["LiveTest"];
 
         saveFermenterConfig();
-        sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Configuration saved\"}"));
+        sendOk(server, F("Configuration saved"));
         return;
       }
     }
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Configuration invalid\"}"), 400);
+    sendErr(server, 400, F("Configuration invalid"));
     return;
   }
 
@@ -418,10 +461,7 @@ void handleDebug(ESP8266WebServer& server) {
 
   if (server.method() == HTTP_POST) {
     JsonDocument doc;
-    if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-      return;
-    }
+    if (!parseJsonBody(server, doc)) return;
     if (!doc["DebugMode"].isNull())
       g_fermenterDebugMode = doc["DebugMode"];
     if (!doc["Fermenter"].isNull()) {
@@ -437,7 +477,7 @@ void handleDebug(ESP8266WebServer& server) {
           g_fermenterDebugOverrides[idx].sg = doc["SG"];
       }
     }
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Debug state updated\"}"));
+    sendOk(server, F("Debug state updated"));
     return;
   }
 
@@ -522,10 +562,10 @@ void handleController(ESP8266WebServer& server) {
       // HA discovery advertises the temperature unit — republish so entities
       // pick up the new unit (retained topics are overwritten in place).
       if (g_globalConfig.unit != oldUnit) publishAllHaDiscovery();
-      sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Configuration saved\"}"));
+      sendOk(server, F("Configuration saved"));
       return;
     }
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Configuration invalid\"}"), 400);
+    sendErr(server, 400, F("Configuration invalid"));
     return;
   }
   JsonDocument doc;
@@ -776,15 +816,9 @@ void handleiSpindels(ESP8266WebServer& server) {
 
 void handleiSpindelConfigPost(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
-  int idx = doc["index"] | -1;
-  if (idx < 0 || idx >= MAX_ISPINDELS) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid index (0-3)\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
+  int idx = getValidIndex(server, doc, "index", MAX_ISPINDELS, F("Invalid index (0-3)"));
+  if (idx < 0) return;
 
   if (doc["_clear"] | false) {
     strlcpy(g_iSpindels[idx].name, "None", sizeof(g_iSpindels[idx].name));
@@ -805,7 +839,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     g_iSpindels[idx].runTime        = 0.0f;
     g_iSpindels[idx].gravityUnit[0] = '\0';
     saveiSpindelConfig();
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"iSpindel slot cleared\"}"));
+    sendOk(server, F("iSpindel slot cleared"));
     return;
   }
 
@@ -822,7 +856,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     g_iSpindels[idx].collectData = (g_iSpindels[idx].fermenter != PROBE_UNASSIGNED);
   }
   saveiSpindelConfig();
-  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"iSpindel updated\"}"));
+  sendOk(server, F("iSpindel updated"));
 }
 
 // ============================================================
@@ -874,8 +908,7 @@ void handleConfigPage(ESP8266WebServer& server) {
 }
 
 void handleWiFiReset(ESP8266WebServer& server) {
-  sendJsonResponse(server,
-    F("{\"status\":\"ok\",\"msg\":\"WiFi settings cleared. Rebooting into setup portal.\"}"));
+  sendOk(server, F("WiFi settings cleared. Rebooting into setup portal."));
   delay(250);
   WiFi.persistent(true);
   WiFi.disconnect(true);
@@ -889,20 +922,18 @@ void handleWiFiReset(ESP8266WebServer& server) {
 
 void handleProbePost(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
-  int idx = doc["index"] | -1;
-  if (idx < 0 || idx >= MAX_PROBES || strlen(g_probes[idx].address) == 0) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid probe index\"}"), 400);
+  if (!parseJsonBody(server, doc)) return;
+  int idx = getValidIndex(server, doc, "index", MAX_PROBES, F("Invalid probe index"));
+  if (idx < 0) return;
+  if (strlen(g_probes[idx].address) == 0) {
+    sendErr(server, 400, F("Invalid probe index"));
     return;
   }
   if (!doc["function"].isNull())   g_probes[idx].function   = doc["function"];
   if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_probes[idx].fermenter = v; }
   if (!doc["tempAdjust"].isNull()) g_probes[idx].tempAdjust = doc["tempAdjust"];
   saveProbeConfig();
-  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Probe updated\"}"));
+  sendOk(server, F("Probe updated"));
 }
 
 // ============================================================
@@ -944,15 +975,9 @@ void handleSmartPlugs(ESP8266WebServer& server) {
 
 void handleSmartPlugPost(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
-  int idx = doc["index"] | -1;
-  if (idx < 0 || idx >= MAX_SMART_PLUGS) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid plug index\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
+  int idx = getValidIndex(server, doc, "index", MAX_SMART_PLUGS, F("Invalid plug index"));
+  if (idx < 0) return;
   if (!doc["function"].isNull())     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           g_smartPlugs[idx].function    = v; }
   if (!doc["fermenter"].isNull())    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_smartPlugs[idx].fermenter   = v; }
   if (doc["manufacturer"].is<const char*>()) strlcpy(g_smartPlugs[idx].manufacturer, doc["manufacturer"].as<const char*>(), sizeof(g_smartPlugs[0].manufacturer));
@@ -964,7 +989,7 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
   if (!doc["delay"].isNull())        g_smartPlugs[idx].delayLength = doc["delay"];
   if (!doc["codeset"].isNull())      g_smartPlugs[idx].codeset     = doc["codeset"];
   saveSmartPlugConfig();
-  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Plug updated\"}"));
+  sendOk(server, F("Plug updated"));
 }
 
 // ============================================================
@@ -973,20 +998,14 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
 
 void handleSmartPlugTest(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
-  int idx = doc["index"] | -1;
-  if (idx < 0 || idx >= MAX_SMART_PLUGS) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid plug index\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
+  int idx = getValidIndex(server, doc, "index", MAX_SMART_PLUGS, F("Invalid plug index"));
+  if (idx < 0) return;
   SmartPlugConfig& plug = g_smartPlugs[idx];
   bool on = (strcmp(doc["action"] | "on", "on") == 0);
   uint32_t code = on ? plug.onCode : plug.offCode;
   if (code == 0) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"No code configured\"}"), 400);
+    sendErr(server, 400, F("No code configured"));
     return;
   }
   logMsg("[PLUG] Test plug %d %s: code=%u (0x%06X), bits=%d, delay=%d, proto=%d",
@@ -994,7 +1013,7 @@ void handleSmartPlugTest(ESP8266WebServer& server) {
 
   ESP.wdtFeed();  // RF transmit bit-bangs for ~1-2 s inside this handler
   rfTransmit(code, plug.bits, plug.delayLength, plug.protocol);
-  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"RF code sent\"}"));
+  sendOk(server, F("RF code sent"));
 }
 
 
@@ -1133,17 +1152,14 @@ void handleBLESniffSend(ESP8266WebServer& server) {
   s_bleSniffLastPoll = millis();
 
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
   const char* cmd = doc["cmd"] | "";
   if (strlen(cmd) == 0) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Empty command\"}"), 400);
+    sendErr(server, 400, F("Empty command"));
     return;
   }
   if (strlen(cmd) > 64) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Command too long (max 64 chars)\"}"), 400);
+    sendErr(server, 400, F("Command too long (max 64 chars)"));
     return;
   }
 
@@ -1253,20 +1269,14 @@ void handleBrewServices(ESP8266WebServer& server) {
 
 void handleBrewServicesPost(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
-  int idx = doc["index"] | -1;
-  if (idx < 0 || idx >= MAX_BREW_SERVICES) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid service index\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
+  int idx = getValidIndex(server, doc, "index", MAX_BREW_SERVICES, F("Invalid service index"));
+  if (idx < 0) return;
   if (!doc["enabled"].isNull())    g_brewServices[idx].enabled = doc["enabled"];
   if (doc["serviceId"].is<const char*>())  strlcpy(g_brewServices[idx].serviceId,  doc["serviceId"].as<const char*>(),  sizeof(g_brewServices[0].serviceId));
   if (doc["deviceName"].is<const char*>()) strlcpy(g_brewServices[idx].deviceName, doc["deviceName"].as<const char*>(), sizeof(g_brewServices[0].deviceName));
   saveBrewServiceConfig();
-  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Brew service saved\"}"));
+  sendOk(server, F("Brew service saved"));
 }
 
 // ============================================================
@@ -1275,17 +1285,11 @@ void handleBrewServicesPost(ESP8266WebServer& server) {
 
 void handleBrewServiceTest(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
-  int idx = doc["index"] | -1;
-  if (idx < 0 || idx >= MAX_BREW_SERVICES) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid service index\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
+  int idx = getValidIndex(server, doc, "index", MAX_BREW_SERVICES, F("Invalid service index"));
+  if (idx < 0) return;
   if (strlen(g_brewServices[idx].serviceId) == 0) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"No service ID configured\"}"), 400);
+    sendErr(server, 400, F("No service ID configured"));
     return;
   }
   ESP.wdtFeed();  // synchronous outbound HTTP POST, bounded by the 5 s HTTP timeout
@@ -1321,16 +1325,13 @@ void handleMqttConfig(ESP8266WebServer& server) {
 
 void handleMqttConfigPost(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
   if (!doc["enabled"].isNull())          g_mqttConfig.enabled = doc["enabled"];
   if (doc["host"].is<const char*>())     strlcpy(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
   if (!doc["port"].isNull()) {
     uint32_t port = doc["port"];
     if (port < 1 || port > 65535) {
-      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"port out of range (1-65535)\"}"), 400);
+      sendErr(server, 400, F("port out of range (1-65535)"));
       return;
     }
     g_mqttConfig.port = (uint16_t)port;
@@ -1340,7 +1341,7 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
   if (doc["baseTopic"].is<const char*>()) {
     const char* bt = doc["baseTopic"].as<const char*>();
     if (bt[0] == '\0') {
-      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"baseTopic cannot be empty\"}"), 400);
+      sendErr(server, 400, F("baseTopic cannot be empty"));
       return;
     }
     strlcpy(g_mqttConfig.baseTopic, bt, sizeof(g_mqttConfig.baseTopic));
@@ -1356,25 +1357,25 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
   }
   if (!doc["logEnabled"].isNull()) g_mqttConfig.logEnabled = doc["logEnabled"];
   saveMqttConfig();
-  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"MQTT config saved\"}"));
+  sendOk(server, F("MQTT config saved"));
 }
 
 void handleMqttTest(ESP8266WebServer& server) {
   ESP.wdtFeed();  // blocking broker connect, bounded by the 5 s socket timeout
   bool ok = testMqtt();
   if (ok) {
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"MQTT connected and test message published\"}"));
+    sendOk(server, F("MQTT connected and test message published"));
   } else {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"MQTT connection failed — check host/port/credentials\"}"));
+    sendErr(server, 200, F("MQTT connection failed — check host/port/credentials"));  // 200: JS reads d.status
   }
 }
 
 void handleMqttDiscover(ESP8266WebServer& server) {
   ESP.wdtFeed();  // discovery burst takes ~2-4 s (yields per entity)
   if (forcePublishAllHaDiscovery()) {
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"HA discovery published\"}"));
+    sendOk(server, F("HA discovery published"));
   } else {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"MQTT not connected — check broker settings\"}"));
+    sendErr(server, 200, F("MQTT not connected — check broker settings"));  // 200: JS reads d.status
   }
 }
 
@@ -1417,15 +1418,9 @@ void handleProfiles(ESP8266WebServer& server) {
 
 void handleProfilePost(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
-  int idx = doc["index"] | -1;
-  if (idx < 0 || idx >= MAX_PROFILES) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid profile index\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
+  int idx = getValidIndex(server, doc, "index", MAX_PROFILES, F("Invalid profile index"));
+  if (idx < 0) return;
   if (doc["name"].is<const char*>()) {
     strlcpy(g_profiles[idx].profileName, doc["name"].as<const char*>(), sizeof(g_profiles[0].profileName));
   }
@@ -1453,7 +1448,7 @@ void handleProfilePost(ESP8266WebServer& server) {
   }
   saveProfileConfig();
   saveProfileSteps();
-  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile saved\"}"));
+  sendOk(server, F("Profile saved"));
 }
 
 // ============================================================
@@ -1463,59 +1458,53 @@ void handleProfilePost(ESP8266WebServer& server) {
 
 void handleFermenterProfile(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
-  int idx = doc["Fermenter"] | -1;
-  if (idx < 0 || idx >= MAX_FERMENTERS) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid fermenter\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
+  int idx = getValidIndex(server, doc, "Fermenter", MAX_FERMENTERS, F("Invalid fermenter"));
+  if (idx < 0) return;
   const char* action = doc["action"] | "";
 
   if (strcmp(action, "start") == 0) {
     int profIdx = doc["ProfileIndex"] | 0;
     if (profIdx < 1 || profIdx > MAX_PROFILES) {
-      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid profile (1-4)\"}"), 400);
+      sendErr(server, 400, F("Invalid profile (1-4)"));
       return;
     }
     // Check profile has at least one step
     if (countProfileSteps(profIdx - 1) == 0) {
-      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Profile has no steps\"}"), 400);
+      sendErr(server, 400, F("Profile has no steps"));
       return;
     }
     startProfile(idx, profIdx);
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile started\"}"));
+    sendOk(server, F("Profile started"));
   } else if (strcmp(action, "stop") == 0) {
     stopProfile(idx);
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile stopped\"}"));
+    sendOk(server, F("Profile stopped"));
   } else if (strcmp(action, "pause") == 0) {
     pauseProfile(idx);
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile paused\"}"));
+    sendOk(server, F("Profile paused"));
   } else if (strcmp(action, "resume") == 0) {
     if (g_fermenters[idx].profileNo == 0 || g_fermenters[idx].profileRunning) {
-      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"No paused profile to resume\"}"), 400);
+      sendErr(server, 400, F("No paused profile to resume"));
       return;
     }
     resumeProfile(idx);
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile resumed\"}"));
+    sendOk(server, F("Profile resumed"));
   } else if (strcmp(action, "next") == 0) {
     if (nextProfileStep(idx)) {
-      sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Advanced to next step\"}"));
+      sendOk(server, F("Advanced to next step"));
     } else if (!g_fermenters[idx].profileRunning && g_fermenters[idx].profileNo > 0) {
-      sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Profile complete\"}"));
+      sendOk(server, F("Profile complete"));
     } else {
-      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Profile not running\"}"), 400);
+      sendErr(server, 400, F("Profile not running"));
     }
   } else if (strcmp(action, "prev") == 0) {
     if (prevProfileStep(idx)) {
-      sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Moved to previous step\"}"));
+      sendOk(server, F("Moved to previous step"));
     } else {
-      sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Already on first step\"}"));
+      sendOk(server, F("Already on first step"));
     }
   } else {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Unknown action\"}"), 400);
+    sendErr(server, 400, F("Unknown action"));
   }
 }
 
@@ -1632,15 +1621,9 @@ void handleTilts(ESP8266WebServer& server) {
 
 void handleTiltPost(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
-  int colour = doc["colour"] | -1;
-  if (colour < 0 || colour >= MAX_TILTS) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid colour index (0-7)\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
+  int colour = getValidIndex(server, doc, "colour", MAX_TILTS, F("Invalid colour index (0-7)"));
+  if (colour < 0) return;
 
   // Clear flag: remove this Tilt from persisted config
   if (doc["_clear"] | false) {
@@ -1651,7 +1634,7 @@ void handleTiltPost(ESP8266WebServer& server) {
     g_tilts[colour].sgAdjust   = 0.0f;
     g_tilts[colour].mbb        = 0;
     saveTiltConfig();
-    sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Tilt slot cleared\"}"));
+    sendOk(server, F("Tilt slot cleared"));
     return;
   }
 
@@ -1662,7 +1645,7 @@ void handleTiltPost(ESP8266WebServer& server) {
   if (!doc["tempAdjust"].isNull()) g_tilts[colour].tempAdjust = doc["tempAdjust"];
   if (!doc["sgAdjust"].isNull())   g_tilts[colour].sgAdjust   = doc["sgAdjust"];
   saveTiltConfig();
-  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Tilt updated\"}"));
+  sendOk(server, F("Tilt updated"));
 }
 
 // ============================================================
@@ -1681,16 +1664,13 @@ void handleSyslogConfig(ESP8266WebServer& server) {
 
 void handleSyslogConfigPost(ESP8266WebServer& server) {
   JsonDocument doc;
-  if (deserializeJson(doc, server.arg("plain")) != DeserializationError::Ok) {
-    sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"Invalid JSON\"}"), 400);
-    return;
-  }
+  if (!parseJsonBody(server, doc)) return;
   if (!doc["enabled"].isNull())  g_syslogConfig.enabled  = doc["enabled"];
   if (doc["host"].is<const char*>()) strlcpy(g_syslogConfig.host, doc["host"].as<const char*>(), sizeof(g_syslogConfig.host));
   if (!doc["port"].isNull()) {
     uint32_t port = doc["port"];
     if (port < 1 || port > 65535) {
-      sendJsonResponse(server, F("{\"status\":\"error\",\"msg\":\"port out of range (1-65535)\"}"), 400);
+      sendErr(server, 400, F("port out of range (1-65535)"));
       return;
     }
     g_syslogConfig.port = (uint16_t)port;
@@ -1699,7 +1679,7 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
   if (!doc["minLevel"].isNull()) { uint8_t v = doc["minLevel"]; if (v <= 7)  g_syslogConfig.minLevel = v; }
   saveSyslogConfig();
   logInit();  // re-resolve host with new config
-  sendJsonResponse(server, F("{\"status\":\"ok\",\"msg\":\"Syslog config saved\"}"));
+  sendOk(server, F("Syslog config saved"));
 }
 
 // ============================================================
@@ -1707,6 +1687,5 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
 // ============================================================
 
 void handleNotFound(ESP8266WebServer& server) {
-  sendJsonResponse(server,
-    F("{\"status\":\"error\",\"msg\":\"Not found\"}"), 404);
+  sendErr(server, 404, F("Not found"));
 }
