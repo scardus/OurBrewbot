@@ -9,8 +9,12 @@
 
 #include "Config.h"
 
-// Send all configured reports
-void sendReports();
+// Staggered cloud reporting: the 15-min tick queues eligible service×fermenter
+// pairs; the loop drains ONE blocking POST per pass so a slow or unreachable
+// service can never stall the loop more than ~5 s.
+void queueReports();        // mark every enabled service×fermenter pair pending
+bool reportsPending();      // anything still queued? (also the Tilt-scan interlock in 0.3.20)
+void processReportQueue();  // send AT MOST one pending report, then return
 
 // Report one fermenter to one brew service slot (0=Brewer's Friend, 1=Brewfather)
 void reportBrewService(uint8_t fermenterIndex, uint8_t svcIndex);

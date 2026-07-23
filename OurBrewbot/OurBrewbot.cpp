@@ -285,11 +285,17 @@ void loop() {
         processFermenters();
       }
 
-      // Cloud / service reporting (HTTP services only)
+      // Cloud / service reporting (HTTP services only). The 15-min tick only
+      // queues work; ONE report is POSTed per loop pass so the loop never stalls
+      // longer than a single 5 s HTTP timeout (was: up to services × fermenters
+      // × 5 s in one pass).
       if (now - g_lastCloudTime >= INTERVAL_CLOUD_MS) {
         g_lastCloudTime = now;
+        queueReports();
+      }
+      if (reportsPending()) {
         checkpoint(CP_CLOUD);
-        sendReports();
+        processReportQueue();
       }
 
       // MQTT publish (separate timer, more frequent)

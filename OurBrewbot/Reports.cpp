@@ -47,21 +47,51 @@ static const BrewServiceDef kBrewServiceDefs[MAX_BREW_SERVICES] = {
 };
 
 // ============================================================
-// MAIN REPORT DISPATCHER
+// MAIN REPORT DISPATCHER — staggered
+//
+// The 15-min tick queues every eligible service×fermenter pair; the loop then
+// drains ONE blocking POST per pass. Worst-case single-pass stall drops from
+// (services × fermenters × 5 s) to a single 5 s HTTP timeout.
 // ============================================================
 
-void sendReports() {
-  if (!WiFi.isConnected()) return;
+// Pending-work bitmaps: bit i of s_pendingReports[s] = fermenter i still owes
+// a report to service s this cycle. MAX_FERMENTERS is 4, so uint8_t is ample.
+static uint8_t s_pendingReports[MAX_BREW_SERVICES];
 
-  // Index 0=Brewer's Friend, 1=Brewfather
+void queueReports() {
+  // Same eligibility tests the old burst dispatcher used
   for (int s = 0; s < MAX_BREW_SERVICES; s++) {
     if (!g_brewServices[s].enabled) continue;
     if (strlen(g_brewServices[s].serviceId) == 0) continue;
-
     for (int i = 0; i < MAX_FERMENTERS; i++) {
       if (!g_fermenters[i].power) continue;
       if (!(g_fermenters[i].brewServices & (1 << s))) continue;
-      reportBrewService(i, s);
+      s_pendingReports[s] |= (1 << i);
+    }
+  }
+}
+
+bool reportsPending() {
+  for (int s = 0; s < MAX_BREW_SERVICES; s++) {
+    if (s_pendingReports[s]) return true;
+  }
+  return false;
+}
+
+void processReportQueue() {
+  if (!WiFi.isConnected()) {
+    // Match the old behaviour: a cycle without WiFi is skipped, not retried
+    memset(s_pendingReports, 0, sizeof(s_pendingReports));
+    return;
+  }
+  for (int s = 0; s < MAX_BREW_SERVICES; s++) {
+    if (!s_pendingReports[s]) continue;
+    for (int i = 0; i < MAX_FERMENTERS; i++) {
+      if (s_pendingReports[s] & (1 << i)) {
+        s_pendingReports[s] &= ~(1 << i);
+        reportBrewService(i, s);   // blocking ≤5 s — the one POST this pass
+        return;
+      }
     }
   }
 }
