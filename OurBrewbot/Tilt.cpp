@@ -20,6 +20,7 @@
 #include "Tilt.h"
 #include "Pins.h"
 #include "Log.h"
+#include "Reports.h"   // reportsPending() — Tilt scan defers to an in-flight cloud report
 
 // SoftwareSerial: RX = GPIO13 (D7, BLE TX), TX = GPIO12 (D6, BLE RX)
 SoftwareSerial g_bleSerial(PIN_BLE_RX, PIN_BLE_TX);
@@ -53,6 +54,14 @@ bool g_bleSniffActive = false;           // set by BLE sniff page to pause Tilt 
 #define BLE_BUF_SIZE 320          // longest AT+DISI? response observed ~280 chars
 static char  s_bleBuf[BLE_BUF_SIZE];
 static int   s_bleBufLen = 0;
+
+// Non-blocking scan state: startTiltScan() kicks off AT+DISI? on the 5 s tick,
+// serviceTilt() drains the response across loop passes until OK+DISCE or timeout.
+static bool          s_scanActive = false;
+static unsigned long s_scanStart  = 0;
+static unsigned long s_lastBleInitRetry = 0;
+#define BLE_SCAN_TIMEOUT_MS 4000       // same ceiling the old busy-wait used
+#define BLE_REINIT_RETRY_MS 300000UL   // retry a failed HM-10 init every 5 min
 
 // Parse a 4-char hex string to uint16_t
 static uint16_t hexToU16(const char* hex) {
@@ -204,84 +213,115 @@ static void parseDiscLine(const char* line) {
   processTiltReading(colour, sg, tempC, isPro);
 }
 
-void checkTilt() {
-  // Skip Tilt scanning when BLE sniff page is active
+// Kick off an AT+DISI? scan on the 5 s tick if idle and allowed. serviceTilt()
+// (called every loop pass) drains the response — this function never blocks on
+// serial reads.
+void startTiltScan() {
+  // Skip Tilt scanning when BLE sniff page owns the serial port
   if (g_bleSniffActive) return;
+  // Previous scan still draining (4 s window < 5 s tick, so rare)
+  if (s_scanActive) return;
+  // Interlock: a queued cloud POST may run this window and block the loop up to
+  // 5 s — skip this tick rather than start a scan that would be starved. Tilt
+  // advertises continuously, so the next tick (5 s) picks it up.
+  if (reportsPending()) return;
 
   if (!s_bleReady) {
-    // Still increment missed reads for timeout
-    for (int i = 0; i < MAX_TILTS; i++) {
-      if (g_tilts[i].active) {
-        s_missedReads[i]++;
-        if (s_missedReads[i] >= 300) {
-          logMsg("[TILT] %s: Tilt not seen in 300 attempted reads. Deregistering.",
-            getTiltColourName(i));
-          g_tilts[i].active = false;
-          s_missedReads[i] = 0;
+    // One failed boot AT probe used to disable Tilt until reboot; retry the
+    // init at a bounded 5-min cadence (initBLE blocks ~1.9 s).
+    unsigned long now = millis();
+    if (now - s_lastBleInitRetry >= BLE_REINIT_RETRY_MS) {
+      s_lastBleInitRetry = now;
+      logMsg("[BLE] Retrying HM-10 init...");
+      initBLE();
+    }
+    if (!s_bleReady) {
+      // Still increment missed reads for timeout
+      for (int i = 0; i < MAX_TILTS; i++) {
+        if (g_tilts[i].active) {
+          s_missedReads[i]++;
+          if (s_missedReads[i] >= 300) {
+            logMsg("[TILT] %s: Tilt not seen in 300 attempted reads. Deregistering.",
+              getTiltColourName(i));
+            g_tilts[i].active = false;
+            s_missedReads[i] = 0;
+          }
         }
       }
+      return;
     }
-    return;
   }
 
   logMsg("[TILT] Starting BLE discovery scan.");
 
-  // Start iBeacon discovery scan
+  // Start iBeacon discovery scan; serviceTilt() drains the response.
   g_bleSerial.print("AT+DISI?");
+  s_scanStart  = millis();
+  s_bleBufLen  = 0;
+  s_scanActive = true;
+}
 
-  // Read responses with timeout (scan takes ~2-3 seconds).
-  // Records are parsed as soon as a second OK+DISC: delimiter is seen in the buffer,
-  // so the working buffer only ever holds ~2 records at a time regardless of how many
-  // devices are in range.  This prevents overflow losing the Tilt packet.
-  unsigned long start = millis();
-  s_bleBufLen = 0;
-  bool scanDone = false;
+// Drain an in-flight AT+DISI? response, a chunk per loop pass (no busy-wait).
+// Records are parsed as soon as a second OK+DISC: delimiter is seen in the
+// buffer, so the working buffer only ever holds ~2 records at a time regardless
+// of how many devices are in range.  This prevents overflow losing the Tilt packet.
+void serviceTilt() {
+  if (!s_scanActive) return;
 
-  while (millis() - start < 4000 && !scanDone) {
-    while (g_bleSerial.available()) {
-      char c = (char)g_bleSerial.read();
-
-      // Prevent buffer overflow — should not normally be needed with the record-flush
-      // logic below, but kept as a safety net for malformed/unexpected responses.
-      if (s_bleBufLen >= BLE_BUF_SIZE - 1) {
-        int half = BLE_BUF_SIZE / 2;
-        memmove(s_bleBuf, s_bleBuf + half, s_bleBufLen - half);
-        s_bleBufLen -= half;
-      }
-      s_bleBuf[s_bleBufLen++] = c;
-      s_bleBuf[s_bleBufLen] = '\0';
-
-      // Check for end-of-scan marker
-      if (s_bleBufLen >= 8 && strcmp(s_bleBuf + s_bleBufLen - 8, "OK+DISCE") == 0) {
-        // Strip the marker so the last record is cleanly processed below
-        s_bleBufLen -= 8;
-        s_bleBuf[s_bleBufLen] = '\0';
-        scanDone = true;
-        break;
-      }
-
-      // When a second OK+DISC: appears in the buffer, the first record is complete.
-      // Save the char at the boundary, null-terminate, parse, then RESTORE before
-      // memmove — otherwise the 'O' of the next "OK+DISC:" is clobbered and lost.
-      char* second = strstr(s_bleBuf + 8, "OK+DISC:");
-      if (second) {
-        char saved = *second;
-        *second = '\0';
-        // Only parse actual DISC records — ignore scan start markers (OK+DISCS etc.)
-        if (strncmp(s_bleBuf, "OK+DISC:", 8) == 0) {
-          parseDiscLine(s_bleBuf);
-        }
-        *second = saved;  // restore 'O' before memmove
-        int firstLen = (int)(second - s_bleBuf);
-        int remain   = s_bleBufLen - firstLen;
-        memmove(s_bleBuf, second, remain + 1);
-        s_bleBufLen = remain;
-      }
-    }
-    yield();
+  // Sniff page opened mid-scan: abandon the scan so its direct serial reads
+  // don't fight this drain loop.
+  if (g_bleSniffActive) {
+    s_scanActive = false;
+    s_bleBufLen  = 0;
+    return;
   }
 
-  // Parse any record(s) remaining in the buffer after the scan ends
+  bool scanDone = false;
+  while (g_bleSerial.available()) {
+    char c = (char)g_bleSerial.read();
+
+    // Prevent buffer overflow — should not normally be needed with the record-flush
+    // logic below, but kept as a safety net for malformed/unexpected responses.
+    if (s_bleBufLen >= BLE_BUF_SIZE - 1) {
+      int half = BLE_BUF_SIZE / 2;
+      memmove(s_bleBuf, s_bleBuf + half, s_bleBufLen - half);
+      s_bleBufLen -= half;
+    }
+    s_bleBuf[s_bleBufLen++] = c;
+    s_bleBuf[s_bleBufLen] = '\0';
+
+    // Check for end-of-scan marker
+    if (s_bleBufLen >= 8 && strcmp(s_bleBuf + s_bleBufLen - 8, "OK+DISCE") == 0) {
+      // Strip the marker so the last record is cleanly processed below
+      s_bleBufLen -= 8;
+      s_bleBuf[s_bleBufLen] = '\0';
+      scanDone = true;
+      break;
+    }
+
+    // When a second OK+DISC: appears in the buffer, the first record is complete.
+    // Save the char at the boundary, null-terminate, parse, then RESTORE before
+    // memmove — otherwise the 'O' of the next "OK+DISC:" is clobbered and lost.
+    char* second = strstr(s_bleBuf + 8, "OK+DISC:");
+    if (second) {
+      char saved = *second;
+      *second = '\0';
+      // Only parse actual DISC records — ignore scan start markers (OK+DISCS etc.)
+      if (strncmp(s_bleBuf, "OK+DISC:", 8) == 0) {
+        parseDiscLine(s_bleBuf);
+      }
+      *second = saved;  // restore 'O' before memmove
+      int firstLen = (int)(second - s_bleBuf);
+      int remain   = s_bleBufLen - firstLen;
+      memmove(s_bleBuf, second, remain + 1);
+      s_bleBufLen = remain;
+    }
+  }
+
+  // Not finished and still within the scan window — resume draining next pass.
+  if (!scanDone && millis() - s_scanStart < BLE_SCAN_TIMEOUT_MS) return;
+
+  // Scan over (end marker or timeout). Parse any record(s) left in the buffer.
   const char* pos = s_bleBuf;
   while (pos < s_bleBuf + s_bleBufLen) {
     const char* found = strstr(pos, "OK+DISC:");
@@ -289,7 +329,8 @@ void checkTilt() {
     parseDiscLine(found);
     pos = found + 8;
   }
-  s_bleBufLen = 0;
+  s_bleBufLen  = 0;
+  s_scanActive = false;
 
   // Increment missed reads for active Tilts not seen this scan
   for (int i = 0; i < MAX_TILTS; i++) {

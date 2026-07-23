@@ -202,6 +202,7 @@ void loop() {
   // (which bypasses custom_crash_callback) still tells us which subsystem hung.
   checkpoint(CP_WEB);          g_webServer.handleClient();
   checkpoint(CP_BLE);          checkBLESniffTimeout();
+  checkpoint(CP_TILT);         serviceTilt();   // drain any in-flight BLE scan every pass
   // mDNS is gated on largest contiguous heap block. The ESP8266mDNS lib
   // (LEAmDNS v1) allocates ~544 B per inbound Resource Record via operator
   // new, with no graceful failure path — when that allocation fails it
@@ -265,11 +266,12 @@ void loop() {
         periodicProbeScan();
       }
 
-      // Tilt BLE scanning
+      // Tilt BLE scanning — the tick only STARTS a scan; serviceTilt() at the
+      // top of loop() drains it across passes (was a 4 s busy-wait here).
       if (now - g_lastTiltTime >= INTERVAL_TILT_MS) {
         g_lastTiltTime = now;
         checkpoint(CP_TILT);
-        checkTilt();
+        startTiltScan();
       }
 
       // Fermenter control loop

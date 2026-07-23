@@ -22,8 +22,10 @@ extern bool g_bleSniffActive;
 // Initialise BLE module — call once in setup()
 void initBLE();
 
-// Poll for Tilt BLE advertisements via HM-10 AT+DISI? scan
-void checkTilt();
+// Non-blocking Tilt scanning: startTiltScan() kicks off an AT+DISI? scan on the
+// 5 s tick; serviceTilt() drains the response across loop passes.
+void startTiltScan();   // 5 s tick: begin a scan if idle and allowed
+void serviceTilt();     // every loop pass: drain an in-flight scan, finish on OK+DISCE or 4 s
 
 // Process a received Tilt reading (isPro: auto-detected as Tilt Pro)
 void processTiltReading(uint8_t colour, float sg, float tempC, bool isPro);
