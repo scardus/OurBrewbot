@@ -41,26 +41,93 @@ static void logApiCall(ESP8266WebServer& server) {
   logMsg("[API] %s %s from %s", method, server.uri().c_str(), ip.c_str());
 }
 
+// ============================================================
+// ROUTE TABLE
+// One PROGMEM table drives all dispatch via onNotFound() — each server.on()
+// registration heap-allocates a RequestHandler, two String URIs and a
+// std::function (~4-5 KB total for the ~48 routes below).  Only the /update
+// POST keeps a real registration: the two-callback upload form is the one
+// thing onNotFound dispatch cannot provide.
+// ============================================================
+
+typedef void (*ApiHandler)(ESP8266WebServer&);
+
+struct ApiRoute {
+  char       path[20];   // longest: "/fermenter/profile" (18 + NUL)
+  HTTPMethod method;
+  ApiHandler handler;
+  bool       log;        // false for high-frequency poll endpoints
+};
+
+static const ApiRoute kRoutes[] PROGMEM = {
+  { "/",                 HTTP_GET,  handleRoot,               true  },
+  { "/controller",       HTTP_GET,  handleController,         true  },
+  { "/controller",       HTTP_POST, handleController,         true  },
+  { "/fermenters",       HTTP_GET,  handleFermenters,         true  },
+  { "/fermenter",        HTTP_GET,  handleFermenter,          true  },
+  { "/fermenter",        HTTP_POST, handleFermenter,          true  },
+  { "/board_info.json",  HTTP_GET,  handleBoardInfo,          true  },
+  { "/reset",            HTTP_GET,  handleReset,              true  },
+  { "/reboot",           HTTP_GET,  handleReboot,             true  },
+  { "/update",           HTTP_GET,  handleOTAPage,            true  },
+  { "/config",           HTTP_GET,  handleConfigPage,         true  },
+  { "/wifi/reset",       HTTP_POST, handleWiFiReset,          true  },
+  { "/WiFi",             HTTP_GET,  handleConfigPage,         true  },
+  { "/iSpindel",         HTTP_POST, handleiSpindel,           true  },
+  { "/ispindels",        HTTP_GET,  handleiSpindels,          true  },
+  { "/ispindel/config",  HTTP_POST, handleiSpindelConfigPost, true  },
+  { "/status",           HTTP_GET,  handleStatus,             true  },
+  { "/probes",           HTTP_GET,  handleProbes,             true  },
+  { "/probes",           HTTP_POST, handleProbePost,          true  },
+  { "/health",           HTTP_GET,  handleHealth,             true  },
+  { "/admin",            HTTP_GET,  handleAdmin,              true  },
+  { "/smartplugs",       HTTP_GET,  handleSmartPlugs,         true  },
+  { "/smartplug",        HTTP_POST, handleSmartPlugPost,      true  },
+  { "/smartplug/test",   HTTP_POST, handleSmartPlugTest,      true  },
+  { "/rf/sniff",         HTTP_GET,  handleRFSniff,            true  },
+  { "/rf/sniff/poll",    HTTP_GET,  handleRFSniffPoll,        false },
+  { "/ble/sniff",        HTTP_GET,  handleBLESniff,           true  },
+  { "/ble/sniff/poll",   HTTP_GET,  handleBLESniffPoll,       false },
+  { "/ble/sniff/send",   HTTP_POST, handleBLESniffSend,       true  },
+  { "/brewservices",     HTTP_GET,  handleBrewServices,       true  },
+  { "/brewservices",     HTTP_POST, handleBrewServicesPost,   true  },
+  { "/brewservices/test",HTTP_POST, handleBrewServiceTest,    true  },
+  { "/mqtt",             HTTP_GET,  handleMqttConfig,         true  },
+  { "/mqtt",             HTTP_POST, handleMqttConfigPost,     true  },
+  { "/mqtt/test",        HTTP_POST, handleMqttTest,           true  },
+  { "/mqtt/discover",    HTTP_POST, handleMqttDiscover,       true  },
+  { "/syslog",           HTTP_GET,  handleSyslogConfig,       true  },
+  { "/syslog",           HTTP_POST, handleSyslogConfigPost,   true  },
+  { "/debug",            HTTP_GET,  handleDebug,              true  },
+  { "/debug",            HTTP_POST, handleDebug,              true  },
+  { "/profiles",         HTTP_GET,  handleProfiles,           true  },
+  { "/profile",          HTTP_POST, handleProfilePost,        true  },
+  { "/fermenter/profile",HTTP_POST, handleFermenterProfile,   true  },
+  { "/tilts",            HTTP_GET,  handleTilts,              true  },
+  { "/tilt",             HTTP_POST, handleTiltPost,           true  },
+  { "/fs/files",         HTTP_GET,  handleFsFiles,            true  },
+  { "/fs/file",          HTTP_GET,  handleFsFile,             true  },
+  { "/fs/save",          HTTP_POST, handleFsFileSave,         true  },
+};
+
+static void dispatchApiRequest(ESP8266WebServer& server) {
+  HTTPMethod method = server.method();
+  String uri = server.uri();  // uri() returns by value — keep it alive for the loop
+  for (size_t i = 0; i < sizeof(kRoutes) / sizeof(kRoutes[0]); i++) {
+    ApiRoute r;
+    memcpy_P(&r, &kRoutes[i], sizeof(r));
+    if (r.method == method && strcmp(uri.c_str(), r.path) == 0) {
+      if (r.log) logApiCall(server);
+      r.handler(server);
+      return;
+    }
+  }
+  logApiCall(server);
+  handleNotFound(server);
+}
+
 void setupWebServer(ESP8266WebServer& server) {
-  server.on("/",              HTTP_GET,  [&server]() { logApiCall(server); handleRoot(server); });
-  server.on("/controller",    HTTP_GET,  [&server]() { logApiCall(server); handleController(server); });
-  server.on("/controller",    HTTP_POST, [&server]() { logApiCall(server); handleController(server); });
-  server.on("/fermenters",    HTTP_GET,  [&server]() { logApiCall(server); handleFermenters(server); });
-  server.on("/fermenter",     HTTP_GET,  [&server]() { logApiCall(server); handleFermenter(server); });
-  server.on("/fermenter",     HTTP_POST, [&server]() { logApiCall(server); handleFermenter(server); });
-  server.on("/board_info.json",HTTP_GET, [&server]() { logApiCall(server); handleBoardInfo(server); });
-  server.on("/reset",         HTTP_GET,  [&server]() { logApiCall(server); handleReset(server); });
-  server.on("/reboot",        HTTP_GET,  [&server]() { logApiCall(server); handleReboot(server); });
-  server.on("/update",        HTTP_GET,  [&server]() { logApiCall(server); handleOTAPage(server); });
-  server.on("/config",        HTTP_GET,  [&server]() { logApiCall(server); handleConfigPage(server); });
-  server.on("/wifi/reset",    HTTP_POST, [&server]() { logApiCall(server); handleWiFiReset(server); });
-  server.on("/WiFi",          HTTP_GET,  [&server]() { logApiCall(server); handleConfigPage(server); });
-
-  server.on("/iSpindel",      HTTP_POST, [&server]() { logApiCall(server); handleiSpindel(server); });
-  server.on("/ispindels",      HTTP_GET,  [&server]() { logApiCall(server); handleiSpindels(server); });
-  server.on("/ispindel/config",HTTP_POST, [&server]() { logApiCall(server); handleiSpindelConfigPost(server); });
-
-  // OTA upload handler
+  // OTA upload handler — must stay a real registration (see kRoutes note)
   server.on("/update", HTTP_POST,
     [&server]() {
       logApiCall(server);
@@ -80,51 +147,7 @@ void setupWebServer(ESP8266WebServer& server) {
     [&server]() { handleOTAUpload(server); }
   );
 
-  // New convenience endpoints
-  server.on("/status",        HTTP_GET,  [&server]() { logApiCall(server); handleStatus(server); });
-  server.on("/probes",        HTTP_GET,  [&server]() { logApiCall(server); handleProbes(server); });
-  server.on("/probes",        HTTP_POST, [&server]() { logApiCall(server); handleProbePost(server); });
-  server.on("/health",        HTTP_GET,  [&server]() { logApiCall(server); handleHealth(server); });
-
-  // Admin configuration page
-  server.on("/admin",         HTTP_GET,  [&server]() { logApiCall(server); handleAdmin(server); });
-  server.on("/smartplugs",    HTTP_GET,  [&server]() { logApiCall(server); handleSmartPlugs(server); });
-  server.on("/smartplug",     HTTP_POST, [&server]() { logApiCall(server); handleSmartPlugPost(server); });
-  server.on("/smartplug/test",HTTP_POST, [&server]() { logApiCall(server); handleSmartPlugTest(server); });
-  server.on("/rf/sniff",     HTTP_GET,  [&server]() { logApiCall(server); handleRFSniff(server); });
-  server.on("/rf/sniff/poll",HTTP_GET,  [&server]() { handleRFSniffPoll(server); });  // high-frequency poll — not logged
-  server.on("/ble/sniff",      HTTP_GET,  [&server]() { logApiCall(server); handleBLESniff(server); });
-  server.on("/ble/sniff/poll", HTTP_GET,  [&server]() { handleBLESniffPoll(server); });  // high-frequency poll — not logged
-  server.on("/ble/sniff/send", HTTP_POST, [&server]() { logApiCall(server); handleBLESniffSend(server); });
-  server.on("/brewservices",      HTTP_GET,  [&server]() { logApiCall(server); handleBrewServices(server); });
-  server.on("/brewservices",      HTTP_POST, [&server]() { logApiCall(server); handleBrewServicesPost(server); });
-  server.on("/brewservices/test", HTTP_POST, [&server]() { logApiCall(server); handleBrewServiceTest(server); });
-  server.on("/mqtt",             HTTP_GET,  [&server]() { logApiCall(server); handleMqttConfig(server); });
-  server.on("/mqtt",             HTTP_POST, [&server]() { logApiCall(server); handleMqttConfigPost(server); });
-  server.on("/mqtt/test",        HTTP_POST, [&server]() { logApiCall(server); handleMqttTest(server); });
-  server.on("/mqtt/discover",    HTTP_POST, [&server]() { logApiCall(server); handleMqttDiscover(server); });
-  server.on("/syslog",           HTTP_GET,  [&server]() { logApiCall(server); handleSyslogConfig(server); });
-  server.on("/syslog",           HTTP_POST, [&server]() { logApiCall(server); handleSyslogConfigPost(server); });
-
-  // Fermenter debug mode
-  server.on("/debug",            HTTP_GET,  [&server]() { logApiCall(server); handleDebug(server); });
-  server.on("/debug",            HTTP_POST, [&server]() { logApiCall(server); handleDebug(server); });
-
-  // Profile management
-  server.on("/profiles",          HTTP_GET,  [&server]() { logApiCall(server); handleProfiles(server); });
-  server.on("/profile",           HTTP_POST, [&server]() { logApiCall(server); handleProfilePost(server); });
-  server.on("/fermenter/profile", HTTP_POST, [&server]() { logApiCall(server); handleFermenterProfile(server); });
-
-  // Tilt hydrometer config
-  server.on("/tilts", HTTP_GET,  [&server]() { logApiCall(server); handleTilts(server); });
-  server.on("/tilt",  HTTP_POST, [&server]() { logApiCall(server); handleTiltPost(server); });
-
-  // Filesystem browser
-  server.on("/fs/files", HTTP_GET,  [&server]() { logApiCall(server); handleFsFiles(server); });
-  server.on("/fs/file",  HTTP_GET,  [&server]() { logApiCall(server); handleFsFile(server); });
-  server.on("/fs/save",  HTTP_POST, [&server]() { logApiCall(server); handleFsFileSave(server); });
-
-  server.onNotFound([&server]() { logApiCall(server); handleNotFound(server); });
+  server.onNotFound([&server]() { dispatchApiRequest(server); });
 }
 
 // ============================================================
