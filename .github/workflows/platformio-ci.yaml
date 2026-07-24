@@ -49,7 +49,7 @@ jobs:
       - name: Build firmware
         run: pio run
       - name: Upload firmware artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: .pio/build/nodemcuv2/firmware.bin
