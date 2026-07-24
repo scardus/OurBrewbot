@@ -11,9 +11,10 @@ on:
     paths:
       - 'OurBrewbot/**'
       - 'platformio.ini'
-
+  workflow_dispatch:
+  
 jobs:
-  analysis:
+  analyze-and-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -30,22 +31,6 @@ jobs:
         run: pip install --upgrade platformio
       - name: Run static analysis
         run: pio check --fail-on-defect=high
-
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cache/pip
-            ~/.platformio/.cache
-          key: ${{ runner.os }}-pio
-      - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
       - name: Build firmware
         run: pio run
       - name: Upload firmware artifact
