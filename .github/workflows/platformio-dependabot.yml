@@ -38,6 +38,6 @@ jobs:
         run: pio run
 
       - name: Run PlatformIO Dependabot
-        uses: peterus/platformio-dependabot-action@v1
+        uses: peterus/platformio-dependabot@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
