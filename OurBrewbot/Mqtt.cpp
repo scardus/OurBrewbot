@@ -916,6 +916,20 @@ static bool mqttConnect() {
   return ok;
 }
 
+// Reconnect if the link has dropped, logging the drop before retrying.
+// Clearing g_mqttWasConnected HERE — rather than only on a failed attempt — is
+// what makes a clean drop-and-reconnect visible in the log. Without it the flag
+// stays true, onMqttConnected() skips its "Connected" line, and a reconnect is
+// only detectable from the re-subscribe it leaves behind.
+static bool mqttEnsureConnected() {
+  if (g_mqtt.connected()) return true;
+  if (g_mqttWasConnected) {
+    logMsg("[MQTT] Connection lost (rc=%d) — reconnecting", g_mqtt.state());
+    g_mqttWasConnected = false;
+  }
+  return mqttConnect();
+}
+
 // ============================================================
 // FORCE DISCOVER — manual trigger from admin UI button
 // ============================================================
@@ -930,7 +944,7 @@ bool forcePublishAllHaDiscovery() {
   }
   if (!g_mqtt.connected()) {
     logMsg("[MQTT] Discover: not connected — attempting connect");
-    if (!mqttConnect()) {
+    if (!mqttEnsureConnected()) {
       logMsg("[MQTT] Discover: connect failed");
       return false;
     }
@@ -1129,9 +1143,7 @@ void reportMqtt() {
   if (!g_mqttConfig.enabled) return;
   if (!WiFi.isConnected()) return;
 
-  if (!g_mqtt.connected()) {
-    if (!mqttConnect()) return;
-  }
+  if (!mqttEnsureConnected()) return;
 
   // Base topic buffer: baseTopic(31) + "/" + "Fermenter" + "N" + NUL
   char base[96];
