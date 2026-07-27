@@ -109,7 +109,7 @@ static bool decodeTiltReading(const char* fields, int colour,
                               float* sgOut, float* tempCOut, bool* isProOut) {
   uint16_t major, minor;
   if (!hexToU16(fields, &major) || !hexToU16(fields + 4, &minor)) {
-    logMsg("[TILT] %s: rejected — non-hex major/minor in frame: %.8s",
+    logMsg("[TILT] %s: rejected - non-hex major/minor in frame: %.8s",
       getTiltColourName(colour), fields);
     return false;
   }
@@ -121,7 +121,7 @@ static bool decodeTiltReading(const char* fields, int colour,
   uint16_t minorMax = isPro ? TILT_PRO_MINOR_MAX : TILT_MINOR_MAX;
 
   if (major < majorMin || major > majorMax || minor < minorMin || minor > minorMax) {
-    logMsg("[TILT] %s: rejected — %s reading out of range (major=%u minor=%u)",
+    logMsg("[TILT] %s: rejected - %s reading out of range (major=%u minor=%u)",
       getTiltColourName(colour), isPro ? "Pro" : "std", major, minor);
     return false;
   }

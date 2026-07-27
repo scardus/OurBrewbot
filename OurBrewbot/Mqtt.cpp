@@ -904,7 +904,10 @@ static bool mqttConnect() {
   if (ok) {
     onMqttConnected();
   } else {
-    logMsg("[MQTT] Connection failed, rc=%d (retry in %lus)",
+    // Backoff is a floor, not a schedule: mqttEnsureConnected() is only reached
+    // from reportMqtt(), so the next actual attempt is the next report tick
+    // (60s) unless the backoff has grown past it.
+    logMsg("[MQTT] Connection failed, rc=%d (backoff %lus, retry on next report)",
       g_mqtt.state(), g_mqttBackoffMs / 1000);
     g_mqttWasConnected = false;
     // Double backoff, capped
@@ -924,7 +927,7 @@ static bool mqttConnect() {
 static bool mqttEnsureConnected() {
   if (g_mqtt.connected()) return true;
   if (g_mqttWasConnected) {
-    logMsg("[MQTT] Connection lost (rc=%d) — reconnecting", g_mqtt.state());
+    logMsg("[MQTT] Connection lost (rc=%d) - reconnecting", g_mqtt.state());
     g_mqttWasConnected = false;
   }
   return mqttConnect();
@@ -943,7 +946,7 @@ bool forcePublishAllHaDiscovery() {
     return false;
   }
   if (!g_mqtt.connected()) {
-    logMsg("[MQTT] Discover: not connected — attempting connect");
+    logMsg("[MQTT] Discover: not connected - attempting connect");
     if (!mqttEnsureConnected()) {
       logMsg("[MQTT] Discover: connect failed");
       return false;
