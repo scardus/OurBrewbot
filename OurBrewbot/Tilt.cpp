@@ -63,31 +63,77 @@ static unsigned long s_lastBleInitRetry = 0;
 #define BLE_SCAN_TIMEOUT_MS 4000       // same ceiling the old busy-wait used
 #define BLE_REINIT_RETRY_MS 300000UL   // retry a failed HM-10 init every 5 min
 
-// Parse a 4-char hex string to uint16_t
-static uint16_t hexToU16(const char* hex) {
+// Parse a 4-char hex string to uint16_t.
+// Returns false if ANY of the 4 characters is not hex — a garbled frame must be
+// rejected, not silently turned into a plausible-looking number.
+static bool hexToU16(const char* hex, uint16_t* out) {
   uint16_t val = 0;
   for (int i = 0; i < 4; i++) {
     val <<= 4;
     char c = hex[i];
-    if (c >= '0' && c <= '9') val |= (c - '0');
+    if      (c >= '0' && c <= '9') val |= (c - '0');
     else if (c >= 'A' && c <= 'F') val |= (c - 'A' + 10);
     else if (c >= 'a' && c <= 'f') val |= (c - 'a' + 10);
+    else return false;
   }
-  return val;
+  *out = val;
+  return true;
 }
 
-// Try to identify a Tilt colour from the iBeacon UUID hex string
-// Returns colour index (0-7) or -1 if not a Tilt
-static int identifyTiltColour(const char* uuidHex) {
-  // Tilt UUID pattern: 4C000215 A495BB x0 C5B14B44B5121370F02D74DE
-  // Check for "A495BB" prefix at expected position (after 4C000215 = 8 chars)
-  if (strncasecmp(uuidHex + 8, "A495BB", 6) != 0) return -1;
+// The 24 UUID characters that follow the colour byte. Identical for every Tilt
+// colour and model, so verifying them catches a frame corrupted after the
+// colour byte — which a prefix-only check would happily accept as valid.
+static const char TILT_UUID_TAIL[] = "C5B14B44B5121370F02D74DE";
 
-  char colourByte = uuidHex[14];  // The distinguishing digit
+// Identify a Tilt from a 32-char iBeacon UUID hex string (no leading company ID).
+// Verifies the WHOLE UUID: "A495BB" + colour digit + '0' + fixed 24-char tail.
+// Returns colour index (0-7), or -1 if this is not a Tilt.
+static int identifyTiltUuid(const char* uuidHex) {
+  if (strlen(uuidHex) < 32) return -1;
+  if (strncasecmp(uuidHex, "A495BB", 6) != 0) return -1;
+  if (uuidHex[7] != '0') return -1;              // pattern is A495BBx0
+  if (strncasecmp(uuidHex + 8, TILT_UUID_TAIL, 24) != 0) return -1;
+
+  char colourByte = uuidHex[6];                  // The distinguishing digit
   for (int i = 0; i < MAX_TILTS; i++) {
     if (colourByte == TILT_UUID_BYTES[i]) return i;
   }
   return -1;
+}
+
+// Decode and range-check the raw major/minor fields, then scale to °C and SG.
+// Bounds are applied to the RAW values before scaling (see Config.h), so a
+// corrupt frame is rejected before it can reach the alarm and control logic.
+// Returns false — and logs why — if the frame fails any check.
+static bool decodeTiltReading(const char* fields, int colour,
+                              float* sgOut, float* tempCOut, bool* isProOut) {
+  uint16_t major, minor;
+  if (!hexToU16(fields, &major) || !hexToU16(fields + 4, &minor)) {
+    logMsg("[TILT] %s: rejected — non-hex major/minor in frame: %.8s",
+      getTiltColourName(colour), fields);
+    return false;
+  }
+
+  bool isPro = (minor > TILT_PRO_THRESHOLD);
+  uint16_t majorMin = isPro ? TILT_PRO_MAJOR_MIN : TILT_MAJOR_MIN;
+  uint16_t majorMax = isPro ? TILT_PRO_MAJOR_MAX : TILT_MAJOR_MAX;
+  uint16_t minorMin = isPro ? TILT_PRO_MINOR_MIN : TILT_MINOR_MIN;
+  uint16_t minorMax = isPro ? TILT_PRO_MINOR_MAX : TILT_MINOR_MAX;
+
+  if (major < majorMin || major > majorMax || minor < minorMin || minor > minorMax) {
+    logMsg("[TILT] %s: rejected — %s reading out of range (major=%u minor=%u)",
+      getTiltColourName(colour), isPro ? "Pro" : "std", major, minor);
+    return false;
+  }
+
+  *isProOut  = isPro;
+  *tempCOut  = isPro ? ((float)major / 10.0f - 32.0f) * 5.0f / 9.0f
+                     : ((float)major - 32.0f) * 5.0f / 9.0f;
+  *sgOut     = isPro ? (float)minor / 10000.0f
+                     : (float)minor / 1000.0f;
+  logMsg("[TILT] PARSE (%s): colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
+    isPro ? "Pro" : "std", colour, major, minor, *tempCOut, *sgOut);
+  return true;
 }
 
 void initBLE() {
@@ -156,37 +202,23 @@ static void parseDiscLine(const char* line) {
     if (strncasecmp(p, "004C0215", 8) == 0) {
       p += 8;
       if (*p == ':') p++;
-      // Field 2: UUID (32 hex chars) — check for Tilt A495BBx0 pattern
-      if (strlen(p) >= 32 && strncasecmp(p, "A495BB", 6) == 0) {
-        char colourChar = p[6];
-        int colour = -1;
-        for (int i = 0; i < MAX_TILTS; i++) {
-          if (colourChar == TILT_UUID_BYTES[i]) { colour = i; break; }
-        }
-        if (colour < 0) {
-          logMsg("[TILT] Tilt-like UUID but unknown colour byte: %c", colourChar);
-          return;
-        }
-        p += 32;
-        if (*p == ':') p++;
-        // Field 3: MajorMinorPower — 4 Major + 4 Minor + 2 Power = 10 chars
-        if (strlen(p) >= 8) {
-          uint16_t tempF = hexToU16(p);      // Major = temp in °F (× 10 for Pro)
-          uint16_t sgRaw = hexToU16(p + 4);  // Minor = SG × 1000 (standard) or × 10000 (Pro)
-          bool isPro = (sgRaw > 8000);       // Pro reports gravity with one extra decimal place, so SG × 10000 > 8000 indicates Pro
-          float tempC = isPro ? ((float)tempF / 10.0f - 32.0f) * 5.0f / 9.0f
-                              : ((float)tempF - 32.0f) * 5.0f / 9.0f;
-          float sg    = isPro ? (float)sgRaw / 10000.0f
-                              : (float)sgRaw / 1000.0f;
-          logMsg("[TILT] PARSE (%s): colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
-            isPro ? "Pro" : "std", colour, tempF, sgRaw, tempC, sg);
-          processTiltReading(colour, sg, tempC, isPro);
-          return;
-        }
-      } else {
+      // Field 2: UUID (32 hex chars) — must match the full Tilt UUID
+      int colour = identifyTiltUuid(p);
+      if (colour < 0) {
         logMsg("[TILT] Apple iBeacon found but not a Tilt UUID: %.32s", p);
         return;
       }
+      p += 32;
+      if (*p == ':') p++;
+      // Field 3: MajorMinorPower — 4 Major + 4 Minor + 2 Power = 10 chars
+      if (strlen(p) >= 8) {
+        float sg, tempC;
+        bool  isPro;
+        if (decodeTiltReading(p, colour, &sg, &tempC, &isPro)) {
+          processTiltReading(colour, sg, tempC, isPro);
+        }
+      }
+      return;
     }
   }
 
@@ -196,21 +228,17 @@ static void parseDiscLine(const char* line) {
   if (!dataStart) return;
   if (strlen(dataStart) < 48) return;
 
-  int colour = identifyTiltColour(dataStart);
+  // UUID starts 8 chars in, after the "4C000215" company/type prefix
+  int colour = identifyTiltUuid(dataStart + 8);
   if (colour < 0) {
     logMsg("[TILT] iBeacon found (legacy fmt) but not a Tilt: %.16s...", dataStart + 8);
     return;
   }
-  uint16_t tempF = hexToU16(dataStart + 40);  // Major = temp in °F (× 10 for Pro)
-  uint16_t sgRaw = hexToU16(dataStart + 44);  // Minor = SG × 1000 (standard) or × 10000 (Pro)
-  bool isPro = (sgRaw > 8000);       // Pro reports gravity with one extra decimal place, so SG × 10000 > 8000 indicates Pro
-  float tempC = isPro ? ((float)tempF / 10.0f - 32.0f) * 5.0f / 9.0f
-                      : ((float)tempF - 32.0f) * 5.0f / 9.0f;
-  float sg    = isPro ? (float)sgRaw / 10000.0f
-                      : (float)sgRaw / 1000.0f;
-  logMsg("[TILT] PARSE (legacy/%s): colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
-    isPro ? "Pro" : "std", colour, tempF, sgRaw, tempC, sg);
-  processTiltReading(colour, sg, tempC, isPro);
+  float sg, tempC;
+  bool  isPro;
+  if (decodeTiltReading(dataStart + 40, colour, &sg, &tempC, &isPro)) {
+    processTiltReading(colour, sg, tempC, isPro);
+  }
 }
 
 // Kick off an AT+DISI? scan on the 5 s tick if idle and allowed. serviceTilt()

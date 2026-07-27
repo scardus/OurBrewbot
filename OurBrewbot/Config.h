@@ -31,6 +31,23 @@
 #define PROBE_UNASSIGNED    99      // Sentinel value from original firmware
 #define PROBE_FAIL_THRESHOLD 6      // Consecutive failed reads before marking inactive (~30s at 5s poll)
 
+// Tilt iBeacon raw field bounds, checked on the major/minor values BEFORE they
+// are scaled to °C/SG. A corrupted BLE frame can still carry a valid-looking
+// colour, so these bounds are the last line of defence against a garbage
+// reading reaching the alarm and control logic.
+// Deliberately WIDER than the manufacturer's calibrated range (0.990-1.120 SG)
+// so that a Tilt sitting in air or on the bench — a legitimate, useful reading —
+// is kept rather than discarded. Anything outside these is corruption.
+#define TILT_PRO_THRESHOLD   5000   // minor above this means Pro encoding (std ~1000-1200, Pro ~9900-11200)
+#define TILT_MINOR_MIN        900   // 0.900 SG — below air/plain water
+#define TILT_MINOR_MAX       1250   // 1.250 SG — above the 1.200 user calibration ceiling
+#define TILT_MAJOR_MIN          0   // 0 °F
+#define TILT_MAJOR_MAX        212   // 212 °F — above the 185 °F spec ceiling
+#define TILT_PRO_MINOR_MIN   9000   // Pro bounds are the standard ones × 10
+#define TILT_PRO_MINOR_MAX  12500
+#define TILT_PRO_MAJOR_MIN      0
+#define TILT_PRO_MAJOR_MAX   2120
+
 // ============================================================
 // TEMPERATURE UNITS
 // ============================================================
@@ -317,7 +334,7 @@ struct TiltConfig {
   float   temperature;          // Tilt temperature reading (with tempAdjust applied)
   bool    active;               // Tilt has been seen recently
   uint32_t lastSeen;            // millis() of last reading
-  bool    isPro;                // true if auto-detected as Tilt Pro (tempF > 212 raw)
+  bool    isPro;                // true if auto-detected as Tilt Pro (raw minor > TILT_PRO_THRESHOLD)
 };
 
 // ============================================================
