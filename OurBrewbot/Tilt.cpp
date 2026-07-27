@@ -6,8 +6,12 @@
  *
  * AT+DISI? returns iBeacon advertisements in colon-delimited format:
  *   OK+DISC:CompanyID:UUID:MajorMinorPower:MACAddr:RSSI
- *   Example: OK+DISC:004C0215:A495BB10C5B14B44B5121370F02D74DE:0044041AF6:F42DC96DA4F2:-053
- *   Where: 004C0215 = Apple iBeacon company ID
+ *   Example: OK+DISC:4C000215:A495BB10C5B14B44B5121370F02D74DE:0044041AF6:F42DC96DA4F2:-053
+ *   Where: 4C000215 = Apple company ID (0x004C) followed by iBeacon type 0215.
+ *          Apple's ID airs little-endian, so the bytes on the wire are 4C 00,
+ *          and the HM-10 passes manufacturer data through verbatim. This order
+ *          is per the iBeacon spec — NOT per whatever a simulator emits; the
+ *          byte-swapped form 004C0215 is a simulator bug and is rejected.
  *          A495BBx0...74DE = Tilt UUID (x = colour: 1=Red..8=Pink)
  *          0044 = Major (temp °F, hex)
  *          041A = Minor (SG × 1000, hex)
@@ -131,8 +135,8 @@ static bool decodeTiltReading(const char* fields, int colour,
                      : ((float)major - 32.0f) * 5.0f / 9.0f;
   *sgOut     = isPro ? (float)minor / 10000.0f
                      : (float)minor / 1000.0f;
-  logMsg("[TILT] PARSE (%s): colour=%d tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
-    isPro ? "Pro" : "std", colour, major, minor, *tempCOut, *sgOut);
+  logMsg("[TILT] PARSE (%s): colour=%s tempF=%u sgRaw=%u tempC=%.1f sg=%.4f",
+    isPro ? "Pro" : "std", getTiltColourName(colour), major, minor, *tempCOut, *sgOut);
   return true;
 }
 
@@ -194,12 +198,14 @@ static void parseDiscLine(const char* line) {
   logMsg("[TILT] Parsing: %.80s", line);
 
   // ---- Colon-delimited format ----
-  // OK+DISC:004C0215:A495BBx0...(32 chars):MajorMinorPower(10 chars):MAC:RSSI
+  // OK+DISC:4C000215:A495BBx0...(32 chars):MajorMinorPower(10 chars):MAC:RSSI
   const char* p = strstr(line, "OK+DISC:");
   if (p) {
     p += 8;  // skip "OK+DISC:"
-    // Field 1: CompanyID — must be Apple iBeacon prefix
-    if (strncasecmp(p, "004C0215", 8) == 0) {
+    // Field 1: CompanyID — must be Apple's 0x004C in on-air (little-endian)
+    // order, followed by the iBeacon type. See the byte-order note in the file
+    // header: 004C0215 is the byte-swapped form and is deliberately rejected.
+    if (strncasecmp(p, "4C000215", 8) == 0) {
       p += 8;
       if (*p == ':') p++;
       // Field 2: UUID (32 hex chars) — must match the full Tilt UUID
@@ -226,6 +232,11 @@ static void parseDiscLine(const char* line) {
   // ...4C000215A495BBx0{32-char-uuid}{4-major}{4-minor}{2-rssi}...
   const char* dataStart = strstr(line, "4C000215");
   if (!dataStart) return;
+  // A ':' straight after the company ID means this is a colon-delimited record,
+  // which the parser above already handled. The offsets below assume the fields
+  // run together, so continuing here would read one character off and reject a
+  // perfectly good frame as "not a Tilt".
+  if (dataStart[8] == ':') return;
   if (strlen(dataStart) < 48) return;
 
   // UUID starts 8 chars in, after the "4C000215" company/type prefix
