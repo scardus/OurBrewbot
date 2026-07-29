@@ -34,7 +34,22 @@ public:
     buf_[sizeof(buf_) - 1] = '\0';
   }
   String(const String&) = default;
+  String& operator=(const char* s) {
+    strncpy(buf_, s ? s : "", sizeof(buf_) - 1);
+    buf_[sizeof(buf_) - 1] = '\0';
+    return *this;
+  }
   const char* c_str() const { return buf_; }
+  size_t length() const { return strlen(buf_); }
+  // Only needed so ArduinoJson's ArduinoStringWriter (serializeJson into a
+  // String) compiles once ARDUINOJSON_ENABLE_ARDUINO_STRING is on - no
+  // native test currently exercises serialization into a String.
+  bool concat(const char* s) {
+    size_t curLen = strlen(buf_);
+    if (curLen >= sizeof(buf_) - 1) return false;
+    strncat(buf_, s, sizeof(buf_) - curLen - 1);
+    return true;
+  }
   bool equalsIgnoreCase(const char* other) const { return strcasecmp(buf_, other) == 0; }
   bool startsWith(const char* prefix) const { return strncasecmp(buf_, prefix, strlen(prefix)) == 0; }
 };

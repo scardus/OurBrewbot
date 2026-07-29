@@ -10,6 +10,22 @@
 #include "Log.h"
 #include <ArduinoJson.h>
 
+// Reject physically impossible values — guards against corrupted payloads or wrong unit config
+void validateiSpindelValues(float& sg, float& temp, const char* name, const char* id) {
+  if (sg != 0.0f && (sg < 0.900f || sg > 1.200f)) {
+    logMsg("[ISPINDEL] %s (ID:%s): gravity %.4f out of range, ignoring", name, id, sg);
+    sg = 0.0f;
+  }
+  if (temp != 0.0f && (temp < -40.0f || temp > 80.0f)) {
+    logMsg("[ISPINDEL] %s (ID:%s): temperature %.1f out of range, ignoring", name, id, temp);
+    temp = 0.0f;
+  }
+}
+
+float platoToSG(float plato) {
+  return 1.0f + (plato / (258.6f - (plato / 258.2f * 227.1f)));
+}
+
 // ============================================================
 // ISPINDEL RECEIVE
 // POST /iSpindel — iSpindel sends: name, ID, temperature, gravity, battery, RSSI
@@ -39,15 +55,7 @@ void handleiSpindelPost(const String& body) {
   float       runTime     = doc["run-time"]     | 0.0f;
   const char* gravityUnit = doc["gravity-unit"] | "";
 
-  // Reject physically impossible values — guards against corrupted payloads or wrong unit config
-  if (sg != 0.0f && (sg < 0.900f || sg > 1.200f)) {
-    logMsg("[ISPINDEL] %s (ID:%s): gravity %.4f out of range, ignoring", name, id, sg);
-    sg = 0.0f;
-  }
-  if (temp != 0.0f && (temp < -40.0f || temp > 80.0f)) {
-    logMsg("[ISPINDEL] %s (ID:%s): temperature %.1f out of range, ignoring", name, id, temp);
-    temp = 0.0f;
-  }
+  validateiSpindelValues(sg, temp, name, id);
 
   // Match by device ID first (primary key), then by name as fallback
   int matched = -1;
@@ -70,7 +78,7 @@ void handleiSpindelPost(const String& body) {
   if (matched >= 0) {
     // Convert Plato to SG if device is configured for Plato output
     if (g_iSpindels[matched].unit == 1) {
-      sg = 1.0f + (sg / (258.6f - (sg / 258.2f * 227.1f)));
+      sg = platoToSG(sg);
     }
     // Apply calibration offsets
     sg   += g_iSpindels[matched].sgAdjust;
