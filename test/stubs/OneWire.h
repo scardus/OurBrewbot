@@ -1,5 +1,9 @@
 #pragma once
-// Temperatures.h declares "extern OneWire g_oneWireBus1/2" - nothing under
-// native test compiles Temperatures.cpp or calls into the real OneWire bus,
-// so an empty type is enough to satisfy those declarations.
-class OneWire {};
+// Temperatures.h declares "extern OneWire g_oneWireBus1/2". Temperatures.cpp
+// constructs them with a pin number (never otherwise called - DallasTemperature
+// is the type whose methods actually get exercised), so a pin-number
+// constructor is enough; no other behaviour is needed.
+class OneWire {
+public:
+  OneWire(int /*pin*/) {}
+};

@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdarg>
+#include <cstring>
+#include <strings.h>
 #include <algorithm>
 
 using std::fabs;
@@ -18,14 +20,23 @@ using std::max;
 typedef const char* PGM_P;
 #define PROGMEM
 
-// Real Arduino String isn't needed by any code path native tests compile
-// today (see Config.h's recordReboot() declaration) — this exists only so
-// that declaration parses.
+// Minimal real String — Temperatures.cpp's addressToString()/scanBuses()
+// construct one from a char*, compare, and read it back, even though those
+// functions aren't under test (see test/test_native_temperatures). A fixed
+// 64-char buffer comfortably covers this codebase's 16-char hex addresses
+// and 24-char probe names.
 class String {
+  char buf_[64];
 public:
-  String() {}
-  String(const char*) {}
+  String() { buf_[0] = '\0'; }
+  String(const char* s) {
+    strncpy(buf_, s ? s : "", sizeof(buf_) - 1);
+    buf_[sizeof(buf_) - 1] = '\0';
+  }
   String(const String&) = default;
+  const char* c_str() const { return buf_; }
+  bool equalsIgnoreCase(const char* other) const { return strcasecmp(buf_, other) == 0; }
+  bool startsWith(const char* prefix) const { return strncasecmp(buf_, prefix, strlen(prefix)) == 0; }
 };
 
 // millis() — settable by tests via test_setMillis() so time-based profile
@@ -36,3 +47,15 @@ void test_setMillis(uint32_t ms);
 // delay() is a real busy-wait on hardware; native tests never need to
 // actually block, so this is a no-op.
 inline void delay(uint32_t) {}
+
+// strlcpy() is a BSD extension the ESP8266 Arduino core provides, but
+// mingw's C library doesn't - minimal standard implementation.
+inline size_t strlcpy(char* dst, const char* src, size_t dstsize) {
+  size_t srclen = strlen(src);
+  if (dstsize > 0) {
+    size_t n = (srclen < dstsize - 1) ? srclen : dstsize - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+  }
+  return srclen;
+}

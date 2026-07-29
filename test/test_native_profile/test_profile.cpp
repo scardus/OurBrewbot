@@ -240,6 +240,89 @@ void test_TimeAndAttn_blocks_before_days_elapsed(void) {
   TEST_ASSERT_FALSE(isStepComplete(F, step));
 }
 
+// ---- getProfileTargetTemp: ramp interpolation + clamping ----
+
+void test_getProfileTargetTemp_none_when_not_running(void) {
+  g_fermenters[F].profileRunning = false;
+  g_fermenters[F].profileNo      = 1;
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getProfileTargetTemp(F));
+}
+
+void test_getProfileTargetTemp_none_in_standard_mode(void) {
+  g_fermenters[F].profileRunning = true;
+  g_fermenters[F].profileNo      = 0;
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getProfileTargetTemp(F));
+}
+
+void test_getProfileTargetTemp_none_past_last_step(void) {
+  g_fermenters[F].profileRunning = true;
+  g_fermenters[F].profileNo      = 1;
+  g_fermenters[F].currentStep    = MAX_STEPS_PER_PROFILE;
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getProfileTargetTemp(F));
+}
+
+void test_getProfileTargetTemp_ramp_interpolates_and_clamps(void) {
+  g_fermenters[F].profileRunning = true;
+  g_fermenters[F].profileNo      = 1;
+  g_fermenters[F].currentStep    = 0;
+  g_profileSteps[0] = makeStep(STEP_TEMP_OVER_TIME, /*days=*/2.0f, /*start=*/10.0f, /*end=*/20.0f, 0);
+
+  g_fermenters[F].currentHour = 0;   // 0% elapsed (48h ramp)
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 10.0f, getProfileTargetTemp(F));
+
+  g_fermenters[F].currentHour = 24;  // 50% elapsed
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 15.0f, getProfileTargetTemp(F));
+
+  g_fermenters[F].currentHour = 48;  // 100% elapsed
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, getProfileTargetTemp(F));
+
+  g_fermenters[F].currentHour = 96;  // past 100% - must clamp, not overshoot
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, getProfileTargetTemp(F));
+}
+
+void test_getProfileTargetTemp_nonramp_returns_endTemp_directly(void) {
+  g_fermenters[F].profileRunning = true;
+  g_fermenters[F].profileNo      = 1;
+  g_fermenters[F].currentStep    = 0;
+
+  // days == 0 - no ramp, regardless of currentHour.
+  g_profileSteps[0] = makeStep(STEP_TIME_OVER_TEMP, 0.0f, 10.0f, 20.0f, 0);
+  g_fermenters[F].currentHour = 5;
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, getProfileTargetTemp(F));
+
+  // startTemp == endTemp - no ramp even with days > 0.
+  g_profileSteps[0] = makeStep(STEP_TIME_OVER_TEMP, 2.0f, 20.0f, 20.0f, 0);
+  g_fermenters[F].currentHour = 10;
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, getProfileTargetTemp(F));
+}
+
+// ---- countProfileSteps ----
+
+void test_countProfileSteps_out_of_range_slot_returns_zero(void) {
+  TEST_ASSERT_EQUAL_UINT8(0, countProfileSteps(MAX_PROFILES));
+}
+
+void test_countProfileSteps_all_empty_returns_zero(void) {
+  for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) g_profileSteps[s] = ProfileStep{};
+  TEST_ASSERT_EQUAL_UINT8(0, countProfileSteps(0));
+}
+
+void test_countProfileSteps_counts_until_first_empty(void) {
+  for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) g_profileSteps[s] = ProfileStep{};
+  g_profileSteps[0] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 0, 0);
+  g_profileSteps[1] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 0, 0);
+  g_profileSteps[2] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 0, 0);
+  // index 3 left empty (zero-initialised) - counting must stop here.
+  TEST_ASSERT_EQUAL_UINT8(3, countProfileSteps(0));
+}
+
+void test_countProfileSteps_full_profile(void) {
+  for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
+    g_profileSteps[s] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 0, 0);
+  }
+  TEST_ASSERT_EQUAL_UINT8(MAX_STEPS_PER_PROFILE, countProfileSteps(0));
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -276,6 +359,17 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_TimeAndAttn_completes_when_both_conditions_met);
   RUN_TEST(test_TimeAndAttn_blocks_before_days_elapsed);
+
+  RUN_TEST(test_getProfileTargetTemp_none_when_not_running);
+  RUN_TEST(test_getProfileTargetTemp_none_in_standard_mode);
+  RUN_TEST(test_getProfileTargetTemp_none_past_last_step);
+  RUN_TEST(test_getProfileTargetTemp_ramp_interpolates_and_clamps);
+  RUN_TEST(test_getProfileTargetTemp_nonramp_returns_endTemp_directly);
+
+  RUN_TEST(test_countProfileSteps_out_of_range_slot_returns_zero);
+  RUN_TEST(test_countProfileSteps_all_empty_returns_zero);
+  RUN_TEST(test_countProfileSteps_counts_until_first_empty);
+  RUN_TEST(test_countProfileSteps_full_profile);
 
   return UNITY_END();
 }
