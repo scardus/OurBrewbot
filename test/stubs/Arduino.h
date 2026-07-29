@@ -22,11 +22,13 @@ typedef const char* PGM_P;
 
 // Minimal real String — Temperatures.cpp's addressToString()/scanBuses()
 // construct one from a char*, compare, and read it back, even though those
-// functions aren't under test (see test/test_native_temperatures). A fixed
-// 64-char buffer comfortably covers this codebase's 16-char hex addresses
-// and 24-char probe names.
+// functions aren't under test (see test/test_native_temperatures). The fixed
+// buffer also has to hold the largest string this codebase ever builds in a
+// String: Reports.cpp serializes a whole brew-service JSON payload into one
+// (~300 B) before POSTing it, and a short buffer would silently truncate it
+// via concat() rather than fail.
 class String {
-  char buf_[64];
+  char buf_[512];
 public:
   String() { buf_[0] = '\0'; }
   String(const char* s) {

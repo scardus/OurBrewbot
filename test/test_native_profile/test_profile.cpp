@@ -43,9 +43,14 @@ static const uint8_t F = 0;  // fermenter index used by every test
 
 void setUp(void) {
   g_fermenters[F] = FermenterConfig{};
+  // Clear every step slot, not just slot 0's - the cross-slot tests below write
+  // to indices 15/30/59, and a leftover step there would change what a later
+  // test's profile sees.
+  for (int s = 0; s < MAX_PROFILE_STEPS; s++) g_profileSteps[s] = ProfileStep{};
   s_controlTemp  = TEMP_NONE;
   s_currentSG    = 0.0f;
   s_attenuation  = 0.0f;
+  s_millis       = 0;
 }
 
 void tearDown(void) {}
@@ -59,6 +64,32 @@ static ProfileStep makeStep(uint8_t stepType, float days, float startTemp,
   step.endTemp   = endTemp;
   step.sgTrigger = sgTrigger;
   return step;
+}
+
+// Flat g_profileSteps index for a (profileNo 1-4, step) pair - mirrors
+// Profile.cpp's file-static flatStepIndex().
+static uint8_t flat(uint8_t profileNo, uint8_t step) {
+  return (profileNo - 1) * MAX_STEPS_PER_PROFILE + step;
+}
+
+// Put a fermenter into "profile running" state without going through
+// startProfile() (which would reset step/hour).
+static void runProfile(uint8_t i, uint8_t profileNo, uint8_t step, uint16_t hour) {
+  g_fermenters[i].profileNo      = profileNo;
+  g_fermenters[i].profileRunning = true;
+  g_fermenters[i].profilePaused  = false;
+  g_fermenters[i].currentStep    = step;
+  g_fermenters[i].currentHour    = hour;
+}
+
+// A finished profile must clear ALL run state, so a saved config is
+// indistinguishable from one stopped by hand - see finishProfile().
+static void assertProfileFinished(uint8_t i) {
+  TEST_ASSERT_FALSE(g_fermenters[i].profileRunning);
+  TEST_ASSERT_FALSE(g_fermenters[i].profilePaused);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[i].profileNo);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[i].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(0, g_fermenters[i].currentHour);
 }
 
 // ---- STEP_TEMP_OVER_TIME: days elapsed AND temp at target ----
@@ -323,6 +354,253 @@ void test_countProfileSteps_full_profile(void) {
   TEST_ASSERT_EQUAL_UINT8(MAX_STEPS_PER_PROFILE, countProfileSteps(0));
 }
 
+// ---- isStepComplete: unrecognised step type ----
+
+void test_unknown_stepType_falls_back_to_time_only(void) {
+  // The switch's default: arm. A step saved by a future firmware (or a
+  // corrupted stepType) must still advance on elapsed time rather than
+  // stalling the profile forever.
+  ProfileStep step = makeStep(/*stepType=*/99, 1.0f, 0, 0, 0);
+  g_fermenters[F].currentHour = 23;
+  TEST_ASSERT_FALSE(isStepComplete(F, step));
+  g_fermenters[F].currentHour = 24;
+  TEST_ASSERT_TRUE(isStepComplete(F, step));
+}
+
+// ---- advanceProfileStep: the step engine ----
+// Drives floor/ceiling from the current step's target, advances on completion,
+// and finishes the profile on three separate paths.
+
+void test_advance_sets_band_around_ramp_target(void) {
+  runProfile(F, 1, 0, /*hour=*/24);
+  // 48 h ramp from 10 to 20 - half elapsed, so the target is 15.
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TEMP_OVER_TIME, 2.0f, 10.0f, 20.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 15.0f - PROFILE_TEMP_BAND, g_fermenters[F].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 15.0f + PROFILE_TEMP_BAND, g_fermenters[F].ceilingTemp);
+  // 24 h of a 48 h step - not complete, so the step must not advance.
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[F].currentStep);
+  TEST_ASSERT_TRUE(g_fermenters[F].profileRunning);
+}
+
+void test_advance_sets_band_around_flat_target(void) {
+  runProfile(F, 1, 0, /*hour=*/10);
+  // startTemp == endTemp, so no ramp - the target is endTemp at any hour.
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 2.0f, 20.0f, 20.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f - PROFILE_TEMP_BAND, g_fermenters[F].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f + PROFILE_TEMP_BAND, g_fermenters[F].ceilingTemp);
+}
+
+void test_advance_free_rise_uses_step_bounds_directly(void) {
+  runProfile(F, 1, 0, /*hour=*/0);
+  // Free Rise is the one step type that does NOT get a band around a target:
+  // startTemp/endTemp ARE the floor/ceiling, giving the beer room to self-heat.
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_FREE_RISE, 3.0f, 15.0f, 25.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 15.0f, g_fermenters[F].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 25.0f, g_fermenters[F].ceilingTemp);
+}
+
+void test_advance_moves_to_next_step_and_resets_hour(void) {
+  runProfile(F, 1, 0, /*hour=*/24);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);  // complete
+  g_profileSteps[flat(1, 1)] = makeStep(STEP_TIME_OVER_TEMP, 2.0f, 0, 20.0f, 0);  // next
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(0, g_fermenters[F].currentHour);  // fresh clock for step 2
+  TEST_ASSERT_TRUE(g_fermenters[F].profileRunning);
+}
+
+void test_advance_finishes_when_next_step_is_empty(void) {
+  runProfile(F, 1, 0, /*hour=*/24);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  // flat(1, 1) left zeroed - a 1-step profile.
+  advanceProfileStep(F);
+  assertProfileFinished(F);
+}
+
+void test_advance_finishes_on_empty_current_step(void) {
+  runProfile(F, 1, 0, /*hour=*/0);
+  // Nothing configured at all - e.g. the assigned profile was cleared while running.
+  advanceProfileStep(F);
+  assertProfileFinished(F);
+}
+
+void test_advance_finishes_when_last_step_completes(void) {
+  uint8_t last = MAX_STEPS_PER_PROFILE - 1;
+  runProfile(F, 1, last, /*hour=*/24);
+  g_profileSteps[flat(1, last)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  advanceProfileStep(F);
+  assertProfileFinished(F);
+}
+
+void test_advance_finishes_when_step_index_past_end(void) {
+  // Defensive path: currentStep already out of range (e.g. a config written by
+  // a build with a larger MAX_STEPS_PER_PROFILE) must finish, not index off the end.
+  runProfile(F, 1, MAX_STEPS_PER_PROFILE, /*hour=*/0);
+  advanceProfileStep(F);
+  assertProfileFinished(F);
+}
+
+// ---- profile slot addressing: profileNo 1-4 map to step blocks 0/15/30/45 ----
+
+void test_advance_reads_steps_from_its_own_profile_slot(void) {
+  runProfile(F, 2, 0, /*hour=*/24);
+  // Profile 2's first step is complete; profile 1's slot holds a step that
+  // would NOT complete. Reading the wrong block would stall here instead.
+  g_profileSteps[flat(2, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  g_profileSteps[flat(2, 1)] = makeStep(STEP_TIME_OVER_TEMP, 5.0f, 0, 20.0f, 0);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 9.0f, 0, 30.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F].currentStep);
+  TEST_ASSERT_TRUE(g_fermenters[F].profileRunning);
+}
+
+void test_getProfileTargetTemp_reads_its_own_profile_slot(void) {
+  g_fermenters[F].profileRunning = true;
+  g_fermenters[F].profileNo      = 3;
+  g_fermenters[F].currentStep    = 0;
+  g_profileSteps[flat(3, 0)] = makeStep(STEP_TIME_OVER_TEMP, 0, 0, 17.0f, 0);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 0, 0, 99.0f, 0);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 17.0f, getProfileTargetTemp(F));
+}
+
+void test_getProfileTargetTemp_reaches_last_step_of_last_profile(void) {
+  // Highest addressable step: profile 4, step 14 -> flat index 59.
+  g_fermenters[F].profileRunning = true;
+  g_fermenters[F].profileNo      = MAX_PROFILES;
+  g_fermenters[F].currentStep    = MAX_STEPS_PER_PROFILE - 1;
+  g_profileSteps[flat(MAX_PROFILES, MAX_STEPS_PER_PROFILE - 1)] =
+    makeStep(STEP_TIME_OVER_TEMP, 0, 0, 12.5f, 0);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.5f, getProfileTargetTemp(F));
+}
+
+void test_countProfileSteps_counts_from_its_own_slot_base(void) {
+  // Slot 0 full, slot 1 holds two steps - counting must start at index 15.
+  for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
+    g_profileSteps[flat(1, s)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  }
+  g_profileSteps[flat(2, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  g_profileSteps[flat(2, 1)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 19.0f, 0);
+  TEST_ASSERT_EQUAL_UINT8(MAX_STEPS_PER_PROFILE, countProfileSteps(0));
+  TEST_ASSERT_EQUAL_UINT8(2, countProfileSteps(1));
+}
+
+// ---- nextProfileStep / prevProfileStep: manual step controls ----
+
+void test_nextProfileStep_rejected_in_standard_mode(void) {
+  g_fermenters[F].profileNo      = 0;
+  g_fermenters[F].profileRunning = true;
+  TEST_ASSERT_FALSE(nextProfileStep(F));
+}
+
+void test_nextProfileStep_rejected_when_not_running(void) {
+  g_fermenters[F].profileNo      = 1;
+  g_fermenters[F].profileRunning = false;
+  TEST_ASSERT_FALSE(nextProfileStep(F));
+}
+
+void test_nextProfileStep_advances_and_resets_hour(void) {
+  runProfile(F, 1, 0, /*hour=*/9);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  g_profileSteps[flat(1, 1)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 19.0f, 0);
+  g_profileSteps[flat(1, 2)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 20.0f, 0);
+  TEST_ASSERT_TRUE(nextProfileStep(F));
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(0, g_fermenters[F].currentHour);
+}
+
+void test_nextProfileStep_past_last_step_finishes_profile(void) {
+  // Two configured steps, sitting on the last one - "next" ends the profile
+  // and reports false so the caller knows there was no step to move to.
+  runProfile(F, 1, 1, /*hour=*/5);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  g_profileSteps[flat(1, 1)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 19.0f, 0);
+  TEST_ASSERT_FALSE(nextProfileStep(F));
+  assertProfileFinished(F);
+}
+
+void test_prevProfileStep_rejected_at_first_step(void) {
+  runProfile(F, 1, 0, /*hour=*/5);
+  TEST_ASSERT_FALSE(prevProfileStep(F));
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[F].currentStep);  // no uint8 underflow
+  TEST_ASSERT_EQUAL_UINT16(5, g_fermenters[F].currentHour); // and no hour reset
+}
+
+void test_prevProfileStep_rejected_when_not_running(void) {
+  g_fermenters[F].profileNo      = 1;
+  g_fermenters[F].profileRunning = false;
+  g_fermenters[F].currentStep    = 2;
+  TEST_ASSERT_FALSE(prevProfileStep(F));
+  TEST_ASSERT_EQUAL_UINT8(2, g_fermenters[F].currentStep);
+}
+
+void test_prevProfileStep_retreats_and_resets_hour(void) {
+  runProfile(F, 1, 2, /*hour=*/9);
+  TEST_ASSERT_TRUE(prevProfileStep(F));
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(0, g_fermenters[F].currentHour);
+}
+
+// ---- start / stop / pause / resume ----
+
+void test_startProfile_initialises_run_state(void) {
+  test_setMillis(1234567);
+  g_fermenters[F].currentStep = 7;    // stale state from a previous run
+  g_fermenters[F].currentHour = 40;
+  startProfile(F, 2);
+  TEST_ASSERT_EQUAL_UINT8(2, g_fermenters[F].profileNo);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[F].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(0, g_fermenters[F].currentHour);
+  TEST_ASSERT_TRUE(g_fermenters[F].profileRunning);
+  TEST_ASSERT_FALSE(g_fermenters[F].profilePaused);
+  TEST_ASSERT_EQUAL_UINT32(1234567, g_fermenters[F].startMillis);
+}
+
+void test_pauseProfile_preserves_position(void) {
+  // The whole point of pause vs. stop: step and elapsed hours survive so
+  // resume picks up where it left off instead of restarting the batch.
+  runProfile(F, 2, 3, /*hour=*/30);
+  pauseProfile(F);
+  TEST_ASSERT_FALSE(g_fermenters[F].profileRunning);
+  TEST_ASSERT_TRUE(g_fermenters[F].profilePaused);
+  TEST_ASSERT_EQUAL_UINT8(2, g_fermenters[F].profileNo);
+  TEST_ASSERT_EQUAL_UINT8(3, g_fermenters[F].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(30, g_fermenters[F].currentHour);
+}
+
+void test_resumeProfile_restores_from_pause(void) {
+  runProfile(F, 2, 3, /*hour=*/30);
+  pauseProfile(F);
+  resumeProfile(F);
+  TEST_ASSERT_TRUE(g_fermenters[F].profileRunning);
+  TEST_ASSERT_FALSE(g_fermenters[F].profilePaused);
+  TEST_ASSERT_EQUAL_UINT8(3, g_fermenters[F].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(30, g_fermenters[F].currentHour);
+}
+
+void test_resumeProfile_ignored_in_standard_mode(void) {
+  g_fermenters[F].profileNo     = 0;
+  g_fermenters[F].profilePaused = true;
+  resumeProfile(F);
+  TEST_ASSERT_FALSE(g_fermenters[F].profileRunning);
+  TEST_ASSERT_TRUE(g_fermenters[F].profilePaused);  // untouched - guard returned early
+}
+
+void test_resumeProfile_ignored_when_already_running(void) {
+  runProfile(F, 1, 0, /*hour=*/0);
+  g_fermenters[F].profilePaused = true;  // inconsistent state a resume must not "fix"
+  resumeProfile(F);
+  TEST_ASSERT_TRUE(g_fermenters[F].profilePaused);
+}
+
+void test_stopProfile_clears_everything(void) {
+  runProfile(F, 2, 3, /*hour=*/30);
+  stopProfile(F);
+  assertProfileFinished(F);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -370,6 +648,37 @@ int main(int argc, char** argv) {
   RUN_TEST(test_countProfileSteps_all_empty_returns_zero);
   RUN_TEST(test_countProfileSteps_counts_until_first_empty);
   RUN_TEST(test_countProfileSteps_full_profile);
+
+  RUN_TEST(test_unknown_stepType_falls_back_to_time_only);
+
+  RUN_TEST(test_advance_sets_band_around_ramp_target);
+  RUN_TEST(test_advance_sets_band_around_flat_target);
+  RUN_TEST(test_advance_free_rise_uses_step_bounds_directly);
+  RUN_TEST(test_advance_moves_to_next_step_and_resets_hour);
+  RUN_TEST(test_advance_finishes_when_next_step_is_empty);
+  RUN_TEST(test_advance_finishes_on_empty_current_step);
+  RUN_TEST(test_advance_finishes_when_last_step_completes);
+  RUN_TEST(test_advance_finishes_when_step_index_past_end);
+
+  RUN_TEST(test_advance_reads_steps_from_its_own_profile_slot);
+  RUN_TEST(test_getProfileTargetTemp_reads_its_own_profile_slot);
+  RUN_TEST(test_getProfileTargetTemp_reaches_last_step_of_last_profile);
+  RUN_TEST(test_countProfileSteps_counts_from_its_own_slot_base);
+
+  RUN_TEST(test_nextProfileStep_rejected_in_standard_mode);
+  RUN_TEST(test_nextProfileStep_rejected_when_not_running);
+  RUN_TEST(test_nextProfileStep_advances_and_resets_hour);
+  RUN_TEST(test_nextProfileStep_past_last_step_finishes_profile);
+  RUN_TEST(test_prevProfileStep_rejected_at_first_step);
+  RUN_TEST(test_prevProfileStep_rejected_when_not_running);
+  RUN_TEST(test_prevProfileStep_retreats_and_resets_hour);
+
+  RUN_TEST(test_startProfile_initialises_run_state);
+  RUN_TEST(test_pauseProfile_preserves_position);
+  RUN_TEST(test_resumeProfile_restores_from_pause);
+  RUN_TEST(test_resumeProfile_ignored_in_standard_mode);
+  RUN_TEST(test_resumeProfile_ignored_when_already_running);
+  RUN_TEST(test_stopProfile_clears_everything);
 
   return UNITY_END();
 }
