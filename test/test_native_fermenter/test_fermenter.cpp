@@ -38,6 +38,13 @@ void processProfiles() {}
 static float s_controlTemp;
 float getControlTemp(uint8_t) { return s_controlTemp; }
 
+// Unit conversions, referenced by applyFermenterFieldFromDisplay(). These
+// pass-throughs keep this suite in Celsius (its ranges and expectations are
+// all Celsius); the real Fahrenheit conversion behaviour is covered in
+// test_native_mqtt, which compiles the actual Temperatures.cpp.
+float toCelsius(float displayTemp)     { return displayTemp; }
+float toCelsiusTempDelta(float dDisp)  { return dDisp; }
+
 // ---- smart plug test double: records every switch call ----
 struct PlugCall { uint8_t plugIndex; bool on; };
 static PlugCall s_plugCalls[32];
