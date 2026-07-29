@@ -32,3 +32,7 @@ public:
 // steps can be exercised deterministically.
 uint32_t millis();
 void test_setMillis(uint32_t ms);
+
+// delay() is a real busy-wait on hardware; native tests never need to
+// actually block, so this is a no-op.
+inline void delay(uint32_t) {}
