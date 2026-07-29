@@ -46,6 +46,10 @@ bool reportsPending() { return false; }
 
 void setUp(void) {
   for (int i = 0; i < MAX_TILTS; i++) g_tilts[i] = TiltConfig{};
+  // File-static miss counter (reachable because Tilt.cpp is #included) - a
+  // count left over from a previous test would change when a Tilt gets
+  // deregistered in the next one.
+  for (int i = 0; i < MAX_TILTS; i++) s_missedReads[i] = 0;
   s_millis = 0;
 }
 
@@ -201,6 +205,64 @@ void test_parseDiscLine_ignores_short_or_null_line(void) {
   for (int i = 0; i < MAX_TILTS; i++) TEST_ASSERT_FALSE(g_tilts[i].active);
 }
 
+// ---- processTiltReading ----
+// Where a decoded frame becomes the stored reading: calibration offsets are
+// applied here, so a sign error would silently skew every reading. The
+// parseDiscLine tests above only reach this with zero offsets.
+
+void test_processTiltReading_applies_calibration_offsets(void) {
+  const uint8_t C = 2;  // Black
+  g_tilts[C].tempAdjust = -0.7f;
+  g_tilts[C].sgAdjust   =  0.002f;
+
+  processTiltReading(C, 1.050f, 20.0f, false);
+
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.052f, g_tilts[C].sg);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f,   19.3f,  g_tilts[C].temperature);
+}
+
+void test_processTiltReading_claims_an_unassigned_colour_slot(void) {
+  const uint8_t C = 3;
+  g_tilts[C].colour = PROBE_UNASSIGNED;  // as initDefaultTiltConfig() leaves it
+  processTiltReading(C, 1.040f, 18.0f, false);
+  // Claiming the slot is what makes saveTiltConfig() persist it.
+  TEST_ASSERT_EQUAL_UINT8(C, g_tilts[C].colour);
+}
+
+void test_processTiltReading_preserves_existing_slot_config(void) {
+  const uint8_t C = 3;
+  g_tilts[C].colour    = C;
+  g_tilts[C].fermenter = 1;
+  g_tilts[C].function  = PROBE_FN_BEER;
+
+  processTiltReading(C, 1.040f, 18.0f, false);
+
+  TEST_ASSERT_EQUAL_UINT8(C, g_tilts[C].colour);
+  TEST_ASSERT_EQUAL_UINT8(1, g_tilts[C].fermenter);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_tilts[C].function);
+}
+
+void test_processTiltReading_marks_active_and_stamps_lastSeen(void) {
+  const uint8_t C = 0;
+  test_setMillis(5000);
+  processTiltReading(C, 1.0500f, 20.0f, /*isPro=*/true);
+  TEST_ASSERT_TRUE(g_tilts[C].active);
+  TEST_ASSERT_TRUE(g_tilts[C].isPro);
+  TEST_ASSERT_EQUAL_UINT32(5000, g_tilts[C].lastSeen);
+}
+
+void test_processTiltReading_resets_missed_read_count(void) {
+  const uint8_t C = 1;
+  s_missedReads[C] = 250;  // most of the way to deregistration
+  processTiltReading(C, 1.040f, 18.0f, false);
+  TEST_ASSERT_EQUAL_INT(0, s_missedReads[C]);
+}
+
+void test_processTiltReading_ignores_out_of_range_colour(void) {
+  processTiltReading(MAX_TILTS, 1.040f, 18.0f, false);
+  for (int i = 0; i < MAX_TILTS; i++) TEST_ASSERT_FALSE(g_tilts[i].active);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -228,6 +290,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_parseDiscLine_valid_legacy_concatenated_frame);
   RUN_TEST(test_parseDiscLine_legacy_defers_to_colon_delimited_fragment);
   RUN_TEST(test_parseDiscLine_ignores_short_or_null_line);
+
+  RUN_TEST(test_processTiltReading_applies_calibration_offsets);
+  RUN_TEST(test_processTiltReading_claims_an_unassigned_colour_slot);
+  RUN_TEST(test_processTiltReading_preserves_existing_slot_config);
+  RUN_TEST(test_processTiltReading_marks_active_and_stamps_lastSeen);
+  RUN_TEST(test_processTiltReading_resets_missed_read_count);
+  RUN_TEST(test_processTiltReading_ignores_out_of_range_colour);
 
   return UNITY_END();
 }
