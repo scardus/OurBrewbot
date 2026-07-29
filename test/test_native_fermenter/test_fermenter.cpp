@@ -63,10 +63,16 @@ static int lastPlugState(uint8_t plugIndex) {
 static const uint8_t F = 0;  // fermenter index used by most tests
 
 void setUp(void) {
-  g_fermenters[F] = FermenterConfig{};
+  for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenters[i] = FermenterConfig{};
   g_fermenters[F].power       = true;
   g_fermenters[F].tempControl = true;
   for (int i = 0; i < MAX_SMART_PLUGS; i++) g_smartPlugs[i] = SmartPlugConfig{};
+  // The gravity chain reads these three, so they need clearing between tests
+  // the same way the plug/fermenter arrays do.
+  for (int i = 0; i < MAX_TILTS; i++)     g_tilts[i]     = TiltConfig{};
+  for (int i = 0; i < MAX_ISPINDELS; i++) g_iSpindels[i] = iSpindelConfig{};
+  g_fermenterDebugMode = false;
+  for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenterDebugOverrides[i] = FermenterDebugOverride{};
   s_controlTemp   = TEMP_NONE;
   s_millis        = 0;
   s_plugCallCount = 0;
@@ -398,6 +404,324 @@ void test_validate_accepts_null_errmsg_pointer(void) {
   TEST_ASSERT_FALSE(validateFermenterField(F, "hysteresis", 15.0f, nullptr));
 }
 
+// ---- processFermenters: top-level dispatch ----
+// Two documented behaviours that the per-fermenter functions alone don't show:
+// a powered-off fermenter is not alarm-checked at all, while one with temp
+// control merely paused still is.
+
+void test_dispatch_powered_off_skips_alarm_entirely(void) {
+  g_fermenters[F].power          = false;
+  g_fermenters[F].floorTemp      = 18.0f;
+  g_fermenters[F].ceilingTemp    = 22.0f;
+  g_fermenters[F].alarmTolerance = 3.0f;
+  g_fermenters[F].alarm          = false;
+  g_smartPlugs[0].fermenter = F;
+  g_smartPlugs[0].function  = PLUG_FN_F1_HOT;
+  s_state[F] = STATUS_HEATING;   // latched from before it was switched off
+  s_controlTemp = 26.0f;         // severe over-temp: WOULD alarm if checked
+
+  processFermenters();
+
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);   // not evaluated
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[F]);
+  TEST_ASSERT_EQUAL(0, lastPlugState(0));     // plug forced off
+}
+
+void test_dispatch_temp_control_off_still_alarms(void) {
+  g_fermenters[F].tempControl    = false;
+  g_fermenters[F].floorTemp      = 18.0f;
+  g_fermenters[F].ceilingTemp    = 22.0f;
+  g_fermenters[F].alarmTolerance = 3.0f;
+  g_fermenters[F].alarm          = false;
+  g_smartPlugs[0].fermenter = F;
+  g_smartPlugs[0].function  = PLUG_FN_F1_HOT;
+  s_controlTemp = 26.0f;         // severe over-temp
+
+  processFermenters();
+
+  TEST_ASSERT_TRUE(g_fermenters[F].alarm);    // still watched
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+  TEST_ASSERT_EQUAL(0, lastPlugState(0));     // but no control action
+}
+
+void test_dispatch_controls_normally_when_powered_and_enabled(void) {
+  g_fermenters[F].floorTemp   = 18.0f;
+  g_fermenters[F].ceilingTemp = 22.0f;
+  g_smartPlugs[0].fermenter = F;
+  g_smartPlugs[0].function  = PLUG_FN_F1_HOT;
+  s_controlTemp = 17.0f;
+
+  processFermenters();
+
+  TEST_ASSERT_EQUAL(STATUS_HEATING, g_fermenters[F].status);
+  TEST_ASSERT_EQUAL(1, lastPlugState(0));
+}
+
+// ---- setFermenterPlugs: the PLUG_FN_F1_HOT + index*2 mapping ----
+
+void test_plug_mapping_for_third_and_fourth_fermenters(void) {
+  // Fermenters 2 and 3 use PLUG_FN_F3_* / PLUG_FN_F4_*; the existing mapping
+  // test only covers 0 and 1, where the *2 arithmetic barely moves.
+  g_smartPlugs[4].fermenter = 2;
+  g_smartPlugs[4].function  = PLUG_FN_F3_HOT;
+  g_smartPlugs[5].fermenter = 2;
+  g_smartPlugs[5].function  = PLUG_FN_F3_COLD;
+  g_smartPlugs[6].fermenter = 3;
+  g_smartPlugs[6].function  = PLUG_FN_F4_HOT;
+  g_smartPlugs[7].fermenter = 3;
+  g_smartPlugs[7].function  = PLUG_FN_F4_COLD;
+
+  g_fermenters[2].power       = true;
+  g_fermenters[2].tempControl = true;
+  g_fermenters[2].floorTemp   = 18.0f;
+  g_fermenters[2].ceilingTemp = 22.0f;
+
+  s_controlTemp = 17.0f;  // below floor -> heat fermenter 2
+  processSingleFermenter(2);
+
+  TEST_ASSERT_EQUAL(1, lastPlugState(4));   // F3 hot on
+  TEST_ASSERT_EQUAL(0, lastPlugState(5));   // F3 cold off
+  TEST_ASSERT_EQUAL(-1, lastPlugState(6));  // fermenter 3 untouched
+  TEST_ASSERT_EQUAL(-1, lastPlugState(7));
+}
+
+// ---- switchOffAll ----
+
+void test_switchOffAll_turns_off_every_plug(void) {
+  for (int p = 0; p < MAX_SMART_PLUGS; p++) {
+    g_smartPlugs[p].fermenter = 0;
+    g_smartPlugs[p].function  = PLUG_FN_F1_HOT;
+  }
+  switchOffAll();
+  for (int p = 0; p < MAX_SMART_PLUGS; p++) {
+    TEST_ASSERT_EQUAL(0, lastPlugState(p));
+  }
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[i].status);
+  }
+}
+
+void test_switchOffAll_clears_latched_control_state(void) {
+  // The internal state machine must be reset too, not just the plugs -
+  // otherwise the next pass resumes HEATING from where it left off.
+  g_fermenters[F].floorTemp   = 18.0f;
+  g_fermenters[F].ceilingTemp = 22.0f;
+  g_fermenters[F].hysteresis  = 2.0f;   // HEATING would only stop at >= 20.0
+  s_state[F] = STATUS_HEATING;
+
+  switchOffAll();
+
+  s_controlTemp = 19.0f;  // in band, but below floor + hysteresis
+  processSingleFermenter(F);
+  // Idle because the state was cleared; a surviving HEATING state would have
+  // needed 20.0 to drop out and would still read HEATING here.
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+}
+
+// ---- setFermenterPower ----
+
+void test_setFermenterPower_off_forces_plugs_off_and_idle(void) {
+  g_smartPlugs[0].fermenter = F;
+  g_smartPlugs[0].function  = PLUG_FN_F1_HOT;
+  g_smartPlugs[1].fermenter = F;
+  g_smartPlugs[1].function  = PLUG_FN_F1_COLD;
+  g_fermenters[F].status = STATUS_HEATING;
+
+  setFermenterPower(F, false);
+
+  TEST_ASSERT_FALSE(g_fermenters[F].power);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+  TEST_ASSERT_EQUAL(0, lastPlugState(0));
+  TEST_ASSERT_EQUAL(0, lastPlugState(1));
+}
+
+void test_setFermenterPower_ignores_out_of_range_index(void) {
+  // Guard against an out-of-bounds write from a bad MQTT/WebAPI index.
+  setFermenterPower(MAX_FERMENTERS, false);
+  TEST_ASSERT_TRUE(g_fermenters[F].power);   // fermenter 0 untouched
+  TEST_ASSERT_EQUAL(0, s_plugCallCount);     // and no plug was switched
+}
+
+// ---- estimateGravity: the no-hydrometer fallback model ----
+// Flat for 24 h (lag phase), 90% of the OG->TG drop over the next 72 h, the
+// last 10% over the 72 h after that, then flat at TG.
+
+void test_estimateGravity_flat_during_lag_phase(void) {
+  g_fermenters[F].og = 1.050f;
+  g_fermenters[F].tg = 1.010f;
+  g_fermenters[F].currentHour = 0;
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, estimateGravity(F));
+  g_fermenters[F].currentHour = 24;
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, estimateGravity(F));
+}
+
+void test_estimateGravity_mid_primary_phase(void) {
+  g_fermenters[F].og = 1.050f;
+  g_fermenters[F].tg = 1.010f;
+  g_fermenters[F].currentHour = 60;  // halfway through the 24-96 h window
+  // 0.5 * 0.9 * 0.040 = 0.018 dropped
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.032f, estimateGravity(F));
+}
+
+void test_estimateGravity_at_end_of_primary_phase(void) {
+  g_fermenters[F].og = 1.050f;
+  g_fermenters[F].tg = 1.010f;
+  g_fermenters[F].currentHour = 96;  // 90% of the range gone
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.014f, estimateGravity(F));
+}
+
+void test_estimateGravity_reaches_tg_and_clamps(void) {
+  g_fermenters[F].og = 1.050f;
+  g_fermenters[F].tg = 1.010f;
+  g_fermenters[F].currentHour = 168;  // 96 + 72: final 10% complete
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, estimateGravity(F));
+  g_fermenters[F].currentHour = 1000;  // must not keep falling past TG
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, estimateGravity(F));
+}
+
+void test_estimateGravity_returns_og_when_tg_not_below_og(void) {
+  // Misconfigured OG/TG must not produce a rising or inverted estimate.
+  g_fermenters[F].og = 1.010f;
+  g_fermenters[F].tg = 1.050f;
+  g_fermenters[F].currentHour = 100;
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, estimateGravity(F));
+}
+
+// ---- getCurrentSG / getGravitySource: Debug > Tilt > iSpindel > Estimate ----
+// Value and label come from one shared resolver, so every case asserts both -
+// they must not be able to drift apart.
+
+void test_gravity_falls_back_to_estimate(void) {
+  g_fermenters[F].og = 1.050f;
+  g_fermenters[F].tg = 1.010f;
+  g_fermenters[F].currentHour = 60;
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.032f, getCurrentSG(F));
+  TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
+}
+
+void test_gravity_uses_ispindel_when_assigned(void) {
+  g_iSpindels[0].collectData = true;
+  g_iSpindels[0].fermenter   = F;
+  g_iSpindels[0].sg          = 1.040f;
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.040f, getCurrentSG(F));
+  TEST_ASSERT_EQUAL_STRING("iSpindel", getGravitySource(F));
+}
+
+void test_gravity_prefers_ispindel_corrected_reading(void) {
+  // corrGravity is the temperature-corrected value the device reports; it wins
+  // over the raw sg whenever it's populated.
+  g_iSpindels[0].collectData  = true;
+  g_iSpindels[0].fermenter    = F;
+  g_iSpindels[0].sg           = 1.040f;
+  g_iSpindels[0].corrGravity  = 1.038f;
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.038f, getCurrentSG(F));
+}
+
+void test_gravity_tilt_beats_ispindel(void) {
+  g_iSpindels[0].collectData = true;
+  g_iSpindels[0].fermenter   = F;
+  g_iSpindels[0].sg          = 1.040f;
+
+  // A Tilt supplies gravity purely on being active and assigned - unlike the
+  // beer-temp chain, its `function` doesn't gate the gravity reading.
+  g_tilts[0].active    = true;
+  g_tilts[0].fermenter = F;
+  g_tilts[0].function  = PROBE_UNASSIGNED;
+  g_tilts[0].sg        = 1.036f;
+
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.036f, getCurrentSG(F));
+  TEST_ASSERT_EQUAL_STRING("Tilt", getGravitySource(F));
+}
+
+void test_gravity_debug_override_beats_everything(void) {
+  g_tilts[0].active    = true;
+  g_tilts[0].fermenter = F;
+  g_tilts[0].sg        = 1.036f;
+
+  g_fermenterDebugMode = true;
+  g_fermenterDebugOverrides[F].enabled = true;
+  g_fermenterDebugOverrides[F].sg      = 1.020f;
+
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.020f, getCurrentSG(F));
+  TEST_ASSERT_EQUAL_STRING("Debug", getGravitySource(F));
+}
+
+void test_gravity_ignores_source_assigned_to_another_fermenter(void) {
+  g_fermenters[F].og = 1.050f;
+  g_fermenters[F].tg = 1.010f;
+  g_fermenters[F].currentHour = 0;
+
+  g_tilts[0].active    = true;
+  g_tilts[0].fermenter = 1;          // someone else's Tilt
+  g_tilts[0].sg        = 1.036f;
+  g_iSpindels[0].collectData = true;
+  g_iSpindels[0].fermenter   = 1;
+  g_iSpindels[0].sg          = 1.040f;
+
+  TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, getCurrentSG(F));
+}
+
+// ---- getAttenuation / getEstABV ----
+
+void test_getAttenuation_normal_case(void) {
+  g_fermenters[F].og = 1.050f;
+  g_tilts[0].active    = true;
+  g_tilts[0].fermenter = F;
+  g_tilts[0].sg        = 1.020f;
+  // (1.050 - 1.020) / (1.050 - 1.000) = 60%
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 60.0f, getAttenuation(F));
+}
+
+void test_getAttenuation_zero_when_og_not_above_water(void) {
+  g_fermenters[F].og = 1.000f;
+  g_tilts[0].active    = true;
+  g_tilts[0].fermenter = F;
+  g_tilts[0].sg        = 0.995f;
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, getAttenuation(F));
+}
+
+void test_getAttenuation_zero_when_no_gravity_reading(void) {
+  // An active Tilt reporting 0.0 means "no reading yet", not "fully attenuated".
+  g_fermenters[F].og = 1.050f;
+  g_tilts[0].active    = true;
+  g_tilts[0].fermenter = F;
+  g_tilts[0].sg        = 0.0f;
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, getAttenuation(F));
+}
+
+void test_getAttenuation_zero_when_sg_at_or_above_og(void) {
+  // Start of fermentation (or a mis-set OG) must read 0%, never negative.
+  g_fermenters[F].og = 1.050f;
+  g_tilts[0].active    = true;
+  g_tilts[0].fermenter = F;
+  g_tilts[0].sg        = 1.055f;
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, getAttenuation(F));
+}
+
+void test_getEstABV_normal_case(void) {
+  g_fermenters[F].og = 1.050f;
+  g_tilts[0].active    = true;
+  g_tilts[0].fermenter = F;
+  g_tilts[0].sg        = 1.010f;
+  // (1.050 - 1.010) * 131.25 = 5.25% ABV
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 5.25f, getEstABV(F));
+}
+
+void test_getEstABV_zero_on_the_same_guards(void) {
+  g_fermenters[F].og = 1.050f;
+  g_tilts[0].active    = true;
+  g_tilts[0].fermenter = F;
+  g_tilts[0].sg        = 0.0f;          // no reading
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, getEstABV(F));
+  g_tilts[0].sg        = 1.060f;        // above OG
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, getEstABV(F));
+  g_fermenters[F].og   = 1.000f;        // OG not above water
+  g_tilts[0].sg        = 0.995f;
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, getEstABV(F));
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -431,6 +755,38 @@ int main(int argc, char** argv) {
   RUN_TEST(test_validate_gravity_fields_reject_out_of_range);
   RUN_TEST(test_validate_unrecognised_key_passes_through);
   RUN_TEST(test_validate_accepts_null_errmsg_pointer);
+
+  RUN_TEST(test_dispatch_powered_off_skips_alarm_entirely);
+  RUN_TEST(test_dispatch_temp_control_off_still_alarms);
+  RUN_TEST(test_dispatch_controls_normally_when_powered_and_enabled);
+
+  RUN_TEST(test_plug_mapping_for_third_and_fourth_fermenters);
+
+  RUN_TEST(test_switchOffAll_turns_off_every_plug);
+  RUN_TEST(test_switchOffAll_clears_latched_control_state);
+
+  RUN_TEST(test_setFermenterPower_off_forces_plugs_off_and_idle);
+  RUN_TEST(test_setFermenterPower_ignores_out_of_range_index);
+
+  RUN_TEST(test_estimateGravity_flat_during_lag_phase);
+  RUN_TEST(test_estimateGravity_mid_primary_phase);
+  RUN_TEST(test_estimateGravity_at_end_of_primary_phase);
+  RUN_TEST(test_estimateGravity_reaches_tg_and_clamps);
+  RUN_TEST(test_estimateGravity_returns_og_when_tg_not_below_og);
+
+  RUN_TEST(test_gravity_falls_back_to_estimate);
+  RUN_TEST(test_gravity_uses_ispindel_when_assigned);
+  RUN_TEST(test_gravity_prefers_ispindel_corrected_reading);
+  RUN_TEST(test_gravity_tilt_beats_ispindel);
+  RUN_TEST(test_gravity_debug_override_beats_everything);
+  RUN_TEST(test_gravity_ignores_source_assigned_to_another_fermenter);
+
+  RUN_TEST(test_getAttenuation_normal_case);
+  RUN_TEST(test_getAttenuation_zero_when_og_not_above_water);
+  RUN_TEST(test_getAttenuation_zero_when_no_gravity_reading);
+  RUN_TEST(test_getAttenuation_zero_when_sg_at_or_above_og);
+  RUN_TEST(test_getEstABV_normal_case);
+  RUN_TEST(test_getEstABV_zero_on_the_same_guards);
 
   return UNITY_END();
 }
