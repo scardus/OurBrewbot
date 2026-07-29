@@ -384,3 +384,40 @@ bool validateFermenterField(uint8_t idx, const char* key, float value, const cha
   return true;
 }
 
+// ============================================================
+// REMOTE FIELD WRITE — display unit in, validated Celsius stored
+//
+// Commands from MQTT arrive in the configured display unit, because that's
+// what HA discovery advertises: in Fahrenheit mode a 72 degF setpoint arrives
+// as "72", not "22.2". Converting BEFORE validation matters twice over — the
+// ranges in validateFermenterField() are Celsius, and storing an unconverted
+// value would set the fermenter 50 degrees high.
+// ============================================================
+
+bool applyFermenterFieldFromDisplay(uint8_t idx, const char* key, float displayValue,
+                                    const char** errMsg) {
+  if (errMsg) *errMsg = nullptr;
+  if (idx >= MAX_FERMENTERS) return false;
+
+  float v = displayValue;
+  if (strcmp(key, "ceiling_temperature") == 0 || strcmp(key, "floor_temperature") == 0) {
+    v = toCelsius(v);                 // absolute temperature: scale and offset
+  } else if (strcmp(key, "hysteresis") == 0) {
+    v = toCelsiusTempDelta(v);        // a span: scale only, no +32 offset
+  } else if (strcmp(key, "compressor_delay") != 0 &&
+             strcmp(key, "og") != 0 && strcmp(key, "tg") != 0) {
+    return false;                     // not a settable numeric field
+  }
+  // Minutes and gravities are unit-independent — deliberately not converted.
+
+  if (!validateFermenterField(idx, key, v, errMsg)) return false;
+
+  if      (strcmp(key, "ceiling_temperature") == 0) g_fermenters[idx].ceilingTemp     = v;
+  else if (strcmp(key, "floor_temperature")   == 0) g_fermenters[idx].floorTemp       = v;
+  else if (strcmp(key, "hysteresis")          == 0) g_fermenters[idx].hysteresis      = v;
+  else if (strcmp(key, "compressor_delay")    == 0) g_fermenters[idx].compressorDelay = (uint16_t)v;
+  else if (strcmp(key, "og")                  == 0) g_fermenters[idx].og              = v;
+  else if (strcmp(key, "tg")                  == 0) g_fermenters[idx].tg              = v;
+  return true;
+}
+

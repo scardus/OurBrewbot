@@ -759,26 +759,13 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
              strcmp(key, "compressor_delay")    == 0 ||
              strcmp(key, "og")                  == 0 ||
              strcmp(key, "tg")                  == 0) {
-    const char* errMsg;
-    float v = atof(pl);
-    // Commands arrive in the configured display unit (HA discovery advertises it);
-    // convert to internal Celsius before validation (Celsius ranges).
-    if (strcmp(key, "ceiling_temperature") == 0 ||
-        strcmp(key, "floor_temperature")   == 0) {
-      v = toCelsius(v);
-    } else if (strcmp(key, "hysteresis") == 0) {
-      v = toCelsiusTempDelta(v);
-    }
-    if (!validateFermenterField(idx, key, v, &errMsg)) {
-      logMsg("[MQTT] cmd rejected (%s): %s", key, errMsg);
+    // Payload is in the configured display unit; applyFermenterFieldFromDisplay()
+    // owns the conversion to Celsius, the range check and the store.
+    const char* errMsg = nullptr;
+    if (!applyFermenterFieldFromDisplay(idx, key, atof(pl), &errMsg)) {
+      logMsg("[MQTT] cmd rejected (%s): %s", key, errMsg ? errMsg : "unsupported field");
       return;
     }
-    if      (strcmp(key, "ceiling_temperature") == 0) g_fermenters[idx].ceilingTemp     = v;
-    else if (strcmp(key, "floor_temperature")   == 0) g_fermenters[idx].floorTemp       = v;
-    else if (strcmp(key, "hysteresis")          == 0) g_fermenters[idx].hysteresis      = v;
-    else if (strcmp(key, "compressor_delay")    == 0) g_fermenters[idx].compressorDelay = (uint16_t)v;
-    else if (strcmp(key, "og")                  == 0) g_fermenters[idx].og              = v;
-    else if (strcmp(key, "tg")                  == 0) g_fermenters[idx].tg              = v;
   } else if (strcmp(key, "name") == 0) {
     strlcpy(g_fermenters[idx].fermenterName, pl, sizeof(g_fermenters[0].fermenterName));
   } else if (strcmp(key, "beer_name") == 0) {

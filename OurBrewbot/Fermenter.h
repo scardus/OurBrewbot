@@ -50,6 +50,13 @@ const char* getFermenterStatusStr(uint8_t status);
 // Returns true if valid; sets *errMsg to a static error string if not.
 bool validateFermenterField(uint8_t idx, const char* key, float value, const char** errMsg);
 
+// Convert a remote-settable numeric field from the current display unit to
+// internal Celsius, validate it, and store it. Returns false (and changes
+// nothing) if the key isn't settable or the value fails validation, with
+// *errMsg set to the reason on a validation failure.
+bool applyFermenterFieldFromDisplay(uint8_t idx, const char* key, float displayValue,
+                                    const char** errMsg);
+
 // Set heating/cooling plugs for a fermenter
 // Implemented here, called internally and by switchOffAll()
 void setFermenterPlugs(uint8_t fermenterIndex, bool heat, bool cool);
