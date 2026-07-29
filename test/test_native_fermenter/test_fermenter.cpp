@@ -301,6 +301,103 @@ void test_alarm_dwell_resets_on_return_to_band(void) {
   TEST_ASSERT_TRUE(g_fermenters[F].alarm);
 }
 
+// ---- validateFermenterField: bounds/safety checks on remote-settable fields ----
+// Guards every write from MQTT/WebAPI to a fermenter's ceiling/floor/hysteresis/
+// compressor-delay/OG/TG - a bug here would silently let an unsafe value through.
+
+void test_validate_ceiling_temp_in_range_accepted(void) {
+  g_fermenters[F].floorTemp  = 18.0f;
+  g_fermenters[F].hysteresis = 0.5f;
+  const char* err = nullptr;
+  TEST_ASSERT_TRUE(validateFermenterField(F, "ceiling_temperature", 22.0f, &err));
+  TEST_ASSERT_NULL(err);
+}
+
+void test_validate_ceiling_temp_rejects_below_absolute_range(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(validateFermenterField(F, "ceiling_temperature", -25.0f, &err));
+  TEST_ASSERT_EQUAL_STRING("temperature out of range (-20 to 50)", err);
+}
+
+void test_validate_ceiling_temp_rejects_above_absolute_range(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(validateFermenterField(F, "ceiling_temperature", 55.0f, &err));
+  TEST_ASSERT_EQUAL_STRING("temperature out of range (-20 to 50)", err);
+}
+
+void test_validate_floor_temp_rejects_when_at_or_above_ceiling(void) {
+  g_fermenters[F].ceilingTemp = 22.0f;
+  g_fermenters[F].hysteresis  = 0.5f;
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(validateFermenterField(F, "floor_temperature", 22.0f, &err));
+  TEST_ASSERT_EQUAL_STRING("floor must be below ceiling", err);
+}
+
+void test_validate_temp_rejects_gap_below_2x_hysteresis(void) {
+  g_fermenters[F].ceilingTemp = 22.0f;
+  g_fermenters[F].hysteresis  = 2.0f;  // needs a >= 4.0 gap
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(validateFermenterField(F, "floor_temperature", 20.0f, &err));  // gap 2.0
+  TEST_ASSERT_EQUAL_STRING("safe zone must be at least 2x hysteresis", err);
+}
+
+void test_validate_hysteresis_in_range_accepted(void) {
+  g_fermenters[F].floorTemp   = 18.0f;
+  g_fermenters[F].ceilingTemp = 22.0f;
+  TEST_ASSERT_TRUE(validateFermenterField(F, "hysteresis", 1.0f, nullptr));
+}
+
+void test_validate_hysteresis_rejects_out_of_range(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(validateFermenterField(F, "hysteresis", 15.0f, &err));
+  TEST_ASSERT_EQUAL_STRING("hysteresis out of range (0 to 10)", err);
+}
+
+void test_validate_hysteresis_rejects_when_it_violates_existing_gap(void) {
+  g_fermenters[F].floorTemp   = 18.0f;
+  g_fermenters[F].ceilingTemp = 22.0f;  // existing 4.0 gap
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(validateFermenterField(F, "hysteresis", 3.0f, &err));  // needs gap >= 6.0
+  TEST_ASSERT_EQUAL_STRING("safe zone must be at least 2x hysteresis", err);
+}
+
+void test_validate_compressor_delay_in_range_accepted(void) {
+  TEST_ASSERT_TRUE(validateFermenterField(F, "compressor_delay", 30.0f, nullptr));
+}
+
+void test_validate_compressor_delay_rejects_out_of_range(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(validateFermenterField(F, "compressor_delay", 1500.0f, &err));
+  TEST_ASSERT_EQUAL_STRING("compressor delay out of range (0 to 1440 min)", err);
+}
+
+void test_validate_gravity_fields_in_range_accepted(void) {
+  TEST_ASSERT_TRUE(validateFermenterField(F, "og", 1.050f, nullptr));
+  TEST_ASSERT_TRUE(validateFermenterField(F, "tg", 1.010f, nullptr));
+}
+
+void test_validate_gravity_fields_reject_out_of_range(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(validateFermenterField(F, "og", 0.980f, &err));
+  TEST_ASSERT_EQUAL_STRING("gravity out of range (0.990 to 1.200)", err);
+
+  err = nullptr;
+  TEST_ASSERT_FALSE(validateFermenterField(F, "tg", 1.250f, &err));
+  TEST_ASSERT_EQUAL_STRING("gravity out of range (0.990 to 1.200)", err);
+}
+
+void test_validate_unrecognised_key_passes_through(void) {
+  // Fields with no explicit validation branch (e.g. "name") are accepted as-is -
+  // validateFermenterField only guards the numeric safety-critical fields.
+  TEST_ASSERT_TRUE(validateFermenterField(F, "name", 0.0f, nullptr));
+}
+
+void test_validate_accepts_null_errmsg_pointer(void) {
+  // Every rejection path guards its *errMsg write with `if (errMsg)` - callers
+  // that don't care about the reason must be able to pass nullptr safely.
+  TEST_ASSERT_FALSE(validateFermenterField(F, "hysteresis", 15.0f, nullptr));
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -319,6 +416,21 @@ int main(int argc, char** argv) {
   RUN_TEST(test_alarm_does_not_fire_immediately_on_mild_deviation);
   RUN_TEST(test_alarm_fires_after_dwell_elapses);
   RUN_TEST(test_alarm_dwell_resets_on_return_to_band);
+
+  RUN_TEST(test_validate_ceiling_temp_in_range_accepted);
+  RUN_TEST(test_validate_ceiling_temp_rejects_below_absolute_range);
+  RUN_TEST(test_validate_ceiling_temp_rejects_above_absolute_range);
+  RUN_TEST(test_validate_floor_temp_rejects_when_at_or_above_ceiling);
+  RUN_TEST(test_validate_temp_rejects_gap_below_2x_hysteresis);
+  RUN_TEST(test_validate_hysteresis_in_range_accepted);
+  RUN_TEST(test_validate_hysteresis_rejects_out_of_range);
+  RUN_TEST(test_validate_hysteresis_rejects_when_it_violates_existing_gap);
+  RUN_TEST(test_validate_compressor_delay_in_range_accepted);
+  RUN_TEST(test_validate_compressor_delay_rejects_out_of_range);
+  RUN_TEST(test_validate_gravity_fields_in_range_accepted);
+  RUN_TEST(test_validate_gravity_fields_reject_out_of_range);
+  RUN_TEST(test_validate_unrecognised_key_passes_through);
+  RUN_TEST(test_validate_accepts_null_errmsg_pointer);
 
   return UNITY_END();
 }

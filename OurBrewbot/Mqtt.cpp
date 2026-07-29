@@ -16,6 +16,7 @@
  */
 
 #include "Mqtt.h"
+#include "MqttParse.h"
 #include "Fermenter.h"
 #include "Temperatures.h"
 #include "Profile.h"
@@ -716,25 +717,9 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
   if (!g_mqttConfig.allowControl) return;
 
   // Parse scope and key from topic
-  size_t baseLen = strlen(g_mqttConfig.baseTopic);
-  if (strncmp(topic, g_mqttConfig.baseTopic, baseLen) != 0 || topic[baseLen] != '/') return;
-  const char* rest   = topic + baseLen + 1;
-  const char* slash1 = strchr(rest, '/');
-  if (!slash1) return;
   char scope[16];
-  size_t scopeLen = slash1 - rest;
-  if (scopeLen == 0 || scopeLen >= sizeof(scope)) return;
-  memcpy(scope, rest, scopeLen);
-  scope[scopeLen] = '\0';
-
-  const char* keyStart = slash1 + 1;
-  const char* slash2   = strchr(keyStart, '/');
-  if (!slash2 || strcmp(slash2, "/set") != 0) return;
   char key[32];
-  size_t keyLen = slash2 - keyStart;
-  if (keyLen == 0 || keyLen >= sizeof(key)) return;
-  memcpy(key, keyStart, keyLen);
-  key[keyLen] = '\0';
+  if (!parseMqttCommandTopic(topic, g_mqttConfig.baseTopic, scope, sizeof(scope), key, sizeof(key))) return;
 
   // Copy payload (not null-terminated in PubSubClient callback)
   char pl[48];
@@ -756,9 +741,8 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
   }
 
   // Fermenter-scope commands: scope = "FermenterN"
-  if (strncmp(scope, "Fermenter", 9) != 0) return;
-  int idx = atoi(scope + 9);
-  if (idx < 0 || idx >= MAX_FERMENTERS) return;
+  int idx = fermenterIndexFromScope(scope);
+  if (idx < 0) return;
 
   bool on = (strcmp(pl, "ON") == 0);
 
