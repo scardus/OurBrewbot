@@ -11,14 +11,26 @@
 #include <strings.h>
 #include <algorithm>
 
+// The real core's Arduino.h pulls in Esp.h for the global ESP object; mirror
+// that so production files referencing ESP need no extra include.
+#include <Esp.h>
+
 using std::fabs;
 using std::min;
 using std::max;
 
-// PROGMEM is a no-op on the host: there's no separate flash address space.
+// PROGMEM is a no-op on the host: there's no separate flash address space, so
+// a "flash" string is just a const char* and the _P variants are the plain
+// functions. FPSTR() therefore yields a const char*, which is what
+// Config.cpp's doc[FPSTR(f.key)] lookups need - no ArduinoJson PROGMEM
+// support required.
 #define PSTR(s) (s)
 typedef const char* PGM_P;
 #define PROGMEM
+#define FPSTR(p)   (reinterpret_cast<const char*>(p))
+#define memcpy_P   memcpy
+#define strlen_P   strlen
+#define snprintf_P snprintf
 
 // Minimal real String — Temperatures.cpp's addressToString()/scanBuses()
 // construct one from a char*, compare, and read it back, even though those
