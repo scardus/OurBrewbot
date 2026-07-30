@@ -68,6 +68,12 @@ public:
   bool startsWith(const char* prefix) const { return strncasecmp(buf_, prefix, strlen(prefix)) == 0; }
 };
 
+// Pin helpers. Pins.h assigns the pressure sensor to A0, and SmartPlugs.cpp
+// wraps its receive pin in digitalPinToInterrupt() - on the host neither
+// means anything, but both have to resolve for those files to compile.
+#define A0 17
+#define digitalPinToInterrupt(p) (p)
+
 // millis() — settable by tests via test_setMillis() so time-based profile
 // steps can be exercised deterministically.
 uint32_t millis();
