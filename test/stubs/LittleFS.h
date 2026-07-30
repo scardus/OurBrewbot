@@ -16,6 +16,10 @@
 #include <cstdint>
 #include <cstring>
 #include <cstddef>
+// For String: WebAPI.cpp opens paths built from request arguments, so the
+// String overloads below need the type. Arduino.h does not include this header
+// back, so there is no cycle.
+#include <Arduino.h>
 
 // 4 KB per file covers the largest config this firmware writes (jsonFermenter
 // is 33 fields x 4 slots, jsonProfileSteps is 6 fields x 60 slots - both come
@@ -83,6 +87,34 @@ public:
 
   size_t size() const { return e_ ? e_->len : 0; }
   void   close()      { e_ = nullptr; pos_ = 0; }
+
+  // print() is how WebAPI.cpp's handleFsFileSave() writes a body, as opposed to
+  // the serializeJson() path Config.cpp uses.
+  size_t print(const char* s) {
+    return s ? write((const uint8_t*)s, strlen(s)) : 0;
+  }
+  size_t print(const String& s) { return print(s.c_str()); }
+};
+
+// Directory iteration, for WebAPI.cpp's handleFsFiles(). The real Dir walks
+// LittleFS entries; this walks the same in-memory table, skipping free slots.
+// next() must be called before the first fileName(), matching the real API.
+class Dir {
+  int idx_ = -1;
+public:
+  bool next() {
+    for (int i = idx_ + 1; i < FS_MAX_FILES; i++) {
+      if (g_fsEntries[i].used) { idx_ = i; return true; }
+    }
+    idx_ = FS_MAX_FILES;
+    return false;
+  }
+  String fileName() {
+    return (idx_ >= 0 && idx_ < FS_MAX_FILES) ? String(g_fsEntries[idx_].path) : String("");
+  }
+  size_t fileSize() {
+    return (idx_ >= 0 && idx_ < FS_MAX_FILES) ? g_fsEntries[idx_].len : 0;
+  }
 };
 
 class LittleFSStub {
@@ -119,6 +151,12 @@ public:
     return true;
   }
 
+  // WebAPI.cpp passes a String path (built from a request argument), so both
+  // overloads are needed; Config.cpp uses the char* one throughout.
+  bool exists(const String& path) { return exists(path.c_str()); }
+
+  Dir openDir(const char* /*prefix*/) { return Dir(); }
+
   File open(const char* path, const char* mode) {
     if (mode && mode[0] == 'r') {
       FsEntry* e = find(path);
@@ -132,6 +170,7 @@ public:
     if (mode && mode[0] == 'w') e->len = 0;   // truncate
     return File(e);
   }
+  File open(const String& path, const char* mode) { return open(path.c_str(), mode); }
 };
 
 static LittleFSStub LittleFS;

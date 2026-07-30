@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
+#include <cstdlib>
 #include <strings.h>
 #include <algorithm>
 
@@ -26,8 +27,23 @@ typedef const char* PGM_P;
 #define FPSTR(p)   (reinterpret_cast<const char*>(p))
 #define memcpy_P    memcpy
 #define strlen_P    strlen
+#define strncpy_P   strncpy
 #define snprintf_P  snprintf
 #define vsnprintf_P vsnprintf
+
+// F() wraps a literal in a distinct type so overload resolution can pick the
+// flash-string variant. WebAPI.cpp uses it throughout - for response messages
+// and for whole HTML pages - and reads it back via (PGM_P) casts, so on the
+// host the type just has to be distinct from const char* and freely
+// convertible to it.
+class __FlashStringHelper;
+#define F(s) (reinterpret_cast<const __FlashStringHelper*>(PSTR(s)))
+
+// Number bases for the String(value, base) constructor.
+#define DEC 10
+#define HEX 16
+#define OCT 8
+#define BIN 2
 
 // Minimal real String — Temperatures.cpp's addressToString()/scanBuses()
 // construct one from a char*, compare, and read it back, even though those
@@ -63,7 +79,67 @@ public:
   }
   bool equalsIgnoreCase(const char* other) const { return strcasecmp(buf_, other) == 0; }
   bool startsWith(const char* prefix) const { return strncasecmp(buf_, prefix, strlen(prefix)) == 0; }
+
+  // ---- added for WebAPI.cpp ----
+
+  // A flash string is a plain const char* on the host. Needed because
+  // WebAPI.cpp passes F("...") to helpers taking a const String&.
+  String(const __FlashStringHelper* s) {
+    const char* p = reinterpret_cast<const char*>(s);
+    strncpy(buf_, p ? p : "", sizeof(buf_) - 1);
+    buf_[sizeof(buf_) - 1] = '\0';
+  }
+
+  // Numeric conversion, e.g. String(ESP.getChipId(), HEX) for the board id.
+  String(unsigned long value, int base) {
+    if (base == 16)      snprintf(buf_, sizeof(buf_), "%lx", value);
+    else if (base == 8)  snprintf(buf_, sizeof(buf_), "%lo", value);
+    else                 snprintf(buf_, sizeof(buf_), "%lu", value);
+  }
+
+  // Offset of the first occurrence of `needle`, or -1. handleFsFile() uses this
+  // for its ".." path-traversal guard, so the -1-on-absent contract matters.
+  int indexOf(const char* needle) const {
+    const char* p = strstr(buf_, needle);
+    return p ? (int)(p - buf_) : -1;
+  }
+
+  long toInt() const { return strtol(buf_, nullptr, 10); }
+
+  void toLowerCase() {
+    for (char* p = buf_; *p; p++) {
+      if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
+    }
+  }
+
+  String& operator+=(const char* s)   { concat(s); return *this; }
+  String& operator+=(const String& s) { concat(s.c_str()); return *this; }
+
+  // Numeric append, as the real String provides. WebAPI.cpp builds its
+  // brew-service test response by appending an HTTP status code this way.
+  String& operator+=(int v)           { return appendNum("%d",  v); }
+  String& operator+=(unsigned int v)  { return appendNum("%u",  v); }
+  String& operator+=(long v)          { return appendNum("%ld", v); }
+  String& operator+=(unsigned long v) { return appendNum("%lu", v); }
+
+  bool operator==(const char* other)   const { return strcmp(buf_, other ? other : "") == 0; }
+  bool operator==(const String& other) const { return strcmp(buf_, other.buf_) == 0; }
+  bool operator!=(const char* other)   const { return !(*this == other); }
+
+private:
+  template <typename T> String& appendNum(const char* fmt, T v) {
+    char num[24];
+    snprintf(num, sizeof(num), fmt, v);
+    concat(num);
+    return *this;
+  }
 };
+
+// Concatenation. Both orders are needed: WebAPI.cpp builds an mDNS name as
+// "ourbrewbot-" + String(chipId, HEX) and normalises a path as "/" + name.
+inline String operator+(const String& a, const String& b) { String r(a); r += b; return r; }
+inline String operator+(const String& a, const char* b)   { String r(a); r += b; return r; }
+inline String operator+(const char* a, const String& b)   { String r(a); r += b; return r; }
 
 // Serial. Log.cpp writes every line here before deciding whether to also send
 // it to syslog or MQTT, so the captured text is how a test sees what was

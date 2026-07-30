@@ -30,6 +30,13 @@ public:
   void     wdtFeed()                 {}
   void     restart()                 {}
 
+  // Board identity, reported by WebAPI.cpp's /board_info.json and /status.
+  // Fixed values so a payload-shape test has something stable to assert on.
+  uint32_t    getChipId()          { return 0x2924FA; }
+  uint32_t    getFlashChipSize()   { return 4194304; }
+  uint32_t    getFreeSketchSpace() { return 1044464; }
+  const char* getSdkVersion()      { return "2.2.2-dev(38a443e)"; }
+
   // Both reject an out-of-bounds access rather than clamping, which is what
   // the SDK does - a test relying on a truncated write would be testing
   // something the hardware never does.
