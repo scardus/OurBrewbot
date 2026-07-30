@@ -398,6 +398,15 @@ void handleFermenter(ESP8266WebServer& server) {
     if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
       int idx = doc["Fermenter"] | -1;
       if (idx >= 0 && idx < MAX_FERMENTERS) {
+        // Every field below is applied to this local copy, and the live config
+        // is only replaced once the entire body has passed validation. Writing
+        // fields straight into g_fermenters[idx] as they were read meant a body
+        // that failed a LATER check (OG, TG, CompressorDelay, AlarmTolerance)
+        // returned 400 having already moved the ceiling/floor/hysteresis — and
+        // the control loop reads those from RAM, so a rejected save really did
+        // change how the fermenter was driven until the next config load.
+        FermenterConfig fc = g_fermenters[idx];
+
         // Validated numeric fields — validateFermenterField() owns single-
         // field ranges; CeilingTemp / FloorTemp / Hysteresis are validated
         // holistically below against the would-be combined state so a save
@@ -408,25 +417,29 @@ void handleFermenter(ESP8266WebServer& server) {
             snprintf(valJson, sizeof(valJson), "{\"status\":\"error\",\"msg\":\"%s\"}", msg); \
             sendJsonResponse(server, valJson, 400); return; \
           }
+        // validateFermenterField() is passed idx, not fc, deliberately: it
+        // range-checks against the STORED config, which is the behaviour the
+        // MQTT command path shares. None of the three keys used below read the
+        // stored trio, so validating before the commit changes nothing.
         #define VALIDATE_AND_SET(jsonKey, valKey, member, cast) \
           if (!doc[#jsonKey].isNull()) { \
             float v = doc[#jsonKey]; \
             if (!validateFermenterField(idx, valKey, v, &valErr)) REJECT(valErr) \
-            g_fermenters[idx].member = (cast)v; \
+            fc.member = (cast)v; \
           }
 
         // Holistic temp/hyst trio: take new value if present, else current.
-        float wbCeiling = doc["CeilingTemp"].isNull() ? g_fermenters[idx].ceilingTemp : (float)doc["CeilingTemp"];
-        float wbFloor   = doc["FloorTemp"].isNull()   ? g_fermenters[idx].floorTemp   : (float)doc["FloorTemp"];
-        float wbHyst    = doc["Hysteresis"].isNull()  ? g_fermenters[idx].hysteresis  : (float)doc["Hysteresis"];
+        float wbCeiling = doc["CeilingTemp"].isNull() ? fc.ceilingTemp : (float)doc["CeilingTemp"];
+        float wbFloor   = doc["FloorTemp"].isNull()   ? fc.floorTemp   : (float)doc["FloorTemp"];
+        float wbHyst    = doc["Hysteresis"].isNull()  ? fc.hysteresis  : (float)doc["Hysteresis"];
         if (wbCeiling < -20.0f || wbCeiling > 50.0f)  REJECT("ceiling temperature out of range (-20 to 50)")
         if (wbFloor   < -20.0f || wbFloor   > 50.0f)  REJECT("floor temperature out of range (-20 to 50)")
         if (wbHyst    <   0.0f || wbHyst    > 10.0f)  REJECT("hysteresis out of range (0 to 10)")
         if (wbFloor >= wbCeiling)                     REJECT("floor must be below ceiling")
         if ((wbCeiling - wbFloor) <  2.0f * wbHyst)   REJECT("safe zone must be at least 2x hysteresis")
-        if (!doc["CeilingTemp"].isNull()) g_fermenters[idx].ceilingTemp = wbCeiling;
-        if (!doc["FloorTemp"].isNull())   g_fermenters[idx].floorTemp   = wbFloor;
-        if (!doc["Hysteresis"].isNull())  g_fermenters[idx].hysteresis  = wbHyst;
+        if (!doc["CeilingTemp"].isNull()) fc.ceilingTemp = wbCeiling;
+        if (!doc["FloorTemp"].isNull())   fc.floorTemp   = wbFloor;
+        if (!doc["Hysteresis"].isNull())  fc.hysteresis  = wbHyst;
 
         VALIDATE_AND_SET(CompressorDelay, "compressor_delay",    compressorDelay, uint16_t)
         VALIDATE_AND_SET(OG,              "og",                  og,              float)
@@ -440,17 +453,21 @@ void handleFermenter(ESP8266WebServer& server) {
             sendErr(server, 400, F("alarm tolerance out of range (0 to 10)"));
             return;
           }
-          g_fermenters[idx].alarmTolerance = v;
+          fc.alarmTolerance = v;
         }
 
-        if (!doc["Power"].isNull())           g_fermenters[idx].power           = doc["Power"];
-        if (!doc["TempControl"].isNull())     g_fermenters[idx].tempControl     = doc["TempControl"];
-        if (doc["BeerName"].is<const char*>())      strlcpy(g_fermenters[idx].beerName,      doc["BeerName"].as<const char*>(),      sizeof(g_fermenters[0].beerName));
-        if (doc["FermenterName"].is<const char*>()) strlcpy(g_fermenters[idx].fermenterName, doc["FermenterName"].as<const char*>(), sizeof(g_fermenters[0].fermenterName));
-        if (doc["YeastName"].is<const char*>())     strlcpy(g_fermenters[idx].yeastName,     doc["YeastName"].as<const char*>(),     sizeof(g_fermenters[0].yeastName));
-        if (!doc["BrewServices"].isNull())    g_fermenters[idx].brewServices    = doc["BrewServices"];
-        if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"]; if (v >= 0 && v <= MAX_PROFILES) g_fermenters[idx].profileNo = (uint8_t)v; }
-        if (!doc["LiveTest"].isNull())        g_fermenters[idx].liveTest        = doc["LiveTest"];
+        if (!doc["Power"].isNull())           fc.power           = doc["Power"];
+        if (!doc["TempControl"].isNull())     fc.tempControl     = doc["TempControl"];
+        if (doc["BeerName"].is<const char*>())      strlcpy(fc.beerName,      doc["BeerName"].as<const char*>(),      sizeof(fc.beerName));
+        if (doc["FermenterName"].is<const char*>()) strlcpy(fc.fermenterName, doc["FermenterName"].as<const char*>(), sizeof(fc.fermenterName));
+        if (doc["YeastName"].is<const char*>())     strlcpy(fc.yeastName,     doc["YeastName"].as<const char*>(),     sizeof(fc.yeastName));
+        if (!doc["BrewServices"].isNull())    fc.brewServices    = doc["BrewServices"];
+        if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"]; if (v >= 0 && v <= MAX_PROFILES) fc.profileNo = (uint8_t)v; }
+        if (!doc["LiveTest"].isNull())        fc.liveTest        = doc["LiveTest"];
+
+        // Single commit point: nothing above this line is visible to the
+        // control loop, so a rejected body leaves the fermenter untouched.
+        g_fermenters[idx] = fc;
 
         saveFermenterConfig();
         sendOk(server, F("Configuration saved"));
