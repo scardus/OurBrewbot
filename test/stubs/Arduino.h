@@ -11,10 +11,6 @@
 #include <strings.h>
 #include <algorithm>
 
-// The real core's Arduino.h pulls in Esp.h for the global ESP object; mirror
-// that so production files referencing ESP need no extra include.
-#include <Esp.h>
-
 using std::fabs;
 using std::min;
 using std::max;
@@ -28,9 +24,10 @@ using std::max;
 typedef const char* PGM_P;
 #define PROGMEM
 #define FPSTR(p)   (reinterpret_cast<const char*>(p))
-#define memcpy_P   memcpy
-#define strlen_P   strlen
-#define snprintf_P snprintf
+#define memcpy_P    memcpy
+#define strlen_P    strlen
+#define snprintf_P  snprintf
+#define vsnprintf_P vsnprintf
 
 // Minimal real String — Temperatures.cpp's addressToString()/scanBuses()
 // construct one from a char*, compare, and read it back, even though those
@@ -67,6 +64,44 @@ public:
   bool equalsIgnoreCase(const char* other) const { return strcasecmp(buf_, other) == 0; }
   bool startsWith(const char* prefix) const { return strncasecmp(buf_, prefix, strlen(prefix)) == 0; }
 };
+
+// Serial. Log.cpp writes every line here before deciding whether to also send
+// it to syslog or MQTT, so the captured text is how a test sees what was
+// logged. Accumulates into one buffer rather than per-line, because Log.cpp
+// builds a line from three separate print() calls (timestamp, body, CRLF).
+#define SERIAL_TEST_MAX 4096
+
+class SerialStub {
+public:
+  char   buf[SERIAL_TEST_MAX] = {0};
+  size_t len = 0;
+
+  void begin(unsigned long) {}
+  void print(const char* s) {
+    if (!s) return;
+    size_t n = strlen(s);
+    if (n > SERIAL_TEST_MAX - 1 - len) n = SERIAL_TEST_MAX - 1 - len;
+    memcpy(buf + len, s, n);
+    len += n;
+    buf[len] = '\0';
+  }
+  void println(const char* s) { print(s); print("\r\n"); }
+  void reset() { len = 0; buf[0] = '\0'; }
+};
+
+static SerialStub Serial;
+
+// The real core's Arduino.h pulls in Esp.h for the global ESP object; mirror
+// that so production files referencing ESP need no extra include. It has to
+// come after String above, not before it: EspClass::getResetReason() returns a
+// String, which is what Crash.cpp calls .c_str() on.
+#include <Esp.h>
+
+// Pin helpers. Pins.h assigns the pressure sensor to A0, and SmartPlugs.cpp
+// wraps its receive pin in digitalPinToInterrupt() - on the host neither
+// means anything, but both have to resolve for those files to compile.
+#define A0 17
+#define digitalPinToInterrupt(p) (p)
 
 // millis() — settable by tests via test_setMillis() so time-based profile
 // steps can be exercised deterministically.
