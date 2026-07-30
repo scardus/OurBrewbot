@@ -512,10 +512,19 @@ bool loadFermenterConfig() {
     if (g_fermenters[i].tg > 2.0f) g_fermenters[i].tg /= 1000.0f;
   }
 
-  // Backward compat: migrate old bool BrewServiceSend → bit 0 of new bitmask
+  // Backward compat: migrate old bool BrewServiceSend → bit 0 of new bitmask.
+  // The value has to be read as either a JSON number (0/1) or a JSON boolean
+  // (true/false): BrewServiceSend was a bool member, so depending on which
+  // firmware wrote the file it can be stored either way. A plain `| 0` reads it
+  // as an int, and ArduinoJson only accepts a stored integer for that - a
+  // stored `true` would fail the type check, fall back to the 0 default and
+  // silently migrate to "not subscribed". Anything that isn't a boolean keeps
+  // the original integer path, so a hand-edited string still reads as 0.
   if (doc["BrewServices"].isNull()) {
     for (int i = 0; i < MAX_FERMENTERS; i++) {
-      g_fermenters[i].brewServices = (doc["BrewServiceSend"][i] | 0) ? 1 : 0;
+      JsonVariantConst v = doc["BrewServiceSend"][i];
+      bool sends = v.is<bool>() ? v.as<bool>() : ((v | 0) != 0);
+      g_fermenters[i].brewServices = sends ? 1 : 0;
     }
   }
 
