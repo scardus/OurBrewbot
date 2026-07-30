@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <Arduino.h>   // for String, which toString() returns
 
 class IPAddress {
   uint8_t octets_[4] = {0, 0, 0, 0};

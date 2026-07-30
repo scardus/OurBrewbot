@@ -34,6 +34,20 @@ public:
     result = resolveTo;
     return true;
   }
+
+  // Link identity, reported by WebAPI.cpp's /status and /health.
+  String    SSID()     { return String(ssid); }
+  IPAddress localIP()  { return localAddress; }
+
+  char      ssid[33]    = "TestNetwork";
+  IPAddress localAddress = IPAddress(192, 168, 0, 207);
+
+  // Called by handleWiFiReset() on the way to a reboot. Recorded rather than
+  // acted on, so a test can prove credentials would have been cleared.
+  bool persistentCalled = false;
+  bool disconnectCalled = false;
+  void persistent(bool) { persistentCalled = true; }
+  void disconnect(bool = false) { disconnectCalled = true; connected = false; }
 };
 
 // One shared instance, mirroring the global `WiFi` the real header provides.
