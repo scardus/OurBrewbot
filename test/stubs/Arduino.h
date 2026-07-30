@@ -11,10 +11,6 @@
 #include <strings.h>
 #include <algorithm>
 
-// The real core's Arduino.h pulls in Esp.h for the global ESP object; mirror
-// that so production files referencing ESP need no extra include.
-#include <Esp.h>
-
 using std::fabs;
 using std::min;
 using std::max;
@@ -67,6 +63,12 @@ public:
   bool equalsIgnoreCase(const char* other) const { return strcasecmp(buf_, other) == 0; }
   bool startsWith(const char* prefix) const { return strncasecmp(buf_, prefix, strlen(prefix)) == 0; }
 };
+
+// The real core's Arduino.h pulls in Esp.h for the global ESP object; mirror
+// that so production files referencing ESP need no extra include. It has to
+// come after String above, not before it: EspClass::getResetReason() returns a
+// String, which is what Crash.cpp calls .c_str() on.
+#include <Esp.h>
 
 // Pin helpers. Pins.h assigns the pressure sensor to A0, and SmartPlugs.cpp
 // wraps its receive pin in digitalPinToInterrupt() - on the host neither
