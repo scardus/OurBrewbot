@@ -311,12 +311,16 @@ void buildFermenterJson(JsonDocument& doc, uint8_t i) {
   doc["FermenterName"]   = g_fermenters[i].fermenterName;
   doc["BeerName"]        = g_fermenters[i].beerName;
   doc["YeastName"]       = g_fermenters[i].yeastName;
-  doc["CeilingTemp"]     = g_fermenters[i].ceilingTemp;
-  doc["FloorTemp"]       = g_fermenters[i].floorTemp;
+  // Setpoints leave in the user's display unit, exactly like the live readings
+  // below. Ceiling/Floor are absolute temperatures (scale + 32 offset);
+  // Hysteresis and AlarmTolerance are SPANS, so they scale only - a 0.5 C
+  // hysteresis is 0.9 F, not 32.9 F.
+  doc["CeilingTemp"]     = toDisplayTemp(g_fermenters[i].ceilingTemp);
+  doc["FloorTemp"]       = toDisplayTemp(g_fermenters[i].floorTemp);
   doc["OG"]              = g_fermenters[i].og;
   doc["TG"]              = g_fermenters[i].tg;
-  doc["Hysteresis"]      = g_fermenters[i].hysteresis;
-  doc["AlarmTolerance"]  = g_fermenters[i].alarmTolerance;
+  doc["Hysteresis"]      = toDisplayTempDelta(g_fermenters[i].hysteresis);
+  doc["AlarmTolerance"]  = toDisplayTempDelta(g_fermenters[i].alarmTolerance);
   doc["CompressorDelay"] = g_fermenters[i].compressorDelay;
   doc["TempControl"]     = g_fermenters[i].tempControl;
   doc["SGControl"]       = g_fermenters[i].sgControl;
@@ -364,11 +368,21 @@ void buildProfileJson(JsonDocument& doc, int p) {
   uint8_t base = p * MAX_STEPS_PER_PROFILE;
   for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
     JsonObject st = steps.add<JsonObject>();
-    st["stepType"]  = g_profileSteps[base + s].stepType;
-    st["startTemp"] = g_profileSteps[base + s].startTemp;
-    st["endTemp"]   = g_profileSteps[base + s].endTemp;
-    st["sgTrigger"] = g_profileSteps[base + s].sgTrigger;
-    st["days"]      = g_profileSteps[base + s].days;
+    const ProfileStep& step = g_profileSteps[base + s];
+    st["stepType"]  = step.stepType;
+    // An unused slot is all-zero, and countProfileSteps() / the WebUI both
+    // detect it by testing those temperatures against 0. Converting them would
+    // report 32 in Fahrenheit and the slot would stop looking empty, so emit
+    // the sentinel verbatim and only convert real step temperatures.
+    if (isStepEmpty(step)) {
+      st["startTemp"] = 0.0f;
+      st["endTemp"]   = 0.0f;
+    } else {
+      st["startTemp"] = toDisplayTemp(step.startTemp);
+      st["endTemp"]   = toDisplayTemp(step.endTemp);
+    }
+    st["sgTrigger"] = step.sgTrigger;
+    st["days"]      = step.days;
   }
 }
 
@@ -429,9 +443,14 @@ void handleFermenter(ESP8266WebServer& server) {
           }
 
         // Holistic temp/hyst trio: take new value if present, else current.
-        float wbCeiling = doc["CeilingTemp"].isNull() ? fc.ceilingTemp : (float)doc["CeilingTemp"];
-        float wbFloor   = doc["FloorTemp"].isNull()   ? fc.floorTemp   : (float)doc["FloorTemp"];
-        float wbHyst    = doc["Hysteresis"].isNull()  ? fc.hysteresis  : (float)doc["Hysteresis"];
+        // Incoming values are in the user's display unit, so convert BEFORE the
+        // range checks below - those limits are Celsius, and range-checking a
+        // Fahrenheit number against them would reject valid setpoints and
+        // accept invalid ones. Hysteresis is a span, so it uses the delta
+        // helper (no 32 offset). Stored config stays Celsius throughout.
+        float wbCeiling = doc["CeilingTemp"].isNull() ? fc.ceilingTemp : toCelsius((float)doc["CeilingTemp"]);
+        float wbFloor   = doc["FloorTemp"].isNull()   ? fc.floorTemp   : toCelsius((float)doc["FloorTemp"]);
+        float wbHyst    = doc["Hysteresis"].isNull()  ? fc.hysteresis  : toCelsiusTempDelta((float)doc["Hysteresis"]);
         if (wbCeiling < -20.0f || wbCeiling > 50.0f)  REJECT("ceiling temperature out of range (-20 to 50)")
         if (wbFloor   < -20.0f || wbFloor   > 50.0f)  REJECT("floor temperature out of range (-20 to 50)")
         if (wbHyst    <   0.0f || wbHyst    > 10.0f)  REJECT("hysteresis out of range (0 to 10)")
@@ -448,7 +467,7 @@ void handleFermenter(ESP8266WebServer& server) {
         #undef REJECT
 
         if (!doc["AlarmTolerance"].isNull()) {
-          float v = doc["AlarmTolerance"];
+          float v = toCelsiusTempDelta((float)doc["AlarmTolerance"]);  // a span, and the range below is Celsius
           if (v < 0.0f || v > 10.0f) {
             sendErr(server, 400, F("alarm tolerance out of range (0 to 10)"));
             return;
@@ -686,7 +705,7 @@ void handleProbes(ESP8266WebServer& server) {
     p["function"]    = g_probes[i].function;
     p["fermenter"]   = g_probes[i].fermenter;
     p["temperature"] = toDisplayTemp(g_probes[i].temperature);
-    p["tempAdjust"]  = g_probes[i].tempAdjust;
+    p["tempAdjust"]  = toDisplayTempDelta(g_probes[i].tempAdjust);  // a calibration offset: span, not absolute
   }
   sendJsonDoc(server, doc);
 }
@@ -826,7 +845,7 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["fermenter"]   = g_iSpindels[i].fermenter;
     s["unit"]        = g_iSpindels[i].unit;
     s["function"]    = g_iSpindels[i].function;
-    s["tempAdjust"]  = g_iSpindels[i].tempAdjust;
+    s["tempAdjust"]  = toDisplayTempDelta(g_iSpindels[i].tempAdjust);  // a calibration offset: span, not absolute
     s["sgAdjust"]    = g_iSpindels[i].sgAdjust;
     s["sg"]          = g_iSpindels[i].sg;
     s["temperature"] = toDisplayTemp(g_iSpindels[i].temperature);
@@ -887,7 +906,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
   if (!doc["fermenter"].isNull())   { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_iSpindels[idx].fermenter = v; }
   if (!doc["unit"].isNull())        g_iSpindels[idx].unit        = doc["unit"];
   if (!doc["function"].isNull())    { uint8_t v = doc["function"]; g_iSpindels[idx].function = (v == PROBE_FN_BEER) ? PROBE_FN_BEER : PROBE_UNASSIGNED; }
-  if (!doc["tempAdjust"].isNull())  g_iSpindels[idx].tempAdjust  = doc["tempAdjust"];
+  if (!doc["tempAdjust"].isNull())  g_iSpindels[idx].tempAdjust  = toCelsiusTempDelta((float)doc["tempAdjust"]);
   if (!doc["sgAdjust"].isNull())    g_iSpindels[idx].sgAdjust    = doc["sgAdjust"];
   // Normalize collectData from fermenter when client didn't send it explicitly.
   // Lets the UI omit the toggle entirely; legacy 'collectData=false + fermenter assigned'
@@ -971,7 +990,7 @@ void handleProbePost(ESP8266WebServer& server) {
   }
   if (!doc["function"].isNull())   g_probes[idx].function   = doc["function"];
   if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_probes[idx].fermenter = v; }
-  if (!doc["tempAdjust"].isNull()) g_probes[idx].tempAdjust = doc["tempAdjust"];
+  if (!doc["tempAdjust"].isNull()) g_probes[idx].tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
   saveProbeConfig();
   sendOk(server, F("Probe updated"));
 }
@@ -1470,13 +1489,22 @@ void handleProfilePost(ESP8266WebServer& server) {
     for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
       if (s < (int)steps.size()) {
         JsonObject st = steps[s];
-        uint8_t stepType = st["stepType"] | 0;
-        float   days     = st["days"]     | 0.0f;
+        uint8_t stepType  = st["stepType"] | 0;
+        float   days      = st["days"]     | 0.0f;
+        float   startTemp = st["startTemp"] | 0.0f;
+        float   endTemp   = st["endTemp"]   | 0.0f;
         if (stepType > 9) stepType = 0;
         if (days < 0.0f)  days    = 0.0f;
+        // Step temperatures arrive in the user's display unit, but the WebUI
+        // pads unused slots with a literal all-zero step and both the firmware
+        // (isStepEmpty) and the WebUI detect an unused slot by testing for
+        // zero. Converting a padded zero would store -17.8 C, so the slot would
+        // no longer count as empty and a running profile would never finish.
+        // Store the sentinel verbatim; convert only real step temperatures.
+        bool blankStep = (stepType == 0 && days == 0.0f && startTemp == 0.0f && endTemp == 0.0f);
         g_profileSteps[base + s].stepType  = stepType;
-        g_profileSteps[base + s].startTemp = st["startTemp"] | 0.0f;
-        g_profileSteps[base + s].endTemp   = st["endTemp"]   | 0.0f;
+        g_profileSteps[base + s].startTemp = blankStep ? 0.0f : toCelsius(startTemp);
+        g_profileSteps[base + s].endTemp   = blankStep ? 0.0f : toCelsius(endTemp);
         g_profileSteps[base + s].sgTrigger = st["sgTrigger"] | 0.0f;
         g_profileSteps[base + s].days      = days;
         g_profileSteps[base + s].stepNo    = s;
@@ -1643,7 +1671,7 @@ void handleTilts(ESP8266WebServer& server) {
     t["colourName"]  = getTiltColourName(i);
     t["function"]    = g_tilts[i].function;
     t["fermenter"]   = g_tilts[i].fermenter;
-    t["tempAdjust"]  = g_tilts[i].tempAdjust;
+    t["tempAdjust"]  = toDisplayTempDelta(g_tilts[i].tempAdjust);  // a calibration offset: span, not absolute
     t["sgAdjust"]    = g_tilts[i].sgAdjust;
     t["mbb"]         = g_tilts[i].mbb;
     t["active"]      = g_tilts[i].active;
@@ -1682,7 +1710,7 @@ void handleTiltPost(ESP8266WebServer& server) {
   g_tilts[colour].colour = (uint8_t)colour;
   if (!doc["function"].isNull())   g_tilts[colour].function   = doc["function"];
   if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_tilts[colour].fermenter = v; }
-  if (!doc["tempAdjust"].isNull()) g_tilts[colour].tempAdjust = doc["tempAdjust"];
+  if (!doc["tempAdjust"].isNull()) g_tilts[colour].tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
   if (!doc["sgAdjust"].isNull())   g_tilts[colour].sgAdjust   = doc["sgAdjust"];
   saveTiltConfig();
   sendOk(server, F("Tilt updated"));

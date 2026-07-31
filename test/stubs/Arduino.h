@@ -52,8 +52,15 @@ class __FlashStringHelper;
 // String: Reports.cpp serializes a whole brew-service JSON payload into one
 // (~300 B) before POSTing it, and a short buffer would silently truncate it
 // via concat() rather than fail.
+//
+// It also has to hold the largest REQUEST body a handler reads, since
+// server.arg("plain") returns one of these: a profile save posts all 15 step
+// slots at roughly 1 KB. At 512 B that body was silently truncated and came
+// back as "Invalid JSON", which looked like a handler bug rather than a
+// harness limit - hence 2 KB, matching the request buffer in the web server
+// stub. The real ESP8266WebServer String is heap-backed and unbounded.
 class String {
-  char buf_[512];
+  char buf_[2048];
 public:
   String() { buf_[0] = '\0'; }
   String(const char* s) {
