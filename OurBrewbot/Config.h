@@ -65,6 +65,14 @@
 #define MQTT_SERVICE_BIT            3   // Bit index in fermenter brewServices bitmask (matches BREW_SERVICE_MQTT)
 
 // ============================================================
+// ISPINDEL GRAVITY UNITS
+// ============================================================
+// Which unit a hydrometer sends its gravity reading in. Readings are converted
+// to SG on receipt, so this describes the DEVICE, not how anything is stored.
+#define ISPINDEL_UNIT_SG     0   // device reports Specific Gravity
+#define ISPINDEL_UNIT_PLATO  1   // device reports degrees Plato
+
+// ============================================================
 // PROBE FUNCTION CODES
 // ============================================================
 #define PROBE_FN_UNASSIGNED  99
@@ -346,18 +354,18 @@ struct iSpindelConfig {
   char     id[16];              // device ID string (hex, e.g. "9b5c5e")
   bool     collectData;         // collect data from this device
   uint8_t  fermenter;           // assigned fermenter
-  uint8_t  unit;                // unit: 0=SG, 1=Plato
+  uint8_t  unit;                // gravity unit the DEVICE sends: ISPINDEL_UNIT_SG / ISPINDEL_UNIT_PLATO
   uint8_t  function;            // PROBE_FN_BEER = use as beer temp source; PROBE_UNASSIGNED = gravity only
   float    tempAdjust;          // temperature calibration offset °C
   float    sgAdjust;            // SG calibration offset
   // Runtime data (not persisted)
-  float    sg;                  // current SG reading
+  float    sg;                  // current gravity, always SG (converted from Plato on receipt)
   float    temperature;         // current temp reading, always °C (converted from temp_units on receipt)
   float    battery;             // battery voltage
   int8_t   rssi;                // WiFi signal strength
   float    angle;               // tilt angle in degrees
   float    velocity;            // gravity velocity (rate of change per day)
-  float    corrGravity;         // temperature-corrected gravity
+  float    corrGravity;         // temperature-corrected gravity, always SG
   float    runTime;             // per-wake cycle duration: wake-up to report sent (seconds)
   char     gravityUnit[4];      // unit string from device ("SG", "G", "P")
   uint32_t lastSeen;            // millis() of last POST received (0 = never seen since boot)
