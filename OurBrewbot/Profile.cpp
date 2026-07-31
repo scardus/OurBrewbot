@@ -27,8 +27,10 @@ static void finishProfile(uint8_t i) {
   g_fermenters[i].currentHour    = 0;
 }
 
-// Helper: check if a step is empty (unused slot)
-static inline bool isStepEmpty(const ProfileStep& step) {
+// Check if a step is empty (unused slot). Declared in Profile.h because the
+// REST layer needs the same test: an empty slot's 0.0 temperatures are a
+// sentinel, not a reading, so they must never be unit-converted.
+bool isStepEmpty(const ProfileStep& step) {
   return step.stepType == 0 && step.days == 0 && step.endTemp == 0.0f && step.startTemp == 0.0f;
 }
 

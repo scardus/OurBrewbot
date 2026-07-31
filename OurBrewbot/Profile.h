@@ -29,6 +29,10 @@ bool prevProfileStep(uint8_t fermenterIndex);
 // Count non-empty steps in a profile (0-indexed profileSlot 0-3)
 uint8_t countProfileSteps(uint8_t profileSlot);
 
+// True if a step is an unused slot. Unused slots are stored as all-zero, so
+// their 0.0 temperatures are a sentinel rather than a real setpoint.
+bool isStepEmpty(const ProfileStep& step);
+
 // Get target temperature for the current profile step
 float getProfileTargetTemp(uint8_t fermenterIndex);
 

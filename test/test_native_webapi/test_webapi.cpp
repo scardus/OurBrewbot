@@ -524,22 +524,15 @@ static void test_fermenter_payload_reports_celsius_by_default(void) {
   TEST_ASSERT_EQUAL_FLOAT(20.0f, doc["CeilingTemp"].as<float>());
 }
 
-// Documents an ASYMMETRY in this payload, rather than asserting an ideal.
+// The whole payload is in one unit (0.4.6). Up to 0.4.5 the live READINGS were
+// converted but the SETPOINTS were emitted as stored, so a Fahrenheit response
+// carried BeerTemp 68 next to CeilingTemp 20 - both unlabelled, both meaning
+// 20 degC. This test previously pinned that asymmetry; it now pins the fix.
 //
-// In Fahrenheit mode the live READINGS are converted (toDisplayTemp on
-// BeerTemp/AmbientTemp) but the SETPOINTS are not - CeilingTemp, FloorTemp,
-// Hysteresis and AlarmTolerance are emitted as stored, in Celsius. So this
-// payload mixes units, and the WebUI renders both verbatim.
-//
-// The round trip is at least self-consistent: the UI posts the same Celsius
-// number back, and handleFermenter validates it against Celsius ranges, so
-// nothing is corrupted. It differs from the MQTT command path, which does
-// convert display units to Celsius (applyFermenterFieldFromDisplay, v0.4.3).
-//
-// Pinned as-is so a deliberate change to either half is visible; changing the
-// behaviour is a separate decision from the partial-write fix this suite
-// accompanies, and would need the WebUI updated in the same commit.
-static void test_fermenter_payload_mixes_celsius_setpoints_with_display_readings(void) {
+// Note which helper each field uses: ceiling and floor are absolute (scale and
+// +32 offset), hysteresis is a SPAN (scale only). That distinction is the
+// likeliest defect in this area, so it is asserted with explicit numbers.
+static void test_fermenter_payload_converts_setpoints_and_readings_alike(void) {
   g_globalConfig.unit = UNIT_FAHRENHEIT;
   g_fermenterDebugMode = true;
   g_fermenterDebugOverrides[F0].enabled  = true;
@@ -549,12 +542,14 @@ static void test_fermenter_payload_mixes_celsius_setpoints_with_display_readings
   buildFermenterJson(doc, F0);
 
   TEST_ASSERT_EQUAL_STRING("F", doc["TempUnit"].as<const char*>());
-  // reading: converted
+  // reading
   TEST_ASSERT_FLOAT_WITHIN(0.1f, 68.0f, doc["BeerTemp"].as<float>());
-  // setpoints: not converted
-  TEST_ASSERT_EQUAL_FLOAT(20.0f, doc["CeilingTemp"].as<float>());
-  TEST_ASSERT_EQUAL_FLOAT(18.0f, doc["FloorTemp"].as<float>());
-  TEST_ASSERT_EQUAL_FLOAT(0.5f,  doc["Hysteresis"].as<float>());
+  // absolute setpoints: 20 -> 68, 18 -> 64.4
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 68.0f, doc["CeilingTemp"].as<float>());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 64.4f, doc["FloorTemp"].as<float>());
+  // spans: 0.5 -> 0.9 and 3.0 -> 5.4, NOT 32.9 and 37.4
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.9f, doc["Hysteresis"].as<float>());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 5.4f, doc["AlarmTolerance"].as<float>());
 }
 
 // profileNo 0 means the plain ceiling/floor mode, reported as "Standard" with
@@ -1078,7 +1073,7 @@ int main(int, char**) {
   // payload shapes
   RUN_TEST(test_fermenter_payload_carries_its_documented_keys);
   RUN_TEST(test_fermenter_payload_reports_celsius_by_default);
-  RUN_TEST(test_fermenter_payload_mixes_celsius_setpoints_with_display_readings);
+  RUN_TEST(test_fermenter_payload_converts_setpoints_and_readings_alike);
   RUN_TEST(test_fermenter_payload_names_the_standard_profile);
   RUN_TEST(test_fermenter_payload_names_an_assigned_profile_and_counts_steps);
   RUN_TEST(test_controller_payload_carries_its_documented_keys);
