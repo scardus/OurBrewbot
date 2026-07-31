@@ -593,6 +593,9 @@ var brewServices = [];
 var mqttEnabled = false;
 var profileNames = [];
 var fermDebugMode = false;
+// Display unit ('C' or 'F') for every tab — the API sends all temperatures in it.
+// Set from /fermenters, which loads on page load before any other tab renders.
+var tempUnit = 'C';
 
 // Fetch brew-services / MQTT / fermenters / profiles / debug in parallel, then render fermenter cards.
 function loadFermenters() {
@@ -610,7 +613,7 @@ function loadFermenters() {
     var dbg = res[4];
     fermDebugMode = dbg.DebugMode || false;
     var dbgOverrides = dbg.Overrides || [];
-    var tempUnit = (d.length > 0 && d[0].TempUnit) ? d[0].TempUnit : 'C';
+    tempUnit = (d.length > 0 && d[0].TempUnit) ? d[0].TempUnit : 'C';
     profileNames = [];
     for (var p = 0; p < profs.length; p++) profileNames.push(profs[p].name);
     var html = '';
@@ -625,9 +628,9 @@ function loadFermenters() {
          + (f.ProfileRunning ? ' &nbsp; Step: ' + (f.CurrentStep + 1) + '/' + f.TotalSteps + ' &nbsp; Hour: ' + f.CurrentHour : '') + '</div>';
       html += row('Name',             textInput('fn' + i, f.FermenterName));
       html += row('Beer',             textInput('bn' + i, f.BeerName));
-      html += row('Ceiling Temp',     numInput ('ct' + i, f.CeilingTemp, 0.1));
-      html += row('Floor Temp',       numInput ('ft' + i, f.FloorTemp,   0.1));
-      html += row('Hysteresis',       numInput ('hy' + i, f.Hysteresis,  0.1));
+      html += row('Ceiling Temp',     numInput ('ct' + i, f.CeilingTemp, 0.1) + ' &deg;' + tempUnit);
+      html += row('Floor Temp',       numInput ('ft' + i, f.FloorTemp,   0.1) + ' &deg;' + tempUnit);
+      html += row('Hysteresis',       numInput ('hy' + i, f.Hysteresis,  0.1) + ' &deg;' + tempUnit);
       html += row('Alarm Tolerance',  numInput ('at' + i, f.AlarmTolerance, 0.1) + ' &deg;' + tempUnit + ' <span style="color:#888;font-size:11px">(deviation that fires alarm immediately; smaller deviations wait the global Alarm Delay)</span>');
       html += row('Compressor Delay', numInput ('cd' + i, f.CompressorDelay) + ' min');
       html += row('Yeast',            textInput('yn' + i, f.YeastName));
@@ -852,7 +855,8 @@ function deleteProfileStep(p, s) {
   loadProfilesFromState();
 }
 
-// Add a new step to profile p — copies the last live step, or seeds Temp/Time 20°C 7 days.
+// Add a new step to profile p — copies the last live step, or seeds Temp/Time
+// 7 days at 20°C. The seed is in the display unit, so it follows tempUnit.
 function addProfileStep(p) {
   var steps = profileEdits[p].steps;
   var live = countLiveSteps(steps);
@@ -862,7 +866,7 @@ function addProfileStep(p) {
     var prev = steps[live - 1];
     seed = { stepType: prev.stepType, startTemp: prev.startTemp, endTemp: prev.endTemp, sgTrigger: prev.sgTrigger, days: prev.days };
   } else {
-    seed = { stepType: 0, startTemp: 0, endTemp: 20, sgTrigger: 0, days: 7 };
+    seed = { stepType: 0, startTemp: 0, endTemp: (tempUnit == 'F' ? 68 : 20), sgTrigger: 0, days: 7 };
   }
   steps[live] = seed;
   markDirty();
@@ -885,7 +889,7 @@ function loadProfilesFromState() {
     if (live == 0) {
       html += '<div class="prof-empty">No steps yet — click <b>+ Add Step</b> to begin.</div>';
     } else {
-      html += '<table class="tbl"><tr><th>#</th><th>Step Type</th><th>Start Temp</th><th>End Temp</th><th>SG Trigger</th><th>Days</th><th></th></tr>';
+      html += '<table class="tbl"><tr><th>#</th><th>Step Type</th><th>Start Temp (&deg;' + tempUnit + ')</th><th>End Temp (&deg;' + tempUnit + ')</th><th>SG Trigger</th><th>Days</th><th></th></tr>';
       for (var s = 0; s < live; s++) {
         var st = pe.steps[s];
         var fl = stepFieldsEnabled(st.stepType);
@@ -1007,11 +1011,11 @@ function loadProbes() {
     for (var i = 0; i < p.length; i++) {
       var q = p[i];
       html += '<tr><td style="font-family:monospace;font-size:12px">' + q.address + '</td>';
-      html += '<td>' + (q.temperature > -100 ? q.temperature.toFixed(1) + '&deg;' : '<span style="color:#f44">--</span>') + '</td>';
+      html += '<td>' + (q.temperature > -100 ? q.temperature.toFixed(1) + '&deg;' + tempUnit : '<span style="color:#f44">--</span>') + '</td>';
       html += '<td>' + q.name + '</td>';
       html += '<td><select id="pf' + q.index + '">' + fnOpts(q.function) + '</select></td>';
       html += '<td><select id="pr' + q.index + '">' + fermOpts(q.fermenter) + '</select></td>';
-      html += '<td><input type="number" step="0.1" id="pa' + q.index + '" value="' + q.tempAdjust + '" style="width:60px"></td>';
+      html += '<td><input type="number" step="0.1" id="pa' + q.index + '" value="' + q.tempAdjust + '" style="width:60px"> &deg;' + tempUnit + '</td>';
       html += '<td><button class="save" onclick="saveProbe(' + q.index + ')">Save</button></td></tr>';
     }
     html += '</table><div class="msg" id="pm"></div></div>';
@@ -1522,7 +1526,7 @@ function buildTiltCard(colour, t) {
   if (t && t.isPro) html += ' <span class="badge" style="background:#ff9800;color:#000">Pro</span>';
   html += '</h3>';
   if (active && t) {
-    html += '<div class="live">SG: ' + (t.sg > 0 ? t.sg.toFixed(4) : '--') + ' &nbsp; Temp: ' + (t.temperature > -100 ? t.temperature.toFixed(1) + '&deg;' : '--') + '</div>';
+    html += '<div class="live">SG: ' + (t.sg > 0 ? t.sg.toFixed(4) : '--') + ' &nbsp; Temp: ' + (t.temperature > -100 ? t.temperature.toFixed(1) + '&deg;' + tempUnit : '--') + '</div>';
   }
   var fn   = t ? t.function   : 99;
   var ferm = t ? t.fermenter  : 99;
@@ -1530,7 +1534,7 @@ function buildTiltCard(colour, t) {
   var sa   = t ? t.sgAdjust   : 0;
   html += row('Fermenter',           '<select id="tlr' + colour + '">' + fermOpts(ferm)  + '</select>');
   html += row('SG Adjust',           numInput('tlsa' + colour, sa, 0.0001, 80));
-  html += row('Temp Adjust',         numInput('tlta' + colour, ta, 0.1,    70) + ' &deg;C');
+  html += row('Temp Adjust',         numInput('tlta' + colour, ta, 0.1,    70) + ' &deg;' + tempUnit);
   html += row('Temperature reading', '<select id="tlf' + colour + '">' + tiltFnOpts(fn) + '</select>');
   html += '<button class="save" onclick="saveTilt(' + colour + ')">Save</button>';
   if (t) html += ' <button class="test" onclick="clearTilt(' + colour + ')" style="background:#333">Clear</button>';
@@ -1590,7 +1594,7 @@ function buildISpindelCard(idx, s) {
   if (!empty) {
     html += '<div class="live">';
     if (hasData) {
-      html += 'SG: ' + s.sg.toFixed(4) + ' &nbsp; Temp: ' + s.temperature.toFixed(1) + '&deg; &nbsp; Angle: ' + s.angle.toFixed(1) + '&deg; &nbsp; Batt: ' + s.battery.toFixed(2) + 'V &nbsp; RSSI: ' + s.rssi + 'dBm';
+      html += 'SG: ' + s.sg.toFixed(4) + ' &nbsp; Temp: ' + s.temperature.toFixed(1) + '&deg;' + tempUnit + ' &nbsp; Angle: ' + s.angle.toFixed(1) + '&deg; &nbsp; Batt: ' + s.battery.toFixed(2) + 'V &nbsp; RSSI: ' + s.rssi + 'dBm';
       if (s.corrGravity > 0 || s.velocity > 0) {
         html += '<br>Corr.SG: ' + s.corrGravity.toFixed(4) + ' &nbsp; Velocity: ' + s.velocity.toFixed(4) + ' &nbsp; Cycle: ' + s.runTime.toFixed(1) + 's' + (s.gravityUnit ? ' &nbsp; Unit: ' + s.gravityUnit : '');
       }
@@ -1604,7 +1608,7 @@ function buildISpindelCard(idx, s) {
   html += row('Unit',                '<select id="isu'  + idx + '"><option value="0"' + (s.unit == 0 ? ' selected' : '') + '>SG</option><option value="1"' + (s.unit == 1 ? ' selected' : '') + '>Plato</option></select>');
   html += row('Temperature reading', '<select id="isfn' + idx + '">' + tiltFnOpts(s.function) + '</select>');
   html += row('SG Adjust',           numInput('issa' + idx, s.sgAdjust,   0.0001, 80));
-  html += row('Temp Adjust',         numInput('ista' + idx, s.tempAdjust, 0.1,    70) + ' &deg;C');
+  html += row('Temp Adjust',         numInput('ista' + idx, s.tempAdjust, 0.1,    70) + ' &deg;' + tempUnit);
   html += '<button class="save" onclick="saveISpindel(' + idx + ')">Save</button>';
   if (!empty) html += ' <button class="test" onclick="clearISpindel(' + idx + ')" style="background:#333">Clear</button>';
   html += ' <span class="msg" id="ism' + idx + '"></span></div>';
