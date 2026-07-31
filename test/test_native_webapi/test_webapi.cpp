@@ -1026,6 +1026,322 @@ static void test_smartplug_test_refuses_when_no_code_is_configured(void) {
 }
 
 // ============================================================
+// DISPLAY UNITS ACROSS THE REST BOUNDARY (0.4.6)
+//
+// One rule: every temperature on the wire is in the user's display unit, and
+// stored config stays Celsius. Two distinctions carry all the risk.
+//
+//   ABSOLUTE (ceiling, floor, step temps) scales AND offsets: 20 C = 68 F.
+//   SPAN     (hysteresis, alarm tolerance, tempAdjust) scales ONLY: 0.5 C
+//            of hysteresis is 0.9 F, not 32.9 F.
+//
+// The property that actually matters is the ROUND TRIP - read a payload, post
+// the same numbers back, and the stored Celsius must not have moved. Convert
+// one direction and not the other and every save drifts the setpoints.
+// ============================================================
+
+// Deserialize whatever the handler just streamed to the client.
+static void respJson(JsonDocument& doc) {
+  TEST_ASSERT_TRUE(deserializeJson(doc, g_httpResp.body) == DeserializationError::Ok);
+}
+
+// Post a document back verbatim - the other half of a round trip.
+static void postJson(JsonDocument& doc) {
+  static char buf[2048];
+  serializeJson(doc, buf, sizeof(buf));
+  postBody(buf);
+}
+
+// ---- fermenter setpoints ----
+
+// THE round-trip property. Read the fermenter in Fahrenheit, post those exact
+// numbers back, and the stored Celsius must be unchanged.
+static void test_fermenter_setpoints_round_trip_through_fahrenheit(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+
+  JsonDocument out;
+  buildFermenterJson(out, F0);
+
+  JsonDocument in;
+  in["Fermenter"]      = F0;
+  in["CeilingTemp"]    = out["CeilingTemp"];
+  in["FloorTemp"]      = out["FloorTemp"];
+  in["Hysteresis"]     = out["Hysteresis"];
+  in["AlarmTolerance"] = out["AlarmTolerance"];
+  postJson(in);
+  handleFermenter(srv);
+
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, g_fermenters[F0].ceilingTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 18.0f, g_fermenters[F0].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f,  g_fermenters[F0].hysteresis);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 3.0f,  g_fermenters[F0].alarmTolerance);
+}
+
+static void test_fermenter_post_converts_the_trio_from_fahrenheit(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  postBody("{\"Fermenter\":0,\"CeilingTemp\":77,\"FloorTemp\":69.8,\"Hysteresis\":1.8}");
+  handleFermenter(srv);
+
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 25.0f, g_fermenters[F0].ceilingTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 21.0f, g_fermenters[F0].floorTemp);
+  // 1.8 F is a SPAN: 1.0 C. Run through toCelsius() instead it would be
+  // -16.8 C, which the 0-10 range check would have rejected outright.
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, g_fermenters[F0].hysteresis);
+}
+
+static void test_fermenter_post_converts_alarm_tolerance_as_a_span(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  postBody("{\"Fermenter\":0,\"AlarmTolerance\":5.4}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 3.0f, g_fermenters[F0].alarmTolerance);
+}
+
+// Conversion must happen BEFORE validation: the range checks are Celsius, so a
+// Fahrenheit number checked against them would reject valid setpoints.
+// 122 F is exactly the 50 C ceiling limit.
+static void test_fahrenheit_ceiling_at_the_celsius_limit_is_accepted(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  postBody("{\"Fermenter\":0,\"CeilingTemp\":122,\"FloorTemp\":118.4}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 50.0f, g_fermenters[F0].ceilingTemp);
+}
+
+// 124 F is about 51.1 C - past the same limit, and still rejected.
+static void test_fahrenheit_ceiling_above_the_celsius_limit_is_rejected(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  postBody("{\"Fermenter\":0,\"CeilingTemp\":124,\"FloorTemp\":118.4}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("ceiling temperature out of range"));
+  TEST_ASSERT_EQUAL_FLOAT(20.0f, g_fermenters[F0].ceilingTemp);   // untouched
+}
+
+// The safe-zone rule (span >= 2 * hysteresis) also has to be applied in
+// Celsius: 68/64.4 F is a 2 C span, which 1 C of hysteresis exactly fills.
+static void test_fahrenheit_safe_zone_rule_is_applied_in_celsius(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  postBody("{\"Fermenter\":0,\"CeilingTemp\":68,\"FloorTemp\":64.4,\"Hysteresis\":1.8}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+
+  httpRespReset();
+  // 2.7 F = 1.5 C of hysteresis needs 3 C of span, and there is only 2.
+  postBody("{\"Fermenter\":0,\"CeilingTemp\":68,\"FloorTemp\":64.4,\"Hysteresis\":2.7}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("safe zone"));
+}
+
+// In Celsius every conversion is the identity, so nothing about the existing
+// behaviour moves. This is what the on-device endpoint diff relies on.
+static void test_celsius_mode_stores_setpoints_verbatim(void) {
+  postBody("{\"Fermenter\":0,\"CeilingTemp\":22.5,\"FloorTemp\":19,"
+           "\"Hysteresis\":0.4,\"AlarmTolerance\":2.5}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_FLOAT(22.5f, g_fermenters[F0].ceilingTemp);
+  TEST_ASSERT_EQUAL_FLOAT(19.0f, g_fermenters[F0].floorTemp);
+  TEST_ASSERT_EQUAL_FLOAT(0.4f,  g_fermenters[F0].hysteresis);
+  TEST_ASSERT_EQUAL_FLOAT(2.5f,  g_fermenters[F0].alarmTolerance);
+}
+
+// ---- profile steps, and the empty-slot sentinel ----
+
+static void test_profile_payload_converts_live_step_temperatures(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  g_profileSteps[0].stepType  = 1;
+  g_profileSteps[0].days      = 3;
+  g_profileSteps[0].startTemp = 12.0f;
+  g_profileSteps[0].endTemp   = 20.0f;
+
+  JsonDocument doc;
+  buildProfileJson(doc, 0);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 53.6f, doc["steps"][0]["startTemp"].as<float>());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 68.0f, doc["steps"][0]["endTemp"].as<float>());
+}
+
+// An unused slot is all-zero, and that zero is a SENTINEL, not a temperature.
+// Converted it would read 32 in Fahrenheit and the slot would stop looking
+// empty - countProfileSteps() and the WebUI both test it against zero.
+static void test_profile_payload_keeps_the_empty_step_sentinel_in_fahrenheit(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  g_profileSteps[0].stepType  = 1;
+  g_profileSteps[0].days      = 3;
+  g_profileSteps[0].endTemp   = 20.0f;
+
+  JsonDocument doc;
+  buildProfileJson(doc, 0);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, doc["steps"][1]["startTemp"].as<float>());
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, doc["steps"][1]["endTemp"].as<float>());
+}
+
+static void test_profile_post_converts_live_step_temperatures_to_celsius(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  postBody("{\"index\":0,\"name\":\"Ale\",\"steps\":["
+           "{\"stepType\":1,\"startTemp\":53.6,\"endTemp\":68,\"sgTrigger\":0,\"days\":3}]}");
+  handleProfilePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.0f, g_profileSteps[0].startTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, g_profileSteps[0].endTemp);
+}
+
+// The WebUI pads unused slots with a literal all-zero step. Converting that
+// padding would store -17.8 C, the slot would no longer count as empty, and a
+// running profile would never reach its end.
+static void test_profile_post_keeps_a_padded_blank_step_empty(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  postBody("{\"index\":0,\"steps\":["
+           "{\"stepType\":1,\"startTemp\":53.6,\"endTemp\":68,\"sgTrigger\":0,\"days\":3},"
+           "{\"stepType\":0,\"startTemp\":0,\"endTemp\":0,\"sgTrigger\":0,\"days\":0}]}");
+  handleProfilePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_profileSteps[1].startTemp);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_profileSteps[1].endTemp);
+  TEST_ASSERT_EQUAL_UINT8(1, countProfileSteps(0));
+}
+
+// The same guard, exercised through a full read-modify-write of every slot -
+// the shape the WebUI's Save button actually produces.
+static void test_profile_round_trips_through_fahrenheit_without_growing(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  for (uint8_t s = 0; s < 3; s++) {
+    g_profileSteps[s].stepType  = 1;
+    g_profileSteps[s].days      = 4;
+    g_profileSteps[s].startTemp = 12.0f + s;
+    g_profileSteps[s].endTemp   = 18.0f + s;
+  }
+  TEST_ASSERT_EQUAL_UINT8(3, countProfileSteps(0));
+
+  JsonDocument out;
+  buildProfileJson(out, 0);
+  postJson(out);
+  handleProfilePost(srv);
+
+  TEST_ASSERT_EQUAL_INT_MESSAGE(200, g_httpResp.code, g_httpResp.body);
+  TEST_ASSERT_EQUAL_UINT8(3, countProfileSteps(0));      // not 15
+  for (uint8_t s = 0; s < 3; s++) {
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.0f + s, g_profileSteps[s].startTemp);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 18.0f + s, g_profileSteps[s].endTemp);
+  }
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_profileSteps[3].startTemp);
+}
+
+static void test_profile_post_in_celsius_stores_step_temperatures_verbatim(void) {
+  postBody("{\"index\":0,\"steps\":["
+           "{\"stepType\":1,\"startTemp\":12,\"endTemp\":20,\"sgTrigger\":0,\"days\":3}]}");
+  handleProfilePost(srv);
+  TEST_ASSERT_EQUAL_FLOAT(12.0f, g_profileSteps[0].startTemp);
+  TEST_ASSERT_EQUAL_FLOAT(20.0f, g_profileSteps[0].endTemp);
+}
+
+// ---- calibration offsets (probe / tilt / iSpindel tempAdjust) ----
+
+// A calibration offset is a span: 0.5 C of correction is 0.9 F of correction.
+static void test_probe_payload_converts_temp_adjust_as_a_span(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  g_probes[0].tempAdjust = 0.5f;
+
+  handleProbes(srv);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.9f, doc["probes"][0]["tempAdjust"].as<float>());
+}
+
+static void test_probe_post_converts_temp_adjust_from_fahrenheit(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  postBody("{\"index\":0,\"tempAdjust\":-0.9}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -0.5f, g_probes[0].tempAdjust);
+}
+
+static void test_probe_temp_adjust_round_trips_through_fahrenheit(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  g_probes[0].tempAdjust = 1.25f;
+
+  handleProbes(srv);
+  JsonDocument out;
+  respJson(out);
+
+  httpRespReset();
+  JsonDocument in;
+  in["index"]      = 0;
+  in["tempAdjust"] = out["probes"][0]["tempAdjust"];
+  postJson(in);
+  handleProbePost(srv);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.25f, g_probes[0].tempAdjust);
+}
+
+static void test_tilt_payload_converts_temp_adjust_as_a_span(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  g_tilts[0].colour     = 0;
+  g_tilts[0].tempAdjust = 0.5f;
+
+  handleTilts(srv);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.9f, doc["tilts"][0]["tempAdjust"].as<float>());
+}
+
+static void test_tilt_post_converts_temp_adjust_from_fahrenheit(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  postBody("{\"colour\":0,\"tempAdjust\":1.8}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, g_tilts[0].tempAdjust);
+}
+
+// The clear path posts a literal zero offset, and zero converts to zero under
+// the span helpers - so clearing a slot works identically in either unit.
+static void test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  g_tilts[0].tempAdjust = 2.0f;
+  postBody("{\"colour\":0,\"_clear\":true}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_tilts[0].tempAdjust);
+}
+
+static void test_ispindel_payload_converts_temp_adjust_as_a_span(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  g_iSpindels[0].tempAdjust = 0.5f;
+
+  handleiSpindels(srv);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.9f, doc["ispindels"][0]["tempAdjust"].as<float>());
+}
+
+static void test_ispindel_config_post_converts_temp_adjust_from_fahrenheit(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  postBody("{\"index\":0,\"tempAdjust\":-1.8}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -1.0f, g_iSpindels[0].tempAdjust);
+}
+
+static void test_celsius_mode_leaves_temp_adjust_untouched(void) {
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  postBody("{\"index\":0,\"tempAdjust\":0.75}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_FLOAT(0.75f, g_probes[0].tempAdjust);
+
+  g_probes[0].tempAdjust = -0.25f;
+  httpRespReset();
+  handleProbes(srv);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_EQUAL_FLOAT(-0.25f, doc["probes"][0]["tempAdjust"].as<float>());
+}
+
+// ============================================================
 
 int main(int, char**) {
   UNITY_BEGIN();
@@ -1130,6 +1446,30 @@ int main(int, char**) {
   RUN_TEST(test_smartplug_post_requires_a_valid_index);
   RUN_TEST(test_smartplug_test_transmits_the_selected_code);
   RUN_TEST(test_smartplug_test_refuses_when_no_code_is_configured);
+
+  // display units across the REST boundary
+  RUN_TEST(test_fermenter_setpoints_round_trip_through_fahrenheit);
+  RUN_TEST(test_fermenter_post_converts_the_trio_from_fahrenheit);
+  RUN_TEST(test_fermenter_post_converts_alarm_tolerance_as_a_span);
+  RUN_TEST(test_fahrenheit_ceiling_at_the_celsius_limit_is_accepted);
+  RUN_TEST(test_fahrenheit_ceiling_above_the_celsius_limit_is_rejected);
+  RUN_TEST(test_fahrenheit_safe_zone_rule_is_applied_in_celsius);
+  RUN_TEST(test_celsius_mode_stores_setpoints_verbatim);
+  RUN_TEST(test_profile_payload_converts_live_step_temperatures);
+  RUN_TEST(test_profile_payload_keeps_the_empty_step_sentinel_in_fahrenheit);
+  RUN_TEST(test_profile_post_converts_live_step_temperatures_to_celsius);
+  RUN_TEST(test_profile_post_keeps_a_padded_blank_step_empty);
+  RUN_TEST(test_profile_round_trips_through_fahrenheit_without_growing);
+  RUN_TEST(test_profile_post_in_celsius_stores_step_temperatures_verbatim);
+  RUN_TEST(test_probe_payload_converts_temp_adjust_as_a_span);
+  RUN_TEST(test_probe_post_converts_temp_adjust_from_fahrenheit);
+  RUN_TEST(test_probe_temp_adjust_round_trips_through_fahrenheit);
+  RUN_TEST(test_tilt_payload_converts_temp_adjust_as_a_span);
+  RUN_TEST(test_tilt_post_converts_temp_adjust_from_fahrenheit);
+  RUN_TEST(test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit);
+  RUN_TEST(test_ispindel_payload_converts_temp_adjust_as_a_span);
+  RUN_TEST(test_ispindel_config_post_converts_temp_adjust_from_fahrenheit);
+  RUN_TEST(test_celsius_mode_leaves_temp_adjust_untouched);
 
   return UNITY_END();
 }
