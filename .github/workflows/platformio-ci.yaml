@@ -55,10 +55,31 @@ jobs:
       - name: Run native unit tests
         run: pio test -e native
       - name: Build firmware
-        run: pio run
+        run: |
+          # pipefail is essential here: without it the pipeline takes tee's exit
+          # status and a FAILED build would be reported as a passing step.
+          set -o pipefail
+          pio run 2>&1 | tee build.log
+      # Every version records its RAM/flash figures by hand (see CLAUDE.md), and
+      # comparing against an older commit otherwise means rebuilding it. This
+      # leaves the numbers attached to the run, per commit, for free.
+      - name: Record firmware size
+        run: |
+          {
+            echo '### Firmware size'
+            echo ''
+            echo '```'
+            grep -E '^(RAM|Flash):' build.log || echo '(size lines not found in build output)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # The .elf goes up alongside the .bin because it is the only thing that can
+      # turn a crash dump from this build back into function names, and a build
+      # from main that never gets tagged has no other copy of it.
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v7
         with:
           name: firmware
-          path: .pio/build/nodemcuv2/firmware.bin
+          path: |
+            .pio/build/nodemcuv2/firmware.bin
+            .pio/build/nodemcuv2/firmware.elf
           retention-days: 7
