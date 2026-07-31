@@ -5,9 +5,17 @@ on:
     - cron: '0 0 * * 1'
   workflow_dispatch:
 
+# The action below opens pull requests, so the token needs write scope stated
+# explicitly - inheriting the repository default breaks silently if that default
+# is ever set to read-only.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   update-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -27,7 +35,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: '3.x'
+          python-version: '3.11'
 
       - name: Install PlatformIO
         run: |
@@ -37,7 +45,10 @@ jobs:
       - name: Test Build Current Project
         run: pio run
 
+      # Third-party Docker action holding a write-capable token, so it is pinned
+      # to a commit SHA rather than the mutable v1 tag. Bump the SHA and the
+      # version comment together.
       - name: Run PlatformIO Dependabot
-        uses: peterus/platformio_dependabot@v1
+        uses: peterus/platformio_dependabot@ee459e446a090c4894b1354a3b85bc064797fd2b # v1.2.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

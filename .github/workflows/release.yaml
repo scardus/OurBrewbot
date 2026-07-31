@@ -8,13 +8,27 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0    # needed to fetch full tag history
+
+      # The tag and Version.h are kept in step by hand, so a mismatch is easy to
+      # make - and it would publish a binary reporting a different version than
+      # the release it hangs off. Fail before anything is built.
+      - name: Check FW_VERSION matches the tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          # POSIX sed rather than grep -oP, so the same command can be dry-run in
+          # Git Bash on Windows, where grep's -P is unavailable in most locales.
+          FW=$(sed -n 's/.*FW_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' OurBrewbot/Version.h)
+          echo "tag=$TAG firmware=$FW"
+          if [ "$TAG" != "$FW" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match FW_VERSION \"$FW\" in OurBrewbot/Version.h"
+            exit 1
+          fi
 
       - uses: actions/setup-python@v7
         with:
@@ -25,29 +39,71 @@ jobs:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
-          key: ${{ runner.os }}-pio
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
 
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
-      - name: Get previous tag
-        run: |
-          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
-          echo "PREVIOUS_TAG=${PREVIOUS_TAG}" >> $GITHUB_ENV
+      # A tag can point at any commit, including one that never went through CI,
+      # so the release re-runs the same gates rather than assuming it did.
+      - name: Run static analysis
+        run: pio check --fail-on-defect=high
+
+      - name: Run native unit tests
+        run: pio test -e native
 
       - name: Build firmware
         run: pio run
 
-      - name: Rename firmware binary
-        run: cp .pio/build/nodemcuv2/firmware.bin OurBrewbot_${{ github.ref_name }}.bin
+      # lib_deps use caret ranges, so this runner can resolve a newer library
+      # than the locally built and flashed binary used. Recording what was
+      # actually linked keeps a released binary traceable after the fact.
+      - name: Record resolved library versions
+        run: |
+          # Written to a file first, and never allowed to fail the job: this is
+          # decorative metadata, and a crash midway through writing the heredoc
+          # would leave $GITHUB_ENV with an unterminated block.
+          pio pkg list -e nodemcuv2 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > libs.txt || true
+          [ -s libs.txt ] || echo '(pio pkg list produced no output)' > libs.txt
+          {
+            echo 'LIBS<<PIOEOF'
+            cat libs.txt
+            echo PIOEOF
+          } >> "$GITHUB_ENV"
+
+      # The .elf ships too: Crash.cpp's RTC register/stack dumps can only be
+      # turned back into function names with the exact ELF that built the binary,
+      # and it exists nowhere else once the runner is torn down.
+      - name: Stage release assets
+        run: |
+          cp .pio/build/nodemcuv2/firmware.bin OurBrewbot_${{ github.ref_name }}.bin
+          cp .pio/build/nodemcuv2/firmware.elf OurBrewbot_${{ github.ref_name }}.elf
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           name: OurBrewbot ${{ github.ref_name }}
+          # GitHub works out the correct previous tag and commit list itself, and
+          # appends them below the body set here.
+          generate_release_notes: true
           body: |
             ## OurBrewbot ${{ github.ref_name }}
             See the [README](https://github.com/scardus/OurBrewbot/blob/main/README.md) for more information.
 
-            **Full changelog:** https://github.com/scardus/OurBrewbot/compare/${{ env.PREVIOUS_TAG }}...${{ github.ref_name }}
-          files: OurBrewbot_${{ github.ref_name }}.bin
+            Flash `OurBrewbot_${{ github.ref_name }}.bin` over OTA. The `.elf` is only
+            needed for decoding a crash stack trace produced by this exact build.
+
+            <details><summary>Build dependencies</summary>
+
+            ```
+            ${{ env.LIBS }}
+            ```
+
+            </details>
+          files: |
+            OurBrewbot_${{ github.ref_name }}.bin
+            OurBrewbot_${{ github.ref_name }}.elf

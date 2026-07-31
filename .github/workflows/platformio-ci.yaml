@@ -5,28 +5,49 @@ on:
     branches: [main, develop]
     paths:
       - 'OurBrewbot/**'
+      - 'test/**'
       - 'platformio.ini'
+      - '.github/workflows/platformio-ci.yaml'
   pull_request:
     branches: [main]
     paths:
       - 'OurBrewbot/**'
+      - 'test/**'
       - 'platformio.ini'
+      - '.github/workflows/platformio-ci.yaml'
   workflow_dispatch:
-  
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes an in-flight run redundant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze-and-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+      # The key MUST vary with platformio.ini. actions/cache does not save when
+      # the primary key hits, so a constant key freezes the cache at whatever was
+      # stored the first time and every later dependency change is re-downloaded
+      # on every run without ever being kept.
       - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
-          key: ${{ runner.os }}-pio
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
       - name: Run static analysis
