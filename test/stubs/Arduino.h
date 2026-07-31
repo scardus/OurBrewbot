@@ -195,6 +195,32 @@ void test_setMillis(uint32_t ms);
 // actually block, so this is a no-op.
 inline void delay(uint32_t) {}
 
+// yield() feeds the watchdog and lets the SDK run on hardware. Mqtt.cpp calls
+// it between successive discovery publishes; on the host there's nothing to
+// yield to.
+inline void yield() {}
+
+// The core's alias for an unsigned byte. PubSubClient's message callback is
+// declared with a byte* payload, so mqttMessageCallback() in Mqtt.cpp uses it.
+typedef uint8_t byte;
+
+// dtostrf() — the AVR/ESP float formatter, absent from mingw's libc.
+//
+// Worth getting exactly right rather than approximating: Mqtt.cpp's
+// publishFloat() routes EVERY numeric MQTT topic through this, so wrong
+// width/precision handling would quietly shift every published value and make
+// the assertions that check them meaningless.
+//
+// Semantics matched to the core's: `width` is a MINIMUM field width, space
+// padded and right justified, and a negative width left justifies. printf's
+// "%*.*f" already behaves that way for both signs, so it's a direct pass
+// through. `prec` is the number of decimals. Returns sout, as the real one
+// does.
+inline char* dtostrf(double val, signed char width, unsigned char prec, char* sout) {
+  sprintf(sout, "%*.*f", (int)width, (int)prec, val);
+  return sout;
+}
+
 // strlcpy() is a BSD extension the ESP8266 Arduino core provides, but
 // mingw's C library doesn't - minimal standard implementation.
 inline size_t strlcpy(char* dst, const char* src, size_t dstsize) {
