@@ -394,6 +394,9 @@ static const CfgField kProfileStepFields[] PROGMEM = { PROFILE_STEP_FIELDS(CFG_R
 // Function defaults to PROBE_FN_BEER for legacy configs without the field —
 // preserves existing behavior where iSpindel temperature flowed into the
 // beer-temp chain. Legacy value collapse happens after the table load.
+// Unit defaults to ISPINDEL_UNIT_PLATO (1), which looks surprising but is
+// deliberate: a device that declares no gravity unit is assumed to be sending
+// Plato, and a device that does declare one overwrites this on its next POST.
 #define ISPINDEL_CONFIG_FIELDS(X) \
   X("iSpindelName",        name,        STR,   "None")            \
   X("ID",                  id,          STR,   "")                \
@@ -991,7 +994,10 @@ void initDefaultiSpindelConfig() {
     g_iSpindels[i].id[0]       = '\0';
     g_iSpindels[i].collectData = false;
     g_iSpindels[i].fermenter   = (i == 0) ? 0 : PROBE_UNASSIGNED;
-    g_iSpindels[i].unit        = (i == 0) ? 1 : 0;
+    // Plato for every slot: it is what an iSpindel that declares no unit is
+    // assumed to be sending. A device that does declare one overwrites this
+    // when it registers (see iSpindel.h).
+    g_iSpindels[i].unit        = ISPINDEL_UNIT_PLATO;
     g_iSpindels[i].function    = PROBE_FN_BEER;
   }
 }

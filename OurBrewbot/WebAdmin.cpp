@@ -1605,7 +1605,10 @@ function buildISpindelCard(idx, s) {
     html += row('Device ID', '<span style="color:#53d8fb;font-size:13px">' + (s.id || '—') + '</span>');
   }
   html += row('Fermenter',           '<select id="isf'  + idx + '">' + fermOpts(s.fermenter)   + '</select>');
-  html += row('Unit',                '<select id="isu'  + idx + '"><option value="0"' + (s.unit == 0 ? ' selected' : '') + '>SG</option><option value="1"' + (s.unit == 1 ? ' selected' : '') + '>Plato</option></select>');
+  // A device that reports its own gravity unit (GravityMon sends "G" or "P")
+  // re-applies it on every report, so the dropdown below follows the device.
+  var unitHint = s.gravityUnit ? '<br><span style="color:#888;font-size:12px">Device reports its unit as \'' + s.gravityUnit + '\' and will reset this on its next report</span>' : '';
+  html += row('Unit',                '<select id="isu'  + idx + '"><option value="0"' + (s.unit == 0 ? ' selected' : '') + '>SG</option><option value="1"' + (s.unit == 1 ? ' selected' : '') + '>Plato</option></select>' + unitHint);
   html += row('Temperature reading', '<select id="isfn' + idx + '">' + tiltFnOpts(s.function) + '</select>');
   html += row('SG Adjust',           numInput('issa' + idx, s.sgAdjust,   0.0001, 80));
   html += row('Temp Adjust',         numInput('ista' + idx, s.tempAdjust, 0.1,    70) + ' &deg;' + tempUnit);
