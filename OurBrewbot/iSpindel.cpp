@@ -10,7 +10,30 @@
 #include "Log.h"
 #include <ArduinoJson.h>
 
-// Reject physically impossible values — guards against corrupted payloads or wrong unit config
+// Normalise an incoming temperature to Celsius, which is what the rest of the
+// firmware stores and calculates in. The iSpindel/GravityMon payload says which
+// unit it used in its "temp_units" field: "C", "F" or "K".
+//
+// Only the first character is checked, so "F" and "Fahrenheit" both work. An
+// empty or unrecognised unit falls back to Celsius — that keeps the behaviour
+// of devices that send no unit at all exactly as it was.
+float iSpindelTempToCelsius(float temp, const char* units) {
+  if (units == nullptr) return temp;
+
+  switch (units[0]) {
+    case 'F':
+    case 'f':
+      return (temp - 32.0f) * 5.0f / 9.0f;
+    case 'K':
+    case 'k':
+      return temp - 273.15f;
+    default:
+      return temp;   // already Celsius (or unit not supplied)
+  }
+}
+
+// Reject physically impossible values — guards against corrupted payloads or wrong unit config.
+// temp is expected in Celsius: convert with iSpindelTempToCelsius() before calling.
 void validateiSpindelValues(float& sg, float& temp, const char* name, const char* id) {
   if (sg != 0.0f && (sg < 0.900f || sg > 1.200f)) {
     logMsg("[ISPINDEL] %s (ID:%s): gravity %.4f out of range, ignoring", name, id, sg);
@@ -54,6 +77,12 @@ void handleiSpindelPost(const String& body) {
   float       corrGravity = doc["corr-gravity"] | 0.0f;
   float       runTime     = doc["run-time"]     | 0.0f;
   const char* gravityUnit = doc["gravity-unit"] | "";
+
+  // Normalise to Celsius before anything else touches the value. Doing it here
+  // means the range check below, the tempAdjust offset (a Celsius delta) and
+  // both storage paths further down all work in the same unit.
+  float rawTemp = temp;                              // kept only for the log line
+  temp = iSpindelTempToCelsius(temp, tempUnits);
 
   validateiSpindelValues(sg, temp, name, id);
 
@@ -109,15 +138,17 @@ void handleiSpindelPost(const String& body) {
     }
     if (configChanged) saveiSpindelConfig();
 
-    logMsg("[ISPINDEL] Slot %d (%s) ID:%s SG=%.4f Corr=%.4f Unit=%s T=%.1f%s Angle=%.1f Vel=%.4f Batt=%.2fV RSSI=%d Interval=%us Runtime=%.1fs",
-      matched, g_iSpindels[matched].name, id, sg, corrGravity, gravityUnit, temp, tempUnits, angle, velocity, battery, rssi, interval, runTime);
+    logMsg("[ISPINDEL] Slot %d (%s) ID:%s SG=%.4f Corr=%.4f Unit=%s T=%.1fC (raw %.1f%s) Angle=%.1f Vel=%.4f Batt=%.2fV RSSI=%d Interval=%us Runtime=%.1fs",
+      matched, g_iSpindels[matched].name, id, sg, corrGravity, gravityUnit, temp, rawTemp, tempUnits, angle, velocity, battery, rssi, interval, runTime);
     return;
   }
 
   // New iSpindel — try to register in first free slot
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     if (strcmp(g_iSpindels[i].name, "None") == 0 || strlen(g_iSpindels[i].name) == 0) {
-      // At registration unit is unknown — store raw value, user sets unit via admin tab
+      // At registration the GRAVITY unit is unknown — store the reading as sent
+      // and let the user pick SG or Plato via the admin tab. Temperature is not
+      // affected: it was already normalised to Celsius from temp_units above.
       strlcpy(g_iSpindels[i].name, name, sizeof(g_iSpindels[i].name));
       strlcpy(g_iSpindels[i].id, id, sizeof(g_iSpindels[i].id));
       g_iSpindels[i].sg          = sg;
