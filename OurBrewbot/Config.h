@@ -352,7 +352,7 @@ struct iSpindelConfig {
   float    sgAdjust;            // SG calibration offset
   // Runtime data (not persisted)
   float    sg;                  // current SG reading
-  float    temperature;         // current temp reading
+  float    temperature;         // current temp reading, always °C (converted from temp_units on receipt)
   float    battery;             // battery voltage
   int8_t   rssi;                // WiFi signal strength
   float    angle;               // tilt angle in degrees
