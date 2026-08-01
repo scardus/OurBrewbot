@@ -79,6 +79,9 @@ const char* moduleName(uint32_t id) {
 
 } // namespace
 
+// Called from loop() in OurBrewbot.cpp, which cppcheck does not connect to
+// this definition - hence the suppression rather than a real removal.
+// cppcheck-suppress unusedFunction
 void checkpoint(uint8_t module) {
   if (module == s_lastModule) return;
   s_lastModule = module;
@@ -86,6 +89,9 @@ void checkpoint(uint8_t module) {
   ESP.rtcUserMemoryWrite(CHECKPOINT_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
 }
 
+// Called from setup() in OurBrewbot.cpp - same cross-file blind spot as
+// checkpoint() above.
+// cppcheck-suppress unusedFunction
 void crashLogPendingDeferred() {
   // Quiet only on hardware power-on / external reset. Soft restarts (code 4)
   // are included because the SDK uses that path for panic()/assert() failures
@@ -152,6 +158,10 @@ void crashLogPendingDeferred() {
 // custom_crash_callback — called from the exception handler
 // before reset. Heap is not safe; stick to register-level work.
 // ============================================================
+// `info` cannot be a pointer to const: this overrides the weak
+// custom_crash_callback the ESP8266 core declares, and the signature has to
+// match it exactly or the override silently stops being called.
+// cppcheck-suppress constParameterPointer
 extern "C" void custom_crash_callback(struct rst_info* info,
                                       uint32_t stack,
                                       uint32_t stack_end) {
@@ -175,6 +185,11 @@ extern "C" void custom_crash_callback(struct rst_info* info,
     const uint32_t* sp = reinterpret_cast<const uint32_t*>(stack);
     size_t available = (stack_end - stack) / sizeof(uint32_t);
     size_t n = available < STACK_WORDS ? available : STACK_WORDS;
+    // cppcheck reads `n` as always 0 here and calls the condition constant.
+    // It isn't: test_device_rtc reads all 24 words back off real hardware
+    // with the pattern the callback copied, and test_native_crash covers the
+    // short-stack and inverted-bounds arms.
+    // cppcheck-suppress knownConditionTrueFalse
     for (size_t i = 0; i < n; i++) rec.stack[i] = sp[i];
   }
 
