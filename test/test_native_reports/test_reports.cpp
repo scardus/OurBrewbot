@@ -91,7 +91,12 @@ static void subscribeFermenter(uint8_t i, uint8_t slot) {
 // Assign a DS18B20 probe to a fermenter with a reading, the normal source for
 // the beer/ambient temperatures in the payload.
 static void setProbe(uint8_t slot, uint8_t fermenter, uint8_t function, float tempC) {
-  char addr[17];
+  // 20 bytes to match ProbeConfig::address, and the other two test files that
+  // build an address this way. %02u is a MINIMUM width, so with slot being a
+  // uint8_t the compiler has to assume three digits and a 17-byte buffer
+  // warns. No caller passes anything near that - MAX_PROBES is 8 - but
+  // sizing it like the field it is copied into costs nothing.
+  char addr[20];
   snprintf(addr, sizeof(addr), "00000000000000%02u", slot);
   strlcpy(g_probes[slot].address, addr, sizeof(g_probes[slot].address));
   g_probes[slot].fermenter   = fermenter;

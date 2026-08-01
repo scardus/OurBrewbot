@@ -809,7 +809,11 @@ void handleOTAUpload(ESP8266WebServer& server) {
     }
   } else if (upload.status == UPLOAD_FILE_END) {
     if (Update.end(true)) {
-      logMsgL(SYSLOG_NOTICE, "[OTA] Update success: %u bytes", upload.totalSize);
+      // size_t is unsigned int on the ESP8266, so %u is right on the target -
+      // but it is 64-bit on the host that builds the native tests, where the
+      // same line warns. The cast makes it correct on both and changes
+      // nothing in the firmware.
+      logMsgL(SYSLOG_NOTICE, "[OTA] Update success: %u bytes", (unsigned)upload.totalSize);
     } else {
       Update.printError(Serial);
     }
