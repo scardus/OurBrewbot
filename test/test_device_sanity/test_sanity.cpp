@@ -1,18 +1,23 @@
-// On-device (hardware) test placeholder - runs on the real ESP8266 over
-// serial, NOT on this dev machine. See Phase B of the unit-testing plan.
+// On-device runner smoke test - runs on the real ESP8266 over serial, NOT on
+// this dev machine.
 //
 // Uploading this REPLACES the running firmware on the device for the
 // duration of the test run (`pio test -e nodemcuv2_test --upload-port COM6`).
 // Do not run against the production controller without explicit, separate
-// go-ahead - this file exists to establish the pattern for future
-// hardware-backed tests, not to be run yet.
+// go-ahead.
+//
+// This was the placeholder that established the on-device pattern; the real
+// suites are now test_device_rtc and test_device_fs. It earns its keep as
+// the cheapest way to tell "board, port or upload is broken" apart from "a
+// test failed" - run it first when a device run misbehaves, since it asserts
+// almost nothing and so can only fail for environmental reasons.
 
 #include <Arduino.h>
 #include <unity.h>
 
 void test_board_boots_and_reports_uptime(void) {
-  // Sanity check that the test runner itself is alive on real hardware
-  // before any device-specific test logic gets added here.
+  // Deliberately trivial: the assertion is that the runner reached this
+  // point on real hardware at all.
   TEST_ASSERT_TRUE(millis() >= 0);
 }
 
