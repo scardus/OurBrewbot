@@ -216,13 +216,24 @@ static void parseDiscLine(const char* line) {
       }
       p += 32;
       if (*p == ':') p++;
-      // Field 3: MajorMinorPower — 4 Major + 4 Minor + 2 Power = 10 chars
-      if (strlen(p) >= 8) {
+      // Field 3: MajorMinorPower — 4 Major + 4 Minor + 2 Power = 10 chars.
+      // The length must be EXACT. The HM-10 drops the odd character at 9600
+      // baud, and a field one character short still decodes as perfectly good
+      // hex with both values in range — so the checks in decodeTiltReading()
+      // cannot catch it. A live frame of "004104CF6" read SG as 1.2310 that
+      // way, instead of the 1.04x it should have been.
+      // Requiring the field to end at the ':' delimiter — or at the end of the
+      // line, for a frame cut short immediately after it — rejects a dropped
+      // character before the value is decoded.
+      if (strlen(p) >= 10 && (p[10] == ':' || p[10] == '\0')) {
         float sg, tempC;
         bool  isPro;
         if (decodeTiltReading(p, colour, &sg, &tempC, &isPro)) {
           processTiltReading(colour, sg, tempC, isPro);
         }
+      } else {
+        logMsg("[TILT] %s: rejected - truncated major/minor/power field: %.10s",
+          getTiltColourName(colour), p);
       }
       return;
     }
