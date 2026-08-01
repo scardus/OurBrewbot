@@ -18,10 +18,9 @@
 //
 // SAFETY
 // Every file this suite touches is a /test_* scratch name; the production
-// jsonXxx.txt files are never opened. The fill test runs LAST, caps its own
-// iterations, and removes its file in the same test rather than relying on
-// tearDown - a fill left behind would stop the real firmware saving config
-// on the next boot.
+// jsonXxx.txt files are never opened, and the last test asserts that nothing
+// is left behind. See the note further down on why filling the partition is
+// deliberately NOT done here.
 
 #include <Arduino.h>
 #include <unity.h>
@@ -44,8 +43,14 @@ static const char* const FILLER  = "/test_fill.bin";
 
 // ---- helpers ----
 
-static void removeIfPresent(const char* path) {
-  if (LittleFS.exists(path)) LittleFS.remove(path);
+// Returns whether the path is gone afterwards. The result is checked by the
+// last test rather than ignored: the first run of this suite left all three
+// scratch files behind and nothing failed, because every cleanup call
+// discarded its result.
+static bool removeIfPresent(const char* path) {
+  if (!LittleFS.exists(path)) return true;
+  LittleFS.remove(path);
+  return !LittleFS.exists(path);
 }
 
 static bool writeRaw(const char* path, const char* contents) {
@@ -191,96 +196,46 @@ void test_load_fails_when_both_copies_are_corrupt(void) {
 // A genuinely full filesystem - runs last, cleans up in-test
 // ============================================================
 
-// Fill to within `headroom` bytes of full. Returns the number of blocks
-// written; capped so a miscalculation can't loop forever.
+// ============================================================
+// NOT TESTED HERE: the full-filesystem short write
 //
-// Two chunk sizes, and both are needed. LittleFS erases a whole 4 KB block
-// per write, so filling 2 MB in 512 B pieces pays that erase eight times for
-// the same data - it took over five minutes. Writing in 4 KB pieces is far
-// faster but overshoots: the loop stops as soon as one write comes up short,
-// which can leave several KB free, and the save under test would then
-// succeed. So: 4 KB until the partition is nearly full, then 512 B to close
-// the gap to `headroom`.
-static int fillFilesystem(uint32_t headroom) {
-  static uint8_t block[4096];
-  memset(block, 'F', sizeof(block));
-
-  File f = LittleFS.open(FILLER, "w");
-  if (!f) return 0;
-
-  const uint32_t COARSE_UNTIL = 64u * 1024u;
-  const int      MAX_PASSES   = 8192;   // ceiling: more passes than can fit
-  bool coarse  = true;
-  int  written = 0;
-
-  // Bounded by the loop counter, not by the write result: a `continue` on a
-  // failed coarse write must not be able to spin forever and trip the
-  // watchdog.
-  for (int pass = 0; pass < MAX_PASSES; pass++) {
-    const uint32_t remaining = freeBytes();
-    if (remaining <= headroom) break;
-
-    const size_t chunk = (coarse && remaining > COARSE_UNTIL) ? sizeof(block) : 512;
-    if (f.write(block, chunk) != chunk) {
-      if (chunk == 512) break;          // genuinely full
-      coarse = false;                   // too big to fit; finish fine-grained
-      continue;
-    }
-    written++;
-    yield();
-  }
-  f.close();
-  return written;
-}
-
-// Two things at once, on one fill: that the save FAILS against a genuinely
-// full partition rather than silently truncating, and that the last good
-// primary is still loadable afterwards. saveJsonDocSafe writes the BACKUP
-// first and returns early if that fails, specifically so the primary
-// survives - which only means anything if the failure is detected at all.
+// An earlier version of this suite filled the partition to 100% and checked
+// that saveJsonDocSafe() detected the short write. It passed - and left
+// three scratch files on the production controller, twice.
 //
-// Filling 2 MB takes a few seconds, so this is deliberately one test rather
-// than two: a second fill would double the runtime for no extra coverage.
-void test_a_full_filesystem_fails_the_save_and_spares_the_previous_copy(void) {
-  JsonDocument good;
-  good["unit"] = 3;
-  TEST_ASSERT_TRUE(saveJsonDocSafe(good, PRIMARY, BACKUP));
-  const uint32_t sizeBefore = (uint32_t)fileSize(PRIMARY);
+// The reason is worth recording, because it is a property of LittleFS rather
+// than a bug in the test: a genuinely full filesystem cannot commit ANY
+// metadata, and a delete is a metadata write. Once full, LittleFS.remove()
+// cannot complete. Worse, LittleFS.exists() then answers from its in-RAM
+// view and reports the file gone, so the cleanup asserted successfully while
+// flash was never touched. After a reboot the whole partition reverted to
+// its state part-way through the fill: the filler back at 0 bytes and the
+// scratch config files back with their pre-cleanup contents.
+//
+// So the cleanup cannot be made reliable from inside the test - the test is
+// what removed the ability to clean up. Filling a real partition to 100% is
+// not a safe thing to do to a device that has to save its config on the next
+// boot, so this belongs in test_native_config, where fsTestSetWriteLimit()
+// reaches the same branch with no hardware at stake. What the native harness
+// genuinely cannot prove - that flash persists, that close() commits, that
+// the fallback works against real files - is covered above.
+// ============================================================
 
-  // Comfortably larger than any slack the fill can leave behind, so "the
-  // save failed" can't be an artefact of the document happening to fit.
-  JsonDocument big;
-  for (int i = 0; i < 120; i++) {
-    char key[8];
-    snprintf(key, sizeof(key), "k%d", i);
-    big[key] = 1234567890;
-  }
-
-  TEST_ASSERT_GREATER_THAN_INT(0, fillFilesystem(256));
-  const bool saved = saveJsonDocSafe(big, PRIMARY, BACKUP);
-  removeIfPresent(FILLER);
-
-  const uint32_t sizeAfter = (uint32_t)fileSize(PRIMARY);
-  JsonDocument in;
-  const bool stillLoads = loadJsonDocSafe(in, PRIMARY, BACKUP);
-  const int  unit       = in["unit"] | -1;
-
-  // Clean up before asserting, so a failed assertion can't leave the
-  // partition full for the production firmware that boots next.
-  removeIfPresent(PRIMARY);
-  removeIfPresent(BACKUP);
-
-  TEST_ASSERT_FALSE(saved);
-  TEST_ASSERT_EQUAL_UINT32(sizeBefore, sizeAfter);
-  TEST_ASSERT_TRUE(stillLoads);
-  TEST_ASSERT_EQUAL_INT(3, unit);
-}
-
-// Belt and braces: whatever happened above, the partition must be left with
-// room for the real firmware to save its config on the next boot.
+// Belt and braces: the partition must be left with room for the real
+// firmware to save its config on the next boot.
 void test_the_partition_is_left_with_free_space(void) {
-  removeIfPresent(FILLER);
   TEST_ASSERT_GREATER_THAN_UINT32(64u * 1024u, freeBytes());
+}
+
+// The suite must leave the filesystem as it found it. An assertion rather
+// than a tidy-up: when the earlier fill test left scratch files behind,
+// every test still passed and nothing said so. FILLER is included even
+// though nothing writes it any more, so a repeat run clears the residue the
+// removed test left on this device.
+void test_no_scratch_files_are_left_behind(void) {
+  TEST_ASSERT_TRUE(removeIfPresent(PRIMARY));
+  TEST_ASSERT_TRUE(removeIfPresent(BACKUP));
+  TEST_ASSERT_TRUE(removeIfPresent(FILLER));
 }
 
 void setup() {
@@ -301,10 +256,14 @@ void setup() {
   RUN_TEST(test_load_fails_when_both_copies_are_gone);
   RUN_TEST(test_load_fails_when_both_copies_are_corrupt);
 
-  RUN_TEST(test_a_full_filesystem_fails_the_save_and_spares_the_previous_copy);
   RUN_TEST(test_the_partition_is_left_with_free_space);
+  RUN_TEST(test_no_scratch_files_are_left_behind);
 
   UNITY_END();
+
+  // Unmount cleanly so nothing is left half-committed when the board is
+  // reset by the next upload.
+  LittleFS.end();
 }
 
 void loop() {}
