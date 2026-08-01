@@ -14,7 +14,9 @@
 //     byte-swapped form 004C0215; fixed in v0.4.2 to require the real
 //     on-air order 4C000215)
 //   - the HM-10 UART character-drop corruption, caught here by
-//     decodeTiltReading's raw major/minor range checks
+//     decodeTiltReading's raw major/minor range checks and, when the dropped
+//     character leaves the values plausible, by parseDiscLine's exact-length
+//     check on the MajorMinorPower field
 
 #include <unity.h>
 #include <cstdint>
@@ -224,6 +226,35 @@ void test_parseDiscLine_legacy_defers_to_colon_delimited_fragment(void) {
   // this rather than misread it with legacy's fixed offsets.
   parseDiscLine("junkjunkjunk4C000215:A495BB10C5B14B44B5121370F02D74DE:0044041AF6");
   TEST_ASSERT_FALSE(g_tilts[0].active);
+}
+
+// The HM-10 drops the odd character at 9600 baud. When the dropped character
+// falls inside MajorMinorPower the field arrives 9 chars long, and every check
+// in decodeTiltReading() still passes: the 8 chars it reads are valid hex and
+// both values land in range. This is the exact frame seen on 2026-08-01 at
+// 10:24:21 - it stored SG 1.2310 for a beer sitting at 1.04x. Only the field's
+// length gives it away, so parseDiscLine() must require the ':' delimiter.
+void test_parseDiscLine_rejects_short_major_minor_power_field(void) {
+  parseDiscLine("OK+DISC:4C000215:A495BB10C5B14B44B5121370F02D74DE:004104CF6:F0CBD8C2A080:-075");
+  TEST_ASSERT_FALSE(g_tilts[0].active);
+}
+
+// Same one-character loss, but landing on the ':' that ends the field rather
+// than inside it. The 10 chars read are the right ones, yet the frame is known
+// corrupt - a substitution here could equally have hit the payload.
+void test_parseDiscLine_rejects_corrupted_field_delimiter(void) {
+  parseDiscLine("OK+DISC:4C000215:A495BB10C5B14B44B5121370F02D74DE:0044041AF6zF42DC96DA4F2:-053");
+  TEST_ASSERT_FALSE(g_tilts[0].active);
+}
+
+// A line cut short immediately after MajorMinorPower still carries a complete,
+// trustworthy reading - only the MAC and RSSI are missing, and neither is used.
+// The delimiter check must accept the end of the string as well as ':'.
+void test_parseDiscLine_accepts_frame_ending_after_major_minor_power(void) {
+  parseDiscLine("OK+DISC:4C000215:A495BB10C5B14B44B5121370F02D74DE:0044041AF6");
+  TEST_ASSERT_TRUE(g_tilts[0].active);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, g_tilts[0].sg);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, g_tilts[0].temperature);
 }
 
 void test_parseDiscLine_ignores_short_or_null_line(void) {
@@ -515,6 +546,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_parseDiscLine_ignores_non_tilt_apple_ibeacon);
   RUN_TEST(test_parseDiscLine_valid_legacy_concatenated_frame);
   RUN_TEST(test_parseDiscLine_legacy_defers_to_colon_delimited_fragment);
+  RUN_TEST(test_parseDiscLine_rejects_short_major_minor_power_field);
+  RUN_TEST(test_parseDiscLine_rejects_corrupted_field_delimiter);
+  RUN_TEST(test_parseDiscLine_accepts_frame_ending_after_major_minor_power);
   RUN_TEST(test_parseDiscLine_ignores_short_or_null_line);
 
   RUN_TEST(test_processTiltReading_applies_calibration_offsets);
