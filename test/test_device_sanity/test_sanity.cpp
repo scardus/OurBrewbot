@@ -2,7 +2,7 @@
 // serial, NOT on this dev machine. See Phase B of the unit-testing plan.
 //
 // Uploading this REPLACES the running firmware on the device for the
-// duration of the test run (`pio test -e nodemcuv2 --upload-port COM7`).
+// duration of the test run (`pio test -e nodemcuv2_test --upload-port COM6`).
 // Do not run against the production controller without explicit, separate
 // go-ahead - this file exists to establish the pattern for future
 // hardware-backed tests, not to be run yet.
