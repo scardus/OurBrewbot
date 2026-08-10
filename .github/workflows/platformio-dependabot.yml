@@ -52,3 +52,14 @@ jobs:
         uses: peterus/platformio_dependabot@ee459e446a090c4894b1354a3b85bc064797fd2b # v1.2.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # The action above is a Docker container action that runs as root and
+      # writes into the mounted workspace (it installs/builds every env in
+      # platformio.ini, including the native one, with no way to scope it
+      # down - see action.yml). That leaves root-owned files behind, which
+      # then breaks the later hashFiles() in the "Cache PlatformIO" step's
+      # post-job save with a permission error. Hand the workspace back to
+      # the runner user before the job ends.
+      - name: Fix workspace ownership after Docker action
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
