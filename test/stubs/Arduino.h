@@ -192,8 +192,10 @@ uint32_t millis();
 void test_setMillis(uint32_t ms);
 
 // delay() is a real busy-wait on hardware; native tests never need to
-// actually block, so this is a no-op.
-inline void delay(uint32_t) {}
+// actually block, so this never sleeps - it just records the total asked
+// for, which is how the syslog inter-packet gap is checked.
+inline uint32_t& delayTestTotal() { static uint32_t total = 0; return total; }
+inline void delay(uint32_t ms) { delayTestTotal() += ms; }
 
 // yield() feeds the watchdog and lets the SDK run on hardware. Mqtt.cpp calls
 // it between successive discovery publishes; on the host there's nothing to
