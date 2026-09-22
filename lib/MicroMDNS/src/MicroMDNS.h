@@ -19,10 +19,12 @@
  *     "mydevice-" + String(ESP.getChipId(), HEX).
  *   - No known-answer suppression (we may repeat an answer someone already had).
  *   - No service discovery client (we never ask, only answer).
- *   - Answers are sent straight away, without the short random delay and
- *     one-per-second repeat limit RFC 6762 recommends.
+ *   - Answers are sent straight away, without the short random delay RFC 6762
+ *     recommends for shared records. (The one-per-second limit on multicasting
+ *     the same record again IS applied.)
  *   - Station (STA) interface only: nothing is answered on the soft-AP.
- *   - IPv4 only.
+ *   - IPv4 only. A query for our IPv6 address gets an NSEC record saying
+ *     there is none, so the asker does not wait for a timeout.
  *
  * Usage:
  *   mdnsBegin("mydevice-2924fa");            // once, after WiFi is up
@@ -41,16 +43,18 @@ typedef void (*MdnsLogger)(const char* message);
 void mdnsSetLogger(MdnsLogger logger);
 
 // Claim the name and start answering. hostname is the bare label with no
-// ".local" suffix, at most 32 characters. Returns false if the name is empty or
-// too long, or the socket could not be opened. Safe to call again to move to
-// a new name; any service already added is kept.
+// ".local" suffix: 1 to 32 letters, digits and hyphens, not starting or ending
+// with a hyphen. Returns false if the name breaks those rules or the socket
+// could not be opened. Safe to call again to move to a new name; any service
+// already added is kept.
 bool mdnsBegin(const char* hostname);
 
-// Advertise one service, e.g. ("http", "tcp", 80) for a web server. service is
-// at most 15 characters and proto must be "tcp" or "udp", both without the
-// leading underscore. Returns false if either is invalid or a service has
-// already been added - only one is supported. May be called before or after
-// mdnsBegin().
+// Advertise one service, e.g. ("http", "tcp", 80) for a web server. service
+// follows RFC 6763: 1 to 15 letters, digits and hyphens, at least one letter,
+// no hyphen at either end and no two in a row. proto must be "tcp" or "udp".
+// Both are given without the leading underscore. Returns false if either is
+// invalid or a service has already been added - only one is supported. May be
+// called before or after mdnsBegin().
 bool mdnsAddService(const char* service, const char* proto, uint16_t port);
 
 // Add one "key=value" entry to the service's TXT record. Returns false if the

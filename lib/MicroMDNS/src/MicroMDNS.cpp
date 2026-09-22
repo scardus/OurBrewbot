@@ -27,18 +27,17 @@ static const IPAddress MDNS_GROUP(224, 0, 0, 251);
 #define MDNS_PACKETS_PER_PASS  4
 
 // Announce the name a few times on startup so browsers pick it up without
-// having to ask (RFC 6762 8.3 asks for at least two, a second apart).
+// having to ask. RFC 6762 8.3 asks for at least two, a second apart, and allows
+// more only if the gap at least doubles each time - so 1 s, then 2 s.
 #define MDNS_ANNOUNCE_COUNT     3
 #define MDNS_ANNOUNCE_FIRST_MS  1000
 #define MDNS_ANNOUNCE_GAP_MS    1000
 
 // One packet in, one packet out, both fixed and file-static. These two buffers
-// are the entire memory cost of the responder; nothing here ever touches the
-// heap. A query longer than the buffer is read as far as it fits, which is
-// safe because the questions come first and compression pointers may only
-// point backwards into bytes we already have.
-static uint8_t s_rx[MDNS_PACKET_SIZE];
-static uint8_t s_tx[MDNS_PACKET_SIZE];
+// are most of the memory cost of the responder; nothing here ever touches the
+// heap. See MdnsPacket.h for how each size was chosen.
+static uint8_t s_rx[MDNS_RX_SIZE];
+static uint8_t s_tx[MDNS_TX_SIZE];
 
 static WiFiUDP    s_udp;
 static MdnsNames  s_names;
@@ -49,9 +48,11 @@ static char       s_service[MDNS_MAX_SERVICE_LEN + 1];   // "" until mdnsAddServ
 static char       s_proto[4];                            // "tcp" or "udp"
 static uint32_t   s_ipv4          = 0;
 static uint16_t   s_port          = 0;
-static bool       s_running       = false;
-static uint8_t    s_announcesLeft = 0;
-static uint32_t   s_announceAt    = 0;
+static bool          s_running       = false;
+static uint8_t       s_announcesLeft = 0;
+static uint32_t      s_announceAt    = 0;
+static uint32_t      s_announceGap   = MDNS_ANNOUNCE_GAP_MS;
+static MdnsRateLimit s_rateLimit;   // zeroed as a static: nothing sent yet
 
 // Format one line and hand it to the logger, if there is one. The format
 // string stays in flash (PSTR) like every other literal on this chip, so a
@@ -94,7 +95,16 @@ static void rebuildNames() {
 // Build the records in plan and put them on the wire, either back to whoever
 // asked or out to the whole group.
 static void sendResponse(const MdnsQueryPlan& plan, IPAddress dest, uint16_t destPort) {
-  size_t len = mdnsBuildResponse(s_tx, sizeof(s_tx), plan, s_names, s_ipv4,
+  // Anything multicast in the last second is left out (RFC 6762 section 6):
+  // everyone listening already has it. Direct answers are never limited.
+  MdnsQueryPlan toSend = plan;
+  uint32_t      now    = millis();
+  if (!plan.unicast) {
+    toSend.replyMask = mdnsRateLimitFilter(s_rateLimit, plan.replyMask, now);
+    if (toSend.replyMask == 0) return;
+  }
+
+  size_t len = mdnsBuildResponse(s_tx, sizeof(s_tx), toSend, s_names, s_ipv4,
                                  s_port, s_txt);
   if (len == 0) return;
 
@@ -105,22 +115,22 @@ static void sendResponse(const MdnsQueryPlan& plan, IPAddress dest, uint16_t des
   if (!started) return;
 
   s_udp.write(s_tx, len);
-  s_udp.endPacket();
+  if (s_udp.endPacket() && !plan.unicast) {
+    mdnsRateLimitRecord(&s_rateLimit, toSend.replyMask, now);
+  }
 }
 
 // An unsolicited response carrying everything we publish.
 static void announce() {
   MdnsQueryPlan plan;
   plan.replyMask = MDNS_REPLY_ALL;
-  plan.unicast   = false;
-  plan.legacy    = false;
-  plan.queryId   = 0;
   sendResponse(plan, MDNS_GROUP, MDNS_PORT);
 }
 
 static void scheduleAnnouncements() {
   s_announcesLeft = MDNS_ANNOUNCE_COUNT;
   s_announceAt    = millis() + MDNS_ANNOUNCE_FIRST_MS;
+  s_announceGap   = MDNS_ANNOUNCE_GAP_MS;
 }
 
 void mdnsSetLogger(MdnsLogger logger) {
@@ -128,9 +138,9 @@ void mdnsSetLogger(MdnsLogger logger) {
 }
 
 bool mdnsBegin(const char* hostname) {
-  size_t len = strlen(hostname);
-  if (len == 0 || len > MDNS_MAX_HOST_LEN) {
-    logLine(PSTR("Host name must be 1-%u characters"), (unsigned)MDNS_MAX_HOST_LEN);
+  if (!mdnsIsValidHostLabel(hostname)) {
+    logLine(PSTR("Host name must be 1-%u letters, digits or hyphens"),
+            (unsigned)MDNS_MAX_HOST_LEN);
     return false;
   }
 
@@ -151,9 +161,8 @@ bool mdnsBegin(const char* hostname) {
 }
 
 bool mdnsAddService(const char* service, const char* proto, uint16_t port) {
-  size_t len = strlen(service);
   if (s_service[0] != '\0') return false;                    // only one service
-  if (len == 0 || len > MDNS_MAX_SERVICE_LEN) return false;
+  if (!mdnsIsValidServiceName(service)) return false;
   if (strcmp(proto, "tcp") != 0 && strcmp(proto, "udp") != 0) return false;
 
   strcpy(s_service, service);
@@ -197,7 +206,8 @@ void mdnsLoop() {
   if (s_announcesLeft > 0 && (int32_t)(now - s_announceAt) >= 0) {
     announce();
     s_announcesLeft--;
-    s_announceAt = now + MDNS_ANNOUNCE_GAP_MS;
+    s_announceAt   = now + s_announceGap;
+    s_announceGap *= 2;
   }
 
   for (uint8_t i = 0; i < MDNS_PACKETS_PER_PASS; i++) {

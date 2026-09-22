@@ -131,6 +131,32 @@ void mdnsBuildNames(const char* hostname, const char* service, const char* proto
   toLowerInPlace(names->instance);
 }
 
+// Letters, digits and hyphens only, 1 to maxLen of them, and no hyphen at
+// either end. The rules both kinds of name have in common.
+static bool isLdhLabel(const char* s, size_t maxLen) {
+  size_t len = strlen(s);
+  if (len == 0 || len > maxLen) return false;
+  if (s[0] == '-' || s[len - 1] == '-') return false;
+  for (size_t i = 0; i < len; i++) {
+    if (!isalnum((unsigned char)s[i]) && s[i] != '-') return false;
+  }
+  return true;
+}
+
+bool mdnsIsValidHostLabel(const char* hostname) {
+  return isLdhLabel(hostname, MDNS_MAX_HOST_LEN);
+}
+
+bool mdnsIsValidServiceName(const char* service) {
+  if (!isLdhLabel(service, MDNS_MAX_SERVICE_LEN)) return false;
+  if (strstr(service, "--") != NULL) return false;
+
+  for (const char* c = service; *c; c++) {
+    if (isalpha((unsigned char)*c)) return true;
+  }
+  return false;   // all digits and hyphens
+}
+
 bool mdnsTxtAdd(MdnsTxt* txt, const char* entry) {
   size_t entryLen = strlen(entry);
 
@@ -146,36 +172,50 @@ bool mdnsTxtAdd(MdnsTxt* txt, const char* entry) {
 
 // ---- parsing ----
 
-// Which of our records does this one question ask for? name is already
-// lowercase, as is everything in names.
-static uint8_t replyMaskForQuestion(const char* name, uint16_t qType,
+// If name is one we answer for, return our own copy of it, otherwise NULL.
+// name is already lowercase, as is everything in names. Returning our copy
+// rather than true/false lets the caller keep it after the packet is gone.
+static const char* findOurName(const char* name, const MdnsNames& names) {
+  if (strcmp(name, names.host) == 0)    return names.host;
+  if (strcmp(name, names.reverse) == 0) return names.reverse;
+
+  // The service names are only checked when there is a service: with none
+  // they are empty strings, and a query for the root name decodes to "" too.
+  if (!names.hasService) return NULL;
+  if (strcmp(name, names.instance) == 0) return names.instance;
+  if (strcmp(name, names.service) == 0)  return names.service;
+  if (strcmp(name, MDNS_META_QUERY) == 0) return MDNS_META_QUERY;
+  return NULL;
+}
+
+// Which of our records does this one question ask for? ours is the name as
+// returned by findOurName(), so plain pointer comparison tells them apart.
+static uint8_t replyMaskForQuestion(const char* ours, uint16_t qType,
                                     const MdnsNames& names) {
   bool    any  = (qType == MDNS_TYPE_ANY);
   uint8_t mask = 0;
 
-  // The service names are only checked when there is a service: with none
-  // they are empty strings, and a query for the root name decodes to "" too.
-  if (strcmp(name, names.host) == 0) {
-    if (any || qType == MDNS_TYPE_A)   mask |= MDNS_REPLY_A;
-  } else if (names.hasService && strcmp(name, names.instance) == 0) {
+  if (ours == names.host) {
+    // Any other type on our host name - usually AAAA - gets an NSEC saying
+    // the A record is all there is, so the asker does not sit out a timeout.
+    if (any || qType == MDNS_TYPE_A) mask |= MDNS_REPLY_A;
+    else                             mask |= MDNS_REPLY_NSEC;
+  } else if (ours == names.instance) {
     if (any || qType == MDNS_TYPE_SRV) mask |= MDNS_REPLY_SRV;
     if (any || qType == MDNS_TYPE_TXT) mask |= MDNS_REPLY_TXT;
-  } else if (names.hasService && strcmp(name, names.service) == 0) {
+  } else if (ours == names.service) {
     if (any || qType == MDNS_TYPE_PTR) mask |= MDNS_REPLY_PTR_SVC;
-  } else if (names.hasService && strcmp(name, MDNS_META_QUERY) == 0) {
-    if (any || qType == MDNS_TYPE_PTR) mask |= MDNS_REPLY_PTR_META;
-  } else if (strcmp(name, names.reverse) == 0) {
+  } else if (ours == names.reverse) {
     if (any || qType == MDNS_TYPE_PTR) mask |= MDNS_REPLY_PTR_REV;
+  } else if (ours != NULL) {   // the meta query
+    if (any || qType == MDNS_TYPE_PTR) mask |= MDNS_REPLY_PTR_META;
   }
   return mask;
 }
 
 bool mdnsParseQuery(const uint8_t* pkt, size_t len, const MdnsNames& names,
                     uint16_t srcPort, MdnsQueryPlan* plan) {
-  plan->replyMask = 0;
-  plan->unicast   = false;
-  plan->legacy    = false;
-  plan->queryId   = 0;
+  *plan = MdnsQueryPlan();   // every field back to its default
 
   if (len < MDNS_HEADER_LEN) return false;
 
@@ -214,7 +254,17 @@ bool mdnsParseQuery(const uint8_t* pkt, size_t len, const MdnsNames& names,
     uint16_t klass = (uint16_t)(qClass & 0x7FFF);
     if (klass != MDNS_CLASS_IN && klass != MDNS_CLASS_ANY) continue;
 
-    plan->replyMask |= replyMaskForQuestion(name, qType, names);
+    const char* ours = findOurName(name, names);
+    uint8_t     mask = replyMaskForQuestion(ours, qType, names);
+
+    // Keep the first question we can answer, to repeat back to a legacy
+    // resolver. The name kept is ours, not the packet's, so it outlives it.
+    if (mask != 0 && plan->echoName == NULL) {
+      plan->echoName  = ours;
+      plan->echoType  = qType;
+      plan->echoClass = klass;
+    }
+    plan->replyMask |= mask;
   }
 
   // The answer sections are deliberately not read - see the file header.
@@ -227,7 +277,36 @@ bool mdnsParseQuery(const uint8_t* pkt, size_t len, const MdnsNames& names,
   if (plan->replyMask & (MDNS_REPLY_SRV | MDNS_REPLY_TXT)) {
     plan->replyMask |= MDNS_REPLY_A;
   }
+  // Every A record travels with an NSEC saying there is no AAAA, so a client
+  // that asks for both does not wait on the one we will never send.
+  if (plan->replyMask & MDNS_REPLY_A) {
+    plan->replyMask |= MDNS_REPLY_NSEC;
+  }
   return true;
+}
+
+// ---- multicast rate limit ----
+
+uint8_t mdnsRateLimitFilter(const MdnsRateLimit& limit, uint8_t mask, uint32_t now) {
+  uint8_t allowed = 0;
+  for (uint8_t bit = 0; bit < 8; bit++) {
+    uint8_t flag = (uint8_t)(1u << bit);
+    if (!(mask & flag)) continue;
+
+    // Unsigned subtraction gives the right gap even when millis() wraps.
+    bool sentRecently = (limit.sentMask & flag) &&
+                        (uint32_t)(now - limit.lastSent[bit]) < MDNS_MULTICAST_GAP_MS;
+    if (!sentRecently) allowed |= flag;
+  }
+  return allowed;
+}
+
+void mdnsRateLimitRecord(MdnsRateLimit* limit, uint8_t mask, uint32_t now) {
+  for (uint8_t bit = 0; bit < 8; bit++) {
+    uint8_t flag = (uint8_t)(1u << bit);
+    if (mask & flag) limit->lastSent[bit] = now;
+  }
+  limit->sentMask |= mask;
 }
 
 // ---- building ----
@@ -302,6 +381,10 @@ size_t mdnsBuildResponse(uint8_t* out, size_t outSize, const MdnsQueryPlan& plan
   uint8_t mask = plan.replyMask;
   if (!names.hasService) mask &= (uint8_t)~MDNS_REPLY_SERVICE;
 
+  // NSEC is an mDNS convention; a plain DNS resolver asked one specific
+  // question and would not know what to make of it.
+  if (plan.legacy) mask &= (uint8_t)~MDNS_REPLY_NSEC;
+
   if (mask == 0 || outSize < MDNS_HEADER_LEN) return 0;
 
   // A legacy resolver gets short TTLs and no cache-flush bit (RFC 6762 6.7).
@@ -311,8 +394,18 @@ size_t mdnsBuildResponse(uint8_t* out, size_t outSize, const MdnsQueryPlan& plan
   uint16_t unique  = plan.legacy ? MDNS_CLASS_IN
                                  : (uint16_t)(MDNS_CLASS_IN | MDNS_CACHE_FLUSH);
 
-  size_t   pos     = MDNS_HEADER_LEN;
-  uint16_t answers = 0;
+  size_t   pos       = MDNS_HEADER_LEN;
+  uint16_t answers   = 0;
+  uint16_t questions = 0;
+
+  // A legacy resolver gets its question back ahead of the answers, as ordinary
+  // DNS does; some resolvers throw away an answer that leaves it out.
+  if (plan.legacy && plan.echoName != NULL) {
+    if (!writeName(out, outSize, &pos, plan.echoName))  return 0;
+    if (!writeU16(out, outSize, &pos, plan.echoType))   return 0;
+    if (!writeU16(out, outSize, &pos, plan.echoClass))  return 0;
+    questions = 1;
+  }
 
   // Service-type PTRs are shared - other devices publish the same service
   // type - so they never carry the cache-flush bit.
@@ -361,6 +454,22 @@ size_t mdnsBuildResponse(uint8_t* out, size_t outSize, const MdnsQueryPlan& plan
                         hostTtl, names.host)) return 0;
     answers++;
   }
+  if (mask & MDNS_REPLY_NSEC) {
+    // The restricted NSEC form from RFC 6762 section 6.1: the "next name" is
+    // our own name, followed by a type bitmap for window 0 listing the types
+    // that do exist. Types 0-7 sit in the first byte, most significant bit
+    // first, so type 1 (A) is 0x40.
+    uint8_t rdata[MDNS_RDATA_MAX];
+    size_t  rdLen = 0;
+    if (!writeName(rdata, sizeof(rdata), &rdLen, names.host)) return 0;
+    if (rdLen + 3 > sizeof(rdata)) return 0;
+    rdata[rdLen++] = 0x00;   // window block 0
+    rdata[rdLen++] = 0x01;   // bitmap is one byte long
+    rdata[rdLen++] = 0x40;   // only type 1, A
+    if (!writeRecord(out, outSize, &pos, names.host, MDNS_TYPE_NSEC,
+                     unique, hostTtl, rdata, (uint16_t)rdLen)) return 0;
+    answers++;
+  }
 
   if (answers == 0) return 0;
 
@@ -370,7 +479,7 @@ size_t mdnsBuildResponse(uint8_t* out, size_t outSize, const MdnsQueryPlan& plan
   size_t hdr = 0;
   writeU16(out, outSize, &hdr, plan.legacy ? plan.queryId : 0);
   writeU16(out, outSize, &hdr, 0x8400);   // response, authoritative
-  writeU16(out, outSize, &hdr, 0);        // no questions echoed back
+  writeU16(out, outSize, &hdr, questions);  // only ever a legacy echo
   writeU16(out, outSize, &hdr, answers);
   writeU16(out, outSize, &hdr, 0);        // no authority records
   writeU16(out, outSize, &hdr, 0);        // no additional records

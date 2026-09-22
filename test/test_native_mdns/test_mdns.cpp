@@ -108,6 +108,14 @@ static int walkAnswers(const uint8_t* pkt, size_t len, Rec* recs, int maxRecs) {
   int    want = (int)getU16(pkt, 6);
   size_t pos  = 12;
 
+  // Step over any questions - only a legacy answer repeats one.
+  for (int q = 0; q < (int)getU16(pkt, 4); q++) {
+    char   name[MDNS_MAX_NAME];
+    size_t next = 0;
+    if (!mdnsDecodeName(pkt, len, pos, name, sizeof(name), &next)) return -1;
+    pos = next + 4;
+  }
+
   if (want > maxRecs) return -1;
   for (int i = 0; i < want; i++) {
     size_t next = 0;
@@ -258,7 +266,7 @@ void test_query_for_our_host_asks_for_the_a_record(void) {
 
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, len, g_names, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
   TEST_ASSERT_FALSE(plan.unicast);
   TEST_ASSERT_FALSE(plan.legacy);
 }
@@ -269,7 +277,7 @@ void test_query_is_matched_case_insensitively(void) {
 
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, len, g_names, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
 }
 
 void test_query_for_another_host_asks_for_nothing(void) {
@@ -290,7 +298,7 @@ void test_service_query_pulls_in_srv_txt_and_a(void) {
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, len, g_names, 5353, &plan));
   TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_PTR_SVC | MDNS_REPLY_SRV |
-                          MDNS_REPLY_TXT | MDNS_REPLY_A, plan.replyMask);
+                          MDNS_REPLY_TXT | MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
 }
 
 void test_srv_query_pulls_in_the_a_record(void) {
@@ -299,7 +307,7 @@ void test_srv_query_pulls_in_the_a_record(void) {
 
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, len, g_names, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_SRV | MDNS_REPLY_A, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_SRV | MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
 }
 
 void test_txt_query_pulls_in_the_a_record(void) {
@@ -308,7 +316,7 @@ void test_txt_query_pulls_in_the_a_record(void) {
 
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, len, g_names, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_TXT | MDNS_REPLY_A, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_TXT | MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
 }
 
 void test_meta_query_enumerates_our_service_type(void) {
@@ -335,17 +343,18 @@ void test_any_query_for_the_host_asks_for_the_a_record(void) {
 
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, len, g_names, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
 }
 
-// Asking for the A record with a type we don't publish must stay silent.
-void test_wrong_type_for_our_host_asks_for_nothing(void) {
+// Asking our host name for a type we don't publish gets an NSEC saying the A
+// record is all there is (RFC 6762 section 6.1), not silence.
+void test_wrong_type_for_our_host_gets_an_nsec(void) {
   uint8_t pkt[128];
   size_t  len = buildQuery(pkt, "ourbrewbot-2924fa.local", MDNS_TYPE_SRV, 1);
 
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, len, g_names, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(0, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_NSEC, plan.replyMask);
 }
 
 void test_query_in_a_foreign_class_is_ignored(void) {
@@ -363,7 +372,7 @@ void test_unicast_bit_requests_a_direct_answer(void) {
 
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, len, g_names, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
   TEST_ASSERT_TRUE(plan.unicast);
   TEST_ASSERT_FALSE(plan.legacy);
 }
@@ -420,7 +429,7 @@ void test_answer_sections_are_never_read(void) {
 
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, len, g_names, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
 }
 
 // Two questions, the second truncated: the first must still be answered and
@@ -443,7 +452,7 @@ void test_a_truncated_second_question_does_not_lose_the_first(void) {
 
   MdnsQueryPlan plan;
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, pos, g_names, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
 }
 
 // ================================================================
@@ -573,7 +582,8 @@ void test_an_announcement_carries_every_published_record(void) {
   Rec     recs[16];
   int     count = walkAnswers(out, len, recs, 16);
 
-  TEST_ASSERT_EQUAL_INT(5, count);
+  TEST_ASSERT_EQUAL_INT(6, count);
+  TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_NSEC));
   TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_A));
   TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_SRV));
   TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_TXT));
@@ -621,7 +631,7 @@ void test_a_service_query_round_trips_into_a_complete_answer(void) {
 
   Rec recs[16];
   int count = walkAnswers(out, len, recs, 16);
-  TEST_ASSERT_EQUAL_INT(4, count);
+  TEST_ASSERT_EQUAL_INT(5, count);
   TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_PTR));
   TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_SRV));
   TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_TXT));
@@ -668,7 +678,7 @@ void test_host_only_ignores_service_and_meta_queries(void) {
 
   qlen = buildQuery(pkt, "ourbrewbot-2924fa.local", MDNS_TYPE_A, 1);
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, n, 5353, &plan));
-  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A, plan.replyMask);
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A | MDNS_REPLY_NSEC, plan.replyMask);
 }
 
 // With no service the instance name is "", and so is a query for the root
@@ -685,7 +695,7 @@ void test_host_only_root_query_asks_for_nothing(void) {
   TEST_ASSERT_EQUAL_UINT8(0, plan.replyMask);
 }
 
-void test_host_only_announcement_carries_only_the_a_record(void) {
+void test_host_only_announcement_carries_only_the_address_records(void) {
   MdnsNames n;
   mdnsBuildNames("ourbrewbot-2924fa", NULL, NULL, TEST_IP, &n);
 
@@ -693,8 +703,9 @@ void test_host_only_announcement_carries_only_the_a_record(void) {
   size_t  len = buildWith(out, sizeof(out), MDNS_REPLY_ALL, n, 0, g_txt);
   Rec     recs[8];
   int     count = walkAnswers(out, len, recs, 8);
-  TEST_ASSERT_EQUAL_INT(1, count);
-  TEST_ASSERT_EQUAL_UINT16(MDNS_TYPE_A, recs[0].type);
+  TEST_ASSERT_EQUAL_INT(2, count);
+  TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_A));
+  TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_NSEC));
 }
 
 void test_a_custom_service_type_is_answered_instead_of_http(void) {
@@ -774,11 +785,15 @@ void test_txt_add_refuses_an_entry_longer_than_the_whole_buffer(void) {
   TEST_ASSERT_EQUAL_UINT8(0, g_txt.len);
 }
 
-// The limits in MdnsPacket.h are chosen so the biggest possible announcement
-// still fits the responder's transmit buffer. If they are ever raised without
-// raising MDNS_PACKET_SIZE, the build returns 0 and the device would go
-// silent - this catches that on the host instead.
-void test_the_largest_announcement_fits_the_packet_buffer(void) {
+// The limits in MdnsPacket.h are chosen so the biggest possible response still
+// fits the responder's transmit buffer. If they are ever raised without
+// raising MDNS_TX_SIZE, the build returns 0 and the device silently stops
+// answering - this catches that on the host instead.
+//
+// The biggest response is not the announcement: one query can ask several
+// questions, so it can pull in the reverse PTR as well. The longest reverse
+// name comes from 255.255.255.255.
+void test_the_largest_response_fits_the_transmit_buffer(void) {
   char host[MDNS_MAX_HOST_LEN + 1];
   char service[MDNS_MAX_SERVICE_LEN + 1];
   memset(host, 'h', MDNS_MAX_HOST_LEN);
@@ -786,20 +801,232 @@ void test_the_largest_announcement_fits_the_packet_buffer(void) {
   memset(service, 's', MDNS_MAX_SERVICE_LEN);
   service[MDNS_MAX_SERVICE_LEN] = '\0';
 
+  const uint32_t longestIp = 0xFFFFFFFFu;   // 255.255.255.255
   MdnsNames n;
-  mdnsBuildNames(host, service, "tcp", TEST_IP, &n);
+  mdnsBuildNames(host, service, "tcp", longestIp, &n);
 
   char entry[64];
   memset(entry, 't', 63);
   entry[63] = '\0';
   TEST_ASSERT_TRUE(mdnsTxtAdd(&g_txt, entry));
 
-  uint8_t out[MDNS_PACKET_SIZE];
-  size_t  len = buildWith(out, sizeof(out), MDNS_REPLY_ALL, n, 65535, g_txt);
+  MdnsQueryPlan plan;
+  plan.replyMask = MDNS_REPLY_ALL | MDNS_REPLY_PTR_REV;
+  plan.unicast   = false;
+  plan.legacy    = false;
+  plan.queryId   = 0;
+
+  uint8_t out[MDNS_TX_SIZE];
+  size_t  len = mdnsBuildResponse(out, sizeof(out), plan, n, longestIp, 65535, g_txt);
   TEST_ASSERT_TRUE(len > 0);
 
   Rec recs[8];
-  TEST_ASSERT_EQUAL_INT(5, walkAnswers(out, len, recs, 8));
+  TEST_ASSERT_EQUAL_INT(7, walkAnswers(out, len, recs, 8));
+}
+
+// ================================================================
+// F. standards compliance: NSEC, legacy echo, rate limit, name rules
+// ================================================================
+
+// RFC 6762 section 6.1's restricted NSEC: our own name as the "next" name,
+// then a one-byte type bitmap for window 0 with only type 1 (A) set.
+void test_nsec_says_only_an_a_record_exists(void) {
+  uint8_t out[512];
+  size_t  len = buildFor(out, sizeof(out), MDNS_REPLY_NSEC);
+  Rec     recs[8];
+  int     count = walkAnswers(out, len, recs, 8);
+  TEST_ASSERT_EQUAL_INT(1, count);
+
+  const Rec* nsec = findRec(recs, count, MDNS_TYPE_NSEC);
+  TEST_ASSERT_NOT_NULL(nsec);
+  TEST_ASSERT_EQUAL_STRING("ourbrewbot-2924fa.local", nsec->name);
+  TEST_ASSERT_EQUAL_UINT16(0x8001, nsec->rrClass);
+  TEST_ASSERT_EQUAL_UINT32(120, nsec->ttl);
+
+  char   next[MDNS_MAX_NAME];
+  size_t after = 0;
+  size_t start = (size_t)(nsec->rdata - out);
+  TEST_ASSERT_TRUE(mdnsDecodeName(out, len, start, next, sizeof(next), &after));
+  TEST_ASSERT_EQUAL_STRING("ourbrewbot-2924fa.local", next);
+
+  const uint8_t bitmap[] = { 0x00, 0x01, 0x40 };
+  TEST_ASSERT_EQUAL_UINT32(start + nsec->rdLen, after + sizeof(bitmap));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(bitmap, out + after, sizeof(bitmap));
+}
+
+// The case NSEC exists for: a client asking for our IPv6 address. It gets a
+// definite "no" instead of waiting for a timeout.
+void test_aaaa_query_for_our_host_gets_only_an_nsec(void) {
+  uint8_t pkt[128];
+  size_t  qlen = buildQuery(pkt, "ourbrewbot-2924fa.local", MDNS_TYPE_AAAA, 1);
+
+  MdnsQueryPlan plan;
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, g_names, 5353, &plan));
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_NSEC, plan.replyMask);
+
+  uint8_t out[512];
+  size_t  len = mdnsBuildResponse(out, sizeof(out), plan, g_names, TEST_IP, 80, g_txt);
+  Rec     recs[8];
+  int     count = walkAnswers(out, len, recs, 8);
+  TEST_ASSERT_EQUAL_INT(1, count);
+  TEST_ASSERT_EQUAL_UINT16(MDNS_TYPE_NSEC, recs[0].type);
+}
+
+// RFC 6762 section 6: an ordinary mDNS response MUST NOT contain questions.
+void test_a_multicast_response_never_carries_a_question(void) {
+  uint8_t pkt[128];
+  size_t  qlen = buildQuery(pkt, "ourbrewbot-2924fa.local", MDNS_TYPE_A, 1);
+
+  MdnsQueryPlan plan;
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, g_names, 5353, &plan));
+
+  uint8_t out[512];
+  size_t  len = mdnsBuildResponse(out, sizeof(out), plan, g_names, TEST_IP, 80, g_txt);
+  TEST_ASSERT_TRUE(len > 12);
+  TEST_ASSERT_EQUAL_UINT16(0, getU16(out, 4));
+}
+
+// RFC 6762 section 6.7: a legacy answer MUST repeat the question. Ordinary DNS
+// resolvers match answers to questions and can drop one that leaves it out.
+void test_legacy_response_repeats_the_question(void) {
+  uint8_t pkt[128];
+  size_t  qlen = buildQuery(pkt, "OurBrewbot-2924FA.local", MDNS_TYPE_A, 1, 0xBEEF);
+
+  MdnsQueryPlan plan;
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, g_names, 49152, &plan));
+  TEST_ASSERT_TRUE(plan.legacy);
+
+  uint8_t out[512];
+  size_t  len = mdnsBuildResponse(out, sizeof(out), plan, g_names, TEST_IP, 80, g_txt);
+  TEST_ASSERT_TRUE(len > 12);
+  TEST_ASSERT_EQUAL_UINT16(0xBEEF, getU16(out, 0));
+  TEST_ASSERT_EQUAL_UINT16(1, getU16(out, 4));   // one question
+
+  char   name[MDNS_MAX_NAME];
+  size_t next = 0;
+  TEST_ASSERT_TRUE(mdnsDecodeName(out, len, 12, name, sizeof(name), &next));
+  TEST_ASSERT_EQUAL_STRING("ourbrewbot-2924fa.local", name);
+  TEST_ASSERT_EQUAL_UINT16(MDNS_TYPE_A, getU16(out, next));
+  TEST_ASSERT_EQUAL_UINT16(1, getU16(out, next + 2));
+
+  // The answer follows the question, and a legacy resolver gets no NSEC.
+  Rec recs[8];
+  int count = walkAnswers(out, len, recs, 8);
+  TEST_ASSERT_EQUAL_INT(1, count);
+  TEST_ASSERT_EQUAL_UINT16(MDNS_TYPE_A, recs[0].type);
+}
+
+// Two questions, the first for somebody else: the one repeated back is the one
+// we actually answer.
+void test_legacy_echo_is_the_first_question_we_can_answer(void) {
+  uint8_t pkt[128];
+  size_t  pos = 0;
+  pos = putU16(pkt, pos, 0x1234);
+  pos = putU16(pkt, pos, 0);
+  pos = putU16(pkt, pos, 2);      // two questions
+  pos = putU16(pkt, pos, 0);
+  pos = putU16(pkt, pos, 0);
+  pos = putU16(pkt, pos, 0);
+  pos = putName(pkt, pos, "somebody-else.local");
+  pos = putU16(pkt, pos, MDNS_TYPE_A);
+  pos = putU16(pkt, pos, 1);
+  pos = putName(pkt, pos, "ourbrewbot-2924fa.local");
+  pos = putU16(pkt, pos, MDNS_TYPE_A);
+  pos = putU16(pkt, pos, 1);
+
+  MdnsQueryPlan plan;
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, pos, g_names, 49152, &plan));
+  TEST_ASSERT_EQUAL_PTR(g_names.host, plan.echoName);
+  TEST_ASSERT_EQUAL_UINT16(MDNS_TYPE_A, plan.echoType);
+  TEST_ASSERT_EQUAL_UINT16(1, plan.echoClass);
+}
+
+// With NSEC withheld from legacy resolvers, an AAAA question has no answer we
+// could give, so nothing is sent - exactly as before NSEC was added.
+void test_legacy_aaaa_query_gets_no_answer(void) {
+  uint8_t pkt[128];
+  size_t  qlen = buildQuery(pkt, "ourbrewbot-2924fa.local", MDNS_TYPE_AAAA, 1, 0xBEEF);
+
+  MdnsQueryPlan plan;
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, g_names, 49152, &plan));
+
+  uint8_t out[512];
+  TEST_ASSERT_EQUAL_UINT32(0, mdnsBuildResponse(out, sizeof(out), plan, g_names,
+                                                TEST_IP, 80, g_txt));
+}
+
+// millis() is 0 straight after a reboot. A last-sent time of 0 must not be
+// mistaken for "sent just now", or the first announcement would be held back.
+void test_rate_limit_allows_a_record_never_sent_even_at_time_zero(void) {
+  MdnsRateLimit limit;
+  memset(&limit, 0, sizeof(limit));
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_ALL, mdnsRateLimitFilter(limit, MDNS_REPLY_ALL, 0));
+}
+
+void test_rate_limit_holds_a_record_back_for_one_second(void) {
+  MdnsRateLimit limit;
+  memset(&limit, 0, sizeof(limit));
+  mdnsRateLimitRecord(&limit, MDNS_REPLY_A, 5000);
+
+  TEST_ASSERT_EQUAL_UINT8(0, mdnsRateLimitFilter(limit, MDNS_REPLY_A, 5000));
+  TEST_ASSERT_EQUAL_UINT8(0, mdnsRateLimitFilter(limit, MDNS_REPLY_A, 5999));
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A, mdnsRateLimitFilter(limit, MDNS_REPLY_A, 6000));
+}
+
+void test_rate_limit_is_kept_per_record(void) {
+  MdnsRateLimit limit;
+  memset(&limit, 0, sizeof(limit));
+  mdnsRateLimitRecord(&limit, MDNS_REPLY_A, 1000);
+
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_SRV,
+                          mdnsRateLimitFilter(limit, MDNS_REPLY_A | MDNS_REPLY_SRV, 1500));
+}
+
+// millis() wraps after about 49.7 days; a record sent just before the wrap is
+// still held back just after it, and released a full second later.
+void test_rate_limit_survives_millis_wrapping(void) {
+  MdnsRateLimit limit;
+  memset(&limit, 0, sizeof(limit));
+  const uint32_t sentAt = 0xFFFFFE00u;
+  mdnsRateLimitRecord(&limit, MDNS_REPLY_A, sentAt);
+
+  TEST_ASSERT_EQUAL_UINT8(0, mdnsRateLimitFilter(limit, MDNS_REPLY_A, 0x00000100u));
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A,
+                          mdnsRateLimitFilter(limit, MDNS_REPLY_A, sentAt + 1000u));
+}
+
+void test_valid_host_labels_are_accepted(void) {
+  TEST_ASSERT_TRUE(mdnsIsValidHostLabel("ourbrewbot-2924fa"));
+  TEST_ASSERT_TRUE(mdnsIsValidHostLabel("a"));
+  TEST_ASSERT_TRUE(mdnsIsValidHostLabel("2924fa"));
+  TEST_ASSERT_TRUE(mdnsIsValidHostLabel("abcdefghijklmnopqrstuvwxyz012345"));   // 32
+}
+
+void test_invalid_host_labels_are_refused(void) {
+  TEST_ASSERT_FALSE(mdnsIsValidHostLabel(""));
+  TEST_ASSERT_FALSE(mdnsIsValidHostLabel("my.device"));   // would become two labels
+  TEST_ASSERT_FALSE(mdnsIsValidHostLabel("-device"));
+  TEST_ASSERT_FALSE(mdnsIsValidHostLabel("device-"));
+  TEST_ASSERT_FALSE(mdnsIsValidHostLabel("my device"));
+  TEST_ASSERT_FALSE(mdnsIsValidHostLabel("my_device"));
+  TEST_ASSERT_FALSE(mdnsIsValidHostLabel("abcdefghijklmnopqrstuvwxyz0123456"));  // 33
+}
+
+void test_valid_service_names_are_accepted(void) {
+  TEST_ASSERT_TRUE(mdnsIsValidServiceName("http"));
+  TEST_ASSERT_TRUE(mdnsIsValidServiceName("ipp"));
+  TEST_ASSERT_TRUE(mdnsIsValidServiceName("my-svc2"));
+  TEST_ASSERT_TRUE(mdnsIsValidServiceName("abcdefghijklmno"));   // 15
+}
+
+void test_invalid_service_names_are_refused(void) {
+  TEST_ASSERT_FALSE(mdnsIsValidServiceName(""));
+  TEST_ASSERT_FALSE(mdnsIsValidServiceName("_http"));    // underscore is added for you
+  TEST_ASSERT_FALSE(mdnsIsValidServiceName("-http"));
+  TEST_ASSERT_FALSE(mdnsIsValidServiceName("http-"));
+  TEST_ASSERT_FALSE(mdnsIsValidServiceName("ht--tp"));
+  TEST_ASSERT_FALSE(mdnsIsValidServiceName("1234"));     // needs a letter
+  TEST_ASSERT_FALSE(mdnsIsValidServiceName("abcdefghijklmnop"));   // 16
 }
 
 int main(int, char**) {
@@ -830,7 +1057,7 @@ int main(int, char**) {
   RUN_TEST(test_meta_query_enumerates_our_service_type);
   RUN_TEST(test_reverse_query_asks_for_the_reverse_ptr);
   RUN_TEST(test_any_query_for_the_host_asks_for_the_a_record);
-  RUN_TEST(test_wrong_type_for_our_host_asks_for_nothing);
+  RUN_TEST(test_wrong_type_for_our_host_gets_an_nsec);
   RUN_TEST(test_query_in_a_foreign_class_is_ignored);
   RUN_TEST(test_unicast_bit_requests_a_direct_answer);
   RUN_TEST(test_query_from_a_legacy_port_is_answered_directly);
@@ -860,7 +1087,7 @@ int main(int, char**) {
   RUN_TEST(test_host_only_names_have_no_service);
   RUN_TEST(test_host_only_ignores_service_and_meta_queries);
   RUN_TEST(test_host_only_root_query_asks_for_nothing);
-  RUN_TEST(test_host_only_announcement_carries_only_the_a_record);
+  RUN_TEST(test_host_only_announcement_carries_only_the_address_records);
   RUN_TEST(test_a_custom_service_type_is_answered_instead_of_http);
   RUN_TEST(test_service_names_are_lowercased);
   RUN_TEST(test_srv_carries_a_custom_port);
@@ -868,7 +1095,23 @@ int main(int, char**) {
   RUN_TEST(test_txt_add_rejects_an_empty_entry);
   RUN_TEST(test_txt_add_refuses_an_entry_that_does_not_fit);
   RUN_TEST(test_txt_add_refuses_an_entry_longer_than_the_whole_buffer);
-  RUN_TEST(test_the_largest_announcement_fits_the_packet_buffer);
+  RUN_TEST(test_the_largest_response_fits_the_transmit_buffer);
+
+  // F. standards compliance: NSEC, legacy echo, rate limit, name rules
+  RUN_TEST(test_nsec_says_only_an_a_record_exists);
+  RUN_TEST(test_aaaa_query_for_our_host_gets_only_an_nsec);
+  RUN_TEST(test_a_multicast_response_never_carries_a_question);
+  RUN_TEST(test_legacy_response_repeats_the_question);
+  RUN_TEST(test_legacy_echo_is_the_first_question_we_can_answer);
+  RUN_TEST(test_legacy_aaaa_query_gets_no_answer);
+  RUN_TEST(test_rate_limit_allows_a_record_never_sent_even_at_time_zero);
+  RUN_TEST(test_rate_limit_holds_a_record_back_for_one_second);
+  RUN_TEST(test_rate_limit_is_kept_per_record);
+  RUN_TEST(test_rate_limit_survives_millis_wrapping);
+  RUN_TEST(test_valid_host_labels_are_accepted);
+  RUN_TEST(test_invalid_host_labels_are_refused);
+  RUN_TEST(test_valid_service_names_are_accepted);
+  RUN_TEST(test_invalid_service_names_are_refused);
 
   return UNITY_END();
 }
