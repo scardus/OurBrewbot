@@ -1,7 +1,0 @@
-mdnsSetLogger	KEYWORD2
-mdnsBegin	KEYWORD2
-mdnsAddService	KEYWORD2
-mdnsAddTxt	KEYWORD2
-mdnsLoop	KEYWORD2
-mdnsEnd	KEYWORD2
-MdnsLogger	KEYWORD1
