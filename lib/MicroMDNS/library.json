@@ -1,0 +1,13 @@
+{
+  "name": "MicroMDNS",
+  "version": "0.1.0",
+  "description": "Minimal heap-free mDNS responder for the ESP8266. Answers for one host name and one DNS-SD service from the main loop, out of fixed buffers.",
+  "keywords": "mdns, dns-sd, bonjour, zeroconf, esp8266",
+  "authors": {
+    "name": "Sean Cardus"
+  },
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "espressif8266",
+  "headers": "MicroMDNS.h"
+}

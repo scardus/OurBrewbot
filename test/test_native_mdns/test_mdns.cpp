@@ -1,5 +1,6 @@
-// Native (host) tests for the mDNS packet layer in OurBrewbot/MdnsPacket.cpp:
-// mdnsBuildNames(), mdnsDecodeName(), mdnsParseQuery() and
+// Native (host) tests for the MicroMDNS packet layer in
+// lib/MicroMDNS/src/MdnsPacket.cpp:
+// mdnsBuildNames(), mdnsTxtAdd(), mdnsDecodeName(), mdnsParseQuery() and
 // mdnsBuildResponse().
 //
 // MdnsPacket.cpp is #included directly (not linked) so the real, unmodified
@@ -23,17 +24,19 @@
 #include <cstring>
 #include <cstdio>
 
-#include "../../OurBrewbot/MdnsPacket.cpp"
+#include "../../lib/MicroMDNS/src/MdnsPacket.cpp"
 
 // ---- fixture ----
 
 static MdnsNames g_names;
+static MdnsTxt   g_txt;
 
 // 192.168.0.207, in the host order this module uses (first octet = MSB).
 #define TEST_IP  0xC0A800CFu
 
 void setUp(void) {
-  mdnsBuildNames("ourbrewbot-2924fa", TEST_IP, &g_names);
+  mdnsBuildNames("ourbrewbot-2924fa", "http", "tcp", TEST_IP, &g_names);
+  memset(&g_txt, 0, sizeof(g_txt));
 }
 
 void tearDown(void) {}
@@ -136,7 +139,7 @@ static size_t buildFor(uint8_t* out, size_t outSize, uint8_t mask,
   plan.unicast   = legacy;
   plan.legacy    = legacy;
   plan.queryId   = queryId;
-  return mdnsBuildResponse(out, outSize, plan, g_names, TEST_IP, 80);
+  return mdnsBuildResponse(out, outSize, plan, g_names, TEST_IP, 80, g_txt);
 }
 
 // ================================================================
@@ -157,7 +160,7 @@ void test_reverse_name_reverses_the_octets(void) {
 
 void test_names_are_lowercased(void) {
   MdnsNames n;
-  mdnsBuildNames("OurBrewBot-2924FA", TEST_IP, &n);
+  mdnsBuildNames("OurBrewBot-2924FA", "http", "tcp", TEST_IP, &n);
   TEST_ASSERT_EQUAL_STRING("ourbrewbot-2924fa.local", n.host);
   TEST_ASSERT_EQUAL_STRING("ourbrewbot-2924fa._http._tcp.local", n.instance);
 }
@@ -612,7 +615,8 @@ void test_a_service_query_round_trips_into_a_complete_answer(void) {
   TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, g_names, 5353, &plan));
 
   uint8_t out[512];
-  size_t  len = mdnsBuildResponse(out, sizeof(out), plan, g_names, TEST_IP, 80);
+  size_t  len = mdnsBuildResponse(out, sizeof(out), plan, g_names, TEST_IP, 80,
+                                    g_txt);
   TEST_ASSERT_TRUE(len > 12);
 
   Rec recs[16];
@@ -622,6 +626,180 @@ void test_a_service_query_round_trips_into_a_complete_answer(void) {
   TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_SRV));
   TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_TXT));
   TEST_ASSERT_NOT_NULL(findRec(recs, count, MDNS_TYPE_A));
+}
+
+// ================================================================
+// E. library configuration: host only, custom service, TXT, sizes
+// ================================================================
+
+// Build a response from any names/port/TXT, not just the fixture's.
+static size_t buildWith(uint8_t* out, size_t outSize, uint8_t mask,
+                        const MdnsNames& names, uint16_t port, const MdnsTxt& txt) {
+  MdnsQueryPlan plan;
+  plan.replyMask = mask;
+  plan.unicast   = false;
+  plan.legacy    = false;
+  plan.queryId   = 0;
+  return mdnsBuildResponse(out, outSize, plan, names, TEST_IP, port, txt);
+}
+
+void test_host_only_names_have_no_service(void) {
+  MdnsNames n;
+  mdnsBuildNames("ourbrewbot-2924fa", NULL, NULL, TEST_IP, &n);
+  TEST_ASSERT_FALSE(n.hasService);
+  TEST_ASSERT_EQUAL_STRING("ourbrewbot-2924fa.local", n.host);
+  TEST_ASSERT_EQUAL_STRING("", n.service);
+  TEST_ASSERT_EQUAL_STRING("", n.instance);
+}
+
+void test_host_only_ignores_service_and_meta_queries(void) {
+  MdnsNames n;
+  mdnsBuildNames("ourbrewbot-2924fa", NULL, NULL, TEST_IP, &n);
+
+  uint8_t       pkt[128];
+  MdnsQueryPlan plan;
+  size_t        qlen = buildQuery(pkt, "_http._tcp.local", MDNS_TYPE_PTR, 1);
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, n, 5353, &plan));
+  TEST_ASSERT_EQUAL_UINT8(0, plan.replyMask);
+
+  qlen = buildQuery(pkt, "_services._dns-sd._udp.local", MDNS_TYPE_PTR, 1);
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, n, 5353, &plan));
+  TEST_ASSERT_EQUAL_UINT8(0, plan.replyMask);
+
+  qlen = buildQuery(pkt, "ourbrewbot-2924fa.local", MDNS_TYPE_A, 1);
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, n, 5353, &plan));
+  TEST_ASSERT_EQUAL_UINT8(MDNS_REPLY_A, plan.replyMask);
+}
+
+// With no service the instance name is "", and so is a query for the root
+// name. Without the hasService check that query would match and we would
+// answer with SRV/TXT records for a service that does not exist.
+void test_host_only_root_query_asks_for_nothing(void) {
+  MdnsNames n;
+  mdnsBuildNames("ourbrewbot-2924fa", NULL, NULL, TEST_IP, &n);
+
+  uint8_t       pkt[64];
+  MdnsQueryPlan plan;
+  size_t        qlen = buildQuery(pkt, "", MDNS_TYPE_ANY, 1);
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, n, 5353, &plan));
+  TEST_ASSERT_EQUAL_UINT8(0, plan.replyMask);
+}
+
+void test_host_only_announcement_carries_only_the_a_record(void) {
+  MdnsNames n;
+  mdnsBuildNames("ourbrewbot-2924fa", NULL, NULL, TEST_IP, &n);
+
+  uint8_t out[512];
+  size_t  len = buildWith(out, sizeof(out), MDNS_REPLY_ALL, n, 0, g_txt);
+  Rec     recs[8];
+  int     count = walkAnswers(out, len, recs, 8);
+  TEST_ASSERT_EQUAL_INT(1, count);
+  TEST_ASSERT_EQUAL_UINT16(MDNS_TYPE_A, recs[0].type);
+}
+
+void test_a_custom_service_type_is_answered_instead_of_http(void) {
+  MdnsNames n;
+  mdnsBuildNames("printer-01", "ipp", "tcp", TEST_IP, &n);
+  TEST_ASSERT_EQUAL_STRING("_ipp._tcp.local", n.service);
+  TEST_ASSERT_EQUAL_STRING("printer-01._ipp._tcp.local", n.instance);
+
+  uint8_t       pkt[128];
+  MdnsQueryPlan plan;
+  size_t        qlen = buildQuery(pkt, "_ipp._tcp.local", MDNS_TYPE_PTR, 1);
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, n, 5353, &plan));
+  TEST_ASSERT_TRUE(plan.replyMask & MDNS_REPLY_PTR_SVC);
+
+  qlen = buildQuery(pkt, "_http._tcp.local", MDNS_TYPE_PTR, 1);
+  TEST_ASSERT_TRUE(mdnsParseQuery(pkt, qlen, n, 5353, &plan));
+  TEST_ASSERT_EQUAL_UINT8(0, plan.replyMask);
+}
+
+void test_service_names_are_lowercased(void) {
+  MdnsNames n;
+  mdnsBuildNames("ourbrewbot-2924fa", "HTTP", "tcp", TEST_IP, &n);
+  TEST_ASSERT_EQUAL_STRING("_http._tcp.local", n.service);
+  TEST_ASSERT_EQUAL_STRING("ourbrewbot-2924fa._http._tcp.local", n.instance);
+}
+
+void test_srv_carries_a_custom_port(void) {
+  uint8_t out[512];
+  size_t  len = buildWith(out, sizeof(out), MDNS_REPLY_SRV, g_names, 8080, g_txt);
+  Rec     recs[8];
+  int     count = walkAnswers(out, len, recs, 8);
+
+  const Rec* srv = findRec(recs, count, MDNS_TYPE_SRV);
+  TEST_ASSERT_NOT_NULL(srv);
+  TEST_ASSERT_EQUAL_UINT16(8080, getU16(srv->rdata, 4));
+}
+
+void test_txt_entries_are_sent_length_prefixed(void) {
+  TEST_ASSERT_TRUE(mdnsTxtAdd(&g_txt, "path=/"));
+  TEST_ASSERT_TRUE(mdnsTxtAdd(&g_txt, "v=1"));
+
+  uint8_t out[512];
+  size_t  len = buildFor(out, sizeof(out), MDNS_REPLY_TXT);
+  Rec     recs[8];
+  int     count = walkAnswers(out, len, recs, 8);
+
+  const Rec* txt = findRec(recs, count, MDNS_TYPE_TXT);
+  TEST_ASSERT_NOT_NULL(txt);
+  const uint8_t expected[] = { 6, 'p', 'a', 't', 'h', '=', '/', 3, 'v', '=', '1' };
+  TEST_ASSERT_EQUAL_UINT16(sizeof(expected), txt->rdLen);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, txt->rdata, sizeof(expected));
+}
+
+void test_txt_add_rejects_an_empty_entry(void) {
+  TEST_ASSERT_FALSE(mdnsTxtAdd(&g_txt, ""));
+  TEST_ASSERT_EQUAL_UINT8(0, g_txt.len);
+}
+
+// A 63-character entry takes all 64 bytes; the next one must be refused and
+// must not leave half an entry behind.
+void test_txt_add_refuses_an_entry_that_does_not_fit(void) {
+  char entry[64];
+  memset(entry, 'a', 63);
+  entry[63] = '\0';
+  TEST_ASSERT_TRUE(mdnsTxtAdd(&g_txt, entry));
+  TEST_ASSERT_EQUAL_UINT8(MDNS_MAX_TXT_LEN, g_txt.len);
+
+  TEST_ASSERT_FALSE(mdnsTxtAdd(&g_txt, "b"));
+  TEST_ASSERT_EQUAL_UINT8(MDNS_MAX_TXT_LEN, g_txt.len);
+}
+
+void test_txt_add_refuses_an_entry_longer_than_the_whole_buffer(void) {
+  char entry[65];
+  memset(entry, 'a', 64);
+  entry[64] = '\0';
+  TEST_ASSERT_FALSE(mdnsTxtAdd(&g_txt, entry));
+  TEST_ASSERT_EQUAL_UINT8(0, g_txt.len);
+}
+
+// The limits in MdnsPacket.h are chosen so the biggest possible announcement
+// still fits the responder's transmit buffer. If they are ever raised without
+// raising MDNS_PACKET_SIZE, the build returns 0 and the device would go
+// silent - this catches that on the host instead.
+void test_the_largest_announcement_fits_the_packet_buffer(void) {
+  char host[MDNS_MAX_HOST_LEN + 1];
+  char service[MDNS_MAX_SERVICE_LEN + 1];
+  memset(host, 'h', MDNS_MAX_HOST_LEN);
+  host[MDNS_MAX_HOST_LEN] = '\0';
+  memset(service, 's', MDNS_MAX_SERVICE_LEN);
+  service[MDNS_MAX_SERVICE_LEN] = '\0';
+
+  MdnsNames n;
+  mdnsBuildNames(host, service, "tcp", TEST_IP, &n);
+
+  char entry[64];
+  memset(entry, 't', 63);
+  entry[63] = '\0';
+  TEST_ASSERT_TRUE(mdnsTxtAdd(&g_txt, entry));
+
+  uint8_t out[MDNS_PACKET_SIZE];
+  size_t  len = buildWith(out, sizeof(out), MDNS_REPLY_ALL, n, 65535, g_txt);
+  TEST_ASSERT_TRUE(len > 0);
+
+  Rec recs[8];
+  TEST_ASSERT_EQUAL_INT(5, walkAnswers(out, len, recs, 8));
 }
 
 int main(int, char**) {
@@ -677,6 +855,20 @@ int main(int, char**) {
   RUN_TEST(test_the_answer_count_matches_the_records_written);
   RUN_TEST(test_legacy_response_echoes_the_id_and_drops_the_cache_flush_bit);
   RUN_TEST(test_a_service_query_round_trips_into_a_complete_answer);
+
+  // E. library configuration
+  RUN_TEST(test_host_only_names_have_no_service);
+  RUN_TEST(test_host_only_ignores_service_and_meta_queries);
+  RUN_TEST(test_host_only_root_query_asks_for_nothing);
+  RUN_TEST(test_host_only_announcement_carries_only_the_a_record);
+  RUN_TEST(test_a_custom_service_type_is_answered_instead_of_http);
+  RUN_TEST(test_service_names_are_lowercased);
+  RUN_TEST(test_srv_carries_a_custom_port);
+  RUN_TEST(test_txt_entries_are_sent_length_prefixed);
+  RUN_TEST(test_txt_add_rejects_an_empty_entry);
+  RUN_TEST(test_txt_add_refuses_an_entry_that_does_not_fit);
+  RUN_TEST(test_txt_add_refuses_an_entry_longer_than_the_whole_buffer);
+  RUN_TEST(test_the_largest_announcement_fits_the_packet_buffer);
 
   return UNITY_END();
 }

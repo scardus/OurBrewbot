@@ -103,15 +103,20 @@ static void toLowerInPlace(char* s) {
   for (; *s; s++) *s = (char)tolower((unsigned char)*s);
 }
 
-// The three functions below are called from Mdns.cpp (and the native
-// tests); cppcheck does not follow either caller across files.
-// cppcheck-suppress unusedFunction
-void mdnsBuildNames(const char* hostname, uint32_t ipv4, MdnsNames* names) {
+void mdnsBuildNames(const char* hostname, const char* service, const char* proto,
+                    uint32_t ipv4, MdnsNames* names) {
   memset(names, 0, sizeof(*names));
 
-  snprintf(names->host,     sizeof(names->host),     "%s.local", hostname);
-  snprintf(names->service,  sizeof(names->service),  "_http._tcp.local");
-  snprintf(names->instance, sizeof(names->instance), "%s._http._tcp.local", hostname);
+  snprintf(names->host, sizeof(names->host), "%s.local", hostname);
+
+  // With no service the service and instance names stay empty, and
+  // hasService keeps them from ever being matched against a query.
+  if (service != NULL && proto != NULL) {
+    snprintf(names->service,  sizeof(names->service),  "_%s._%s.local", service, proto);
+    snprintf(names->instance, sizeof(names->instance), "%s._%s._%s.local",
+             hostname, service, proto);
+    names->hasService = true;
+  }
 
   // in-addr.arpa lists the octets backwards: 192.168.0.207 becomes
   // 207.0.168.192.in-addr.arpa.
@@ -122,7 +127,21 @@ void mdnsBuildNames(const char* hostname, uint32_t ipv4, MdnsNames* names) {
   // Names decoded out of a packet are lowercased, so lowercase ours too and
   // every comparison stays a plain strcmp.
   toLowerInPlace(names->host);
+  toLowerInPlace(names->service);
   toLowerInPlace(names->instance);
+}
+
+bool mdnsTxtAdd(MdnsTxt* txt, const char* entry) {
+  size_t entryLen = strlen(entry);
+
+  // Each entry goes on the wire as one length byte and then the text.
+  if (entryLen == 0) return false;
+  if (txt->len + 1 + entryLen > sizeof(txt->data)) return false;
+
+  txt->data[txt->len] = (uint8_t)entryLen;
+  memcpy(txt->data + txt->len + 1, entry, entryLen);
+  txt->len = (uint8_t)(txt->len + 1 + entryLen);
+  return true;
 }
 
 // ---- parsing ----
@@ -134,14 +153,16 @@ static uint8_t replyMaskForQuestion(const char* name, uint16_t qType,
   bool    any  = (qType == MDNS_TYPE_ANY);
   uint8_t mask = 0;
 
+  // The service names are only checked when there is a service: with none
+  // they are empty strings, and a query for the root name decodes to "" too.
   if (strcmp(name, names.host) == 0) {
     if (any || qType == MDNS_TYPE_A)   mask |= MDNS_REPLY_A;
-  } else if (strcmp(name, names.instance) == 0) {
+  } else if (names.hasService && strcmp(name, names.instance) == 0) {
     if (any || qType == MDNS_TYPE_SRV) mask |= MDNS_REPLY_SRV;
     if (any || qType == MDNS_TYPE_TXT) mask |= MDNS_REPLY_TXT;
-  } else if (strcmp(name, names.service) == 0) {
+  } else if (names.hasService && strcmp(name, names.service) == 0) {
     if (any || qType == MDNS_TYPE_PTR) mask |= MDNS_REPLY_PTR_SVC;
-  } else if (strcmp(name, MDNS_META_QUERY) == 0) {
+  } else if (names.hasService && strcmp(name, MDNS_META_QUERY) == 0) {
     if (any || qType == MDNS_TYPE_PTR) mask |= MDNS_REPLY_PTR_META;
   } else if (strcmp(name, names.reverse) == 0) {
     if (any || qType == MDNS_TYPE_PTR) mask |= MDNS_REPLY_PTR_REV;
@@ -149,7 +170,6 @@ static uint8_t replyMaskForQuestion(const char* name, uint16_t qType,
   return mask;
 }
 
-// cppcheck-suppress unusedFunction
 bool mdnsParseQuery(const uint8_t* pkt, size_t len, const MdnsNames& names,
                     uint16_t srcPort, MdnsQueryPlan* plan) {
   plan->replyMask = 0;
@@ -274,10 +294,15 @@ static bool writePtrRecord(uint8_t* out, size_t outSize, size_t* pos,
                      rdata, (uint16_t)rdLen);
 }
 
-// cppcheck-suppress unusedFunction
 size_t mdnsBuildResponse(uint8_t* out, size_t outSize, const MdnsQueryPlan& plan,
-                         const MdnsNames& names, uint32_t ipv4, uint16_t httpPort) {
-  if (plan.replyMask == 0 || outSize < MDNS_HEADER_LEN) return 0;
+                         const MdnsNames& names, uint32_t ipv4, uint16_t port,
+                         const MdnsTxt& txt) {
+  // An announcement asks for MDNS_REPLY_ALL whether or not there is a service,
+  // so drop the service records here rather than at every caller.
+  uint8_t mask = plan.replyMask;
+  if (!names.hasService) mask &= (uint8_t)~MDNS_REPLY_SERVICE;
+
+  if (mask == 0 || outSize < MDNS_HEADER_LEN) return 0;
 
   // A legacy resolver gets short TTLs and no cache-flush bit (RFC 6762 6.7).
   uint32_t hostTtl = plan.legacy ? MDNS_LEGACY_TTL : MDNS_HOST_TTL;
@@ -289,38 +314,40 @@ size_t mdnsBuildResponse(uint8_t* out, size_t outSize, const MdnsQueryPlan& plan
   size_t   pos     = MDNS_HEADER_LEN;
   uint16_t answers = 0;
 
-  // Service-type PTRs are shared - other devices publish _http._tcp too - so
-  // they never carry the cache-flush bit.
-  if (plan.replyMask & MDNS_REPLY_PTR_SVC) {
+  // Service-type PTRs are shared - other devices publish the same service
+  // type - so they never carry the cache-flush bit.
+  if (mask & MDNS_REPLY_PTR_SVC) {
     if (!writePtrRecord(out, outSize, &pos, names.service, MDNS_CLASS_IN,
                         svcTtl, names.instance)) return 0;
     answers++;
   }
-  if (plan.replyMask & MDNS_REPLY_PTR_META) {
+  if (mask & MDNS_REPLY_PTR_META) {
     if (!writePtrRecord(out, outSize, &pos, MDNS_META_QUERY, MDNS_CLASS_IN,
                         svcTtl, names.service)) return 0;
     answers++;
   }
-  if (plan.replyMask & MDNS_REPLY_SRV) {
+  if (mask & MDNS_REPLY_SRV) {
     uint8_t rdata[MDNS_RDATA_MAX];
     size_t  rdLen = 0;
     if (!writeU16(rdata, sizeof(rdata), &rdLen, 0))            return 0;  // priority
     if (!writeU16(rdata, sizeof(rdata), &rdLen, 0))            return 0;  // weight
-    if (!writeU16(rdata, sizeof(rdata), &rdLen, httpPort))     return 0;
+    if (!writeU16(rdata, sizeof(rdata), &rdLen, port))         return 0;
     if (!writeName(rdata, sizeof(rdata), &rdLen, names.host))  return 0;
     if (!writeRecord(out, outSize, &pos, names.instance, MDNS_TYPE_SRV,
                      unique, hostTtl, rdata, (uint16_t)rdLen)) return 0;
     answers++;
   }
-  if (plan.replyMask & MDNS_REPLY_TXT) {
+  if (mask & MDNS_REPLY_TXT) {
     // DNS-SD wants a TXT even when there is nothing to say; the empty form is
     // a single zero byte (RFC 6763 6.1), not a zero-length record.
     const uint8_t empty[1] = { 0 };
+    const uint8_t* rdata   = (txt.len > 0) ? txt.data : empty;
+    uint16_t       rdLen   = (txt.len > 0) ? txt.len  : (uint16_t)sizeof(empty);
     if (!writeRecord(out, outSize, &pos, names.instance, MDNS_TYPE_TXT,
-                     unique, hostTtl, empty, sizeof(empty))) return 0;
+                     unique, hostTtl, rdata, rdLen)) return 0;
     answers++;
   }
-  if (plan.replyMask & MDNS_REPLY_A) {
+  if (mask & MDNS_REPLY_A) {
     const uint8_t rdata[4] = {
       (uint8_t)(ipv4 >> 24), (uint8_t)(ipv4 >> 16),
       (uint8_t)(ipv4 >> 8),  (uint8_t)(ipv4 & 0xFF)
@@ -329,7 +356,7 @@ size_t mdnsBuildResponse(uint8_t* out, size_t outSize, const MdnsQueryPlan& plan
                      unique, hostTtl, rdata, sizeof(rdata))) return 0;
     answers++;
   }
-  if (plan.replyMask & MDNS_REPLY_PTR_REV) {
+  if (mask & MDNS_REPLY_PTR_REV) {
     if (!writePtrRecord(out, outSize, &pos, names.reverse, unique,
                         hostTtl, names.host)) return 0;
     answers++;

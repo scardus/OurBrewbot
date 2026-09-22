@@ -40,7 +40,7 @@
 #include "Mqtt.h"
 #include "WebAPI.h"
 #include "Crash.h"
-#include "Mdns.h"
+#include <MicroMDNS.h>
 
 // ============================================================
 // TIMING CONSTANTS (milliseconds)
@@ -203,7 +203,7 @@ void loop() {
   checkpoint(CP_WEB);          g_webServer.handleClient();
   checkpoint(CP_BLE);          checkBLESniffTimeout();
   checkpoint(CP_TILT);         serviceTilt();   // drain any in-flight BLE scan every pass
-  // mDNS runs entirely from here now (see Mdns.h). The heap gate and
+  // mDNS runs entirely from here now (see MicroMDNS.h). The heap gate and
   // ESP.wdtFeed() that used to wrap this call were both dead weight: the old
   // library did its parsing in the WiFi stack's receive callback, not in the
   // call we were guarding, and ESP.wdtFeed() only feeds the *software*
@@ -359,6 +359,12 @@ static const char WM_PORTAL_CSS[] PROGMEM =
     "a{color:#e0e0e0}.q a{color:#fff}"
     "</style>";
 
+// MicroMDNS hands over finished lines with no prefix; tag them so they read
+// like every other subsystem in the syslog.
+static void mdnsLog(const char* message) {
+  logMsg("[MDNS] %s", message);
+}
+
 void setupWiFi() {
   WiFiManager wifiManager;
   wifiManager.setConnectTimeout(20);
@@ -395,7 +401,9 @@ void setupWiFi() {
   if (g_globalConfig.mdnsEnabled) {
     String mdnsName = "ourbrewbot-" + String(ESP.getChipId(), HEX);
     mdnsName.toLowerCase();
-    mdnsBegin(mdnsName.c_str(), 80);
+    mdnsSetLogger(mdnsLog);
+    mdnsBegin(mdnsName.c_str());
+    mdnsAddService("http", "tcp", 80);
   } else {
     logMsg("[MDNS] Disabled");
   }

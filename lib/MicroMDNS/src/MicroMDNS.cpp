@@ -1,16 +1,16 @@
 /*
- * Mdns.cpp — minimal mDNS responder: socket, scheduling, and the loop hook
+ * MicroMDNS.cpp — minimal mDNS responder: socket, scheduling, and the loop hook
  *
- * See Mdns.h for why this replaces ESP8266mDNS. All packet decoding and
+ * See MicroMDNS.h for why this replaces ESP8266mDNS. All packet decoding and
  * encoding lives in MdnsPacket.cpp so it can be unit tested on the host; this
  * file is only the plumbing around it.
  */
 
-#include "Mdns.h"
+#include "MicroMDNS.h"
 #include "MdnsPacket.h"
-#include "Log.h"
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
+#include <stdarg.h>
 
 // The mDNS group address and port, fixed by RFC 6762. Responses go out with a
 // hop limit of 255 rather than the usual 1: RFC 6762 section 11 asks for it,
@@ -37,17 +37,35 @@ static const IPAddress MDNS_GROUP(224, 0, 0, 251);
 // heap. A query longer than the buffer is read as far as it fits, which is
 // safe because the questions come first and compression pointers may only
 // point backwards into bytes we already have.
-static uint8_t s_rx[512];
-static uint8_t s_tx[512];
+static uint8_t s_rx[MDNS_PACKET_SIZE];
+static uint8_t s_tx[MDNS_PACKET_SIZE];
 
-static WiFiUDP   s_udp;
-static MdnsNames s_names;
-static char      s_hostname[48];
-static uint32_t  s_ipv4          = 0;
-static uint16_t  s_httpPort      = 80;
-static bool      s_running       = false;
-static uint8_t   s_announcesLeft = 0;
-static uint32_t  s_announceAt    = 0;
+static WiFiUDP    s_udp;
+static MdnsNames  s_names;
+static MdnsTxt    s_txt;
+static MdnsLogger s_logger        = NULL;
+static char       s_hostname[MDNS_MAX_HOST_LEN + 1];
+static char       s_service[MDNS_MAX_SERVICE_LEN + 1];   // "" until mdnsAddService()
+static char       s_proto[4];                            // "tcp" or "udp"
+static uint32_t   s_ipv4          = 0;
+static uint16_t   s_port          = 0;
+static bool       s_running       = false;
+static uint8_t    s_announcesLeft = 0;
+static uint32_t   s_announceAt    = 0;
+
+// Format one line and hand it to the logger, if there is one. The format
+// string stays in flash (PSTR) like every other literal on this chip, so a
+// silent responder costs no RAM for its messages.
+static void logLine(PGM_P fmt, ...) {
+  if (s_logger == NULL) return;
+
+  char line[96];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf_P(line, sizeof(line), fmt, args);
+  va_end(args);
+  s_logger(line);
+}
 
 // WiFi.localIP() packs the octets in network order, so read them one at a time
 // rather than casting the whole thing - the rest of this module works in host
@@ -63,10 +81,21 @@ static bool openSocket() {
   return s_udp.beginMulticast(WiFi.localIP(), MDNS_GROUP, MDNS_PORT) == 1;
 }
 
+// Rebuild the names we answer for from the host name, the service (if one has
+// been added) and the current address.
+static void rebuildNames() {
+  bool hasService = (s_service[0] != '\0');
+  mdnsBuildNames(s_hostname,
+                 hasService ? s_service : NULL,
+                 hasService ? s_proto   : NULL,
+                 s_ipv4, &s_names);
+}
+
 // Build the records in plan and put them on the wire, either back to whoever
 // asked or out to the whole group.
 static void sendResponse(const MdnsQueryPlan& plan, IPAddress dest, uint16_t destPort) {
-  size_t len = mdnsBuildResponse(s_tx, sizeof(s_tx), plan, s_names, s_ipv4, s_httpPort);
+  size_t len = mdnsBuildResponse(s_tx, sizeof(s_tx), plan, s_names, s_ipv4,
+                                 s_port, s_txt);
   if (len == 0) return;
 
   int started = plan.unicast
@@ -94,29 +123,57 @@ static void scheduleAnnouncements() {
   s_announceAt    = millis() + MDNS_ANNOUNCE_FIRST_MS;
 }
 
-// Called from setup() in OurBrewbot.cpp - cppcheck's usual cross-file
-// blind spot, same as crashLogPendingDeferred() in Crash.cpp.
-// cppcheck-suppress unusedFunction
-void mdnsBegin(const char* hostname, uint16_t httpPort) {
-  strncpy(s_hostname, hostname, sizeof(s_hostname) - 1);
-  s_hostname[sizeof(s_hostname) - 1] = '\0';
-  s_httpPort = httpPort;
-  s_ipv4     = currentIPv4();
-  mdnsBuildNames(s_hostname, s_ipv4, &s_names);
+void mdnsSetLogger(MdnsLogger logger) {
+  s_logger = logger;
+}
+
+bool mdnsBegin(const char* hostname) {
+  size_t len = strlen(hostname);
+  if (len == 0 || len > MDNS_MAX_HOST_LEN) {
+    logLine(PSTR("Host name must be 1-%u characters"), (unsigned)MDNS_MAX_HOST_LEN);
+    return false;
+  }
+
+  strcpy(s_hostname, hostname);
+  s_ipv4 = currentIPv4();
+  rebuildNames();
 
   if (!openSocket()) {
     s_running = false;
-    logMsg("[MDNS] Failed to open the multicast socket");
-    return;
+    logLine(PSTR("Failed to open the multicast socket"));
+    return false;
   }
 
   s_running = true;
   scheduleAnnouncements();
-  logMsg("[MDNS] Responding for %s on port %u", s_names.host, (unsigned)s_httpPort);
+  logLine(PSTR("Responding for %s"), s_names.host);
+  return true;
 }
 
-// Called from loop() in OurBrewbot.cpp - same cross-file blind spot.
-// cppcheck-suppress unusedFunction
+bool mdnsAddService(const char* service, const char* proto, uint16_t port) {
+  size_t len = strlen(service);
+  if (s_service[0] != '\0') return false;                    // only one service
+  if (len == 0 || len > MDNS_MAX_SERVICE_LEN) return false;
+  if (strcmp(proto, "tcp") != 0 && strcmp(proto, "udp") != 0) return false;
+
+  strcpy(s_service, service);
+  strcpy(s_proto, proto);
+  s_port = port;
+  rebuildNames();
+
+  // Already answering: announce again so browsers see the new service now
+  // rather than when they next happen to ask.
+  if (s_running) scheduleAnnouncements();
+  logLine(PSTR("Advertising %s on port %u"), s_names.service, (unsigned)s_port);
+  return true;
+}
+
+bool mdnsAddTxt(const char* entry) {
+  if (!mdnsTxtAdd(&s_txt, entry)) return false;
+  if (s_running && s_service[0] != '\0') scheduleAnnouncements();
+  return true;
+}
+
 void mdnsLoop() {
   if (!s_running) return;
 
@@ -131,9 +188,9 @@ void mdnsLoop() {
   // is retried on the next pass instead of being silently forgotten.
   if (ip != s_ipv4 && openSocket()) {
     s_ipv4 = ip;
-    mdnsBuildNames(s_hostname, s_ipv4, &s_names);
+    rebuildNames();
     scheduleAnnouncements();
-    logMsg("[MDNS] Address changed, re-announcing %s", s_names.host);
+    logLine(PSTR("Address changed, re-announcing %s"), s_names.host);
   }
 
   uint32_t now = millis();
