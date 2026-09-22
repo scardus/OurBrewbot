@@ -390,6 +390,13 @@ size_t mdnsBuildResponse(uint8_t* out, size_t outSize, const MdnsQueryPlan& plan
   // A legacy resolver gets short TTLs and no cache-flush bit (RFC 6762 6.7).
   uint32_t hostTtl = plan.legacy ? MDNS_LEGACY_TTL : MDNS_HOST_TTL;
   uint32_t svcTtl  = plan.legacy ? MDNS_LEGACY_TTL : MDNS_SERVICE_TTL;
+
+  // A goodbye is the same records with a TTL of 0, which tells every cache to
+  // drop them now rather than when they would have expired (RFC 6762 10.1).
+  if (plan.goodbye) {
+    hostTtl = 0;
+    svcTtl  = 0;
+  }
   // Records only we can own are marked unique so resolvers drop stale copies.
   uint16_t unique  = plan.legacy ? MDNS_CLASS_IN
                                  : (uint16_t)(MDNS_CLASS_IN | MDNS_CACHE_FLUSH);

@@ -1029,6 +1029,33 @@ void test_invalid_service_names_are_refused(void) {
   TEST_ASSERT_FALSE(mdnsIsValidServiceName("abcdefghijklmnop"));   // 16
 }
 
+// ================================================================
+// G. goodbye packets (0.4.14)
+// ================================================================
+
+// RFC 6762 section 10.1: a goodbye is every record we have given out, sent
+// again with a TTL of 0. Caches drop them at once instead of holding a stale
+// .local name for two minutes after a restart. Nothing else about the records
+// changes, so the cache-flush bits must still be set on the unique ones.
+void test_goodbye_sends_every_record_with_a_ttl_of_zero(void) {
+  MdnsQueryPlan plan;
+  plan.replyMask = MDNS_REPLY_ALL | MDNS_REPLY_PTR_REV;
+  plan.goodbye   = true;
+
+  uint8_t out[MDNS_TX_SIZE];
+  size_t  len = mdnsBuildResponse(out, sizeof(out), plan, g_names, TEST_IP, 80, g_txt);
+  Rec     recs[8];
+  int     count = walkAnswers(out, len, recs, 8);
+  TEST_ASSERT_EQUAL_INT(7, count);
+
+  for (int i = 0; i < count; i++) {
+    TEST_ASSERT_EQUAL_UINT32(0, recs[i].ttl);
+  }
+  const Rec* a = findRec(recs, count, MDNS_TYPE_A);
+  TEST_ASSERT_NOT_NULL(a);
+  TEST_ASSERT_EQUAL_UINT16(0x8001, a->rrClass);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -1112,6 +1139,9 @@ int main(int, char**) {
   RUN_TEST(test_invalid_host_labels_are_refused);
   RUN_TEST(test_valid_service_names_are_accepted);
   RUN_TEST(test_invalid_service_names_are_refused);
+
+  // G. goodbye packets
+  RUN_TEST(test_goodbye_sends_every_record_with_a_ttl_of_zero);
 
   return UNITY_END();
 }

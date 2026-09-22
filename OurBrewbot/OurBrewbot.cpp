@@ -323,7 +323,7 @@ void loop() {
       logMsgL(SYSLOG_NOTICE, "[SYS] Resetting all config...");
       resetAllConfig();
       g_state = WAIT_CONFIG;
-      ESP.restart();
+      restartDevice();
       break;
 
     case OTA_UPGRADE:
@@ -365,6 +365,18 @@ static void mdnsLog(const char* message) {
   logMsg("[MDNS] %s", message);
 }
 
+// See Config.h. mdnsEnd() does nothing if mDNS is disabled or never started,
+// so this is safe from every restart path, including a failed WiFi setup.
+void restartDevice(bool forgetWiFi) {
+  mdnsEnd();
+
+  if (forgetWiFi) {
+    WiFi.persistent(true);
+    WiFi.disconnect(true);
+  }
+  ESP.restart();
+}
+
 void setupWiFi() {
   WiFiManager wifiManager;
   wifiManager.setConnectTimeout(20);
@@ -382,7 +394,7 @@ void setupWiFi() {
   if (!wifiManager.autoConnect(apName.c_str())) {
     logMsgL(SYSLOG_ERR, "[WIFI] Failed to connect - restarting");
     delay(3000);
-    ESP.restart();
+    restartDevice();
   }
 
   // Modem sleep's periodic DTIM beacon wake/parse cycle is the known trigger

@@ -733,7 +733,7 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
   if (strcmp(scope, "Device") == 0) {
     if (strcmp(key, "reboot") == 0) {
       recordReboot("MQTT command");
-      ESP.restart();
+      restartDevice();
     } else if (strcmp(key, "all_off") == 0) {
       switchOffAll();
     }

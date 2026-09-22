@@ -33,6 +33,16 @@ static const IPAddress MDNS_GROUP(224, 0, 0, 251);
 #define MDNS_ANNOUNCE_FIRST_MS  1000
 #define MDNS_ANNOUNCE_GAP_MS    1000
 
+// Goodbyes are sent twice: multicast over WiFi gets no link-level retries, and
+// about one packet in eight was measured lost on a busy network. lwIP also
+// drops a datagram handed over too soon after the previous one, and the
+// caller has usually just logged something (another datagram, if syslog is
+// on), so every copy waits a little first. The final wait gives the last copy
+// time to leave the radio before a restart pulls the plug.
+#define MDNS_GOODBYE_COPIES     2
+#define MDNS_GOODBYE_GAP_MS     20
+#define MDNS_GOODBYE_FLUSH_MS   50
+
 // One packet in, one packet out, both fixed and file-static. These two buffers
 // are most of the memory cost of the responder; nothing here ever touches the
 // heap. See MdnsPacket.h for how each size was chosen.
@@ -127,6 +137,28 @@ static void announce() {
   sendResponse(plan, MDNS_GROUP, MDNS_PORT);
 }
 
+// Tell everyone to forget the names we have been answering for: every record
+// we could have given out, with a TTL of 0. Sent straight to the group rather
+// than through sendResponse(), because the one-second limit must not hold a
+// goodbye back - the records may well have been multicast a moment ago.
+static void sendGoodbye() {
+  MdnsQueryPlan plan;
+  plan.replyMask = MDNS_REPLY_ALL | MDNS_REPLY_PTR_REV;
+  plan.goodbye   = true;
+
+  size_t len = mdnsBuildResponse(s_tx, sizeof(s_tx), plan, s_names, s_ipv4,
+                                 s_port, s_txt);
+  if (len == 0) return;
+
+  for (uint8_t copy = 0; copy < MDNS_GOODBYE_COPIES; copy++) {
+    delay(MDNS_GOODBYE_GAP_MS);
+    if (!s_udp.beginPacketMulticast(MDNS_GROUP, MDNS_PORT, WiFi.localIP(), MDNS_TTL)) continue;
+    s_udp.write(s_tx, len);
+    s_udp.endPacket();
+  }
+  delay(MDNS_GOODBYE_FLUSH_MS);
+}
+
 static void scheduleAnnouncements() {
   s_announcesLeft = MDNS_ANNOUNCE_COUNT;
   s_announceAt    = millis() + MDNS_ANNOUNCE_FIRST_MS;
@@ -142,6 +174,13 @@ bool mdnsBegin(const char* hostname) {
     logLine(PSTR("Host name must be 1-%u letters, digits or hyphens"),
             (unsigned)MDNS_MAX_HOST_LEN);
     return false;
+  }
+
+  // Moving to a new name: take the old one off the network first, or caches
+  // would keep answering for it until its TTL ran out.
+  if (s_running && strcmp(hostname, s_hostname) != 0) {
+    logLine(PSTR("Goodbye for %s"), s_names.host);
+    sendGoodbye();
   }
 
   strcpy(s_hostname, hostname);
@@ -181,6 +220,21 @@ bool mdnsAddTxt(const char* entry) {
   if (!mdnsTxtAdd(&s_txt, entry)) return false;
   if (s_running && s_service[0] != '\0') scheduleAnnouncements();
   return true;
+}
+
+void mdnsEnd() {
+  if (!s_running) return;
+
+  // With no address, or one we have not announced yet, there is nothing out
+  // there to withdraw and no way to send it anyway.
+  if (s_ipv4 != 0 && currentIPv4() == s_ipv4) {
+    logLine(PSTR("Goodbye for %s"), s_names.host);
+    sendGoodbye();
+  }
+
+  s_udp.stop();
+  s_running       = false;
+  s_announcesLeft = 0;
 }
 
 void mdnsLoop() {

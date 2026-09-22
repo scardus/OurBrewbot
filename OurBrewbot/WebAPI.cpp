@@ -141,7 +141,7 @@ void setupWebServer(ESP8266WebServer& server) {
           "<META http-equiv=\"refresh\" content=\"10;URL=/\">"
           "Update Success! Rebooting OurBrewbot Controller...");
         delay(500);
-        ESP.restart();
+        restartDevice();
       }
     },
     [&server]() { handleOTAUpload(server); }
@@ -735,7 +735,7 @@ void handleReset(ESP8266WebServer& server) {
     server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Configuration reset\"}"));
     delay(200);
     resetAllConfig();
-    ESP.restart();
+    restartDevice();
   } else {
     // Show confirmation page
     server.send(200, "text/html",
@@ -753,7 +753,7 @@ void handleReset(ESP8266WebServer& server) {
 void handleReboot(ESP8266WebServer& server) {
   server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Rebooting\"}"));
   delay(500);
-  ESP.restart();
+  restartDevice();
 }
 
 // ============================================================
@@ -973,10 +973,8 @@ void handleConfigPage(ESP8266WebServer& server) {
 void handleWiFiReset(ESP8266WebServer& server) {
   sendOk(server, F("WiFi settings cleared. Rebooting into setup portal."));
   delay(250);
-  WiFi.persistent(true);
-  WiFi.disconnect(true);
   resetWiFiConfig();
-  ESP.restart();
+  restartDevice(true);   // goodbye first, while still connected, then forget WiFi
 }
 
 // ============================================================

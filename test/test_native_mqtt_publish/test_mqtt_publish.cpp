@@ -43,6 +43,9 @@ void test_setMillis(uint32_t ms) { s_millis = ms; }
 void logMsgImpl(uint8_t, PGM_P, ...) {}
 void logInit() {}
 
+// OurBrewbot.cpp - the MQTT "reboot" command calls this; nothing here restarts.
+void restartDevice(bool) {}
+
 // Tilt.cpp - only the colour-name lookup is reachable from Mqtt.cpp.
 static const char* const TILT_COLOUR_NAMES[] = {
   "Red", "Green", "Black", "Purple", "Orange", "Blue", "Yellow", "Pink"

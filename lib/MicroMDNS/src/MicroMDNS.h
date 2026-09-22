@@ -31,6 +31,7 @@
  *   mdnsAddService("http", "tcp", 80);       // optional
  *   mdnsAddTxt("path=/");                    // optional, repeat for more entries
  *   mdnsLoop();                              // every pass of loop()
+ *   mdnsEnd();                               // just before a restart
  */
 
 #include <stdint.h>
@@ -45,8 +46,8 @@ void mdnsSetLogger(MdnsLogger logger);
 // Claim the name and start answering. hostname is the bare label with no
 // ".local" suffix: 1 to 32 letters, digits and hyphens, not starting or ending
 // with a hyphen. Returns false if the name breaks those rules or the socket
-// could not be opened. Safe to call again to move to a new name; any service
-// already added is kept.
+// could not be opened. Safe to call again to move to a new name: the old one
+// is withdrawn with a goodbye first, and any service already added is kept.
 bool mdnsBegin(const char* hostname);
 
 // Advertise one service, e.g. ("http", "tcp", 80) for a web server. service
@@ -62,6 +63,14 @@ bool mdnsAddService(const char* service, const char* proto, uint16_t port);
 // byte per entry). Without any entries an empty TXT record is sent, as DNS-SD
 // requires.
 bool mdnsAddTxt(const char* entry);
+
+// Stop answering and tell the network to forget us: every record is sent
+// again with a TTL of 0, so caches drop the name straight away instead of
+// holding it for up to two minutes. Call it just before a restart or before
+// leaving the network. It blocks for about 100 ms so the packets actually get
+// out; a later mdnsBegin() starts everything up again. Does nothing if the
+// responder is not running.
+void mdnsEnd();
 
 // Service the responder: send any due announcements and answer queries that
 // have arrived. Call every pass of loop(); it returns immediately when there

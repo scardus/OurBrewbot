@@ -101,6 +101,7 @@ struct MdnsQueryPlan {
   bool     unicast   = false;     // answer the sender directly instead of the group
   bool     legacy    = false;     // sender wasn't on port 5353, so it's a plain DNS resolver
   uint16_t queryId   = 0;         // echoed back on a legacy answer; 0 otherwise
+  bool     goodbye   = false;     // send every record with TTL 0: "forget these now"
 
   // A legacy resolver expects its question repeated in the answer (RFC 6762
   // section 6.7). These hold the first question we could answer: the name
