@@ -44,7 +44,7 @@ Removed:
 
 ## How this was done
 
-The hardware connections were traced with a simple multimeter.  Analysis of the previous firmware image was performed by Claude Code.  Reverse engineering of the machine code was unfeasable, so instead we pulled generic information from the JSON configuration files and any function name strings/symbols it could find.  From this, it was possible to build a basic framework to iterate upon and re-build features.
+The hardware connections were traced with a simple multimeter.  Analysis of the previous firmware image was performed by Claude Code.  Reverse engineering of the machine code was unfeasible, so instead we pulled generic information from the JSON configuration files and any function name strings/symbols it could find.  From this, it was possible to build a basic framework to iterate upon and re-build features.
 
 ---
 
@@ -81,7 +81,7 @@ Open the repository root folder in VS Code (`File → Open Folder`). PlatformIO 
 
 ### 4. Configure the upload port
 
-In `platformio.ini`, set `upload_port` and `monitor_port` to match your device's COM port (currently `COM7`). Adjust if your port differs.
+In `platformio.ini`, set `upload_port` and `monitor_port` to match your device's COM port (currently `COM6`). Adjust if your port differs.
 
 ### 5. Build and upload
 
@@ -126,30 +126,30 @@ Download and install the tool from the [Espressif Flash Download Tool documentat
 
 ## Flashing the new firmware
 
-Pre-built binaries are in the `bin/` folder of this repository. You do **not** need VS Code or PlatformIO installed — just the binary and one of the tools below.
+Pre-built binaries are attached to each release on the [GitHub Releases](../../releases) page of this repository, named `OurBrewbot_vX.Y.Z.bin`. You do **not** need VS Code or PlatformIO installed — just the binary and one of the tools below.
 
 Put the device in bootloader mode as described above before flashing.
 
 ### Option A — esptool.py (cross-platform)
 
 ```bash
-esptool.py --port COM7 --baud 115200 write_flash -fm dout 0x0 OurBrewbot_x.x.x.bin
+esptool.py --port COM7 --baud 115200 write_flash -fm dout 0x0 OurBrewbot_vX.Y.Z.bin
 ```
 
-> Replace `COM7` with your actual port and `OurBrewbot_x.x.x.bin` with the filename from the `bin/` folder.
+> Replace `COM7` with your actual port and `OurBrewbot_vX.Y.Z.bin` with the filename downloaded from the Releases page.
 
 ### Option B — Espressif Flash Download Tool (Windows GUI)
 
 1. Run the tool, select **ESP8266** / **Develop** / **UART**
 2. Click the **SPIDownload** tab
-3. Tick the checkbox on the first row, click `...` to browse to `OurBrewbot_x.x.x.bin`, and set the address to `0x0`
+3. Tick the checkbox on the first row, click `...` to browse to `OurBrewbot_vX.Y.Z.bin`, and set the address to `0x0`
 4. Set **SPI Speed** to `40MHz` and **SPI Mode** to `DOUT`
 5. Select your COM port and baud rate to 115200
 6. Click **START**
 
 ### Option C — OTA (no cable, after initial flash)
 
-Once the firmware is running, navigate to `http://OurBrewbot-XXXXXX/update` in your browser and upload the `.bin` file directly.
+Once the firmware is running, navigate to `http://ourbrewbot-XXXXXX.local/update` in your browser and upload the `.bin` file directly.
 
 ---
 
@@ -158,8 +158,8 @@ Once the firmware is running, navigate to `http://OurBrewbot-XXXXXX/update` in y
 1. On first boot the device creates a WiFi access point named `OurBrewbot-XXXXXX` - __Make a note of this!__
 2. Connect to it from your phone or laptop
 3. A configuration portal opens — enter your WiFi SSID and password
-4. The device reboots, connects to your network and registers it's name in mDNS
-5. Open http://OurBrewbot-XXXXXX (noted in step 1) in your browser.  If this does not work, find your device's IP from your router admin page, then open `http://DEVICEIP/` in a browser.
+4. The device reboots, connects to your network and registers its name in mDNS
+5. Open http://ourbrewbot-XXXXXX.local (the XXXXXX noted in step 1) in your browser.  If this does not work, find your device's IP from your router admin page, then open `http://DEVICEIP/` in a browser.
 
 ---
 
@@ -187,17 +187,21 @@ These should be auto-detected and used if you flash this firmware to the same de
 | POST   | /brewservices      | Update brew service config    |
 | POST   | /brewservices/test | Test brew service connection  |
 | GET    | /config            | WiFi config page              |
-| GET    | /configMe          | Save WiFi config (form GET)   |
 | GET    | /controller        | Controller config + plugs     |
 | POST   | /controller        | Update global config          |
+| GET    | /debug             | Debug mode and per-fermenter sensor overrides |
+| POST   | /debug             | Set debug mode / sensor overrides (runtime only, not saved) |
 | GET    | /fermenter?id=0    | Single fermenter              |
 | POST   | /fermenter         | Update fermenter config       |
 | POST   | /fermenter/profile | Profile control (start/stop/pause/next/prev) |
 | GET    | /fermenters        | All fermenter data (JSON)     |
 | GET    | /fs/file           | Read LittleFS file content    |
 | GET    | /fs/files          | List LittleFS files           |
+| POST   | /fs/save           | Save a LittleFS config file   |
 | GET    | /health            | System health                 |
 | POST   | /iSpindel          | iSpindel gravity data         |
+| POST   | /ispindel/config   | Update iSpindel config (fermenter, collect data, clear) |
+| GET    | /ispindels         | iSpindel config + live data   |
 | GET    | /mqtt              | MQTT config (includes haDiscovery flag) |
 | POST   | /mqtt              | Update MQTT config (haDiscovery, LWT, discovery cleanup on disable) |
 | POST   | /mqtt/discover     | Trigger HA MQTT discovery     |
@@ -221,6 +225,7 @@ These should be auto-detected and used if you flash this firmware to the same de
 | GET    | /update            | OTA firmware update page      |
 | POST   | /update            | Upload new firmware binary    |
 | GET    | /WiFi              | WiFi config page (alias)      |
+| POST   | /wifi/reset        | Clear WiFi settings and reboot into the setup portal |
 
 ---
 
@@ -230,16 +235,23 @@ When MQTT is enabled and **HA Discovery** is turned on, the device publishes Hom
 
 ### Entity types (v0.1.74+)
 
-| Entity type | Fields |
-|-------------|--------|
-| `sensor`    | beer_temperature, ambient_temperature, gravity, gravity_source, attenuation, status, beer_temperature_source, temperature_unit, profile_step, profile_steps |
-| `switch`    | power, temp_control, profile_running |
-| `number`    | ceiling_temperature, floor_temperature, hysteresis, compressor_delay, og, tg |
-| `text`      | name, beer_name, yeast |
-| `select`    | profile_no (options: 0–4) |
-| `button`    | Device: reboot, all_off |
+Discovery creates one HA device for the controller, one for each fermenter, and one for each configured probe, Tilt and iSpindel. Empty or unassigned slots are skipped.
 
-All temperatures are published in **°C** regardless of display unit setting. Conversion for display is handled by the receiving side (HA, dashboard, etc.).
+| HA device | Entity type | Fields |
+|-----------|-------------|--------|
+| `OurBrewbot` (controller) | `sensor` | firmware_version, ip_address, mdns_name, wifi_ssid, rssi, free_heap, uptime, chip_id, reboot_reason, reboot_code (all diagnostic) |
+| | `button` | reboot, all_off |
+| `OurBrewbot F0`–`F3` (fermenters) | `sensor` | beer_temperature, ambient_temperature, gravity, gravity_source, attenuation, status, beer_temperature_source, temperature_unit, profile_step, profile_steps |
+| | `binary_sensor` | alarm |
+| | `switch` | power, temp_control, profile_running |
+| | `number` | ceiling_temperature, floor_temperature, hysteresis, compressor_delay, og, tg |
+| | `text` | name, beer_name, yeast |
+| | `select` | profile_no (options: 0–4) |
+| `OurBrewbot Probe <name>` | `sensor` | temperature, name, function, fermenter |
+| | `binary_sensor` | active |
+| `OurBrewbot Tilt <colour>` | `sensor` | temperature, gravity, fermenter, function |
+| | `binary_sensor` | active, is_pro |
+| `OurBrewbot iSpindel <name>` | `sensor` | temperature, gravity, corrected_gravity, battery, rssi, angle, velocity, run_time, name, fermenter, function |
 
 ### Allow HA Control
 
@@ -309,9 +321,11 @@ OurBrewbot/
   iSpindel.h/.cpp      iSpindel WiFi hydrometer receive and registration
   Tilt.h/.cpp          Tilt hydrometer via HM-10 BLE
   Mqtt.h/.cpp          MQTT client — publishing, HA discovery, command dispatch
+  MqttParse.h/.cpp     MQTT command-topic parsing (split out so it can be unit tested)
   WebAPI.h/.cpp        REST API web server
   WebAdmin.cpp         Admin configuration page (PROGMEM HTML)
   Log.h/.cpp           Centralised serial & syslog logging with timestamps
+  Crash.h/.cpp         Crash and watchdog-reset details saved across reboot, logged on the next boot
   Pins.h               Hardware GPIO pin assignments
   Version.h            Firmware version constants
 ```
