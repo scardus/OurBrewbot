@@ -23,7 +23,6 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h>
 #include <LittleFS.h>
 #include <WiFiManager.h>
 
@@ -41,6 +40,7 @@
 #include "Mqtt.h"
 #include "WebAPI.h"
 #include "Crash.h"
+#include <MicroMDNS.h>
 
 // ============================================================
 // TIMING CONSTANTS (milliseconds)
@@ -203,17 +203,15 @@ void loop() {
   checkpoint(CP_WEB);          g_webServer.handleClient();
   checkpoint(CP_BLE);          checkBLESniffTimeout();
   checkpoint(CP_TILT);         serviceTilt();   // drain any in-flight BLE scan every pass
-  // mDNS is gated on largest contiguous heap block. The ESP8266mDNS lib
-  // (LEAmDNS v1) allocates ~544 B per inbound Resource Record via operator
-  // new, with no graceful failure path — when that allocation fails it
-  // panics (soft restart) or writes through a NULL pointer (cause 29).
-  // We skip MDNS.update() while the heap is too tight to safely service a
-  // packet; queries dropped during the gap retry via the protocol's normal
-  // timeout/retry behaviour and resume cleanly once the heap recovers.
+  // mDNS runs entirely from here now (see MicroMDNS.h). The heap gate and
+  // ESP.wdtFeed() that used to wrap this call were both dead weight: the old
+  // library did its parsing in the WiFi stack's receive callback, not in the
+  // call we were guarding, and ESP.wdtFeed() only feeds the *software*
+  // watchdog. mdnsLoop() allocates nothing and services at most a few packets
+  // per pass, so it needs neither.
   checkpoint(CP_MDNS);
-  if (g_globalConfig.mdnsEnabled && ESP.getMaxFreeBlockSize() >= 1024) {
-    ESP.wdtFeed();   // LEAmDNS can block >8 s on busy networks — reset HW WDT first
-    MDNS.update();
+  if (g_globalConfig.mdnsEnabled) {
+    mdnsLoop();
   }
   checkpoint(CP_MQTT);         mqttLoop();
   checkpoint(CP_MQTT_PEND);    mqttPendingSaveCheck();
@@ -325,7 +323,7 @@ void loop() {
       logMsgL(SYSLOG_NOTICE, "[SYS] Resetting all config...");
       resetAllConfig();
       g_state = WAIT_CONFIG;
-      ESP.restart();
+      restartDevice();
       break;
 
     case OTA_UPGRADE:
@@ -361,6 +359,24 @@ static const char WM_PORTAL_CSS[] PROGMEM =
     "a{color:#e0e0e0}.q a{color:#fff}"
     "</style>";
 
+// MicroMDNS hands over finished lines with no prefix; tag them so they read
+// like every other subsystem in the syslog.
+static void mdnsLog(const char* message) {
+  logMsg("[MDNS] %s", message);
+}
+
+// See Config.h. mdnsEnd() does nothing if mDNS is disabled or never started,
+// so this is safe from every restart path, including a failed WiFi setup.
+void restartDevice(bool forgetWiFi) {
+  mdnsEnd();
+
+  if (forgetWiFi) {
+    WiFi.persistent(true);
+    WiFi.disconnect(true);
+  }
+  ESP.restart();
+}
+
 void setupWiFi() {
   WiFiManager wifiManager;
   wifiManager.setConnectTimeout(20);
@@ -378,7 +394,7 @@ void setupWiFi() {
   if (!wifiManager.autoConnect(apName.c_str())) {
     logMsgL(SYSLOG_ERR, "[WIFI] Failed to connect - restarting");
     delay(3000);
-    ESP.restart();
+    restartDevice();
   }
 
   // Modem sleep's periodic DTIM beacon wake/parse cycle is the known trigger
@@ -397,12 +413,9 @@ void setupWiFi() {
   if (g_globalConfig.mdnsEnabled) {
     String mdnsName = "ourbrewbot-" + String(ESP.getChipId(), HEX);
     mdnsName.toLowerCase();
-    if (MDNS.begin(mdnsName.c_str())) {
-      MDNS.addService("http", "tcp", 80);
-      logMsg("[MDNS] Registered as %s.local", mdnsName.c_str());
-    } else {
-      logMsg("[MDNS] Failed to start");
-    }
+    mdnsSetLogger(mdnsLog);
+    mdnsBegin(mdnsName.c_str());
+    mdnsAddService("http", "tcp", 80);
   } else {
     logMsg("[MDNS] Disabled");
   }

@@ -60,6 +60,9 @@ static void enableSyslog(uint8_t facility = 16, uint8_t minLevel = SYSLOG_DEBUG)
   WiFi.connected = true;
   WiFi.resolveOk = true;
   logInit();
+  // logInit() sends the ARP warm-up packet; drop it so each test counts
+  // only what its own logMsg() put on the wire.
+  udpTestReset();
 }
 
 void setUp(void) {
@@ -68,6 +71,8 @@ void setUp(void) {
   s_millis       = 0;
   s_ipResolved   = false;
   s_syslogIP     = IPAddress(0, 0, 0, 0);
+  s_lastSendMs   = 0;
+  delayTestTotal() = 0;
   s_mqttCalls    = 0;
   s_mqttLastLevel = -1;
   s_mqttLastLine[0] = '\0';
@@ -132,6 +137,109 @@ static void test_reinit_clears_a_previously_resolved_address(void) {
   WiFi.resolveOk = false;
   logInit();
   TEST_ASSERT_FALSE(s_ipResolved);
+}
+
+// ============================================================
+// MINIMUM INTER-PACKET GAP
+// ============================================================
+
+// Two lines logged in the same millisecond must not leave back to back - that
+// is what cost half the boot block, which is the one place in the firmware
+// where nothing else paces the output.
+static void test_back_to_back_lines_are_spaced_out(void) {
+  enableSyslog();
+  delayTestTotal() = 0;
+  s_millis = 5000;
+  s_lastSendMs = 5000;   // as if a line had just gone out
+
+  logMsg("second line");
+  TEST_ASSERT_EQUAL_INT(1, g_udpPacketCount);
+  TEST_ASSERT_EQUAL_UINT32(SYSLOG_MIN_GAP_MS, delayTestTotal());
+}
+
+// Steady-state logging is already far slower than the gap, so it must not add
+// any delay at all - this runs on every one of the ~3 lines a second the
+// firmware emits while running.
+static void test_a_line_after_a_long_pause_is_not_delayed(void) {
+  enableSyslog();
+  delayTestTotal() = 0;
+  s_lastSendMs = 5000;
+  s_millis     = 9000;   // 4 s later
+
+  logMsg("much later");
+  TEST_ASSERT_EQUAL_INT(1, g_udpPacketCount);
+  TEST_ASSERT_EQUAL_UINT32(0, delayTestTotal());
+}
+
+// A partial gap is topped up, not restarted, so a burst is paced at exactly
+// SYSLOG_MIN_GAP_MS rather than doubling it.
+static void test_a_partial_gap_is_only_topped_up(void) {
+  enableSyslog();
+  delayTestTotal() = 0;
+  s_lastSendMs = 5000;
+  s_millis     = 5004;   // 4 ms of the gap already elapsed
+
+  logMsg("soon after");
+  TEST_ASSERT_EQUAL_UINT32(SYSLOG_MIN_GAP_MS - 4, delayTestTotal());
+}
+
+// millis() wraps every 49.7 days. Unsigned subtraction handles it, but only if
+// nobody 'helpfully' rewrites the comparison - a regression here would stall
+// every log line for the full gap once, or block for ~49 days if signed.
+static void test_gap_survives_the_millis_rollover(void) {
+  enableSyslog();
+  delayTestTotal() = 0;
+  s_lastSendMs = 0xFFFFFFFBu;   // 5 ms before the wrap
+  s_millis     = 3u;            // 8 ms after that line, across the wrap
+
+  logMsg("after rollover");
+  TEST_ASSERT_EQUAL_UINT32(SYSLOG_MIN_GAP_MS - 8, delayTestTotal());
+}
+
+// ============================================================
+// logInit() - ARP WARM-UP
+// ============================================================
+
+// lwIP drops, rather than queues, datagrams sent while it is still looking up
+// the syslog host's MAC address, which used to cost the first four or five
+// lines of every boot. logInit() spends one throwaway packet to start that
+// lookup so the real boot block survives.
+static void test_successful_init_sends_one_warmup_packet(void) {
+  g_syslogConfig.enabled  = true;
+  snprintf(g_syslogConfig.host, sizeof(g_syslogConfig.host), "syslog.local");
+  g_syslogConfig.port     = 514;
+  g_syslogConfig.facility = 16;
+  g_syslogConfig.minLevel = SYSLOG_DEBUG;
+  WiFi.resolveTo = IPAddress(10, 1, 2, 3);
+  logInit();
+
+  TEST_ASSERT_EQUAL_INT(1, g_udpPacketCount);
+  TEST_ASSERT_EQUAL_STRING("<134>ourbrewbot ourbrewbot: [LOG] Syslog ready",
+                           udpTestLastPayload());
+  TEST_ASSERT_TRUE(g_udpPackets[0].dest == IPAddress(10, 1, 2, 3));
+  TEST_ASSERT_EQUAL_UINT16(514, g_udpPackets[0].port);
+}
+
+// Nothing resolved means no destination, so there must be no warm-up packet
+// either - it would go to 0.0.0.0.
+static void test_failed_init_sends_no_warmup_packet(void) {
+  g_syslogConfig.enabled = true;
+  snprintf(g_syslogConfig.host, sizeof(g_syslogConfig.host), "nonexistent.local");
+  WiFi.resolveOk = false;
+  logInit();
+  TEST_ASSERT_EQUAL_INT(0, g_udpPacketCount);
+}
+
+// The warm-up is a plain syslog line, so minLevel must not suppress it: a site
+// running minLevel=WARNING still needs the ARP entry the packet creates.
+static void test_warmup_is_sent_even_at_the_strictest_minlevel(void) {
+  g_syslogConfig.enabled  = true;
+  snprintf(g_syslogConfig.host, sizeof(g_syslogConfig.host), "syslog.local");
+  g_syslogConfig.port     = 514;
+  g_syslogConfig.facility = 16;
+  g_syslogConfig.minLevel = SYSLOG_EMERG;
+  logInit();
+  TEST_ASSERT_EQUAL_INT(1, g_udpPacketCount);
 }
 
 // ============================================================
@@ -337,6 +445,15 @@ int main(int, char**) {
   RUN_TEST(test_successful_lookup_caches_the_address);
   RUN_TEST(test_failed_lookup_leaves_the_address_unresolved);
   RUN_TEST(test_reinit_clears_a_previously_resolved_address);
+
+  RUN_TEST(test_successful_init_sends_one_warmup_packet);
+  RUN_TEST(test_failed_init_sends_no_warmup_packet);
+  RUN_TEST(test_warmup_is_sent_even_at_the_strictest_minlevel);
+
+  RUN_TEST(test_back_to_back_lines_are_spaced_out);
+  RUN_TEST(test_a_line_after_a_long_pause_is_not_delayed);
+  RUN_TEST(test_a_partial_gap_is_only_topped_up);
+  RUN_TEST(test_gap_survives_the_millis_rollover);
 
   RUN_TEST(test_pri_for_local0_and_info);
   RUN_TEST(test_pri_for_user_facility_and_error);

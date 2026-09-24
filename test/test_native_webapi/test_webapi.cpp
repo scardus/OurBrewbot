@@ -78,6 +78,15 @@ void handleAdmin(ESP8266WebServer&) {}
 // endpoint can be checked without an RCSwitch.
 static int s_rfTransmits = 0;
 void rfTransmit(uint32_t, uint8_t, uint16_t, uint8_t) { s_rfTransmits++; }
+
+// OurBrewbot.cpp - restartDevice() sends the mDNS goodbye, then restarts.
+// Recorded so the reboot endpoints can be checked without restarting anything.
+static int  s_restarts       = 0;
+static bool s_lastForgetWiFi = false;
+void restartDevice(bool forgetWiFi) {
+  s_restarts++;
+  s_lastForgetWiFi = forgetWiFi;
+}
 void smartPlugSwitch(uint8_t, bool) {}
 bool getPlugState(uint8_t) { return false; }
 RCSwitch g_rcSwitch;
@@ -129,6 +138,8 @@ void setUp(void) {
   clientTestSetConnected(true);
   s_millis      = 1000000;
   s_rfTransmits = 0;
+  s_restarts       = 0;
+  s_lastForgetWiFi = false;
 
   memset(&g_globalConfig, 0, sizeof(g_globalConfig));
   g_globalConfig.unit = UNIT_CELSIUS;
@@ -1026,6 +1037,29 @@ static void test_smartplug_test_refuses_when_no_code_is_configured(void) {
 }
 
 // ============================================================
+// RESTARTS GO THROUGH restartDevice() (0.4.14)
+//
+// A bare ESP.restart() skips the mDNS goodbye, leaving phones and PCs holding
+// the old .local record for up to two minutes.
+// ============================================================
+
+static void test_reboot_restarts_through_restart_device(void) {
+  handleReboot(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, s_restarts);
+  TEST_ASSERT_FALSE(s_lastForgetWiFi);
+}
+
+// The goodbye needs a working connection, so forgetting WiFi has to be left to
+// restartDevice() to do after it - not done by the handler beforehand.
+static void test_wifi_reset_leaves_forgetting_wifi_until_after_the_goodbye(void) {
+  handleWiFiReset(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, s_restarts);
+  TEST_ASSERT_TRUE(s_lastForgetWiFi);
+}
+
+// ============================================================
 // DISPLAY UNITS ACROSS THE REST BOUNDARY (0.4.6)
 //
 // One rule: every temperature on the wire is in the user's display unit, and
@@ -1446,6 +1480,10 @@ int main(int, char**) {
   RUN_TEST(test_smartplug_post_requires_a_valid_index);
   RUN_TEST(test_smartplug_test_transmits_the_selected_code);
   RUN_TEST(test_smartplug_test_refuses_when_no_code_is_configured);
+
+  // Restarts go through restartDevice() (0.4.14)
+  RUN_TEST(test_reboot_restarts_through_restart_device);
+  RUN_TEST(test_wifi_reset_leaves_forgetting_wifi_until_after_the_goodbye);
 
   // display units across the REST boundary
   RUN_TEST(test_fermenter_setpoints_round_trip_through_fahrenheit);

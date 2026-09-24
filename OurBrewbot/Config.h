@@ -494,3 +494,10 @@ bool   saveJsonDocSafe(JsonDocument& doc, const char* primary, const char* backu
 
 // Reboot logging
 void recordReboot(const String& reason);
+
+// Restart the device. Use this instead of calling ESP.restart() directly: it
+// first sends mDNS goodbye packets, so phones and PCs forget the .local name
+// straight away rather than holding the old record for up to two minutes.
+// forgetWiFi also erases the saved WiFi credentials once the goodbye is out,
+// so the device comes back up in the setup portal. Defined in OurBrewbot.cpp.
+void restartDevice(bool forgetWiFi = false);
