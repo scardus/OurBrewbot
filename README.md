@@ -31,6 +31,11 @@ New/Updated Features:
 - LittleFS file browser in admin page for inspecting config files
 - BLE AT command console for debugging HM-10 Bluetooth module
 - Rebuilt Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation
+- Daily firmware update check — tells you (admin page, syslog, Home Assistant) when a newer release is out; it never installs anything itself
+- Crash reports — after a crash or watchdog reset, the crash details are sent to ourbrewbot.com to help fix bugs
+- Install from your browser at [ourbrewbot.com](https://ourbrewbot.com/install) — no tools needed
+
+The update check and crash reports can each be switched off — see [Contacting ourbrewbot.com](#contacting-ourbrewbotcom).
 
 Not yet implemented / tested:
 - Pressure sensor - __Untested - No hardware__
@@ -130,24 +135,28 @@ Pre-built binaries are attached to each release on the [GitHub Releases](../../r
 
 Put the device in bootloader mode as described above before flashing.
 
-### Option A — esptool.py (cross-platform)
+### Option A — Web installer (easiest)
+
+Open [ourbrewbot.com/install](https://ourbrewbot.com/install) in Chrome or Edge on a desktop computer, connect the device by USB and follow the steps. It always installs the latest release.
+
+### Option B — esptool.py (cross-platform)
 
 ```bash
-esptool.py --port COM7 --baud 115200 write_flash -fm dout 0x0 OurBrewbot_vX.Y.Z.bin
+esptool.py --port COM7 --baud 115200 write_flash 0x0 OurBrewbot_vX.Y.Z.bin
 ```
 
 > Replace `COM7` with your actual port and `OurBrewbot_vX.Y.Z.bin` with the filename downloaded from the Releases page.
 
-### Option B — Espressif Flash Download Tool (Windows GUI)
+### Option C — Espressif Flash Download Tool (Windows GUI)
 
 1. Run the tool, select **ESP8266** / **Develop** / **UART**
 2. Click the **SPIDownload** tab
 3. Tick the checkbox on the first row, click `...` to browse to `OurBrewbot_vX.Y.Z.bin`, and set the address to `0x0`
-4. Set **SPI Speed** to `40MHz` and **SPI Mode** to `DOUT`
+4. Set **SPI Speed** to `40MHz` and **SPI Mode** to `DIO`
 5. Select your COM port and baud rate to 115200
 6. Click **START**
 
-### Option C — OTA (no cable, after initial flash)
+### Option D — OTA (no cable, after initial flash)
 
 Once the firmware is running, navigate to `http://ourbrewbot-XXXXXX.local/update` in your browser and upload the `.bin` file directly.
 
@@ -170,6 +179,19 @@ LittleFS partition.
 
 These should be auto-detected and used if you flash this firmware to the same device
 (the LittleFS partition is separate and survives firmware updates).
+
+---
+
+## Contacting ourbrewbot.com
+
+The controller runs entirely on your own network. It only contacts ourbrewbot.com for these two things, and both can be switched off in the admin page on the **System Settings** tab, under **Global Settings**:
+
+| Setting | What it does | What is sent |
+|---------|--------------|--------------|
+| **Update Check** | Once a day, downloads `http://ourbrewbot.com/version.json` and compares it with the running version. The result is shown on the admin page, in syslog and as a Home Assistant `update` entity. Nothing is downloaded or installed. The **[check]** link next to the firmware version (`POST /update/check`) works even when the daily check is off. | The chip ID and firmware version (used to count the controllers in use) |
+| **Crash Reports** | About 2 minutes after the device restarts from a crash or watchdog reset, it sends one report to `http://ourbrewbot.com/api/crash` (retried up to 3 times). Nothing is sent after a normal restart. | The chip ID, firmware version and build date, the reset reason, the last code area that ran, the processor registers, and the top of the stack (raw memory, as hex numbers) |
+
+Neither sends your settings, WiFi details, temperatures or brewing data. The stack snapshot is a few dozen raw memory words from the moment of the crash, used to find which code crashed.
 
 ---
 
@@ -328,9 +350,17 @@ OurBrewbot/
   WebAdmin.cpp         Admin configuration page (PROGMEM HTML)
   Log.h/.cpp           Centralised serial & syslog logging with timestamps
   Crash.h/.cpp         Crash and watchdog-reset details saved across reboot, logged on the next boot
+  CrashReport.h/.cpp   Sends the saved crash details to ourbrewbot.com
+  UpdateCheck.h/.cpp   Daily check of ourbrewbot.com for a newer firmware release
   Pins.h               Hardware GPIO pin assignments
-  Version.h            Firmware version constants
+  Version.h            Firmware version constants and ourbrewbot.com URLs
 ```
+
+---
+
+## Licence
+
+OurBrewbot is licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for the copyright notice.
 
 ---
 
