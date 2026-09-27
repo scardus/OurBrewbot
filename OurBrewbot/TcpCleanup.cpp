@@ -25,7 +25,10 @@
  * using the freed connection and aborts it a second time: a double free that
  * corrupts the heap and crashes the controller later, somewhere unrelated.
  * It happens when a browser re-uses a connection we already closed while
- * more than 5 others are in TIME_WAIT (found 2026-09-27 with FreeTrace).
+ * the TIME_WAIT list is full. Found 2026-09-27 with a double-free tracer on
+ * the debug/double-free-trace branch, and reported upstream as
+ * https://github.com/esp8266/Arduino/issues/9327 - the core has had no
+ * release since 3.1.2, so don't expect a fix to arrive that way.
  *
  * The fix: remove every TIME_WAIT connection on each loop() pass, so there
  * are never 6 and the core's patch never has to pick one. TIME_WAIT only
@@ -34,6 +37,14 @@
  * network. Removing them this way is safe: they have no callbacks left,
  * nothing else points at them, and tcp_abort() on a TIME_WAIT connection
  * just unlinks and frees it without sending anything.
+ *
+ * This is the long-standing tcpCleanup() workaround from one of the core's
+ * maintainers (https://github.com/esp8266/Arduino/issues/4213,
+ * https://gist.github.com/d-a-v/ed67f7a6f476a043d1c7f347c829087e), which
+ * was originally meant to save the memory TIME_WAIT connections hold.
+ *
+ * It only narrows the window: 6+ connections entering TIME_WAIT within a
+ * single loop() pass could still trigger the bug.
  */
 
 #include "TcpCleanup.h"
