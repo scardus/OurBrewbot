@@ -16,15 +16,15 @@
 
 #pragma once
 /*
- * Version.h — Firmware version constants
+ * TcpCleanup.h — Clear out closed TCP connections waiting in TIME_WAIT,
+ * to avoid a double free in the ESP8266 core's lwIP. See TcpCleanup.cpp.
  */
 
-#define FW_VERSION      "0.5.1"
-#define FW_SWNO         20          // preserved for config compatibility
-#define FW_BUILD_DATE   __DATE__ " " __TIME__
+#include <stdint.h>
 
-// Where the daily update check (UpdateCheck.cpp) reads the latest release.
-#define UPDATE_CHECK_URL "http://ourbrewbot.com/version.json"
+// Remove every TCP connection in TIME_WAIT. Call once per loop() pass.
+// Returns how many were removed.
+uint32_t tcpClearTimeWait();
 
-// Where a crash report is sent (CrashReport.cpp) after a crash or watchdog reset.
-#define CRASH_REPORT_URL "http://ourbrewbot.com/api/crash"
+// Connections removed since the last call - for the 10-minute health log
+uint32_t tcpTakeClearedCount();
