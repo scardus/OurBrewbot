@@ -1449,6 +1449,22 @@ static void test_controller_post_saves_the_update_check_switch(void) {
   TEST_ASSERT_FALSE(g_globalConfig.updateCheck);
 }
 
+static void test_controller_saves_and_reports_the_crash_reports_switch(void) {
+  g_globalConfig.crashReports = true;
+  postBody("{\"CrashReports\":false}");
+  handleController(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_globalConfig.crashReports);
+
+  httpRespReset();   // the recorder appends - start the GET with an empty body
+  srv.setMethod(HTTP_GET);
+  handleController(srv);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_TRUE(doc["CrashReports"].is<bool>());
+  TEST_ASSERT_FALSE(doc["CrashReports"].as<bool>());
+}
+
 static void test_update_check_endpoint_runs_a_check_and_returns_the_result(void) {
   g_updateStatus.checked = true;
   strlcpy(g_updateStatus.latestVersion, "0.4.16", sizeof(g_updateStatus.latestVersion));
@@ -1598,6 +1614,7 @@ int main(int, char**) {
   RUN_TEST(test_controller_last_check_is_minus_one_before_any_attempt);
   RUN_TEST(test_controller_post_saves_the_update_check_switch);
   RUN_TEST(test_update_check_endpoint_runs_a_check_and_returns_the_result);
+  RUN_TEST(test_controller_saves_and_reports_the_crash_reports_switch);
 
   return UNITY_END();
 }

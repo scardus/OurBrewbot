@@ -118,6 +118,7 @@ void setUp(void) {
   espTestSetResetReason(REASON_DEFAULT_RST);
   s_logCount   = 0;
   s_lastModule = 0xFF;   // the value the firmware boots with
+  memset(&g_lastCrash, 0, sizeof(g_lastCrash));
 }
 
 void tearDown(void) {}
@@ -134,7 +135,7 @@ void tearDown(void) {}
 // ============================================================
 
 static void test_module_table_has_an_entry_for_every_checkpoint_id(void) {
-  TEST_ASSERT_EQUAL_UINT32(CP_UPDATE + 1, MODULE_COUNT);
+  TEST_ASSERT_EQUAL_UINT32(CP_CRASH_RPT + 1, MODULE_COUNT);
 }
 
 static void test_every_module_name_matches_its_enum_ordinal(void) {
@@ -154,6 +155,7 @@ static void test_every_module_name_matches_its_enum_ordinal(void) {
   TEST_ASSERT_EQUAL_STRING("MQTT_PUB",   moduleName(CP_MQTT_PUB));
   TEST_ASSERT_EQUAL_STRING("TEN_MIN",    moduleName(CP_TEN_MIN));
   TEST_ASSERT_EQUAL_STRING("UPDATE",     moduleName(CP_UPDATE));
+  TEST_ASSERT_EQUAL_STRING("CRASH_RPT",  moduleName(CP_CRASH_RPT));
 }
 
 static void test_unknown_module_id_degrades_to_a_placeholder(void) {
@@ -329,6 +331,67 @@ static void test_reported_crash_is_cleared_so_it_is_not_logged_twice(void) {
   s_logCount = 0;
   crashLogPendingDeferred();
   TEST_ASSERT_FALSE(logContains("Crash detail"));
+}
+
+// ============================================================
+// g_lastCrash - what the crash report (CrashReport.cpp) sends
+// ============================================================
+
+static void test_crash_record_is_kept_for_the_crash_report(void) {
+  espTestSetResetReason(REASON_EXCEPTION_RST);
+  stageCrashRecord(CP_CLOUD);
+  crashLogPendingDeferred();
+  TEST_ASSERT_TRUE(g_lastCrash.valid);
+  TEST_ASSERT_TRUE(g_lastCrash.haveRegisters);
+  TEST_ASSERT_EQUAL_UINT8(REASON_EXCEPTION_RST, g_lastCrash.resetCode);
+  TEST_ASSERT_EQUAL_UINT8(CP_CLOUD, g_lastCrash.lastModule);
+  TEST_ASSERT_EQUAL_HEX32(0x40201234, g_lastCrash.epc1);
+  TEST_ASSERT_EQUAL_HEX32(0x4020DEF0, g_lastCrash.depc);
+  TEST_ASSERT_EQUAL_HEX32(0x3FFFFC00, g_lastCrash.sp);
+  TEST_ASSERT_EQUAL_UINT32(28, g_lastCrash.exccause);
+}
+
+// A panic (e.g. a heap-check hit) reboots as a soft restart but leaves a record
+static void test_panic_after_a_soft_restart_is_kept_for_the_crash_report(void) {
+  espTestSetResetReason(REASON_SOFT_RESTART);
+  stageCrashRecord(CP_MQTT_PEND);
+  crashLogPendingDeferred();
+  TEST_ASSERT_TRUE(g_lastCrash.valid);
+  TEST_ASSERT_TRUE(g_lastCrash.haveRegisters);
+  TEST_ASSERT_EQUAL_UINT8(REASON_SOFT_RESTART, g_lastCrash.resetCode);
+}
+
+// The crash handler never runs for a hardware watchdog: only the checkpoint
+static void test_hardware_watchdog_is_kept_without_registers(void) {
+  espTestSetResetReason(REASON_WDT_RST);
+  checkpoint(CP_MDNS);
+  crashLogPendingDeferred();
+  TEST_ASSERT_TRUE(g_lastCrash.valid);
+  TEST_ASSERT_FALSE(g_lastCrash.haveRegisters);
+  TEST_ASSERT_EQUAL_UINT8(REASON_WDT_RST, g_lastCrash.resetCode);
+  TEST_ASSERT_EQUAL_UINT8(CP_MDNS, g_lastCrash.lastModule);
+}
+
+static void test_watchdog_without_a_checkpoint_has_an_unknown_subsystem(void) {
+  espTestSetResetReason(REASON_SOFT_WDT_RST);
+  crashLogPendingDeferred();
+  TEST_ASSERT_TRUE(g_lastCrash.valid);
+  TEST_ASSERT_EQUAL_UINT8(0xFF, g_lastCrash.lastModule);
+}
+
+// OTA, /reboot and the like: a soft restart with no crash record is never reported
+static void test_intentional_restart_is_not_reported(void) {
+  espTestSetResetReason(REASON_SOFT_RESTART);
+  checkpoint(CP_WEB);
+  crashLogPendingDeferred();
+  TEST_ASSERT_FALSE(g_lastCrash.valid);
+}
+
+static void test_power_on_is_not_reported(void) {
+  espTestSetResetReason(REASON_DEFAULT_RST);
+  stageCrashRecord(CP_CLOUD);   // even with a leftover record
+  crashLogPendingDeferred();
+  TEST_ASSERT_FALSE(g_lastCrash.valid);
 }
 
 static void test_stale_magic_falls_through_to_the_checkpoint_path(void) {
@@ -529,6 +592,12 @@ int main(int, char**) {
   RUN_TEST(test_crash_record_reports_a_panic_reason_after_a_soft_restart);
   RUN_TEST(test_crash_record_dumps_the_whole_stack_slice);
   RUN_TEST(test_reported_crash_is_cleared_so_it_is_not_logged_twice);
+  RUN_TEST(test_crash_record_is_kept_for_the_crash_report);
+  RUN_TEST(test_panic_after_a_soft_restart_is_kept_for_the_crash_report);
+  RUN_TEST(test_hardware_watchdog_is_kept_without_registers);
+  RUN_TEST(test_watchdog_without_a_checkpoint_has_an_unknown_subsystem);
+  RUN_TEST(test_intentional_restart_is_not_reported);
+  RUN_TEST(test_power_on_is_not_reported);
   RUN_TEST(test_stale_magic_falls_through_to_the_checkpoint_path);
   RUN_TEST(test_checkpoint_only_path_names_the_subsystem_and_its_id);
   RUN_TEST(test_no_records_at_all_still_reports_the_reset_reason);

@@ -1358,6 +1358,7 @@ function loadSystemSettings() {
     html += row('Alarm Delay',      numInput('sadwell', d.AlarmDwellSec || 600, null, 90) + ' s <span style="color:#888;font-size:11px">(mild deviations wait this long before alarming; severe deviations bypass it)</span>');
     html += row('mDNS', switchHtml('smdns', d.MdnsEnabled !== false) + ' <span style="color:#888;font-size:11px">Takes effect after reboot</span>');
     html += row('Update Check', switchHtml('supd', d.UpdateCheck !== false) + ' <span style="color:#888;font-size:11px">Automatically check for firmware updates</span>');
+    html += row('Crash Reports', switchHtml('scrash', d.CrashReports !== false) + ' <span style="color:#888;font-size:11px">Automatically send crash reports</span>');
     html += row('<span style="color:#8b5cf6">Fermenter Debug Mode</span>', switchHtml('dbmode', dbg.DebugMode || false));
     html += '<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
     html += '</div>';
@@ -1398,14 +1399,15 @@ function loadSystemSettings() {
   });
 }
 
-// Save the global controller settings (temp unit, resolution, mDNS, update check, debug mode).
+// Save the global controller settings (temp unit, resolution, mDNS, update check, crash reports, debug mode).
 function saveSettings() {
   var body = {
     Unit:          parseInt(byId('su').value),
     Resolution:    parseInt(byId('sres').value),
     AlarmDwellSec: parseInt(byId('sadwell').value),
     MdnsEnabled:   byId('smdns').checked,
-    UpdateCheck:   byId('supd').checked
+    UpdateCheck:   byId('supd').checked,
+    CrashReports:  byId('scrash').checked
   };
   fetch('/controller', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })

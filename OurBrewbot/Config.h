@@ -231,6 +231,7 @@ struct GlobalConfig {
   uint16_t alarmDwellSec;       // dwell time before mild deviations raise an alarm
   bool     mdnsEnabled;         // register and update mDNS hostname
   bool     updateCheck;         // check ourbrewbot.com daily for a newer release
+  bool     crashReports;        // send a crash report to ourbrewbot.com after a crash
 };
 
 // ============================================================

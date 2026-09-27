@@ -37,7 +37,7 @@ constexpr uint32_t CRASH_OFFSET      = 0;        // dword offset 0
 constexpr uint32_t CHECKPOINT_OFFSET = 35;       // dword offset 35 (past CrashRecord)
 constexpr uint32_t CRASH_MAGIC       = 0xC0FFEE42u;
 constexpr uint32_t CP_MAGIC          = 0xC0DECA11u;
-constexpr size_t   STACK_WORDS       = 24;
+constexpr size_t   STACK_WORDS       = CRASH_STACK_WORDS;
 
 struct CrashRecord {
   uint32_t magic;
@@ -87,6 +87,7 @@ const char* const MODULE_NAMES[] = {
   "MQTT_PUB",    // CP_MQTT_PUB
   "TEN_MIN",     // CP_TEN_MIN
   "UPDATE",      // CP_UPDATE
+  "CRASH_RPT",   // CP_CRASH_RPT
 };
 constexpr size_t MODULE_COUNT = sizeof(MODULE_NAMES) / sizeof(MODULE_NAMES[0]);
 
@@ -95,6 +96,12 @@ const char* moduleName(uint32_t id) {
 }
 
 } // namespace
+
+CrashInfo g_lastCrash;
+
+const char* checkpointName(uint32_t module) {
+  return moduleName(module);
+}
 
 // Called from loop() in OurBrewbot.cpp, which cppcheck does not connect to
 // this definition - hence the suppression rather than a real removal.
@@ -149,6 +156,23 @@ void crashLogPendingDeferred() {
               crashRec.stack[i+0], crashRec.stack[i+1], crashRec.stack[i+2], crashRec.stack[i+3],
               crashRec.stack[i+4], crashRec.stack[i+5], crashRec.stack[i+6], crashRec.stack[i+7]);
     }
+    // Keep a copy for the crash report (CrashReport.cpp) before clearing it
+    memset(&g_lastCrash, 0, sizeof(g_lastCrash));
+    g_lastCrash.valid         = true;
+    g_lastCrash.haveRegisters = true;
+    g_lastCrash.resetCode     = (uint8_t)ri->reason;
+    g_lastCrash.lastModule    = (uint8_t)crashRec.lastCheckpoint;
+    g_lastCrash.reason        = crashRec.reason;
+    g_lastCrash.exccause      = crashRec.exccause;
+    g_lastCrash.epc1          = crashRec.epc1;
+    g_lastCrash.epc2          = crashRec.epc2;
+    g_lastCrash.epc3          = crashRec.epc3;
+    g_lastCrash.excvaddr      = crashRec.excvaddr;
+    g_lastCrash.depc          = crashRec.depc;
+    g_lastCrash.sp            = crashRec.stackStart;
+    g_lastCrash.spEnd         = crashRec.stackEnd;
+    memcpy(g_lastCrash.stack, crashRec.stack, sizeof(g_lastCrash.stack));
+
     uint32_t zero = 0;
     ESP.rtcUserMemoryWrite(CRASH_OFFSET, &zero, sizeof(zero));
     return;
@@ -171,6 +195,15 @@ void crashLogPendingDeferred() {
     logMsgL(SYSLOG_ERR,
             "DEFERRED [SYS] %s: no checkpoint recorded",
             ESP.getResetReason().c_str());
+  }
+
+  // Report watchdog and exception resets. A software restart without a crash
+  // record is an intentional reboot (OTA, /reboot) - never reported.
+  if (ri->reason != REASON_SOFT_RESTART) {
+    memset(&g_lastCrash, 0, sizeof(g_lastCrash));
+    g_lastCrash.valid      = true;
+    g_lastCrash.resetCode  = (uint8_t)ri->reason;
+    g_lastCrash.lastModule = haveCp ? (uint8_t)cpRec.module : 0xFF;
   }
 }
 

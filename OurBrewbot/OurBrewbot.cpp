@@ -57,6 +57,7 @@
 #include "WebAPI.h"
 #include "Crash.h"
 #include "UpdateCheck.h"
+#include "CrashReport.h"
 #include <MicroMDNS.h>
 
 // ============================================================
@@ -199,6 +200,10 @@ void setup() {
     }
     crashLogPendingDeferred();
     logMsgL(SYSLOG_NOTICE, "DEFERRED [WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
+  } else {
+    // No syslog, but still read (and clear) any crash record so the crash
+    // report (CrashReport.cpp) can send it
+    crashLogPendingDeferred();
   }
 
   // MQTT client setup
@@ -331,6 +336,9 @@ void loop() {
 
       // Daily firmware update check - returns straight away until it's due
       updateCheckLoop();
+
+      // Send the crash report once after a crash - does nothing otherwise
+      crashReportLoop();
 
       // Uptime counter (incremented every minute, saved to global config)
       if (now - g_lastUptimeTime >= INTERVAL_UPTIME_MS) {

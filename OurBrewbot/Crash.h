@@ -63,16 +63,41 @@ enum : uint8_t {
   CP_MQTT_PUB   = 13,
   CP_TEN_MIN    = 14,
   CP_UPDATE     = 15,
+  CP_CRASH_RPT  = 16,
 };
+
+#define CRASH_STACK_WORDS 24   // stack words captured by the crash handler
+
+// A crash found at boot, kept for the crash report upload (CrashReport.cpp).
+// Filled in by crashLogPendingDeferred(). `valid` stays false after a normal
+// boot or an intentional restart (OTA, /reboot), so only real faults are sent.
+struct CrashInfo {
+  bool     valid;
+  bool     haveRegisters;   // false when only the checkpoint is known (e.g. hardware watchdog)
+  uint8_t  resetCode;       // the boot's reset reason (REASON_*)
+  uint8_t  lastModule;      // CP_* the loop was in, 0xFF if unknown
+  uint32_t reason;          // what the crash handler saw (254 = panic / heap-check hit)
+  uint32_t exccause;
+  uint32_t epc1, epc2, epc3, excvaddr, depc;
+  uint32_t sp, spEnd;
+  uint32_t stack[CRASH_STACK_WORDS];
+};
+
+extern CrashInfo g_lastCrash;
 
 // Mark `module` as the currently-running subsystem. Cheap: skips the RTC
 // write when the module hasn't changed since the previous call. Call before
 // each subsystem invocation in loop().
 void checkpoint(uint8_t module);
 
-// Mirror any pending crash/checkpoint detail via the DEFERRED syslog path.
-// Call once from setup() after WiFi + syslog are up. Quiet on clean reboots
-// (power-on, software restart, external reset); logs detail only when the
-// reset reason indicates a fault (exception, hw watchdog, soft watchdog).
-// Clears the crash magic on success so the next boot does not re-log it.
+// Name of a checkpoint id, e.g. "MQTT_PEND" - "?" if unknown.
+const char* checkpointName(uint32_t module);
+
+// Mirror any pending crash/checkpoint detail via the DEFERRED syslog path,
+// and copy it into g_lastCrash for the crash report. Call once from setup()
+// after WiFi + syslog are up - and also when syslog is off, so a crash is
+// still read and reported. Quiet on clean reboots (power-on, external reset);
+// logs detail only when the reset reason indicates a fault (exception, hw
+// watchdog, soft watchdog) or a software restart. Clears the crash magic on
+// success so the next boot does not re-log it.
 void crashLogPendingDeferred();

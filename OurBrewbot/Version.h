@@ -25,3 +25,6 @@
 
 // Where the daily update check (UpdateCheck.cpp) reads the latest release.
 #define UPDATE_CHECK_URL "http://ourbrewbot.com/version.json"
+
+// Where a crash report is sent (CrashReport.cpp) after a crash or watchdog reset.
+#define CRASH_REPORT_URL "http://ourbrewbot.com/api/crash"

@@ -598,6 +598,7 @@ void buildControllerJson(JsonDocument& doc) {
   doc["Resolution"]    = g_globalConfig.resolution;
   doc["AlarmDwellSec"] = g_globalConfig.alarmDwellSec;
   doc["MdnsEnabled"]   = g_globalConfig.mdnsEnabled;
+  doc["CrashReports"]  = g_globalConfig.crashReports;
   doc["FirmwareVersion"] = FW_VERSION;
   buildUpdateStatusJson(doc);
   doc["ChipId"]        = String(ESP.getChipId(), HEX);
@@ -635,6 +636,7 @@ void handleController(ESP8266WebServer& server) {
       if (!doc["AlarmDwellSec"].isNull()) { uint32_t v = doc["AlarmDwellSec"]; if (v <= 3600) g_globalConfig.alarmDwellSec = (uint16_t)v; }
       if (!doc["MdnsEnabled"].isNull())   g_globalConfig.mdnsEnabled   = doc["MdnsEnabled"];
       if (!doc["UpdateCheck"].isNull())   g_globalConfig.updateCheck   = doc["UpdateCheck"];
+      if (!doc["CrashReports"].isNull())  g_globalConfig.crashReports  = doc["CrashReports"];
       if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
       if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
       if (doc["BrewServiceId"].is<const char*>()) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
