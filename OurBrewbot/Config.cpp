@@ -1,4 +1,20 @@
 /*
+ * Copyright 2026 Sean Cardus
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * Config.cpp — Configuration persistence
  * Load/save all config to/from LittleFS.
  *
@@ -252,7 +268,9 @@ static void cfgSaveArray(JsonDocument& doc, const void* base, size_t stride,
   X("tuning_chart_no", tuningChartNo, U8,    0)                  \
   X("resolution",      resolution,    U8,    11)                 \
   X("alarm_dwell_sec", alarmDwellSec, U16,   600)                \
-  X("mdns_enabled",    mdnsEnabled,   BOOL,  true)
+  X("mdns_enabled",    mdnsEnabled,   BOOL,  true)                \
+  X("update_check",    updateCheck,   BOOL,  true)                \
+  X("crash_reports",   crashReports,  BOOL,  true)
 
 #define CFG_KEY(key, member, type, def) static const char kGKey_##member[] PROGMEM = key;
 #define CFG_CHK(key, member, type, def) CFG_ASSERT_TYPE(GlobalConfig, member, type)
@@ -913,6 +931,8 @@ void initDefaultGlobalConfig() {
   g_globalConfig.resolution = 11;
   g_globalConfig.alarmDwellSec = 600;
   g_globalConfig.mdnsEnabled = true;
+  g_globalConfig.updateCheck = true;
+  g_globalConfig.crashReports = true;
 }
 
 void initDefaultFermenterConfig() {

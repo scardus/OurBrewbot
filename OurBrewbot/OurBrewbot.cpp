@@ -1,4 +1,20 @@
 /*
+ * Copyright 2026 Sean Cardus
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * OurBrewbot — ESP8266 fermentation controller firmware
  * Targets: NodeMCU / Wemos D1 Mini (ESP8266)
  *
@@ -40,6 +56,8 @@
 #include "Mqtt.h"
 #include "WebAPI.h"
 #include "Crash.h"
+#include "UpdateCheck.h"
+#include "CrashReport.h"
 #include <MicroMDNS.h>
 
 // ============================================================
@@ -182,6 +200,10 @@ void setup() {
     }
     crashLogPendingDeferred();
     logMsgL(SYSLOG_NOTICE, "DEFERRED [WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
+  } else {
+    // No syslog, but still read (and clear) any crash record so the crash
+    // report (CrashReport.cpp) can send it
+    crashLogPendingDeferred();
   }
 
   // MQTT client setup
@@ -311,6 +333,12 @@ void loop() {
         checkpoint(CP_TEN_MIN);
         onTenMinuteTimer();
       }
+
+      // Daily firmware update check - returns straight away until it's due
+      updateCheckLoop();
+
+      // Send the crash report once after a crash - does nothing otherwise
+      crashReportLoop();
 
       // Uptime counter (incremented every minute, saved to global config)
       if (now - g_lastUptimeTime >= INTERVAL_UPTIME_MS) {

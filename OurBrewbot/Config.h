@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Sean Cardus
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 /*
  * Config.h — All data structures and configuration constants
@@ -214,6 +230,8 @@ struct GlobalConfig {
   uint8_t  resolution;          // DS18B20 resolution 9-12 bits (e.g. 11)
   uint16_t alarmDwellSec;       // dwell time before mild deviations raise an alarm
   bool     mdnsEnabled;         // register and update mDNS hostname
+  bool     updateCheck;         // check ourbrewbot.com daily for a newer release
+  bool     crashReports;        // send a crash report to ourbrewbot.com after a crash
 };
 
 // ============================================================

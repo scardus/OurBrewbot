@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Sean Cardus
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 /*
  * WebAPI.h — REST API server setup and route handlers
@@ -10,6 +26,7 @@
  *   POST /smartplug        → update a plug config
  *   POST /smartplug/test   → test RF transmission
  *   POST /update           → accept firmware binary upload
+ *   POST /update/check     → check ourbrewbot.com for a newer firmware now
  *   POST /iSpindel         → receive iSpindel POST
  */
 
@@ -24,6 +41,7 @@ void checkBLESniffTimeout();
 // Route handlers (called by server)
 void handleRoot(ESP8266WebServer& server);
 void handleController(ESP8266WebServer& server);
+void handleUpdateCheck(ESP8266WebServer& server);
 void handleFermenters(ESP8266WebServer& server);
 void handleFermenter(ESP8266WebServer& server);
 void handleBoardInfo(ESP8266WebServer& server);
@@ -83,4 +101,5 @@ void sendJsonDoc(ESP8266WebServer& server, JsonDocument& doc, int code = 200);
 void buildFermenterJson(JsonDocument& doc, uint8_t index);
 void buildProfileJson(JsonDocument& doc, int profileIndex);
 void buildControllerJson(JsonDocument& doc);
+void buildUpdateStatusJson(JsonDocument& doc);
 void buildBoardInfoJson(JsonDocument& doc);

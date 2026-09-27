@@ -1,4 +1,20 @@
 /*
+ * Copyright 2026 Sean Cardus
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * WebAdmin.cpp — Admin configuration page (PROGMEM HTML)
  */
 
@@ -1262,36 +1278,36 @@ function loadReporting() {
   });
 }
 
-function checkFwUpdate(current) {
-  var el = byId('fwcheck');
+// Firmware update status for the System Info row, followed by a [check] link.
+// d is the /controller or /update/check response - the controller itself
+// checks ourbrewbot.com, daily and whenever [check] is clicked.
+function fwStatusHtml(d) {
+  var s;
+  if (d.UpdateAvailable) {
+    var url = d.UpdateNotesUrl || 'https://github.com/scardus/OurBrewbot/releases';
+    s = '<a href="' + url + '" target="_blank" style="color:#fa0">[update ' + d.LatestVersion + ' available]</a>';
+  } else if (d.UpdateCheckError) {
+    s = '<span style="color:#f44">[check failed: ' + d.UpdateCheckError + ']</span>';
+  } else if (d.UpdateChecked) {
+    s = '<span style="color:#4f4">[up to date]</span>';
+  } else {
+    s = '<span style="color:#888">[not checked yet]</span>';
+  }
+  return s + ' <a href="#" onclick="checkFwUpdate();return false;" style="color:#53d8fb">[check]</a>';
+}
+
+// Ask the controller to check for a newer firmware now (takes up to ~5 s).
+function checkFwUpdate() {
+  var el = byId('fwstatus');
   if (!el) return;
   markDirty();
-  el.textContent = '[checking...]';
-  el.style.color = '#53d8fb';
-  el.onclick = function() { return false; };
-  fetch('https://api.github.com/repos/scardus/OurBrewbot/releases/latest')
-    .then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function(data) {
-      var latest = data.tag_name.replace(/^v/, '');
-      if (latest === current) {
-        el.textContent = '[on latest]';
-        el.style.color = '#4f4';
-        el.onclick = function() { return false; };
-      } else {
-        el.textContent = '[update available]';
-        el.style.color = '#fa0';
-        el.href = data.html_url;
-        el.target = '_blank';
-        el.onclick = null;
-      }
-    })
-    .catch(function() {
-      el.textContent = '[check failed]';
-      el.style.color = '#f44';
-      el.onclick = function() { checkFwUpdate(current); return false; };
+  el.innerHTML = '<span style="color:#53d8fb">[checking...]</span>';
+  fetch('/update/check', { method: 'POST' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { el.innerHTML = fwStatusHtml(d); })
+    .catch(function () {
+      el.innerHTML = '<span style="color:#f44">[check failed]</span>'
+                   + ' <a href="#" onclick="checkFwUpdate();return false;" style="color:#53d8fb">[check]</a>';
     });
 }
 
@@ -1314,8 +1330,7 @@ function loadSystemSettings() {
     ];
     var html = '<div class="info"><h3 style="color:#e94560;margin-bottom:8px">System Info</h3>';
     html += '<div class="r"><span>Firmware</span><span class="v">' + d.FirmwareVersion
-          + ' <a id="fwcheck" href="#" onclick="checkFwUpdate(\'' + d.FirmwareVersion
-          + '\');return false;" style="color:#53d8fb;font-size:11px">[check]</a></span></div>';
+          + ' <span id="fwstatus" style="font-size:11px">' + fwStatusHtml(d) + '</span></span></div>';
     html += '<div class="r"><span>IP Address</span><span class="v">' + d.IP + '</span></div>';
     html += '<div class="r"><span>mDNS Name</span><span class="v">' + (d.MdnsEnabled ? '<a href="http://' + d.mDNSName + '/" style="color:#53d8fb">' + d.mDNSName + '</a>' : '<span style="color:#888">disabled</span>') + '</span></div>';
     html += '<div class="r"><span>WiFi SSID</span><span class="v">' + d.WiFiSSID + '</span></div>';
@@ -1341,7 +1356,9 @@ function loadSystemSettings() {
     for (var r = 9; r <= 12; r++) html += '<option value="' + r + '"' + (d.Resolution == r ? ' selected' : '') + '>' + r + '-bit</option>';
     html += '</select></div>';
     html += row('Alarm Delay',      numInput('sadwell', d.AlarmDwellSec || 600, null, 90) + ' s <span style="color:#888;font-size:11px">(mild deviations wait this long before alarming; severe deviations bypass it)</span>');
-    html += row('mDNS', switchHtml('smdns', d.MdnsEnabled !== false) + ' <span style="color:#888;font-size:11px">(takes effect after reboot; disable on networks with heavy mDNS traffic to improve stability)</span>');
+    html += row('mDNS', switchHtml('smdns', d.MdnsEnabled !== false) + ' <span style="color:#888;font-size:11px">Takes effect after reboot</span>');
+    html += row('Update Check', switchHtml('supd', d.UpdateCheck !== false) + ' <span style="color:#888;font-size:11px">Automatically check for firmware updates</span>');
+    html += row('Crash Reports', switchHtml('scrash', d.CrashReports !== false) + ' <span style="color:#888;font-size:11px">Automatically send crash reports</span>');
     html += row('<span style="color:#8b5cf6">Fermenter Debug Mode</span>', switchHtml('dbmode', dbg.DebugMode || false));
     html += '<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
     html += '</div>';
@@ -1382,13 +1399,15 @@ function loadSystemSettings() {
   });
 }
 
-// Save the global controller settings (temp unit, resolution, mDNS, debug mode).
+// Save the global controller settings (temp unit, resolution, mDNS, update check, crash reports, debug mode).
 function saveSettings() {
   var body = {
     Unit:          parseInt(byId('su').value),
     Resolution:    parseInt(byId('sres').value),
     AlarmDwellSec: parseInt(byId('sadwell').value),
-    MdnsEnabled:   byId('smdns').checked
+    MdnsEnabled:   byId('smdns').checked,
+    UpdateCheck:   byId('supd').checked,
+    CrashReports:  byId('scrash').checked
   };
   fetch('/controller', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })

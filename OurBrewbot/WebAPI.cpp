@@ -1,4 +1,20 @@
 /*
+ * Copyright 2026 Sean Cardus
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * WebAPI.cpp — REST API and web server implementation
  */
 
@@ -13,6 +29,7 @@
 #include "Pins.h"
 #include "Profile.h"
 #include "Tilt.h"
+#include "UpdateCheck.h"
 
 // Forward refs to global server (defined in .ino)
 extern ESP8266WebServer g_webServer;
@@ -70,6 +87,7 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/reset",            HTTP_GET,  handleReset,              true  },
   { "/reboot",           HTTP_GET,  handleReboot,             true  },
   { "/update",           HTTP_GET,  handleOTAPage,            true  },
+  { "/update/check",     HTTP_POST, handleUpdateCheck,        true  },
   { "/config",           HTTP_GET,  handleConfigPage,         true  },
   { "/wifi/reset",       HTTP_POST, handleWiFiReset,          true  },
   { "/WiFi",             HTTP_GET,  handleConfigPage,         true  },
@@ -293,6 +311,7 @@ static const char ROOT_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/tilt</span><span class='desc'> &mdash; update Tilt config</span></li>
     <li><span class='method'>GET</span><a href='/tilts'>/tilts</a><span class='desc'> &mdash; Tilt hydrometer config &amp; live data</span></li>
     <li><span class='method'>GET</span><a href='/update'>/update</a><span class='desc'> &mdash; OTA firmware update</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/update/check</span><span class='desc'> &mdash; check ourbrewbot.com for a newer firmware now</span></li>
     </ul></div>
     </body></html>)rawliteral";
 
@@ -579,7 +598,9 @@ void buildControllerJson(JsonDocument& doc) {
   doc["Resolution"]    = g_globalConfig.resolution;
   doc["AlarmDwellSec"] = g_globalConfig.alarmDwellSec;
   doc["MdnsEnabled"]   = g_globalConfig.mdnsEnabled;
+  doc["CrashReports"]  = g_globalConfig.crashReports;
   doc["FirmwareVersion"] = FW_VERSION;
+  buildUpdateStatusJson(doc);
   doc["ChipId"]        = String(ESP.getChipId(), HEX);
   doc["FreeHeap"]      = ESP.getFreeHeap();
   doc["Uptime"]        = (uint32_t)(millis() / 60000UL);
@@ -614,6 +635,8 @@ void handleController(ESP8266WebServer& server) {
       if (!doc["Resolution"].isNull()) { uint8_t v = doc["Resolution"]; if (v >= 9 && v <= 12)                        g_globalConfig.resolution = v; }
       if (!doc["AlarmDwellSec"].isNull()) { uint32_t v = doc["AlarmDwellSec"]; if (v <= 3600) g_globalConfig.alarmDwellSec = (uint16_t)v; }
       if (!doc["MdnsEnabled"].isNull())   g_globalConfig.mdnsEnabled   = doc["MdnsEnabled"];
+      if (!doc["UpdateCheck"].isNull())   g_globalConfig.updateCheck   = doc["UpdateCheck"];
+      if (!doc["CrashReports"].isNull())  g_globalConfig.crashReports  = doc["CrashReports"];
       if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
       if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
       if (doc["BrewServiceId"].is<const char*>()) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
@@ -629,6 +652,33 @@ void handleController(ESP8266WebServer& server) {
   }
   JsonDocument doc;
   buildControllerJson(doc);
+  sendJsonDoc(server, doc);
+}
+
+// ============================================================
+// UPDATE CHECK — POST /update/check
+// Runs the firmware update check now (the [check] link on the admin page)
+// and returns the result. Blocks for up to ~5 s while it downloads.
+// ============================================================
+
+// The update-check fields, shared by GET /controller and POST /update/check
+void buildUpdateStatusJson(JsonDocument& doc) {
+  doc["UpdateCheck"]      = g_globalConfig.updateCheck;      // daily check switched on
+  doc["UpdateChecked"]    = g_updateStatus.checked;          // a check has worked since boot
+  doc["UpdateAvailable"]  = g_updateStatus.updateAvailable;
+  doc["LatestVersion"]    = g_updateStatus.latestVersion;
+  doc["UpdateNotesUrl"]   = g_updateStatus.notesUrl;
+  doc["UpdateCheckError"] = g_updateStatus.lastError;        // "" if the last check worked
+  // Minutes since the last attempt, or -1 if there hasn't been one since boot
+  doc["LastUpdateCheck"]  = g_updateStatus.attempted
+                              ? (int32_t)((millis() - g_updateStatus.lastCheckMs) / 60000UL)
+                              : -1;
+}
+
+void handleUpdateCheck(ESP8266WebServer& server) {
+  runUpdateCheck();
+  JsonDocument doc;
+  buildUpdateStatusJson(doc);
   sendJsonDoc(server, doc);
 }
 

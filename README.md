@@ -224,6 +224,7 @@ These should be auto-detected and used if you flash this firmware to the same de
 | GET    | /tilts             | Tilt hydrometer config + live data |
 | GET    | /update            | OTA firmware update page      |
 | POST   | /update            | Upload new firmware binary    |
+| POST   | /update/check      | Check ourbrewbot.com for a newer firmware now |
 | GET    | /WiFi              | WiFi config page (alias)      |
 | POST   | /wifi/reset        | Clear WiFi settings and reboot into the setup portal |
 
@@ -241,6 +242,7 @@ Discovery creates one HA device for the controller, one for each fermenter, and 
 |-----------|-------------|--------|
 | `OurBrewbot` (controller) | `sensor` | firmware_version, ip_address, mdns_name, wifi_ssid, rssi, free_heap, uptime, chip_id, reboot_reason, reboot_code (all diagnostic) |
 | | `button` | reboot, all_off |
+| | `update` | firmware (installed vs latest release, from the daily update check; display-only) |
 | `OurBrewbot F0`–`F3` (fermenters) | `sensor` | beer_temperature, ambient_temperature, gravity, gravity_source, attenuation, status, beer_temperature_source, temperature_unit, profile_step, profile_steps |
 | | `binary_sensor` | alarm |
 | | `switch` | power, temp_control, profile_running |
