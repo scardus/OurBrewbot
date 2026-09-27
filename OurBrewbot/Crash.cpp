@@ -114,10 +114,13 @@ void crashLogPendingDeferred() {
   if (haveCrash) {
     // The existing DEFERRED block already logs exccause/EPC1/EXCVADDR from
     // ESP.getResetInfoPtr(); these lines add the rest of the register frame
-    // plus stack + last-known subsystem.
+    // plus stack + last-known subsystem. `reason` is what the crash handler
+    // saw, which can differ from the boot's reset reason: a core panic()/
+    // abort() - e.g. a heap-poison hit - is recorded as 254 (software
+    // exception) but reboots as an ordinary soft restart.
     logMsgL(SYSLOG_ERR,
-            "DEFERRED [SYS] Crash detail: EPC2=0x%08x EPC3=0x%08x DEPC=0x%08x last=%s",
-            crashRec.epc2, crashRec.epc3, crashRec.depc,
+            "DEFERRED [SYS] Crash detail: reason=%u EPC2=0x%08x EPC3=0x%08x DEPC=0x%08x last=%s",
+            crashRec.reason, crashRec.epc2, crashRec.epc3, crashRec.depc,
             moduleName(crashRec.lastCheckpoint));
     logMsgL(SYSLOG_ERR,
             "DEFERRED [SYS] Stack: SP=0x%08x end=0x%08x (%u words follow)",

@@ -271,6 +271,22 @@ static void test_crash_record_reports_the_full_register_frame(void) {
   TEST_ASSERT_TRUE(logContains("0x40209abc"));   // EPC3
   TEST_ASSERT_TRUE(logContains("0x4020def0"));   // DEPC
   TEST_ASSERT_TRUE(logContains("last=CLOUD"));
+  TEST_ASSERT_TRUE(logContains("reason=2 "));     // REASON_EXCEPTION_RST
+}
+
+// A core panic()/abort() - e.g. a UMM_POISON_CHECK_LITE heap-corruption hit -
+// runs the crash callback with reason 254 but reboots as a plain soft
+// restart. The detail line must carry the callback's reason, or the panic
+// would be indistinguishable from an exception with a blank register frame.
+static void test_crash_record_reports_a_panic_reason_after_a_soft_restart(void) {
+  espTestSetResetReason(REASON_SOFT_RESTART);
+  stageCrashRecord(CP_MQTT_PEND);
+  CrashRecord rec = readCrashRecord();
+  rec.reason = 254;   // REASON_USER_SWEXCEPTION_RST in core_esp8266_postmortem.cpp
+  ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
+  crashLogPendingDeferred();
+  TEST_ASSERT_TRUE(logContains("Crash detail: reason=254 "));
+  TEST_ASSERT_TRUE(logContains("last=MQTT_PEND"));
 }
 
 // 24 stack words at 8 per line = 3 STACK lines, after the detail and SP header.
@@ -493,6 +509,7 @@ int main(int, char**) {
   RUN_TEST(test_exception_reset_is_reported);
 
   RUN_TEST(test_crash_record_reports_the_full_register_frame);
+  RUN_TEST(test_crash_record_reports_a_panic_reason_after_a_soft_restart);
   RUN_TEST(test_crash_record_dumps_the_whole_stack_slice);
   RUN_TEST(test_reported_crash_is_cleared_so_it_is_not_logged_twice);
   RUN_TEST(test_stale_magic_falls_through_to_the_checkpoint_path);
