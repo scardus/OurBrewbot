@@ -10,6 +10,7 @@
  *   POST /smartplug        → update a plug config
  *   POST /smartplug/test   → test RF transmission
  *   POST /update           → accept firmware binary upload
+ *   POST /update/check     → check ourbrewbot.com for a newer firmware now
  *   POST /iSpindel         → receive iSpindel POST
  */
 
@@ -24,6 +25,7 @@ void checkBLESniffTimeout();
 // Route handlers (called by server)
 void handleRoot(ESP8266WebServer& server);
 void handleController(ESP8266WebServer& server);
+void handleUpdateCheck(ESP8266WebServer& server);
 void handleFermenters(ESP8266WebServer& server);
 void handleFermenter(ESP8266WebServer& server);
 void handleBoardInfo(ESP8266WebServer& server);
@@ -83,4 +85,5 @@ void sendJsonDoc(ESP8266WebServer& server, JsonDocument& doc, int code = 200);
 void buildFermenterJson(JsonDocument& doc, uint8_t index);
 void buildProfileJson(JsonDocument& doc, int profileIndex);
 void buildControllerJson(JsonDocument& doc);
+void buildUpdateStatusJson(JsonDocument& doc);
 void buildBoardInfoJson(JsonDocument& doc);

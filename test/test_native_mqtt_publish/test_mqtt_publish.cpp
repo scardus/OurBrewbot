@@ -63,6 +63,10 @@ bool g_fermenterDebugMode = false;
 FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
 String g_rebootReason = "Power on";
 
+// UpdateCheck.cpp - the device report publishes the latest release from here.
+#include "../../OurBrewbot/UpdateCheck.h"
+UpdateStatus g_updateStatus;
+
 // The code under test, plus the modules its payloads genuinely depend on.
 #include "../../OurBrewbot/Config.cpp"
 #include "../../OurBrewbot/Temperatures.cpp"
@@ -118,6 +122,7 @@ void setUp(void) {
   mqttTestReset();
   espTestSetResetReason(REASON_DEFAULT_RST);
   s_millis = 1000000;
+  memset(&g_updateStatus, 0, sizeof(g_updateStatus));   // no update check yet
 
   memset(&g_globalConfig, 0, sizeof(g_globalConfig));
   g_globalConfig.unit = UNIT_CELSIUS;
@@ -633,8 +638,23 @@ void test_discovery_publishes_every_row_of_every_table(void) {
 
   publishAllHaDiscovery();
 
-  // 12 device + 24 per fermenter x 4 + 5 probe + 6 tilt + 11 iSpindel
-  TEST_ASSERT_EQUAL_INT(12 + (24 * 4) + 5 + 6 + 11, mqttTestPublishCount());
+  // 13 device + 24 per fermenter x 4 + 5 probe + 6 tilt + 11 iSpindel
+  TEST_ASSERT_EQUAL_INT(13 + (24 * 4) + 5 + 6 + 11, mqttTestPublishCount());
+}
+
+void test_discovery_update_entity_links_the_version_topics(void) {
+  g_mqttConfig.haDiscovery = true;
+  publishAllHaDiscovery();
+
+  const char* topic = DISC("update", DEV_ID, "firmware");
+  TEST_ASSERT_TRUE(mqttTestRetainedFor(topic));
+  JsonDocument& d = payloadJson(topic);
+  TEST_ASSERT_EQUAL_STRING(BASE "/Device/firmware_version", d["stat_t"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING(BASE "/Device/latest_version",   d["latest_version_topic"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("firmware", d["dev_cla"].as<const char*>());
+  // HA rejects an update config containing exp_aft, and there is nothing to install
+  TEST_ASSERT_TRUE(d["exp_aft"].isNull());
+  TEST_ASSERT_TRUE(d["cmd_t"].isNull());
 }
 
 void test_discovery_publish_failure_does_not_abort_the_burst(void) {
@@ -751,6 +771,23 @@ void test_report_publishes_fermenter_identity_and_state(void) {
   assertPayload(F0_BASE "/temp_control", "ON");
   assertPayload(F0_BASE "/alarm",        "OFF");
   assertPayload(F0_BASE "/status",       "cooling");
+}
+
+// HA shows "unknown" until a check succeeds, rather than a made-up version
+void test_report_publishes_latest_version_only_after_an_update_check(void) {
+  reportMqtt();
+  assertNotPublished(BASE "/Device/latest_version");
+
+  g_updateStatus.checked = true;
+  strlcpy(g_updateStatus.latestVersion, "0.4.17", sizeof(g_updateStatus.latestVersion));
+  mqttTestResetRecords();
+  reportMqtt();
+  assertPayload(BASE "/Device/latest_version", "0.4.17");
+  TEST_ASSERT_TRUE(mqttTestRetainedFor(BASE "/Device/latest_version"));
+
+  mqttTestResetRecords();
+  mqttPublishUpdateStatus();   // straight after a check
+  assertPayload(BASE "/Device/latest_version", "0.4.17");
 }
 
 void test_report_publishes_celsius_values_unchanged(void) {
@@ -1131,6 +1168,7 @@ int main(int, char**) {
   RUN_TEST(test_discovery_ispindel_named_none_is_skipped);
   RUN_TEST(test_no_discovery_payload_exceeds_the_client_buffer);
   RUN_TEST(test_discovery_publishes_every_row_of_every_table);
+  RUN_TEST(test_discovery_update_entity_links_the_version_topics);
   RUN_TEST(test_discovery_publish_failure_does_not_abort_the_burst);
 
   // C. removal
@@ -1143,6 +1181,7 @@ int main(int, char**) {
 
   // D. report
   RUN_TEST(test_report_publishes_fermenter_identity_and_state);
+  RUN_TEST(test_report_publishes_latest_version_only_after_an_update_check);
   RUN_TEST(test_report_publishes_celsius_values_unchanged);
   RUN_TEST(test_report_converts_setpoints_to_fahrenheit);
   RUN_TEST(test_report_omits_beer_temperature_when_no_sensor);

@@ -3,6 +3,10 @@
 // the serialized JSON body of each POST are recorded, so tests can assert on
 // exactly what would have gone to Brewfather / Brewer's Friend without any
 // network. POST()'s return value is settable to exercise the error branch.
+//
+// GET() (UpdateCheck.cpp's version.json download) returns nextStatus too, and
+// the reply body and its advertised size are settable, so the update-check
+// tests can script a good reply, an HTTP error or a malformed file.
 #include <cstdint>
 #include <cstring>
 #include <Arduino.h>   // String
@@ -13,15 +17,30 @@ struct HttpTestRecord {
   char body[1024];
   int  postCount;
   int  nextStatus;
+  int  getCount;
+  char response[1024];   // what getString() returns
+  int  responseSize;     // what getSize() returns (-1 = "not given", as for a chunked reply)
 };
 
-static HttpTestRecord g_httpTest = { {0}, {0}, 0, 200 };
+static HttpTestRecord g_httpTest = { {0}, {0}, 0, 200, 0, {0}, -1 };
 
 static void httpTestReset() {
-  g_httpTest.url[0]    = '\0';
-  g_httpTest.body[0]   = '\0';
-  g_httpTest.postCount = 0;
-  g_httpTest.nextStatus = 200;
+  g_httpTest.url[0]       = '\0';
+  g_httpTest.body[0]      = '\0';
+  g_httpTest.postCount    = 0;
+  g_httpTest.nextStatus   = 200;
+  g_httpTest.getCount     = 0;
+  g_httpTest.response[0]  = '\0';
+  g_httpTest.responseSize = -1;
+}
+
+// Script the reply to the next GET: status code and body. The size is taken
+// from the body, as a real server's Content-Length would be.
+static void httpTestSetReply(int status, const char* body) {
+  g_httpTest.nextStatus = status;
+  strncpy(g_httpTest.response, body ? body : "", sizeof(g_httpTest.response) - 1);
+  g_httpTest.response[sizeof(g_httpTest.response) - 1] = '\0';
+  g_httpTest.responseSize = (int)strlen(g_httpTest.response);
 }
 
 class HTTPClient {
@@ -40,7 +59,13 @@ public:
     return g_httpTest.nextStatus;
   }
 
-  String getString()            { return String(""); }
+  int GET() {
+    g_httpTest.getCount++;
+    return g_httpTest.nextStatus;
+  }
+
+  int    getSize()              { return g_httpTest.responseSize; }
+  String getString()            { return String(g_httpTest.response); }
   String errorToString(int)     { return String("stub error"); }
   void   end()                  {}
 };

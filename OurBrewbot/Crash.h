@@ -46,6 +46,7 @@ enum : uint8_t {
   CP_CLOUD      = 12,
   CP_MQTT_PUB   = 13,
   CP_TEN_MIN    = 14,
+  CP_UPDATE     = 15,
 };
 
 // Mark `module` as the currently-running subsystem. Cheap: skips the RTC

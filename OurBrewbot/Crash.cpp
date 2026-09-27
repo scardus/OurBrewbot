@@ -70,6 +70,7 @@ const char* const MODULE_NAMES[] = {
   "CLOUD",       // CP_CLOUD
   "MQTT_PUB",    // CP_MQTT_PUB
   "TEN_MIN",     // CP_TEN_MIN
+  "UPDATE",      // CP_UPDATE
 };
 constexpr size_t MODULE_COUNT = sizeof(MODULE_NAMES) / sizeof(MODULE_NAMES[0]);
 

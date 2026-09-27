@@ -53,6 +53,12 @@ bool forcePublishAllHaDiscovery() { return true; }
 void cleanupAllHaDiscovery() {}
 bool testMqtt() { return true; }
 
+// UpdateCheck.cpp - /controller and /update/check report its status.
+#include "../../OurBrewbot/UpdateCheck.h"
+UpdateStatus g_updateStatus;
+static int s_updateChecks = 0;
+bool runUpdateCheck() { s_updateChecks++; return true; }
+
 // Reports.cpp
 int testBrewService(uint8_t) { return 200; }
 
@@ -141,6 +147,8 @@ void setUp(void) {
   s_restarts       = 0;
   s_lastForgetWiFi = false;
 
+  memset(&g_updateStatus, 0, sizeof(g_updateStatus));
+  s_updateChecks = 0;
   memset(&g_globalConfig, 0, sizeof(g_globalConfig));
   g_globalConfig.unit = UNIT_CELSIUS;
   for (int i = 0; i < MAX_FERMENTERS; i++)    configureFermenter(i);
@@ -1377,6 +1385,67 @@ static void test_celsius_mode_leaves_temp_adjust_untouched(void) {
 
 // ============================================================
 
+// ============================================================
+// Firmware update check - /controller fields, the UpdateCheck setting and
+// POST /update/check
+// ============================================================
+
+static void test_controller_reports_the_update_status(void) {
+  g_globalConfig.updateCheck = true;
+  g_updateStatus.checked = true;
+  g_updateStatus.updateAvailable = true;
+  strlcpy(g_updateStatus.latestVersion, "0.4.17", sizeof(g_updateStatus.latestVersion));
+  strlcpy(g_updateStatus.notesUrl, "https://example.com/notes", sizeof(g_updateStatus.notesUrl));
+  g_updateStatus.attempted = true;
+  g_updateStatus.lastCheckMs = s_millis;
+  s_millis += 5 * 60000UL;   // checked 5 minutes ago
+
+  handleController(srv);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_TRUE(doc["UpdateCheck"].as<bool>());
+  TEST_ASSERT_TRUE(doc["UpdateChecked"].as<bool>());
+  TEST_ASSERT_TRUE(doc["UpdateAvailable"].as<bool>());
+  TEST_ASSERT_EQUAL_STRING("0.4.17", doc["LatestVersion"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("https://example.com/notes", doc["UpdateNotesUrl"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("", doc["UpdateCheckError"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(5, doc["LastUpdateCheck"].as<int>());
+}
+
+static void test_controller_last_check_is_minus_one_before_any_attempt(void) {
+  handleController(srv);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_EQUAL_INT(-1, doc["LastUpdateCheck"].as<int>());
+  TEST_ASSERT_FALSE(doc["UpdateChecked"].as<bool>());
+}
+
+static void test_controller_post_saves_the_update_check_switch(void) {
+  g_globalConfig.updateCheck = true;
+  postBody("{\"UpdateCheck\":false}");
+  handleController(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_globalConfig.updateCheck);
+
+  // Leaving the field out keeps the current value
+  postBody("{\"Unit\":1}");
+  handleController(srv);
+  TEST_ASSERT_FALSE(g_globalConfig.updateCheck);
+}
+
+static void test_update_check_endpoint_runs_a_check_and_returns_the_result(void) {
+  g_updateStatus.checked = true;
+  strlcpy(g_updateStatus.latestVersion, "0.4.16", sizeof(g_updateStatus.latestVersion));
+  postBody("");
+  srv.setUri("/update/check");
+  handleUpdateCheck(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_updateChecks);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_EQUAL_STRING("0.4.16", doc["LatestVersion"].as<const char*>());
+  TEST_ASSERT_FALSE(doc["UpdateAvailable"].as<bool>());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -1508,6 +1577,11 @@ int main(int, char**) {
   RUN_TEST(test_ispindel_payload_converts_temp_adjust_as_a_span);
   RUN_TEST(test_ispindel_config_post_converts_temp_adjust_from_fahrenheit);
   RUN_TEST(test_celsius_mode_leaves_temp_adjust_untouched);
+
+  RUN_TEST(test_controller_reports_the_update_status);
+  RUN_TEST(test_controller_last_check_is_minus_one_before_any_attempt);
+  RUN_TEST(test_controller_post_saves_the_update_check_switch);
+  RUN_TEST(test_update_check_endpoint_runs_a_check_and_returns_the_result);
 
   return UNITY_END();
 }

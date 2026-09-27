@@ -252,7 +252,8 @@ static void cfgSaveArray(JsonDocument& doc, const void* base, size_t stride,
   X("tuning_chart_no", tuningChartNo, U8,    0)                  \
   X("resolution",      resolution,    U8,    11)                 \
   X("alarm_dwell_sec", alarmDwellSec, U16,   600)                \
-  X("mdns_enabled",    mdnsEnabled,   BOOL,  true)
+  X("mdns_enabled",    mdnsEnabled,   BOOL,  true)                \
+  X("update_check",    updateCheck,   BOOL,  true)
 
 #define CFG_KEY(key, member, type, def) static const char kGKey_##member[] PROGMEM = key;
 #define CFG_CHK(key, member, type, def) CFG_ASSERT_TYPE(GlobalConfig, member, type)
@@ -913,6 +914,7 @@ void initDefaultGlobalConfig() {
   g_globalConfig.resolution = 11;
   g_globalConfig.alarmDwellSec = 600;
   g_globalConfig.mdnsEnabled = true;
+  g_globalConfig.updateCheck = true;
 }
 
 void initDefaultFermenterConfig() {

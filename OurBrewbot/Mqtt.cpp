@@ -23,6 +23,7 @@
 #include "Tilt.h"
 #include "Version.h"
 #include "Log.h"
+#include "UpdateCheck.h"
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 
@@ -270,6 +271,39 @@ static void publishButtonEntity(JsonDocument& doc,
   publishAndReset(doc, "button", devId, objectId);
 }
 
+// HA update entity (firmware version, display-only - no install command).
+// Built by hand rather than with buildDiscoveryBase(): HA rejects the whole
+// config if it contains exp_aft, which the update platform doesn't accept.
+// Installed version = the existing firmware_version topic; latest version =
+// latest_version, published after each update check (UpdateCheck.cpp).
+static void publishUpdateEntity(JsonDocument& doc,
+    const char* devId, const char* base, const char* devName,
+    const char* objectId, const char* name,
+    const char* devClass, const char* entityCat)
+{
+  char uid[56], stTopic[96], latestTopic[96];
+  snprintf(uid,         sizeof(uid),         "%s_%s", devId, objectId);
+  snprintf(stTopic,     sizeof(stTopic),     "%s/firmware_version", base);
+  snprintf(latestTopic, sizeof(latestTopic), "%s/latest_version",   base);
+  doc["uniq_id"]              = uid;
+  doc["name"]                 = name;
+  doc["stat_t"]               = stTopic;
+  doc["latest_version_topic"] = latestTopic;
+  doc["title"]                = "OurBrewbot firmware";
+  doc["release_url"]          = "https://github.com/scardus/OurBrewbot/releases";
+  if (devClass  && devClass[0])  doc["dev_cla"] = devClass;
+  if (entityCat && entityCat[0]) doc["ent_cat"] = entityCat;
+  doc["avty_t"] = s_availTopic;
+  JsonObject dev = doc["dev"].to<JsonObject>();
+  JsonArray  ids = dev["ids"].to<JsonArray>();
+  ids.add(devId);
+  dev["name"] = devName;
+  dev["mf"]   = "OurBrewbot";
+  dev["mdl"]  = "ESP8266";
+  dev["sw"]   = FW_VERSION;
+  publishAndReset(doc, "update", devId, objectId);
+}
+
 // Echo a single fermenter field immediately after processing a /set command,
 // so HA shows confirmed state without waiting for the 60 s periodic publish.
 static void publishFermenterField(int i, const char* key) {
@@ -299,7 +333,7 @@ static void publishFermenterField(int i, const char* key) {
 // to the stack before use); publish order matches table order.
 // ============================================================
 
-enum HaKind : uint8_t { HA_SENSOR, HA_BINARY, HA_NUMBER, HA_SWITCH, HA_SELECT, HA_TEXT, HA_BUTTON };
+enum HaKind : uint8_t { HA_SENSOR, HA_BINARY, HA_NUMBER, HA_SWITCH, HA_SELECT, HA_TEXT, HA_BUTTON, HA_UPDATE };
 
 // Flags for discovery fields that depend on the configured temperature unit
 #define HAF_TEMP_UNIT    0x01   // unit_of_meas = haTempUnit()
@@ -339,6 +373,8 @@ static const HaEntityDesc kDeviceEntities[] PROGMEM = {
   // state topic publishes correct device state within 60s regardless
   { HA_BUTTON, 0, "reboot",           "Reboot",           nullptr, nullptr, "mdi:restart",       nullptr, nullptr },
   { HA_BUTTON, 0, "all_off",          "All Off",          nullptr, nullptr, "mdi:power-off",     nullptr, nullptr },
+  // Firmware update notice - shows in HA under Settings > Updates (display-only)
+  { HA_UPDATE, 0, "firmware",         "Firmware",         "firmware", nullptr, nullptr,          "config", nullptr },
 };
 
 static const HaEntityDesc kFermenterEntities[] PROGMEM = {
@@ -443,6 +479,7 @@ static const char* haComponentName(uint8_t kind) {
     case HA_SELECT: return "select";
     case HA_TEXT:   return "text";
     case HA_BUTTON: return "button";
+    case HA_UPDATE: return "update";
     default:        return "sensor";
   }
 }
@@ -491,6 +528,10 @@ static void publishEntityFromDesc(JsonDocument& doc, const HaEntityDesc* row,
     case HA_BUTTON:
       publishButtonEntity(doc, devId, base, devName, d.objectId, d.name,
         cmdKey, d.icon);
+      break;
+    case HA_UPDATE:
+      publishUpdateEntity(doc, devId, base, devName, d.objectId, d.name,
+        d.devClass, d.entityCat);
       break;
   }
 }
@@ -1110,7 +1151,22 @@ static void publishDeviceReport() {
   struct rst_info* ri = ESP.getResetInfoPtr();
   publishInt(base, "reboot_code", ri->reason);
 
+  // Latest release - only once an update check has succeeded, so HA shows
+  // "unknown" rather than a made-up version before then
+  if (g_updateStatus.checked) {
+    publishValue(base, "latest_version", g_updateStatus.latestVersion);
+  }
+
   logMsg("[MQTT] Published device report: base=%s", base);
+}
+
+void mqttPublishUpdateStatus() {
+  if (!g_mqttConfig.enabled || !g_updateStatus.checked) return;
+  if (!g_mqtt.connected()) return;   // the next device report carries it instead
+
+  char base[64];
+  snprintf(base, sizeof(base), "%s/Device", g_mqttConfig.baseTopic);
+  publishValue(base, "latest_version", g_updateStatus.latestVersion);
 }
 
 void reportMqtt() {

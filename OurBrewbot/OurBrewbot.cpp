@@ -40,6 +40,7 @@
 #include "Mqtt.h"
 #include "WebAPI.h"
 #include "Crash.h"
+#include "UpdateCheck.h"
 #include <MicroMDNS.h>
 
 // ============================================================
@@ -311,6 +312,9 @@ void loop() {
         checkpoint(CP_TEN_MIN);
         onTenMinuteTimer();
       }
+
+      // Daily firmware update check - returns straight away until it's due
+      updateCheckLoop();
 
       // Uptime counter (incremented every minute, saved to global config)
       if (now - g_lastUptimeTime >= INTERVAL_UPTIME_MS) {
