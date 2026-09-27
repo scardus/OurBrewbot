@@ -1356,7 +1356,7 @@ function loadSystemSettings() {
     for (var r = 9; r <= 12; r++) html += '<option value="' + r + '"' + (d.Resolution == r ? ' selected' : '') + '>' + r + '-bit</option>';
     html += '</select></div>';
     html += row('Alarm Delay',      numInput('sadwell', d.AlarmDwellSec || 600, null, 90) + ' s <span style="color:#888;font-size:11px">(mild deviations wait this long before alarming; severe deviations bypass it)</span>');
-    html += row('mDNS', switchHtml('smdns', d.MdnsEnabled !== false) + ' <span style="color:#888;font-size:11px">(takes effect after reboot; disable on networks with heavy mDNS traffic to improve stability)</span>');
+    html += row('mDNS', switchHtml('smdns', d.MdnsEnabled !== false) + ' <span style="color:#888;font-size:11px">Takes effect after reboot</span>');
     html += row('Update Check', switchHtml('supd', d.UpdateCheck !== false) + ' <span style="color:#888;font-size:11px">Automatically check for firmware updates</span>');
     html += row('<span style="color:#8b5cf6">Fermenter Debug Mode</span>', switchHtml('dbmode', dbg.DebugMode || false));
     html += '<button class="save" onclick="saveSettings()">Save</button> <span class="msg" id="setm"></span>';
