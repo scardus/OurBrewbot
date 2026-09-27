@@ -107,3 +107,22 @@ jobs:
           files: |
             OurBrewbot_${{ github.ref_name }}.bin
             OurBrewbot_${{ github.ref_name }}.elf
+
+      # Rebuild ourbrewbot.com so its installer and version.json pick up this
+      # release: an empty commit to the website repo starts its Cloudflare build.
+      # WEBSITE_REBUILD_TOKEN is a fine-grained token with Contents: write on
+      # OurBrewbot-Website only. Without it, this step just warns.
+      - name: Rebuild the website
+        env:
+          WEBSITE_TOKEN: ${{ secrets.WEBSITE_REBUILD_TOKEN }}
+        run: |
+          if [ -z "$WEBSITE_TOKEN" ]; then
+            echo "::warning::WEBSITE_REBUILD_TOKEN is not set - rebuild ourbrewbot.com by hand"
+            exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${WEBSITE_TOKEN}@github.com/scardus/OurBrewbot-Website.git" website
+          cd website
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "Rebuild to publish firmware ${GITHUB_REF_NAME}"
+          git push
