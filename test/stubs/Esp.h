@@ -43,6 +43,7 @@ public:
   uint32_t getFreeHeap()             { return g_espFreeHeap; }
   uint32_t getMaxFreeBlockSize()     { return g_espFreeHeap / 2; }
   uint8_t  getHeapFragmentation()    { return 0; }
+  uint32_t getFreeContStack()        { return 1024; }
   void     wdtFeed()                 {}
   void     restart()                 {}
 

@@ -767,6 +767,7 @@ void handleProbes(ESP8266WebServer& server) {
 void handleHealth(ESP8266WebServer& server) {
   JsonDocument doc;
   doc["freeHeap"]    = ESP.getFreeHeap();
+  doc["freeStack"]   = ESP.getFreeContStack();  // lowest free loop stack since boot
   doc["uptime"]      = (uint32_t)(millis() / 60000UL);
   doc["rssi"]        = WiFi.RSSI();
   doc["ssid"]        = WiFi.SSID();

@@ -455,9 +455,11 @@ void setupWiFi() {
 // TEN MINUTE TIMER TASKS
 // ============================================================
 void onTenMinuteTimer() {
-  // Health report
-  logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%% | Uptime: %u min | WiFi RSSI: %d dBm",
-    ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), g_globalConfig.lastUptime, WiFi.RSSI());
+  // Health report. "Stack free" is the lowest amount of the 4 KB loop stack
+  // that has been left unused since boot (a high-water mark). If it ever
+  // reaches 0 the loop stack has overflowed into the WiFi SDK's stack below it.
+  logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%% | Stack free: %u bytes | Uptime: %u min | WiFi RSSI: %d dBm",
+    ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), ESP.getFreeContStack(), g_globalConfig.lastUptime, WiFi.RSSI());
   uint32_t cleared = tcpTakeClearedCount();
   if (cleared > 0) {
     logMsg("[TCP] Cleared %u closed connections from TIME_WAIT in the last 10 min", cleared);
