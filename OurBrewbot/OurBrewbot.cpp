@@ -461,11 +461,12 @@ void onTenMinuteTimer() {
   // reaches 0 the loop stack has overflowed into the WiFi SDK's stack below it.
   logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%% | Stack free: %u bytes | Uptime: %u min | WiFi RSSI: %d dBm",
     ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), ESP.getFreeContStack(), g_globalConfig.lastUptime, WiFi.RSSI());
-  uint32_t stackFree;
-  uint8_t  stackModule;
-  if (stackTakeNewLow(stackFree, stackModule)) {
-    logMsg("[STACK] New deepest point: %u bytes of loop stack left, while in %s",
-           stackFree, checkpointName(stackModule));
+  uint32_t    stackFree;
+  uint8_t     stackModule;
+  const char* stackWhere;
+  if (stackTakeNewLow(stackFree, stackModule, stackWhere)) {
+    logMsg("[STACK] New deepest point: %u bytes of loop stack left, after %s %s",
+           stackFree, stackModule == 0xFF ? "setup" : checkpointName(stackModule), stackWhere);
   }
   uint32_t cleared = tcpTakeClearedCount();
   if (cleared > 0) {

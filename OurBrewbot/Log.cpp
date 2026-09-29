@@ -21,7 +21,6 @@
 #include "Log.h"
 #include "Config.h"
 #include "Mqtt.h"
-#include "StackCheck.h"
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <stdarg.h>
@@ -129,7 +128,6 @@ static void vlogMsg(uint8_t level, PGM_P fmt, va_list args) {
 }
 
 void logMsgImpl(uint8_t level, PGM_P fmt, ...) {
-  stackCheck();   // note how deep the loop stack is (see StackCheck.cpp)
   va_list args;
   va_start(args, fmt);
   vlogMsg(level, fmt, args);

@@ -78,6 +78,9 @@ static bool logContains(const char* needle) {
   return false;
 }
 
+// ---- stack depth check: reads the ESP8266 loop stack, nothing to do here ----
+void stackCheck(uint8_t, const char*) {}
+
 // The code under test.
 #include "../../OurBrewbot/Crash.cpp"
 

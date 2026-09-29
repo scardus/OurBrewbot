@@ -59,9 +59,6 @@ void mqttPublishLog(uint8_t level, const char* line) {
   snprintf(s_mqttLastLine, sizeof(s_mqttLastLine), "%s", line);
 }
 
-// ---- stack depth check: reads the ESP8266 loop stack, nothing to do here ----
-void stackCheck() {}
-
 // The code under test. Also brings the file-static s_ipResolved/s_syslogIP
 // into scope so the fixture can force a resolved state without a lookup.
 #include "../../OurBrewbot/Log.cpp"

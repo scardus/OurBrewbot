@@ -17,16 +17,17 @@
 #pragma once
 /*
  * StackCheck.h — Record the deepest point the loop stack reaches, and which
- * subsystem was running at the time. See StackCheck.cpp.
+ * subsystem took it there. See StackCheck.cpp.
  */
 
 #include <stdint.h>
 
-// Note how much loop stack is left right now. Cheap enough to call often;
-// it only compares two numbers unless a new deepest point has been reached.
-void stackCheck();
+// Call just AFTER `module` (a CP_* id, 0xFF for setup) has run. If the loop
+// stack has gone deeper than ever before, notes the new low against `module`
+// and `where` (e.g. the web URL - may be nullptr).
+void stackCheck(uint8_t module, const char* where);
 
-// If a new deepest point has been reached since the last call, fills in the
-// free bytes left and the subsystem that was running, and returns true.
+// If a new deepest point has been noted since the last call, fills in the
+// free bytes left, the subsystem and the detail, and returns true.
 // For the 10-minute health log.
-bool stackTakeNewLow(uint32_t& freeBytes, uint8_t& module);
+bool stackTakeNewLow(uint32_t& freeBytes, uint8_t& module, const char*& where);

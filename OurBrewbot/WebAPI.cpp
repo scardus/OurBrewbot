@@ -30,6 +30,8 @@
 #include "Profile.h"
 #include "Tilt.h"
 #include "UpdateCheck.h"
+#include "Crash.h"
+#include "StackCheck.h"
 
 // Forward refs to global server (defined in .ino)
 extern ESP8266WebServer g_webServer;
@@ -137,6 +139,7 @@ static void dispatchApiRequest(ESP8266WebServer& server) {
     if (r.method == method && strcmp(uri.c_str(), r.path) == 0) {
       if (r.log) logApiCall(server);
       r.handler(server);
+      stackCheck(CP_WEB, r.path);   // note the URL if this went deeper than ever
       return;
     }
   }

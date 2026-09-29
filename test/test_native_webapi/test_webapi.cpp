@@ -126,6 +126,9 @@ ESP8266WebServer g_webServer;
 #include "../../OurBrewbot/Temperatures.cpp"
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"
+// ---- stack depth check: reads the ESP8266 loop stack, nothing to do here ----
+void stackCheck(uint8_t, const char*) {}
+
 #include "../../OurBrewbot/WebAPI.cpp"
 
 // ============================================================
