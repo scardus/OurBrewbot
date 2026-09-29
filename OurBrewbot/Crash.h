@@ -93,6 +93,9 @@ void checkpoint(uint8_t module);
 // Name of a checkpoint id, e.g. "MQTT_PEND" - "?" if unknown.
 const char* checkpointName(uint32_t module);
 
+// The CP_* id most recently passed to checkpoint(), 0xFF if none yet.
+uint8_t currentCheckpoint();
+
 // Mirror any pending crash/checkpoint detail via the DEFERRED syslog path,
 // and copy it into g_lastCrash for the crash report. Call once from setup()
 // after WiFi + syslog are up - and also when syslog is off, so a crash is

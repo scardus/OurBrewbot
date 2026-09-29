@@ -59,6 +59,7 @@
 #include "UpdateCheck.h"
 #include "CrashReport.h"
 #include "TcpCleanup.h"
+#include "StackCheck.h"
 #include <MicroMDNS.h>
 
 // ============================================================
@@ -460,6 +461,12 @@ void onTenMinuteTimer() {
   // reaches 0 the loop stack has overflowed into the WiFi SDK's stack below it.
   logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%% | Stack free: %u bytes | Uptime: %u min | WiFi RSSI: %d dBm",
     ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), ESP.getFreeContStack(), g_globalConfig.lastUptime, WiFi.RSSI());
+  uint32_t stackFree;
+  uint8_t  stackModule;
+  if (stackTakeNewLow(stackFree, stackModule)) {
+    logMsg("[STACK] New deepest point: %u bytes of loop stack left, while in %s",
+           stackFree, checkpointName(stackModule));
+  }
   uint32_t cleared = tcpTakeClearedCount();
   if (cleared > 0) {
     logMsg("[TCP] Cleared %u closed connections from TIME_WAIT in the last 10 min", cleared);
