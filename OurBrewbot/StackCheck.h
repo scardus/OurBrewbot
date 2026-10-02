@@ -22,6 +22,8 @@
 
 #include <stdint.h>
 
+#define STACK_WHERE_LEN 24   // longest detail (web URL) kept, including the NUL
+
 // Call just AFTER `module` (a CP_* id, 0xFF for setup) has run. If the loop
 // stack has gone deeper than ever before, notes the new low against `module`
 // and `where` (e.g. the web URL - may be nullptr).
@@ -31,3 +33,8 @@ void stackCheck(uint8_t module, const char* where);
 // free bytes left, the subsystem and the detail, and returns true.
 // For the 10-minute health log.
 bool stackTakeNewLow(uint32_t& freeBytes, uint8_t& module, const char*& where);
+
+// The deepest point so far, without clearing the "new low" flag. For the
+// crash handler in Crash.cpp, so the crash report can say how close the loop
+// stack came to overflowing before the crash.
+void stackLowest(uint32_t& freeBytes, uint8_t& module, const char*& where);

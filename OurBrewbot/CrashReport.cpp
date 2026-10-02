@@ -77,6 +77,10 @@ bool buildCrashReportJson(const CrashInfo& crash, char* out, size_t outSize) {
       snprintf(hex, sizeof(hex), "%x", crash.stack[i]);
       stack.add(hex);
     }
+
+    // How close the loop stack came to overflowing before the crash
+    doc["stack_free"] = crash.stackFree;
+    doc["stack_at"]   = crash.stackAt;
   }
 
   if (measureJson(doc) + 1 > outSize) return false;

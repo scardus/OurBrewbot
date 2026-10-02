@@ -41,7 +41,7 @@
 
 static uint32_t s_lowestFree   = UINT32_MAX;  // least stack left seen so far
 static uint8_t  s_lowestModule = 0xFF;        // who was running at the time
-static char     s_lowestWhere[24] = "";       // e.g. the web URL, "" if none
+static char     s_lowestWhere[STACK_WHERE_LEN] = "";  // e.g. the web URL, "" if none
 static bool     s_newLow       = false;       // not yet reported
 
 // Called from checkpoint() in Crash.cpp and dispatchApiRequest() in WebAPI.cpp
@@ -65,4 +65,12 @@ bool stackTakeNewLow(uint32_t& freeBytes, uint8_t& module, const char*& where) {
   module    = s_lowestModule;
   where     = s_lowestWhere;
   return true;
+}
+
+// Called from custom_crash_callback() in Crash.cpp
+// cppcheck-suppress unusedFunction
+void stackLowest(uint32_t& freeBytes, uint8_t& module, const char*& where) {
+  freeBytes = s_lowestFree;
+  module    = s_lowestModule;
+  where     = s_lowestWhere;
 }

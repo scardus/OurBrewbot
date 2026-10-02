@@ -26,7 +26,7 @@
 // test/stubs/Esp.h's `static uint8_t g_espRtcMem[512]` - a plain array in
 // one host process. That harness cannot answer the question the whole
 // design rests on: does anything actually survive a reset? Nor can it
-// confirm that dword offset 35 is really free, that the SDK doesn't use
+// confirm that dword offset 43 is really free, that the SDK doesn't use
 // that region for itself, or that a write past the bank is rejected rather
 // than wrapping. Each of those failing would silently produce an empty
 // post-mortem exactly when one was needed - the diagnostic is only ever
@@ -74,13 +74,14 @@ static bool logContains(const char* needle) {
 // is what runs, and so its anonymous namespace - CrashRecord, the magics and
 // the offsets - is in scope to be read back raw.
 #include "../../OurBrewbot/Crash.cpp"
+#include "../../OurBrewbot/StackCheck.cpp"   // the real one: the callback calls it
 
 extern "C" void custom_crash_callback(struct rst_info* info,
                                       uint32_t stack, uint32_t stack_end);
 
-// ---- two-boot marker, in a slot above CrashRecord (0-34) and
-// CheckpointRecord (35-36) ----
-static const uint32_t MARKER_OFFSET = 40;
+// ---- two-boot marker, in a slot above CrashRecord (0-42) and
+// CheckpointRecord (43-44) ----
+static const uint32_t MARKER_OFFSET = 48;
 static const uint32_t MARKER_MAGIC  = 0x7E577E57u;
 
 // The subsystem and register values written before the reset, asserted after.
@@ -205,7 +206,7 @@ void test_the_two_records_do_not_overlap(void) {
   TEST_ASSERT_TRUE(readCheckpointRecord(cp));
   TEST_ASSERT_EQUAL_HEX32(CRASH_MAGIC, crash.magic);
   TEST_ASSERT_EQUAL_HEX32(CP_MAGIC, cp.magic);
-  TEST_ASSERT_EQUAL_UINT32(35u * 4u, sizeof(CrashRecord));
+  TEST_ASSERT_EQUAL_UINT32(43u * 4u, sizeof(CrashRecord));
 }
 
 // Consumes the crash record - everything above must have run already.

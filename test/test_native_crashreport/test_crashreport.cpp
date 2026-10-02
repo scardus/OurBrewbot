@@ -78,6 +78,8 @@ static void stageException() {
   g_lastCrash.sp            = 0x3FFFFD80;
   g_lastCrash.spEnd         = 0x3FFFFFB0;
   for (int i = 0; i < CRASH_STACK_WORDS; i++) g_lastCrash.stack[i] = 0x40201000 + i;
+  g_lastCrash.stackFree     = 924;
+  strcpy(g_lastCrash.stackAt, "WEB /iSpindel");
 }
 
 static void stageWatchdog() {
@@ -142,12 +144,16 @@ static void test_report_carries_the_full_register_frame(void) {
   TEST_ASSERT_EQUAL_INT(CRASH_STACK_WORDS, doc["stack"].size());
   TEST_ASSERT_EQUAL_STRING("40201000", doc["stack"][0].as<const char*>());
   TEST_ASSERT_EQUAL_STRING("40201017", doc["stack"][23].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(924, doc["stack_free"].as<int>());
+  TEST_ASSERT_EQUAL_STRING("WEB /iSpindel", doc["stack_at"].as<const char*>());
 }
 
 // The website accepts at most 2048 bytes; keep well clear of it
 static void test_a_full_report_is_well_under_the_website_limit(void) {
   stageException();
   for (int i = 0; i < CRASH_STACK_WORDS; i++) g_lastCrash.stack[i] = 0xFFFFFFFF;
+  g_lastCrash.stackFree = 4096;
+  memset(g_lastCrash.stackAt, 'x', sizeof(g_lastCrash.stackAt) - 1);   // longest possible
   char out[768];
   TEST_ASSERT_TRUE(buildCrashReportJson(g_lastCrash, out, sizeof(out)));
   TEST_ASSERT_LESS_THAN(700, (int)strlen(out));
@@ -165,6 +171,7 @@ static void test_watchdog_report_has_no_registers_or_stack(void) {
   TEST_ASSERT_TRUE(doc["reason"].isNull());
   TEST_ASSERT_TRUE(doc["epc1"].isNull());
   TEST_ASSERT_TRUE(doc["stack"].isNull());
+  TEST_ASSERT_TRUE(doc["stack_free"].isNull());
 }
 
 static void test_report_that_does_not_fit_is_refused(void) {

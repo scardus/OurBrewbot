@@ -24,7 +24,10 @@
  *
  *   {"id":"2924fa","v":"0.4.16","build":"Sep 27 2026 09:29:50","reset":2,
  *    "last":"MQTT_PEND","reason":2,"exccause":28,"epc1":"4021a3b0",...,
- *    "stack":["40201234",...]}
+ *    "stack":["40201234",...],"stack_free":924,"stack_at":"WEB /iSpindel"}
+ *
+ * stack_free is the least loop stack left at any point before the crash, and
+ * stack_at the subsystem (and web URL) that took it there - see StackCheck.cpp.
  *
  * A hardware watchdog report has only id, v, build, reset and last - the
  * crash handler never runs for one, so there are no registers or stack.
