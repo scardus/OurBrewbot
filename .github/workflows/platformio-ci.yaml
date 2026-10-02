@@ -54,6 +54,12 @@ jobs:
         run: pio check --fail-on-defect=high
       - name: Run native unit tests
         run: pio test -e native
+      # The same tests again under AddressSanitizer + UndefinedBehaviorSanitizer
+      # (see test/sanitize.py), so an out-of-bounds read or write, use after free
+      # or integer overflow fails the run instead of passing silently. Linux only,
+      # which the runner is - on Windows run it from WSL.
+      - name: Run native unit tests with sanitizers
+        run: pio test -e native_asan
       - name: Build firmware
         run: |
           # pipefail is essential here: without it the pipeline takes tee's exit
