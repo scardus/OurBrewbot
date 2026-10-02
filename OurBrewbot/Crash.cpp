@@ -30,6 +30,8 @@
 #include "Log.h"
 #include "StackCheck.h"
 #include <Arduino.h>
+#include <ctype.h>            // isalnum
+#include <string.h>           // memcpy, strchr, strlcpy
 #include <user_interface.h>   // struct rst_info, REASON_* constants
 
 namespace {
@@ -106,7 +108,10 @@ const char* moduleName(uint32_t id) {
 // other character in it (STACK_AT in the website's worker/index.js).
 void formatStackAt(const CrashRecord& rec, char* out, size_t outSize) {
   char where[STACK_WHERE_LEN];
-  strlcpy(where, rec.stackWhere, sizeof(where));   // NUL-terminated even if RTC isn't
+  // Not strlcpy: that reads the source up to its NUL, and after a bad crash
+  // the RTC copy may not have one - so copy the fixed size and terminate it.
+  memcpy(where, rec.stackWhere, sizeof(where));
+  where[sizeof(where) - 1] = '\0';
   const char* module = (rec.stackModule == 0xFF) ? "setup" : moduleName(rec.stackModule);
   if (where[0] != '\0') {
     snprintf(out, outSize, "%s %s", module, where);
