@@ -21,6 +21,7 @@
 #include "Log.h"
 #include "Config.h"
 #include "Mqtt.h"
+#include "StackProbe.h"
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <stdarg.h>
@@ -101,7 +102,9 @@ static void vlogMsg(uint8_t level, PGM_P fmt, va_list args) {
 
   // Format message — vsnprintf_P reads the format string from flash
   char buf[192];
+  STACK_PROBE_BEGIN(formatProbe);
   vsnprintf_P(buf, sizeof(buf), fmt, args);
+  STACK_PROBE_END(PROBE_LOG_FORMAT, formatProbe);
 
   Serial.print(buf);
   Serial.print("\r\n");
@@ -113,7 +116,9 @@ static void vlogMsg(uint8_t level, PGM_P fmt, va_list args) {
       WiFi.status() == WL_CONNECTED &&
       level <= g_syslogConfig.minLevel) {
 
+    STACK_PROBE_BEGIN(syslogProbe);
     sendSyslog(level, buf);
+    STACK_PROBE_END(PROBE_LOG_SYSLOG, syslogProbe);
   }
 
   // MQTT log topic output: timestamp + message in a single payload.
@@ -122,7 +127,9 @@ static void vlogMsg(uint8_t level, PGM_P fmt, va_list args) {
   if (g_mqttConfig.enabled && g_mqttConfig.logEnabled) {
     char line[208];
     snprintf(line, sizeof(line), "%s%s", ts, buf);
+    STACK_PROBE_BEGIN(mqttProbe);
     mqttPublishLog(level, line);
+    STACK_PROBE_END(PROBE_LOG_MQTT, mqttProbe);
   }
 
 }

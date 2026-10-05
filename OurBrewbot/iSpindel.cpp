@@ -24,6 +24,7 @@
 
 #include "iSpindel.h"
 #include "Log.h"
+#include "StackProbe.h"
 #include <ArduinoJson.h>
 
 // Normalise an incoming temperature to Celsius, which is what the rest of the
@@ -119,7 +120,9 @@ static const char* gravityUnitName(uint8_t unit) {
 
 void handleiSpindelPost(const String& body) {
   JsonDocument doc;
+  STACK_PROBE_BEGIN(parseProbe);
   DeserializationError err = deserializeJson(doc, body);
+  STACK_PROBE_END(PROBE_ISPINDEL_PARSE, parseProbe);
 
   if (err) {
     logMsg("[ISPINDEL] Parse error: %s", err.c_str());
@@ -234,8 +237,10 @@ void handleiSpindelPost(const String& body) {
     }
     if (configChanged) saveiSpindelConfig();
 
+    STACK_PROBE_BEGIN(logProbe);
     logMsg("[ISPINDEL] Slot %d (%s) ID:%s SG=%.4f Corr=%.4f Unit=%s (dev:%s) T=%.1fC (raw %.1f%s) Angle=%.1f Vel=%.4f Batt=%.2fV RSSI=%d Interval=%us Runtime=%.1fs",
       matched, g_iSpindels[matched].name, id, sg, corrGravity, gravityUnitName(unit), gravityUnit, temp, rawTemp, tempUnits, angle, velocity, battery, rssi, interval, runTime);
+    STACK_PROBE_END(PROBE_ISPINDEL_LOG, logProbe);
     return;
   }
 

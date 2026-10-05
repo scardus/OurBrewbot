@@ -55,6 +55,7 @@
 #include "Reports.h"
 #include "Mqtt.h"
 #include "WebAPI.h"
+#include "StackProbe.h"
 #include "Crash.h"
 #include "UpdateCheck.h"
 #include "CrashReport.h"
@@ -226,6 +227,7 @@ void loop() {
   // (which bypasses custom_crash_callback) still tells us which subsystem hung.
   checkpoint(CP_WEB);          g_webServer.handleClient();
   tcpClearTimeWait();   // must run every pass - see TcpCleanup.cpp
+  STACK_PROBE_IRQ_SAMPLE();   // diagnostic build only - see StackProbe.cpp
   checkpoint(CP_BLE);          checkBLESniffTimeout();
   checkpoint(CP_TILT);         serviceTilt();   // drain any in-flight BLE scan every pass
   // mDNS runs entirely from here now (see MicroMDNS.h). The heap gate and
@@ -468,6 +470,7 @@ void onTenMinuteTimer() {
     logMsg("[STACK] New deepest point: %u bytes of loop stack left, after %s %s",
            stackFree, stackModule == 0xFF ? "setup" : checkpointName(stackModule), stackWhere);
   }
+  STACK_PROBE_LOG_NEW();   // diagnostic build only - see StackProbe.cpp
   uint32_t cleared = tcpTakeClearedCount();
   if (cleared > 0) {
     logMsg("[TCP] Cleared %u closed connections from TIME_WAIT in the last 10 min", cleared);

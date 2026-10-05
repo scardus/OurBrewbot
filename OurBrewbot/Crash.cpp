@@ -131,6 +131,12 @@ const char* checkpointName(uint32_t module) {
   return moduleName(module);
 }
 
+// Called from StackProbe.cpp, which is only built with STACK_PROBE defined
+// cppcheck-suppress unusedFunction
+uint8_t checkpointCurrent() {
+  return s_lastModule;
+}
+
 // Called from loop() in OurBrewbot.cpp, which cppcheck does not connect to
 // this definition - hence the suppression rather than a real removal.
 // cppcheck-suppress unusedFunction
