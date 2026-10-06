@@ -547,6 +547,46 @@ void test_parse_numeric_id_becomes_text(void) {
   TEST_ASSERT_EQUAL_STRING("12345678", r.id);
 }
 
+void test_parse_missing_id_reads_as_empty(void) {
+  // No ID at all must come out as "", which the matching and MQTT code treat
+  // as "no ID" - not as the text "null", which every ID-less device would share.
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("", r.id);
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":null}"), r));
+  TEST_ASSERT_EQUAL_STRING("", r.id);
+}
+
+void test_parse_keeps_a_normal_id_as_sent(void) {
+  // Letters, digits, '_' and '-' are all safe in an MQTT topic and in a
+  // Home Assistant discovery topic, so they pass through untouched.
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":\"C2cc-7C_01\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("C2cc-7C_01", r.id);
+}
+
+void test_parse_makes_the_id_safe_for_mqtt_topics(void) {
+  // The ID becomes part of the MQTT topic {base}/iSpindel/{id}/... A '+' or
+  // '#' there is a wildcard the broker rejects by dropping the connection, a
+  // '/' splits the topic, and Home Assistant ignores discovery topics with
+  // anything outside letters, digits, '_' and '-'.
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":\"a+b#c/d e.f\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("a_b_c_d_e_f", r.id);
+}
+
+void test_unsafe_id_matches_its_slot_without_resaving(void) {
+  // The same unsafe ID is made safe the same way on every POST, so the device
+  // keeps matching its slot instead of looking "changed" each time.
+  handleiSpindelPost(makeBody("odd-id", "x/y#1", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_STRING("x_y_1", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // the registration
+
+  handleiSpindelPost(makeBody("odd-id", "x/y#1", 20.5f, "C"));
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // no re-save for the same device
+  TEST_ASSERT_EQUAL_STRING("None", g_iSpindels[1].name);   // and no second slot
+}
+
 void test_parse_rejects_invalid_json(void) {
   iSpindelReading r;
   TEST_ASSERT_FALSE(parseiSpindelBody(String("{\"name\":\"x\","), r));
@@ -591,6 +631,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_parse_copies_every_field);
   RUN_TEST(test_parse_missing_fields_read_as_zero_or_empty);
   RUN_TEST(test_parse_numeric_id_becomes_text);
+  RUN_TEST(test_parse_missing_id_reads_as_empty);
+  RUN_TEST(test_parse_keeps_a_normal_id_as_sent);
+  RUN_TEST(test_parse_makes_the_id_safe_for_mqtt_topics);
+  RUN_TEST(test_unsafe_id_matches_its_slot_without_resaving);
   RUN_TEST(test_parse_rejects_invalid_json);
   RUN_TEST(test_parse_cuts_long_text_to_the_slot_sizes);
   RUN_TEST(test_invalid_body_changes_nothing);
