@@ -651,6 +651,156 @@ static void test_profile_payload_reads_from_the_right_step_slot(void) {
   TEST_ASSERT_EQUAL_FLOAT(17.5f, doc["steps"][0]["startTemp"].as<float>());
 }
 
+// ---- worst-case payloads: every buffered handler must send valid JSON ----
+//
+// Several GET handlers serialize each item into a fixed-size buffer and
+// serializeJson() cuts the output off silently when it does not fit - the
+// browser then gets invalid JSON and the whole tab fails to load. These tests
+// fill every text field to its full size with '"', which JSON escapes to two
+// bytes, so each item is as long as it can ever be. If a field or buffer size
+// changes and the worst case no longer fits, the matching test fails here
+// instead of on someone's device.
+
+// Fill a char array field with '"' to its full length (keeping the NUL).
+#define FILL_WORST(field) do {                    \
+    memset((field), '"', sizeof(field) - 1);        \
+    (field)[sizeof(field) - 1] = '\0';              \
+  } while (0)
+
+// The longest text ArduinoJson writes for a float: 13 characters, with sign,
+// seven digits and a two-digit negative exponent.
+static const float LONG_FLOAT = -3.023374e-11f;
+
+// Parse the response body, failing with the body itself if it is not JSON.
+static void parseResponse(JsonDocument& doc) {
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE_MESSAGE(g_httpResp.bodyLen < HTTP_RESP_MAX_BODY - 1, "body hit the recorder limit");
+  DeserializationError err = deserializeJson(doc, g_httpResp.body, g_httpResp.bodyLen);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("Ok", err.c_str(), g_httpResp.body);
+}
+
+// Every fermenter as long as its JSON can get. Celsius (the setUp default)
+// keeps the temperatures as set - converting to Fahrenheit would shorten them.
+// The live readings come from the debug overrides. Attenuation and ABV are
+// only printed for 1 < SG < OG, so OG and SG get realistic long values rather
+// than LONG_FLOAT: four 8-character numbers beat two 13s and two zeros.
+static void fillWorstFermenters(void) {
+  g_fermenterDebugMode = true;
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    FILL_WORST(g_fermenters[i].fermenterName);
+    FILL_WORST(g_fermenters[i].beerName);
+    FILL_WORST(g_fermenters[i].yeastName);
+    FILL_WORST(g_fermenters[i].bjcp);
+    g_fermenters[i].profileNo       = i + 1;   // ProfileName comes from the profile
+    g_fermenters[i].status          = STATUS_COOLING;
+    g_fermenters[i].compressorDelay = 0xFFFF;
+    g_fermenters[i].currentStep     = 0xFF;
+    g_fermenters[i].currentHour     = 0xFFFF;
+    g_fermenters[i].brewServices    = 0xFF;
+    g_fermenters[i].ceilingTemp     = LONG_FLOAT;
+    g_fermenters[i].floorTemp       = LONG_FLOAT;
+    g_fermenters[i].hysteresis      = LONG_FLOAT;
+    g_fermenters[i].alarmTolerance  = LONG_FLOAT;
+    g_fermenters[i].sgCalibration   = LONG_FLOAT;
+    g_fermenters[i].tg              = LONG_FLOAT;
+    g_fermenters[i].og              = 1.0987654f;
+    g_fermenterDebugOverrides[i].enabled     = true;
+    g_fermenterDebugOverrides[i].beerTemp    = LONG_FLOAT;
+    g_fermenterDebugOverrides[i].ambientTemp = LONG_FLOAT;
+    g_fermenterDebugOverrides[i].sg          = 1.0123457f;
+  }
+  for (int p = 0; p < MAX_PROFILES; p++) FILL_WORST(g_profiles[p].profileName);
+}
+
+static void test_fermenters_get_sends_worst_case_names_whole(void) {
+  fillWorstFermenters();
+  // The data above reaches 940 bytes per fermenter, close to the 979-byte
+  // ceiling the handler's buffer is sized for. If it drops well below that
+  // (a field was shortened or the fill stopped working), this test no longer
+  // proves the buffer is big enough - fix the fill, not this number.
+  JsonDocument one;
+  buildFermenterJson(one, 0);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT(900, measureJson(one));
+  handleFermenters(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_INT(MAX_FERMENTERS, doc.as<JsonArray>().size());
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    TEST_ASSERT_EQUAL_STRING(g_fermenters[i].fermenterName, doc[i]["FermenterName"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(g_fermenters[i].yeastName,     doc[i]["YeastName"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(g_profiles[i].profileName,     doc[i]["ProfileName"].as<const char*>());
+  }
+}
+
+static void test_status_get_sends_worst_case_names_whole(void) {
+  fillWorstFermenters();
+  handleStatus(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_INT(MAX_FERMENTERS, doc["fermenters"].as<JsonArray>().size());
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    TEST_ASSERT_EQUAL_STRING(g_fermenters[i].fermenterName, doc["fermenters"][i]["name"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(g_fermenters[i].beerName,      doc["fermenters"][i]["beer"].as<const char*>());
+  }
+}
+
+static void test_ispindels_get_sends_worst_case_names_whole(void) {
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    FILL_WORST(g_iSpindels[i].name);
+    FILL_WORST(g_iSpindels[i].id);
+    FILL_WORST(g_iSpindels[i].gravityUnit);
+    g_iSpindels[i].sg          = LONG_FLOAT;
+    g_iSpindels[i].temperature = LONG_FLOAT;
+    g_iSpindels[i].corrGravity = LONG_FLOAT;
+    g_iSpindels[i].velocity    = LONG_FLOAT;
+    g_iSpindels[i].sgAdjust    = LONG_FLOAT;
+    g_iSpindels[i].tempAdjust  = LONG_FLOAT;
+  }
+  handleiSpindels(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_INT(MAX_ISPINDELS, doc["ispindels"].as<JsonArray>().size());
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    TEST_ASSERT_EQUAL_STRING(g_iSpindels[i].name, doc["ispindels"][i]["name"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(g_iSpindels[i].id,   doc["ispindels"][i]["id"].as<const char*>());
+  }
+}
+
+static void test_smartplugs_get_sends_worst_case_names_whole(void) {
+  for (int i = 0; i < MAX_SMART_PLUGS; i++) {
+    FILL_WORST(g_smartPlugs[i].manufacturer);
+    FILL_WORST(g_smartPlugs[i].model);
+    g_smartPlugs[i].onCode  = 0xFFFFFFFF;
+    g_smartPlugs[i].offCode = 0xFFFFFFFF;
+  }
+  handleSmartPlugs(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_INT(MAX_SMART_PLUGS, doc["plugs"].as<JsonArray>().size());
+  for (int i = 0; i < MAX_SMART_PLUGS; i++) {
+    TEST_ASSERT_EQUAL_STRING(g_smartPlugs[i].manufacturer, doc["plugs"][i]["manufacturer"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(g_smartPlugs[i].model,        doc["plugs"][i]["model"].as<const char*>());
+  }
+}
+
+static void test_debug_get_sends_worst_case_overrides_whole(void) {
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    g_fermenterDebugOverrides[i].enabled     = true;
+    g_fermenterDebugOverrides[i].beerTemp    = LONG_FLOAT;
+    g_fermenterDebugOverrides[i].ambientTemp = LONG_FLOAT;
+    g_fermenterDebugOverrides[i].sg          = LONG_FLOAT;
+  }
+  handleDebug(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_INT(MAX_FERMENTERS, doc["Overrides"].as<JsonArray>().size());
+}
+
 // ---- GET /profiles, streamed as chunks ----
 
 // Fills every step of a profile with values that print long, and gives it the
@@ -1611,6 +1761,11 @@ int main(int, char**) {
   RUN_TEST(test_board_info_payload_carries_its_documented_keys);
   RUN_TEST(test_profile_payload_lists_every_step_slot);
   RUN_TEST(test_profile_payload_reads_from_the_right_step_slot);
+  RUN_TEST(test_fermenters_get_sends_worst_case_names_whole);
+  RUN_TEST(test_status_get_sends_worst_case_names_whole);
+  RUN_TEST(test_ispindels_get_sends_worst_case_names_whole);
+  RUN_TEST(test_smartplugs_get_sends_worst_case_names_whole);
+  RUN_TEST(test_debug_get_sends_worst_case_overrides_whole);
   RUN_TEST(test_profiles_get_sends_a_full_profile_whole);
   RUN_TEST(test_profiles_get_streams_the_same_bytes_as_one_document);
   RUN_TEST(test_profiles_get_lists_every_profile_and_step_type);
