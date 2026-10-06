@@ -78,13 +78,19 @@ static void udpTestReset() {
   for (int i = 0; i < UDP_TEST_MAX_PACKETS; i++) g_udpPackets[i] = UdpTestPacket{};
 }
 
-// The most recent packet's payload as a NUL-terminated string, or "" if none.
-static const char* udpTestLastPayload() {
+// Packet `index`'s payload as a NUL-terminated string, or "" if there is no
+// such packet. The returned buffer is reused by the next call.
+static const char* udpTestPayload(int index) {
   static char buf[UDP_TEST_MAX_LEN + 1];
   buf[0] = '\0';
-  if (g_udpPacketCount == 0) return buf;
-  const UdpTestPacket& p = g_udpPackets[g_udpPacketCount - 1];
+  if (index < 0 || index >= g_udpPacketCount) return buf;
+  const UdpTestPacket& p = g_udpPackets[index];
   memcpy(buf, p.data, p.len);
   buf[p.len] = '\0';
   return buf;
+}
+
+// The most recent packet's payload as a NUL-terminated string, or "" if none.
+static const char* udpTestLastPayload() {
+  return udpTestPayload(g_udpPacketCount - 1);
 }

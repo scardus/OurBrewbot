@@ -238,7 +238,7 @@ static void enableLogMirror() {
 
 void test_log_publishes_to_device_log_topic_unretained(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "hello");
+  mqttPublishLog(SYSLOG_INFO, "", "hello");
   TEST_ASSERT_TRUE(mqttTestPublished(LOG_TOPIC));
   // Retaining a log line would make the last message reappear on every
   // subscriber reconnect, forever.
@@ -247,7 +247,7 @@ void test_log_publishes_to_device_log_topic_unretained(void) {
 
 void test_log_payload_is_valid_json_with_level_and_message(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "plain message");
+  mqttPublishLog(SYSLOG_INFO, "", "plain message");
   JsonDocument& d = payloadJson(LOG_TOPIC);
   TEST_ASSERT_EQUAL_INT(SYSLOG_INFO, d["level"].as<int>());
   TEST_ASSERT_EQUAL_STRING("INFO", d["severity"].as<const char*>());
@@ -256,7 +256,7 @@ void test_log_payload_is_valid_json_with_level_and_message(void) {
 
 void test_log_escapes_double_quote(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "probe \"Beer\" failed");
+  mqttPublishLog(SYSLOG_INFO, "", "probe \"Beer\" failed");
   // Parsing it back is the real assertion: an unescaped quote would end the
   // JSON string early and this deserialize would fail.
   JsonDocument& d = payloadJson(LOG_TOPIC);
@@ -265,14 +265,14 @@ void test_log_escapes_double_quote(void) {
 
 void test_log_escapes_backslash(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "path C:\\temp");
+  mqttPublishLog(SYSLOG_INFO, "", "path C:\\temp");
   JsonDocument& d = payloadJson(LOG_TOPIC);
   TEST_ASSERT_EQUAL_STRING("path C:\\temp", d["msg"].as<const char*>());
 }
 
 void test_log_escapes_both_in_one_line(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "\\\"mixed\"\\");
+  mqttPublishLog(SYSLOG_INFO, "", "\\\"mixed\"\\");
   JsonDocument& d = payloadJson(LOG_TOPIC);
   TEST_ASSERT_EQUAL_STRING("\\\"mixed\"\\", d["msg"].as<const char*>());
 }
@@ -284,7 +284,7 @@ void test_log_severity_names_match_syslog_levels(void) {
   };
   for (uint8_t level = 0; level < 8; level++) {
     mqttTestResetRecords();
-    mqttPublishLog(level, "x");
+    mqttPublishLog(level, "", "x");
     JsonDocument& d = payloadJson(LOG_TOPIC);
     TEST_ASSERT_EQUAL_STRING(expected[level], d["severity"].as<const char*>());
     TEST_ASSERT_EQUAL_INT(level, d["level"].as<int>());
@@ -293,7 +293,7 @@ void test_log_severity_names_match_syslog_levels(void) {
 
 void test_log_level_above_range_falls_back_to_info(void) {
   enableLogMirror();
-  mqttPublishLog(8, "out of range");
+  mqttPublishLog(8, "", "out of range");
   JsonDocument& d = payloadJson(LOG_TOPIC);
   TEST_ASSERT_EQUAL_STRING("INFO", d["severity"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(8, d["level"].as<int>());   // level itself is not clamped
@@ -305,12 +305,12 @@ void test_log_long_line_truncates_but_stays_valid_json(void) {
   memset(line, 'A', sizeof(line) - 1);
   line[sizeof(line) - 1] = '\0';
 
-  mqttPublishLog(SYSLOG_INFO, line);
+  mqttPublishLog(SYSLOG_INFO, "", line);
   JsonDocument& d = payloadJson(LOG_TOPIC);
   const char* msg = d["msg"].as<const char*>();
   TEST_ASSERT_NOT_NULL(msg);
-  // The escape buffer is 210 B and the loop stops at sizeof(safe) - 2.
-  TEST_ASSERT_LESS_OR_EQUAL_UINT(208, strlen(msg));
+  // The escape buffer is 210 B: 209 characters plus the terminator.
+  TEST_ASSERT_LESS_OR_EQUAL_UINT(209, strlen(msg));
   TEST_ASSERT_GREATER_THAN_UINT(200, strlen(msg));
 }
 
@@ -318,14 +318,14 @@ void test_log_truncation_never_leaves_a_dangling_escape(void) {
   // The pathological case for the escaping loop: a line made entirely of
   // backslashes, so every input character emits two output characters and the
   // truncation boundary lands mid-pair. Ending on a lone '\' would put invalid
-  // JSON on the topic - the loop's `j < sizeof(safe) - 2` guard is what
-  // prevents it, and nothing else pins that guard.
+  // JSON on the topic - the loop only ever copies whole escapes, and
+  // nothing else pins that rule.
   enableLogMirror();
   char line[400];
   memset(line, '\\', sizeof(line) - 1);
   line[sizeof(line) - 1] = '\0';
 
-  mqttPublishLog(SYSLOG_INFO, line);
+  mqttPublishLog(SYSLOG_INFO, "", line);
   const char* raw = mqttTestPayloadFor(LOG_TOPIC);
   TEST_ASSERT_NOT_NULL(raw);
   // Deserializing is the assertion; a trailing lone backslash escapes the
@@ -344,35 +344,184 @@ void test_log_quote_at_the_truncation_boundary_stays_valid(void) {
   memset(line, '"', sizeof(line) - 1);
   line[sizeof(line) - 1] = '\0';
 
-  mqttPublishLog(SYSLOG_INFO, line);
+  mqttPublishLog(SYSLOG_INFO, "", line);
   const char* raw = mqttTestPayloadFor(LOG_TOPIC);
   TEST_ASSERT_NOT_NULL(raw);
   s_doc.clear();
   TEST_ASSERT_FALSE_MESSAGE(deserializeJson(s_doc, raw), raw);
 }
 
+// ArduinoJson happily parses raw control characters, so parsing the payload
+// back can't prove they were escaped - stricter parsers reject them. Check
+// the bytes themselves.
+static void assertNoRawControlChars(const char* raw) {
+  for (size_t i = 0; raw[i]; i++) {
+    TEST_ASSERT_TRUE_MESSAGE((unsigned char)raw[i] >= 0x20, raw);
+  }
+}
+
+void test_log_escapes_control_characters(void) {
+  // JSON does not allow raw control characters inside a string, and a log
+  // line can carry one - an iSpindel name with a newline in it, say.
+  enableLogMirror();
+  mqttPublishLog(SYSLOG_INFO, "", "line1\nline2\ttab\x01 end");
+  const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+  TEST_ASSERT_NOT_NULL(raw);
+  assertNoRawControlChars(raw);
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("line1\nline2\ttab\x01 end", d["msg"].as<const char*>());
+}
+
+void test_log_control_characters_at_the_truncation_boundary_stay_valid(void) {
+  // Each control character becomes a 6-character \u00XX escape, so the
+  // truncation boundary lands inside one - it must be dropped whole.
+  enableLogMirror();
+  char line[400];
+  memset(line, '\x01', sizeof(line) - 1);
+  line[sizeof(line) - 1] = '\0';
+
+  mqttPublishLog(SYSLOG_INFO, "", line);
+  const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+  TEST_ASSERT_NOT_NULL(raw);
+  assertNoRawControlChars(raw);
+  s_doc.clear();
+  TEST_ASSERT_FALSE_MESSAGE(deserializeJson(s_doc, raw), raw);
+  const char* msg = s_doc["msg"].as<const char*>();
+  TEST_ASSERT_NOT_NULL(msg);
+  TEST_ASSERT_GREATER_THAN_UINT(30, strlen(msg));   // 209 / 6 = 34 escapes fit
+  for (size_t i = 0; msg[i]; i++) TEST_ASSERT_EQUAL_CHAR('\x01', msg[i]);
+}
+
+void test_log_keeps_valid_utf8_characters(void) {
+  // 2-, 3- and 4-byte characters: e-acute, degree sign, euro sign, an emoji.
+  enableLogMirror();
+  const char* line = "Bi\xC3\xA8re 20\xC2\xB0" "C \xE2\x82\xAC \xF0\x9F\x8D\xBA";
+  mqttPublishLog(SYSLOG_INFO, "", line);
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING(line, d["msg"].as<const char*>());
+}
+
+void test_log_replaces_invalid_utf8_bytes(void) {
+  // A garbled Tilt reading, as captured from the device: JSON must be valid
+  // UTF-8, so bytes that are not part of a real character become '?'.
+  enableLogMirror();
+  mqttPublishLog(SYSLOG_INFO, "", "[TILT] Parsing: OK+DISC:4C0j\xB2\x06\x06&\xFF\xFE");
+  const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+  TEST_ASSERT_NOT_NULL(raw);
+  for (size_t i = 0; raw[i]; i++) TEST_ASSERT_TRUE_MESSAGE((unsigned char)raw[i] < 0x80, raw);
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("[TILT] Parsing: OK+DISC:4C0j?\x06\x06&??", d["msg"].as<const char*>());
+}
+
+void test_log_replaces_broken_and_disallowed_utf8_sequences(void) {
+  enableLogMirror();
+  // A lead byte with no continuation, a stray continuation byte, an
+  // over-long encoding of '/', a UTF-16 surrogate, and a 3-byte character
+  // cut off by the end of the line: each bad byte becomes one '?'.
+  mqttPublishLog(SYSLOG_INFO, "", "a\xC3" "b\x80" "c\xC0\xAF" "d\xED\xA0\x80" "e\xE2\x82");
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("a?b?c??d???e??", d["msg"].as<const char*>());
+}
+
+void test_log_truncation_never_splits_a_utf8_character(void) {
+  // 2-byte characters all the way, so the truncation boundary can land
+  // between the two bytes of one - the whole character must be dropped.
+  enableLogMirror();
+  char line[401];
+  for (size_t i = 0; i < 400; i += 2) { line[i] = '\xC3'; line[i + 1] = '\xA9'; }
+  line[400] = '\0';
+
+  mqttPublishLog(SYSLOG_INFO, "", line);
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  const char* msg = d["msg"].as<const char*>();
+  TEST_ASSERT_NOT_NULL(msg);
+  size_t n = strlen(msg);
+  TEST_ASSERT_GREATER_THAN_UINT(200, n);
+  TEST_ASSERT_EQUAL_UINT(0, n % 2);
+  for (size_t i = 0; i < n; i += 2) {
+    TEST_ASSERT_EQUAL_HEX8(0xC3, (unsigned char)msg[i]);
+    TEST_ASSERT_EQUAL_HEX8(0xA9, (unsigned char)msg[i + 1]);
+  }
+}
+
+void test_log_longest_payload_is_not_cut_off(void) {
+  // A full escape buffer with the longest severity name and a 3-digit level
+  // is the longest payload there can be (252 characters). If the payload
+  // buffer were too small, snprintf would cut off the closing "} and the
+  // JSON would no longer parse.
+  enableLogMirror();
+  char line[400];
+  memset(line, 'A', sizeof(line) - 1);
+  line[sizeof(line) - 1] = '\0';
+  const uint8_t levels[] = { SYSLOG_WARNING, 255 };
+  for (uint8_t level : levels) {
+    mqttTestResetRecords();
+    mqttPublishLog(level, "", line);
+    const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+    TEST_ASSERT_NOT_NULL(raw);
+    s_doc.clear();
+    TEST_ASSERT_FALSE_MESSAGE(deserializeJson(s_doc, raw), raw);
+    TEST_ASSERT_EQUAL_UINT(209, strlen(s_doc["msg"].as<const char*>()));
+  }
+}
+
 void test_log_suppressed_when_mirror_or_link_is_off(void) {
   // Three independent gates, each of which must stop the publish on its own.
   g_mqttConfig.logEnabled = false;
-  mqttPublishLog(SYSLOG_INFO, "x");
+  mqttPublishLog(SYSLOG_INFO, "", "x");
   TEST_ASSERT_EQUAL_INT(0, mqttTestPublishCount());
 
   enableLogMirror();
   g_mqttConfig.enabled = false;
-  mqttPublishLog(SYSLOG_INFO, "x");
+  mqttPublishLog(SYSLOG_INFO, "", "x");
   TEST_ASSERT_EQUAL_INT(0, mqttTestPublishCount());
 
   g_mqttConfig.enabled = true;
   mqttTestSetConnected(false);
-  mqttPublishLog(SYSLOG_INFO, "x");
+  mqttPublishLog(SYSLOG_INFO, "", "x");
   TEST_ASSERT_EQUAL_INT(0, mqttTestPublishCount());
 }
 
 void test_log_empty_line_publishes_nothing(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "");
-  mqttPublishLog(SYSLOG_INFO, nullptr);
+  mqttPublishLog(SYSLOG_INFO, "", "");
+  mqttPublishLog(SYSLOG_INFO, "", nullptr);
+  mqttPublishLog(SYSLOG_INFO, nullptr, nullptr);
   TEST_ASSERT_EQUAL_INT(0, mqttTestPublishCount());
+}
+
+void test_log_timestamp_and_message_are_joined(void) {
+  // Log.cpp passes the two halves separately so it needs no buffer of its
+  // own to join them in; the topic must still see one line.
+  enableLogMirror();
+  mqttPublishLog(SYSLOG_INFO, "[001:02:03] ", "probe \"Beer\" ok");
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("[001:02:03] probe \"Beer\" ok", d["msg"].as<const char*>());
+}
+
+void test_log_timestamp_with_empty_message_still_publishes(void) {
+  // logMsg("") used to publish just the timestamp; keep that behaviour.
+  enableLogMirror();
+  mqttPublishLog(SYSLOG_INFO, "[000:00:01] ", "");
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("[000:00:01] ", d["msg"].as<const char*>());
+}
+
+void test_log_long_message_after_a_timestamp_truncates_but_stays_valid_json(void) {
+  // The timestamp uses up part of the escape buffer, so the message is cut
+  // shorter - the second append must respect the same limit as the first.
+  enableLogMirror();
+  char line[400];
+  memset(line, '"', sizeof(line) - 1);
+  line[sizeof(line) - 1] = '\0';
+
+  mqttPublishLog(SYSLOG_INFO, "[123:45:59] ", line);
+  const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+  TEST_ASSERT_NOT_NULL(raw);
+  s_doc.clear();
+  TEST_ASSERT_FALSE_MESSAGE(deserializeJson(s_doc, raw), raw);
+  const char* msg = s_doc["msg"].as<const char*>();
+  TEST_ASSERT_EQUAL_INT(0, strncmp(msg, "[123:45:59] \"", 13));
 }
 
 // The re-entry guard: publishing a log line from inside a publish must not
@@ -380,13 +529,13 @@ void test_log_empty_line_publishes_nothing(void) {
 // moment a publish lands, which is what a logMsg() from inside PubSubClient
 // would do on hardware.
 static void reentrantPublishHook(const char*) {
-  mqttPublishLog(SYSLOG_INFO, "from inside a publish");
+  mqttPublishLog(SYSLOG_INFO, "", "from inside a publish");
 }
 
 void test_log_reentry_guard_stops_recursion(void) {
   enableLogMirror();
   g_mqttTest.onPublish = reentrantPublishHook;
-  mqttPublishLog(SYSLOG_INFO, "outer");
+  mqttPublishLog(SYSLOG_INFO, "", "outer");
   g_mqttTest.onPublish = nullptr;
   // Exactly one publish: the inner call returns immediately on the guard.
   TEST_ASSERT_EQUAL_INT(1, mqttTestPublishCount());
@@ -623,25 +772,108 @@ void test_discovery_ispindel_named_none_is_skipped(void) {
   TEST_ASSERT_TRUE(mqttTestPublished(DISC("sensor", DEV_ID "_ispindel_A1B2C3", "gravity")));
 }
 
-void test_no_discovery_payload_exceeds_the_client_buffer(void) {
-  // publishAndReset() SKIPS any entity whose serialized config exceeds
-  // s_discPayload (1024 B, sized to PubSubClient's buffer) - silently, from
-  // HA's point of view. Adding a field to a descriptor table is exactly how
-  // that limit gets crossed, so guard every row in every table at once.
+// Fill a char array field with '"' to its full length (keeping the NUL).
+// JSON escapes '"' to two bytes, so this is the longest a text field can get.
+#define FILL_WORST(field) do {                    \
+    memset((field), '"', sizeof(field) - 1);        \
+    (field)[sizeof(field) - 1] = '\0';              \
+  } while (0)
+
+// Every slot configured, with every text that reaches a discovery config at
+// its longest: the base topic (in up to three topics per config), probe
+// addresses and names, iSpindel IDs and names. IDs read from an old or
+// hand-edited config file are not made topic-safe, so they get quotes too.
+static void fillWorstDiscovery(uint8_t unit) {
+  g_globalConfig.unit = unit;
   g_mqttConfig.haDiscovery = true;
-  g_globalConfig.unit = UNIT_FAHRENHEIT;   // longer unit strings than Celsius
-  strlcpy(g_probes[0].address, "28FF1234", sizeof(g_probes[0].address));
-  g_tilts[0].colour = 0;
-  strlcpy(g_iSpindels[0].id,   "A1B2C3",    sizeof(g_iSpindels[0].id));
-  strlcpy(g_iSpindels[0].name, "Spindel 1", sizeof(g_iSpindels[0].name));
+  FILL_WORST(g_mqttConfig.baseTopic);
+  connectFixture();   // rebuilds the availability topic from the new base
+  for (int i = 0; i < MAX_PROBES; i++) {
+    FILL_WORST(g_probes[i].address);
+    FILL_WORST(g_probes[i].probeName);
+  }
+  for (int c = 0; c < MAX_TILTS; c++) g_tilts[c].colour = c;
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    FILL_WORST(g_iSpindels[i].id);
+    FILL_WORST(g_iSpindels[i].name);
+  }
+}
 
-  publishAllHaDiscovery();
+static bool endsWith(const char* s, const char* suffix) {
+  size_t n = strlen(s), m = strlen(suffix);
+  return n >= m && strcmp(s + n - m, suffix) == 0;
+}
 
-  TEST_ASSERT_GREATER_THAN_INT(0, mqttTestPublishCount());
-  TEST_ASSERT_EQUAL_INT(0, g_mqttTest.overflowCount);
-  for (int i = 0; i < mqttTestPublishCount(); i++) {
-    TEST_ASSERT_LESS_THAN_UINT_MESSAGE(1024, g_mqttTest.records[i].payloadLen,
-                                       g_mqttTest.records[i].topic);
+// The object ID is the topic segment before "/config":
+// homeassistant/<component>/<device id>/<object id>/config
+// A topic cut short by its buffer loses the "/config" and fails here.
+static const char* objectIdOf(const char* topic, char* out, size_t outSize) {
+  TEST_ASSERT_TRUE_MESSAGE(endsWith(topic, "/config"), topic);
+  const char* end   = strstr(topic, "/config");
+  const char* start = end;
+  while (start > topic && start[-1] != '/') start--;
+  size_t n = (size_t)(end - start);
+  if (n >= outSize) n = outSize - 1;
+  memcpy(out, start, n);
+  out[n] = '\0';
+  return out;
+}
+
+void test_no_discovery_payload_exceeds_the_client_buffer(void) {
+  // publishAndReset() SKIPS any entity whose serialized config does not fit
+  // s_discPayload - silently, from HA's point of view - and PubSubClient
+  // refuses a publish whose topic does not fit its buffer. Longer names or a
+  // new field in a descriptor table are how those limits get crossed, so
+  // check every config of every device with the worst-case text, in both
+  // units (Fahrenheit has longer min/max numbers).
+  const uint8_t units[] = { UNIT_CELSIUS, UNIT_FAHRENHEIT };
+  for (uint8_t unit : units) {
+    fillWorstDiscovery(unit);
+    publishAllHaDiscovery();
+
+    // 13 device + 24 per fermenter x 4 + 5 per probe x 8 + 6 per tilt x 8
+    // + 11 per iSpindel x 4: if any count is short, one was skipped.
+    TEST_ASSERT_EQUAL_INT(13 + (24 * 4) + (5 * 8) + (6 * 8) + (11 * 4), mqttTestPublishCount());
+    TEST_ASSERT_EQUAL_INT(0, g_mqttTest.overflowCount);
+    size_t longestPayload = 0;
+    for (int i = 0; i < mqttTestPublishCount(); i++) {
+      const MqttPublishRecord& r = g_mqttTest.records[i];
+      TEST_ASSERT_LESS_THAN_UINT_MESSAGE(MQTT_DISC_PAYLOAD_SIZE, r.payloadLen, r.topic);
+      // PubSubClient needs room for a 5-byte header, the 2-byte topic length
+      // and the topic; the payload is streamed through the buffer after it.
+      TEST_ASSERT_LESS_OR_EQUAL_UINT_MESSAGE(MQTT_CLIENT_BUFFER_SIZE, 5 + 2 + strlen(r.topic), r.topic);
+      if (r.payloadLen > longestPayload) longestPayload = r.payloadLen;
+
+      // The unique ID is built in its own buffer - it must not be cut short.
+      JsonDocument d;
+      TEST_ASSERT_EQUAL_STRING_MESSAGE("Ok", deserializeJson(d, r.payload).c_str(), r.topic);
+      char objectId[32], suffix[34];
+      snprintf(suffix, sizeof(suffix), "_%s", objectIdOf(r.topic, objectId, sizeof(objectId)));
+      const char* uid = d["uniq_id"].as<const char*>();
+      TEST_ASSERT_NOT_NULL_MESSAGE(uid, r.topic);
+      TEST_ASSERT_TRUE_MESSAGE(endsWith(uid, suffix), r.topic);
+
+      // So is the command topic: <base>/<object id>/set
+      const char* cmd = d["cmd_t"].as<const char*>();
+      if (cmd) {
+        char cmdSuffix[40];
+        snprintf(cmdSuffix, sizeof(cmdSuffix), "/%s/set", objectId);
+        TEST_ASSERT_TRUE_MESSAGE(endsWith(cmd, cmdSuffix), r.topic);
+      }
+    }
+    // The worst case is 634 bytes (see Mqtt.h). If the longest drops well
+    // below that, the fill above stopped working and this test no longer
+    // proves the buffers are big enough - fix the fill, not this number.
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT(630, longestPayload);
+    mqttTestResetRecords();
+
+    // Removal builds the same topics in its own buffer.
+    cleanupAllHaDiscovery();
+    TEST_ASSERT_GREATER_THAN_INT(0, mqttTestPublishCount());
+    for (int i = 0; i < mqttTestPublishCount(); i++) {
+      TEST_ASSERT_TRUE_MESSAGE(endsWith(g_mqttTest.records[i].topic, "/config"), g_mqttTest.records[i].topic);
+    }
+    mqttTestResetRecords();
   }
 }
 
@@ -858,6 +1090,38 @@ void test_report_keeps_the_probe_no_reading_sentinel_unconverted(void) {
 
   reportMqtt();
   assertPayload(BASE "/Probe/28FF1234/temperature", "-127.0");
+}
+
+void test_report_publishes_impossible_values_as_nan(void) {
+  // publishFloat() formats into a 16-byte stack buffer with dtostrf(), which
+  // writes as many digits as the value needs - 3.4e38 is ~45 characters. An
+  // iSpindel can POST any float, so a huge, infinite or NaN value must come
+  // out as "nan" instead of overrunning the stack.
+  strlcpy(g_iSpindels[0].id,   "A1B2C3",    sizeof(g_iSpindels[0].id));
+  strlcpy(g_iSpindels[0].name, "Spindel 1", sizeof(g_iSpindels[0].name));
+  g_iSpindels[0].angle    = 3.4e38f;
+  g_iSpindels[0].battery  = -3.4e38f;
+  g_iSpindels[0].runTime  = INFINITY;
+  g_iSpindels[0].velocity = NAN;
+
+  reportMqtt();
+  assertPayload(BASE "/iSpindel/A1B2C3/angle",    "nan");
+  assertPayload(BASE "/iSpindel/A1B2C3/battery",  "nan");
+  assertPayload(BASE "/iSpindel/A1B2C3/run_time", "nan");
+  assertPayload(BASE "/iSpindel/A1B2C3/velocity", "nan");
+}
+
+void test_report_still_prints_large_but_possible_values(void) {
+  // Up to 1e8 still prints: the longest it can get with 4 decimals is
+  // "-99999999.9999" (15 characters), which fits the buffer.
+  strlcpy(g_iSpindels[0].id,   "A1B2C3",    sizeof(g_iSpindels[0].id));
+  strlcpy(g_iSpindels[0].name, "Spindel 1", sizeof(g_iSpindels[0].name));
+  g_iSpindels[0].velocity = -9.9e7f;
+  g_iSpindels[0].angle    = 45.25f;
+
+  reportMqtt();
+  assertPayload(BASE "/iSpindel/A1B2C3/velocity", "-99000000.0000");
+  assertPayload(BASE "/iSpindel/A1B2C3/angle",    "45.25");
 }
 
 void test_report_publishes_probe_metadata(void) {
@@ -1158,8 +1422,18 @@ int main(int, char**) {
   RUN_TEST(test_log_long_line_truncates_but_stays_valid_json);
   RUN_TEST(test_log_truncation_never_leaves_a_dangling_escape);
   RUN_TEST(test_log_quote_at_the_truncation_boundary_stays_valid);
+  RUN_TEST(test_log_escapes_control_characters);
+  RUN_TEST(test_log_control_characters_at_the_truncation_boundary_stay_valid);
+  RUN_TEST(test_log_keeps_valid_utf8_characters);
+  RUN_TEST(test_log_replaces_invalid_utf8_bytes);
+  RUN_TEST(test_log_replaces_broken_and_disallowed_utf8_sequences);
+  RUN_TEST(test_log_truncation_never_splits_a_utf8_character);
+  RUN_TEST(test_log_longest_payload_is_not_cut_off);
   RUN_TEST(test_log_suppressed_when_mirror_or_link_is_off);
   RUN_TEST(test_log_empty_line_publishes_nothing);
+  RUN_TEST(test_log_timestamp_and_message_are_joined);
+  RUN_TEST(test_log_timestamp_with_empty_message_still_publishes);
+  RUN_TEST(test_log_long_message_after_a_timestamp_truncates_but_stays_valid_json);
   RUN_TEST(test_log_reentry_guard_stops_recursion);
 
   // B. discovery
@@ -1203,6 +1477,8 @@ int main(int, char**) {
   RUN_TEST(test_report_omits_beer_temperature_when_no_sensor);
   RUN_TEST(test_report_publishes_beer_temperature_when_a_probe_is_assigned);
   RUN_TEST(test_report_keeps_the_probe_no_reading_sentinel_unconverted);
+  RUN_TEST(test_report_publishes_impossible_values_as_nan);
+  RUN_TEST(test_report_still_prints_large_but_possible_values);
   RUN_TEST(test_report_publishes_probe_metadata);
   RUN_TEST(test_report_marks_a_failed_probe_inactive);
   RUN_TEST(test_report_publishes_the_gravity_estimate_when_no_sensor_reports);

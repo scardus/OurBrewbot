@@ -55,9 +55,12 @@
 #include "Reports.h"
 #include "Mqtt.h"
 #include "WebAPI.h"
+#include "StackProbe.h"
 #include "Crash.h"
 #include "UpdateCheck.h"
 #include "CrashReport.h"
+#include "TcpCleanup.h"
+#include "StackCheck.h"
 #include <MicroMDNS.h>
 
 // ============================================================
@@ -223,6 +226,8 @@ void loop() {
   // checkpoint() drops a one-byte breadcrumb to RTC so a hardware-watchdog reset
   // (which bypasses custom_crash_callback) still tells us which subsystem hung.
   checkpoint(CP_WEB);          g_webServer.handleClient();
+  tcpClearTimeWait();   // must run every pass - see TcpCleanup.cpp
+  STACK_PROBE_IRQ_SAMPLE();   // diagnostic build only - see StackProbe.cpp
   checkpoint(CP_BLE);          checkBLESniffTimeout();
   checkpoint(CP_TILT);         serviceTilt();   // drain any in-flight BLE scan every pass
   // mDNS runs entirely from here now (see MicroMDNS.h). The heap gate and
@@ -453,9 +458,23 @@ void setupWiFi() {
 // TEN MINUTE TIMER TASKS
 // ============================================================
 void onTenMinuteTimer() {
-  // Health report
-  logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%% | Uptime: %u min | WiFi RSSI: %d dBm",
-    ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), g_globalConfig.lastUptime, WiFi.RSSI());
+  // Health report. "Stack free" is the lowest amount of the 4 KB loop stack
+  // that has been left unused since boot (a high-water mark). If it ever
+  // reaches 0 the loop stack has overflowed into the WiFi SDK's stack below it.
+  logMsg("[HEALTH] Free heap: %u bytes, Largest contiguous: %u bytes, Fragmentation: %u%% | Stack free: %u bytes | Uptime: %u min | WiFi RSSI: %d dBm",
+    ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation(), ESP.getFreeContStack(), g_globalConfig.lastUptime, WiFi.RSSI());
+  uint32_t    stackFree;
+  uint8_t     stackModule;
+  const char* stackWhere;
+  if (stackTakeNewLow(stackFree, stackModule, stackWhere)) {
+    logMsg("[STACK] New deepest point: %u bytes of loop stack left, after %s %s",
+           stackFree, stackModule == 0xFF ? "setup" : checkpointName(stackModule), stackWhere);
+  }
+  STACK_PROBE_LOG_NEW();   // diagnostic build only - see StackProbe.cpp
+  uint32_t cleared = tcpTakeClearedCount();
+  if (cleared > 0) {
+    logMsg("[TCP] Cleared %u closed connections from TIME_WAIT in the last 10 min", cleared);
+  }
 
   // Increment currentHour for active profile steps (6 calls × 10 min = 1 hour)
   static uint8_t s_hourTick[MAX_FERMENTERS] = {0};

@@ -495,8 +495,184 @@ void test_register_declared_sg_stores_sg(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.0500f, g_iSpindels[0].sg);
 }
 
+// ---- parseiSpindelBody: copying the POST out of its JSON ----
+
+void test_parse_copies_every_field(void) {
+  // A full GravityMon-style payload, numbers as ArduinoJson writes them.
+  String body("{\"name\":\"ispindel-1\",\"ID\":\"C2CC7C\",\"token\":\"\","
+              "\"interval\":900,\"temperature\":68.123456,\"temp_units\":\"F\","
+              "\"gravity\":12.345678,\"angle\":45.25,\"battery\":3.91,"
+              "\"RSSI\":-61,\"velocity\":-0.25,\"corr-gravity\":12.5,"
+              "\"run-time\":2.75,\"gravity-unit\":\"P\"}");
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(body, r));
+  TEST_ASSERT_EQUAL_STRING("ispindel-1", r.name);
+  TEST_ASSERT_EQUAL_STRING("C2CC7C", r.id);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 68.123456f, r.temperature);
+  TEST_ASSERT_EQUAL_STRING("F", r.tempUnits);
+  TEST_ASSERT_EQUAL_UINT32(900, r.interval);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 12.345678f, r.gravity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 45.25f, r.angle);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 3.91f, r.battery);
+  TEST_ASSERT_EQUAL_INT(-61, r.rssi);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.25f, r.velocity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 12.5f, r.corrGravity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 2.75f, r.runTime);
+  TEST_ASSERT_EQUAL_STRING("P", r.gravityUnit);
+}
+
+void test_parse_missing_fields_read_as_zero_or_empty(void) {
+  // An iSpindel sends no temp_units, gravity-unit, velocity, corr-gravity or
+  // run-time; each must come out as "not sent", never as leftover memory.
+  iSpindelReading r;
+  memset(&r, 0x5A, sizeof(r));   // fill with junk first
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":\"1\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("", r.tempUnits);
+  TEST_ASSERT_EQUAL_STRING("", r.gravityUnit);
+  TEST_ASSERT_EQUAL_UINT32(0, r.interval);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.temperature);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.gravity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.battery);
+  TEST_ASSERT_EQUAL_INT(0, r.rssi);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.angle);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.velocity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.corrGravity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.runTime);
+}
+
+void test_parse_numeric_id_becomes_text(void) {
+  // A stock iSpindel sends its chip ID as a JSON number, not a string.
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":12345678}"), r));
+  TEST_ASSERT_EQUAL_STRING("12345678", r.id);
+}
+
+void test_parse_missing_id_reads_as_empty(void) {
+  // No ID at all must come out as "", which the matching and MQTT code treat
+  // as "no ID" - not as the text "null", which every ID-less device would share.
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("", r.id);
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":null}"), r));
+  TEST_ASSERT_EQUAL_STRING("", r.id);
+}
+
+void test_parse_keeps_a_normal_id_as_sent(void) {
+  // Letters, digits, '_' and '-' are all safe in an MQTT topic and in a
+  // Home Assistant discovery topic, so they pass through untouched.
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":\"C2cc-7C_01\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("C2cc-7C_01", r.id);
+}
+
+void test_parse_makes_the_id_safe_for_mqtt_topics(void) {
+  // The ID becomes part of the MQTT topic {base}/iSpindel/{id}/... A '+' or
+  // '#' there is a wildcard the broker rejects by dropping the connection, a
+  // '/' splits the topic, and Home Assistant ignores discovery topics with
+  // anything outside letters, digits, '_' and '-'.
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":\"a+b#c/d e.f\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("a_b_c_d_e_f", r.id);
+}
+
+void test_unsafe_id_matches_its_slot_without_resaving(void) {
+  // The same unsafe ID is made safe the same way on every POST, so the device
+  // keeps matching its slot instead of looking "changed" each time.
+  handleiSpindelPost(makeBody("odd-id", "x/y#1", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_STRING("x_y_1", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // the registration
+
+  handleiSpindelPost(makeBody("odd-id", "x/y#1", 20.5f, "C"));
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // no re-save for the same device
+  TEST_ASSERT_EQUAL_STRING("None", g_iSpindels[1].name);   // and no second slot
+}
+
+// The optional fields are only shown and published, but anything on the LAN
+// can POST to /iSpindel, so impossible values are dropped (set to 0, "not
+// sent") one field at a time - the rest of the reading is still used.
+void test_impossible_optional_fields_are_dropped(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  handleiSpindelPost(String(
+      "{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0,"
+      "\"temp_units\":\"C\",\"gravity\":1.050,\"gravity-unit\":\"G\","
+      "\"corr-gravity\":2.5,\"battery\":-5,\"angle\":1e39,"
+      "\"velocity\":500,\"run-time\":99999}"));
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, g_iSpindels[0].sg);   // still used
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].corrGravity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].battery);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].angle);       // 1e39 parses as infinity
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].velocity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].runTime);
+}
+
+void test_realistic_optional_fields_are_kept(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  handleiSpindelPost(String(
+      "{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0,"
+      "\"temp_units\":\"C\",\"gravity\":1.050,\"gravity-unit\":\"G\","
+      "\"corr-gravity\":1.049,\"battery\":3.91,\"angle\":45.25,"
+      "\"velocity\":-2.5,\"run-time\":6.5}"));
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.049f, g_iSpindels[0].corrGravity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 3.91f,  g_iSpindels[0].battery);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 45.25f, g_iSpindels[0].angle);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, -2.5f,  g_iSpindels[0].velocity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 6.5f,   g_iSpindels[0].runTime);
+}
+
+void test_parse_rejects_invalid_json(void) {
+  iSpindelReading r;
+  TEST_ASSERT_FALSE(parseiSpindelBody(String("{\"name\":\"x\","), r));
+  TEST_ASSERT_FALSE(parseiSpindelBody(String("not json"), r));
+}
+
+void test_parse_cuts_long_text_to_the_slot_sizes(void) {
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String(
+      "{\"name\":\"abcdefghijklmnopqrstuvwxyz0123\",\"ID\":\"0123456789ABCDEFGHIJ\","
+      "\"temp_units\":\"Fahrenheit\",\"gravity-unit\":\"Plato\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("abcdefghijklmnopqrstuvw", r.name);   // 23 + NUL
+  TEST_ASSERT_EQUAL_STRING("0123456789ABCDE", r.id);             // 15 + NUL
+  TEST_ASSERT_EQUAL_STRING("Fah", r.tempUnits);                  // first letter is what counts
+  TEST_ASSERT_EQUAL_STRING("Pla", r.gravityUnit);
+}
+
+void test_invalid_body_changes_nothing(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\","));
+  TEST_ASSERT_EQUAL_UINT32(0, g_iSpindels[0].lastSeen);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].sg);
+  TEST_ASSERT_EQUAL_INT(0, s_saveCalls);
+}
+
+void test_over_long_id_matches_its_slot_without_resaving(void) {
+  // The ID is cut to the slot's size before matching, so a device whose ID
+  // is too long to store still matches the slot holding the cut-down copy -
+  // rather than looking "changed" and rewriting the config on every POST.
+  handleiSpindelPost(makeBody("long-id", "0123456789ABCDEFGHIJ", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_STRING("0123456789ABCDE", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // the registration
+
+  handleiSpindelPost(makeBody("long-id", "0123456789ABCDEFGHIJ", 20.5f, "C"));
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // no re-save for the same device
+  TEST_ASSERT_EQUAL_STRING("None", g_iSpindels[1].name);   // and no second slot
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
+
+  RUN_TEST(test_parse_copies_every_field);
+  RUN_TEST(test_parse_missing_fields_read_as_zero_or_empty);
+  RUN_TEST(test_parse_numeric_id_becomes_text);
+  RUN_TEST(test_parse_missing_id_reads_as_empty);
+  RUN_TEST(test_parse_keeps_a_normal_id_as_sent);
+  RUN_TEST(test_parse_makes_the_id_safe_for_mqtt_topics);
+  RUN_TEST(test_unsafe_id_matches_its_slot_without_resaving);
+  RUN_TEST(test_impossible_optional_fields_are_dropped);
+  RUN_TEST(test_realistic_optional_fields_are_kept);
+  RUN_TEST(test_parse_rejects_invalid_json);
+  RUN_TEST(test_parse_cuts_long_text_to_the_slot_sizes);
+  RUN_TEST(test_invalid_body_changes_nothing);
+  RUN_TEST(test_over_long_id_matches_its_slot_without_resaving);
 
   RUN_TEST(test_validate_keeps_sg_in_range);
   RUN_TEST(test_validate_zeroes_sg_below_floor);

@@ -24,7 +24,10 @@
 
 #include "iSpindel.h"
 #include "Log.h"
+#include "StackProbe.h"
 #include <ArduinoJson.h>
+#include <ctype.h>
+#include <math.h>
 
 // Normalise an incoming temperature to Celsius, which is what the rest of the
 // firmware stores and calculates in. The iSpindel/GravityMon payload says which
@@ -59,6 +62,21 @@ void validateiSpindelValues(float& sg, float& temp, const char* name, const char
     logMsg("[ISPINDEL] %s (ID:%s): temperature %.1f out of range, ignoring", name, id, temp);
     temp = 0.0f;
   }
+}
+
+// Drop one optional field (return 0, which means "not sent" everywhere it is
+// shown) when it is not a number or outside [lo, hi]. These fields are only
+// displayed and published, never used for control, but anything on the LAN
+// can POST to /iSpindel, and an absurd value would otherwise reach the WebUI,
+// MQTT and Home Assistant. The ranges are far wider than any real device.
+static float dropIfImpossible(float value, float lo, float hi, const char* field,
+                              const char* name, const char* id) {
+  if (value == 0.0f) return value;
+  if (!isfinite(value) || value < lo || value > hi) {
+    logMsg("[ISPINDEL] %s (ID:%s): %s %g out of range, ignoring", name, id, field, value);
+    return 0.0f;
+  }
+  return value;
 }
 
 float platoToSG(float plato) {
@@ -117,29 +135,77 @@ static const char* gravityUnitName(uint8_t unit) {
 // POST /iSpindel — iSpindel sends: name, ID, temperature, gravity, battery, RSSI
 // ============================================================
 
-void handleiSpindelPost(const String& body) {
+// The device ID becomes part of MQTT topic names ({base}/iSpindel/{id}/...)
+// and of the Home Assistant discovery topics. A '+' or '#' there is a wildcard
+// the broker answers by dropping the connection, a '/' splits the topic, and
+// Home Assistant ignores discovery topics holding anything outside letters,
+// digits, '_' and '-'. Real devices send a number (iSpindel) or hex text
+// (GravityMon), so any other character is replaced with '_' rather than
+// throwing the reading away.
+static void makeIdTopicSafe(char* id) {
+  for (; *id != '\0'; id++) {
+    if (!isalnum((unsigned char)*id) && *id != '_' && *id != '-') *id = '_';
+  }
+}
+
+// The JSON parser needs several hundred bytes of loop stack. While it was part
+// of handleiSpindelPost() that space stayed in use for the whole function -
+// including the long log line at the end, whose syslog send was the deepest
+// point measured in the firmware. As a separate function (noinline stops the
+// compiler merging it back in) its stack is released as soon as it returns.
+bool __attribute__((noinline)) parseiSpindelBody(const String& body, iSpindelReading& out) {
   JsonDocument doc;
+  STACK_PROBE_BEGIN(parseProbe);
   DeserializationError err = deserializeJson(doc, body);
+  STACK_PROBE_END(PROBE_ISPINDEL_PARSE, parseProbe);
 
   if (err) {
     logMsg("[ISPINDEL] Parse error: %s", err.c_str());
-    return;
+    return false;
   }
 
-  const char* name        = doc["name"]         | "";
-  String      idStr       = doc["ID"].as<String>();
-  const char* id          = idStr.c_str();
-  float       temp        = doc["temperature"]  | 0.0f;
-  const char* tempUnits   = doc["temp_units"]   | "";
-  uint32_t    interval    = doc["interval"]     | 0;
-  float       sg          = doc["gravity"]      | 0.0f;
-  float       battery     = doc["battery"]      | 0.0f;
-  int         rssi        = doc["RSSI"]         | 0;
-  float       angle       = doc["angle"]        | 0.0f;
-  float       velocity    = doc["velocity"]     | 0.0f;
-  float       corrGravity = doc["corr-gravity"] | 0.0f;
-  float       runTime     = doc["run-time"]     | 0.0f;
-  const char* gravityUnit = doc["gravity-unit"] | "";
+  // The ID can arrive as a number (an iSpindel's chip ID) or a string, so it
+  // is converted to text whichever it is. A missing ID is checked for first:
+  // as<String>() would turn it into the text "null", which every device
+  // without an ID would then share.
+  strlcpy(out.name,        doc["name"]         | "", sizeof(out.name));
+  if (doc["ID"].isNull()) {
+    out.id[0] = '\0';
+  } else {
+    strlcpy(out.id, doc["ID"].as<String>().c_str(), sizeof(out.id));
+    makeIdTopicSafe(out.id);
+  }
+  out.temperature        = doc["temperature"]  | 0.0f;
+  strlcpy(out.tempUnits,   doc["temp_units"]   | "", sizeof(out.tempUnits));
+  out.interval           = doc["interval"]     | 0;
+  out.gravity            = doc["gravity"]      | 0.0f;
+  out.battery            = doc["battery"]      | 0.0f;
+  out.rssi               = doc["RSSI"]         | 0;
+  out.angle              = doc["angle"]        | 0.0f;
+  out.velocity           = doc["velocity"]     | 0.0f;
+  out.corrGravity        = doc["corr-gravity"] | 0.0f;
+  out.runTime            = doc["run-time"]     | 0.0f;
+  strlcpy(out.gravityUnit, doc["gravity-unit"] | "", sizeof(out.gravityUnit));
+  return true;
+}
+
+void handleiSpindelPost(const String& body) {
+  iSpindelReading reading;
+  if (!parseiSpindelBody(body, reading)) return;
+
+  const char* name        = reading.name;
+  const char* id          = reading.id;
+  float       temp        = reading.temperature;
+  const char* tempUnits   = reading.tempUnits;
+  uint32_t    interval    = reading.interval;
+  float       sg          = reading.gravity;
+  float       battery     = reading.battery;
+  int         rssi        = reading.rssi;
+  float       angle       = reading.angle;
+  float       velocity    = reading.velocity;
+  float       corrGravity = reading.corrGravity;
+  float       runTime     = reading.runTime;
+  const char* gravityUnit = reading.gravityUnit;
 
   // Normalise to Celsius before anything else touches the value. Doing it here
   // means the range check below, the tempAdjust offset (a Celsius delta) and
@@ -196,6 +262,11 @@ void handleiSpindelPost(const String& body) {
   }
 
   validateiSpindelValues(sg, temp, name, id);
+  corrGravity = dropIfImpossible(corrGravity, 0.900f,  1.200f, "corrected gravity", name, id);
+  battery     = dropIfImpossible(battery,     0.0f,    10.0f,  "battery",           name, id);
+  angle       = dropIfImpossible(angle,      -180.0f,  180.0f, "angle",             name, id);
+  velocity    = dropIfImpossible(velocity,   -100.0f,  100.0f, "velocity",          name, id);
+  runTime     = dropIfImpossible(runTime,     0.0f,    3600.0f, "run time",         name, id);
 
   if (matched >= 0) {
     // Apply calibration offsets
@@ -234,8 +305,10 @@ void handleiSpindelPost(const String& body) {
     }
     if (configChanged) saveiSpindelConfig();
 
+    STACK_PROBE_BEGIN(logProbe);
     logMsg("[ISPINDEL] Slot %d (%s) ID:%s SG=%.4f Corr=%.4f Unit=%s (dev:%s) T=%.1fC (raw %.1f%s) Angle=%.1f Vel=%.4f Batt=%.2fV RSSI=%d Interval=%us Runtime=%.1fs",
       matched, g_iSpindels[matched].name, id, sg, corrGravity, gravityUnitName(unit), gravityUnit, temp, rawTemp, tempUnits, angle, velocity, battery, rssi, interval, runTime);
+    STACK_PROBE_END(PROBE_ISPINDEL_LOG, logProbe);
     return;
   }
 

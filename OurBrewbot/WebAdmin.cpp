@@ -514,6 +514,20 @@ function byId(s) {
   return document.getElementById(s);
 }
 
+// Escape text so it shows as typed when added to an html string, including
+// inside a quoted attribute such as value="...". Use it on every string that
+// comes from the API (names, hosts, passwords, device IDs, error text): a
+// name like Ale "Special" would otherwise end the attribute early, and a <
+// or & would be read as markup.
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Show a status message in the element with the given id, styled ok (green) or err (red).
 function showMsg(id, t, ok) {
   var e = byId(id);
@@ -566,7 +580,7 @@ function row(label, content) {
 // Render a text <input> with the given id and value (optional CSS width in px).
 function textInput(id, value, width) {
   var styleAttr = width ? ' style="width:' + width + 'px"' : '';
-  return '<input type="text" id="' + id + '" value="' + value + '"' + styleAttr + '>';
+  return '<input type="text" id="' + id + '" value="' + escHtml(value) + '"' + styleAttr + '>';
 }
 
 // Render a number <input> with the given id, value, and optional step / width-in-px.
@@ -577,13 +591,14 @@ function numInput(id, value, step, width) {
 }
 
 // Render a collapsible card: header with arrow + dot + title + status summary, body hidden by default.
+// title and summary are plain text (escaped here), to match collUpdate's textContent.
 function collCard(id, title, enabled, summary, body, opened) {
   return '<div class="card" id="cc-' + id + '" style="padding:0">' +
     '<div onclick="collToggle(\'' + id + '\')" style="padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none">' +
       '<span class="arr" id="ccarr-' + id + '" style="color:#888;width:14px">' + (opened ? '&#9660;' : '&#9654;') + '</span>' +
       '<span style="width:8px;height:8px;border-radius:50%;background:' + (enabled ? '#4ade80' : '#666') + '" id="ccdot-' + id + '"></span>' +
-      '<span style="font-weight:bold;font-size:13px;flex:1" id="cctitle-' + id + '">' + title + '</span>' +
-      '<span style="color:#666;font-size:11px" id="ccsub-' + id + '">' + (summary || '') + '</span>' +
+      '<span style="font-weight:bold;font-size:13px;flex:1" id="cctitle-' + id + '">' + escHtml(title) + '</span>' +
+      '<span style="color:#666;font-size:11px" id="ccsub-' + id + '">' + escHtml(summary) + '</span>' +
     '</div>' +
     '<div id="ccbody-' + id + '" style="display:' + (opened ? 'block' : 'none') + ';padding:0 12px 12px 12px">' + body + '</div>' +
   '</div>';
@@ -635,10 +650,10 @@ function loadFermenters() {
     var html = '';
     for (var i = 0; i < d.length; i++) {
       var f = d[i];
-      html += '<div class="card"><h3>Fermenter ' + i + ' ' + statusBadge(f.Status, f.Power) + ' ' + (f.ProfileNo >= 1 ? '<span class="badge badge-prof">' + f.ProfileName + '</span>' : '<span class="badge badge-idle">Standard</span>') + '</h3>';
-      html += '<div class="live">Beer: ' + (f.BeerTemp > -100 ? f.BeerTemp.toFixed(1) + '&deg;' + f.TempUnit + (f.BeerTempSource && f.BeerTempSource != 'None' ? ' (' + f.BeerTempSource + ')' : '') : '--')
+      html += '<div class="card"><h3>Fermenter ' + i + ' ' + statusBadge(f.Status, f.Power) + ' ' + (f.ProfileNo >= 1 ? '<span class="badge badge-prof">' + escHtml(f.ProfileName) + '</span>' : '<span class="badge badge-idle">Standard</span>') + '</h3>';
+      html += '<div class="live">Beer: ' + (f.BeerTemp > -100 ? f.BeerTemp.toFixed(1) + '&deg;' + f.TempUnit + (f.BeerTempSource && f.BeerTempSource != 'None' ? ' (' + escHtml(f.BeerTempSource) + ')' : '') : '--')
          + ' &nbsp; Ambient: ' + (f.AmbientTemp > -100 ? f.AmbientTemp.toFixed(1) + '&deg;' + f.TempUnit : '--')
-         + ' &nbsp; SG: ' + (f.SG > 0 ? f.SG.toFixed(3) + (f.GravitySource ? ' (' + f.GravitySource + ')' : '') : '--')
+         + ' &nbsp; SG: ' + (f.SG > 0 ? f.SG.toFixed(3) + (f.GravitySource ? ' (' + escHtml(f.GravitySource) + ')' : '') : '--')
          + (f.SG > 0 && f.Attenuation > 0 ? ' &nbsp; Att: ' + f.Attenuation.toFixed(1) + '%' : '')
          + (f.SG > 0 && f.EstABV > 0 ? ' &nbsp; Est.ABV: ' + f.EstABV.toFixed(1) + '%' : '')
          + (f.ProfileRunning ? ' &nbsp; Step: ' + (f.CurrentStep + 1) + '/' + f.TotalSteps + ' &nbsp; Hour: ' + f.CurrentHour : '') + '</div>';
@@ -654,7 +669,7 @@ function loadFermenters() {
       html += row('Power',        switchHtml('pw' + i, f.Power));
       html += row('Temp Control', switchHtml('tc' + i, f.TempControl));
       html += '<div class="row"><label>Profile</label><select id="fp' + i + '"><option value="0"' + (f.ProfileNo == 0 ? ' selected' : '') + '>Standard</option>';
-      for (var p = 0; p < profileNames.length; p++) html += '<option value="' + (p + 1) + '"' + (f.ProfileNo == (p + 1) ? ' selected' : '') + '>' + profileNames[p] + '</option>';
+      for (var p = 0; p < profileNames.length; p++) html += '<option value="' + (p + 1) + '"' + (f.ProfileNo == (p + 1) ? ' selected' : '') + '>' + escHtml(profileNames[p]) + '</option>';
       html += '</select></div>';
       if (f.ProfileNo >= 1) html += '<div class="row"><label>Profile Control</label>';
       if (f.ProfileNo >= 1 && !f.ProfileRunning) {
@@ -677,7 +692,7 @@ function loadFermenters() {
       var hasSvc = false;
       for (var s = 0; s < brewServices.length; s++) {
         if (brewServices[s].enabled) {
-          html += row(brewServices[s].name, switchHtml('bsv' + i + '_' + s, !!(bs & (1 << s))));
+          html += row(escHtml(brewServices[s].name), switchHtml('bsv' + i + '_' + s, !!(bs & (1 << s))));
           hasSvc = true;
         }
       }
@@ -899,9 +914,9 @@ function loadProfilesFromState() {
     var live = countLiveSteps(pe.steps);
     html += '<div class="card" id="pcard' + p + '"><h3>Profile ' + (p + 1) + '</h3>';
     if (locked) {
-      html += '<div class="prof-banner">Profile is running on ' + pe.lockedBy.join(', ') + ' — stop the profile to edit.</div>';
+      html += '<div class="prof-banner">Profile is running on ' + escHtml(pe.lockedBy.join(', ')) + ' — stop the profile to edit.</div>';
     }
-    html += '<div class="row"><label>Name</label><input type="text" id="ppn' + p + '" value="' + pe.name + '" style="width:200px" oninput="profileEdits[' + p + '].name=this.value;markDirty()"' + disAttr + '></div>';
+    html += '<div class="row"><label>Name</label><input type="text" id="ppn' + p + '" value="' + escHtml(pe.name) + '" style="width:200px" oninput="profileEdits[' + p + '].name=this.value;markDirty()"' + disAttr + '></div>';
     if (live == 0) {
       html += '<div class="prof-empty">No steps yet — click <b>+ Add Step</b> to begin.</div>';
     } else {
@@ -914,7 +929,7 @@ function loadProfilesFromState() {
         var delDis  = locked ? ' disabled' : '';
         html += '<tr><td>' + (s + 1) + '</td>';
         html += '<td><select id="pst' + p + '_' + s + '" onchange="onStepFieldChange(' + p + ',' + s + ')"' + disAttr + '>';
-        for (var t = 0; t < stepTypes.length; t++) html += '<option value="' + stepTypes[t].id + '"' + (stepTypes[t].id == st.stepType ? ' selected' : '') + '>' + stepTypes[t].name + '</option>';
+        for (var t = 0; t < stepTypes.length; t++) html += '<option value="' + stepTypes[t].id + '"' + (stepTypes[t].id == st.stepType ? ' selected' : '') + '>' + escHtml(stepTypes[t].name) + '</option>';
         html += '</select>';
         html += '<span class="tip" tabindex="0" aria-label="Step info">&#9432;<span class="tt" id="ptt' + p + '_' + s + '">' + buildStepTooltipHtml(st.stepType) + '</span></span>';
         html += '</td>';
@@ -1026,9 +1041,9 @@ function loadProbes() {
     if (p.length == 0) html += '<tr><td colspan="7" style="color:#888">No probes detected. Connect DS18B20 probes to the Green Jack.</td></tr>';
     for (var i = 0; i < p.length; i++) {
       var q = p[i];
-      html += '<tr><td style="font-family:monospace;font-size:12px">' + q.address + '</td>';
+      html += '<tr><td style="font-family:monospace;font-size:12px">' + escHtml(q.address) + '</td>';
       html += '<td>' + (q.temperature > -100 ? q.temperature.toFixed(1) + '&deg;' + tempUnit : '<span style="color:#f44">--</span>') + '</td>';
-      html += '<td>' + q.name + '</td>';
+      html += '<td>' + escHtml(q.name) + '</td>';
       html += '<td><select id="pf' + q.index + '">' + fnOpts(q.function) + '</select></td>';
       html += '<td><select id="pr' + q.index + '">' + fermOpts(q.fermenter) + '</select></td>';
       html += '<td><input type="number" step="0.1" id="pa' + q.index + '" value="' + q.tempAdjust + '" style="width:60px"> &deg;' + tempUnit + '</td>';
@@ -1153,14 +1168,14 @@ function loadPlugs() {
       var q = p[i];
       var active = q.onCode > 0 || q.offCode > 0;
       var hdr = 'Plug ' + q.index;
-      if (active) hdr += ' <span style="color:#53d8fb;font-size:12px">' + q.manufacturer + (q.model ? ' - ' + q.model : '') + '</span>';
+      if (active) hdr += ' <span style="color:#53d8fb;font-size:12px">' + escHtml(q.manufacturer) + (q.model ? ' - ' + escHtml(q.model) : '') + '</span>';
       if (q.state) hdr += ' <span class="badge badge-heat">ON</span>';
       html += '<div class="card"><h3>' + hdr + '</h3>';
       html += '<div class="row" style="background:#0a1628;padding:6px;border-radius:4px;margin-bottom:8px"><label>Preset</label><select id="sps' + i + '" style="width:160px">' + presetOpts() + '</select>';
       html += ' <select id="sbs' + i + '" style="width:100px">' + btnOpts() + '</select>';
       html += ' <button class="test" onclick="applyPreset(' + i + ')">Apply</button></div>';
-      html += '<div class="row"><label>Manufacturer</label><input type="text" id="sm' + i + '" value="' + q.manufacturer + '" style="width:120px">';
-      html += ' <label style="min-width:auto">Model</label><input type="text" id="smo' + i + '" value="' + q.model + '" style="width:120px"></div>';
+      html += '<div class="row"><label>Manufacturer</label><input type="text" id="sm' + i + '" value="' + escHtml(q.manufacturer) + '" style="width:120px">';
+      html += ' <label style="min-width:auto">Model</label><input type="text" id="smo' + i + '" value="' + escHtml(q.model) + '" style="width:120px"></div>';
       html += '<div class="row"><label>On Code</label><input type="number" id="son' + i + '" value="' + q.onCode + '" style="width:120px">';
       html += ' <label style="min-width:auto">Off Code</label><input type="number" id="sof' + i + '" value="' + q.offCode + '" style="width:120px"></div>';
       html += '<div class="row"><label>Protocol</label><input type="number" id="spr' + i + '" value="' + q.protocol + '" style="width:60px">';
@@ -1264,7 +1279,7 @@ function loadReporting() {
     mqBody += row('Broker Host',       textInput ('mqhost',  mq.host     || '',          220));
     mqBody += row('Port',              numInput  ('mqport',  mq.port     || 1883, null,   80));
     mqBody += row('Username',          textInput ('mquser',  mq.username || '',          180));
-    mqBody += '<div class="row"><label>Password</label><input type="password" id="mqpass" value="' + (mq.password || '') + '" style="width:180px"></div>';
+    mqBody += '<div class="row"><label>Password</label><input type="password" id="mqpass" value="' + escHtml(mq.password) + '" style="width:180px"></div>';
     mqBody += row('Base Topic',        textInput ('mqtopic', mq.baseTopic || 'ourbrewbot', 180));
     mqBody += row('HA Discovery',      switchHtml('mqha',  mq.haDiscovery  || false));
     mqBody += row('Allow HA Control',  switchHtml('mqctl', mq.allowControl || false));
@@ -1285,9 +1300,9 @@ function fwStatusHtml(d) {
   var s;
   if (d.UpdateAvailable) {
     var url = d.UpdateNotesUrl || 'https://github.com/scardus/OurBrewbot/releases';
-    s = '<a href="' + url + '" target="_blank" style="color:#fa0">[update ' + d.LatestVersion + ' available]</a>';
+    s = '<a href="' + escHtml(url) + '" target="_blank" style="color:#fa0">[update ' + escHtml(d.LatestVersion) + ' available]</a>';
   } else if (d.UpdateCheckError) {
-    s = '<span style="color:#f44">[check failed: ' + d.UpdateCheckError + ']</span>';
+    s = '<span style="color:#f44">[check failed: ' + escHtml(d.UpdateCheckError) + ']</span>';
   } else if (d.UpdateChecked) {
     s = '<span style="color:#4f4">[up to date]</span>';
   } else {
@@ -1329,15 +1344,15 @@ function loadSystemSettings() {
       '0 Emergency', '1 Alert', '2 Critical', '3 Error', '4 Warning', '5 Notice', '6 Info', '7 Debug'
     ];
     var html = '<div class="info"><h3 style="color:#e94560;margin-bottom:8px">System Info</h3>';
-    html += '<div class="r"><span>Firmware</span><span class="v">' + d.FirmwareVersion
+    html += '<div class="r"><span>Firmware</span><span class="v">' + escHtml(d.FirmwareVersion)
           + ' <span id="fwstatus" style="font-size:11px">' + fwStatusHtml(d) + '</span></span></div>';
-    html += '<div class="r"><span>IP Address</span><span class="v">' + d.IP + '</span></div>';
-    html += '<div class="r"><span>mDNS Name</span><span class="v">' + (d.MdnsEnabled ? '<a href="http://' + d.mDNSName + '/" style="color:#53d8fb">' + d.mDNSName + '</a>' : '<span style="color:#888">disabled</span>') + '</span></div>';
-    html += '<div class="r"><span>WiFi SSID</span><span class="v">' + d.WiFiSSID + '</span></div>';
+    html += '<div class="r"><span>IP Address</span><span class="v">' + escHtml(d.IP) + '</span></div>';
+    html += '<div class="r"><span>mDNS Name</span><span class="v">' + (d.MdnsEnabled ? '<a href="http://' + escHtml(d.mDNSName) + '/" style="color:#53d8fb">' + escHtml(d.mDNSName) + '</a>' : '<span style="color:#888">disabled</span>') + '</span></div>';
+    html += '<div class="r"><span>WiFi SSID</span><span class="v">' + escHtml(d.WiFiSSID) + '</span></div>';
     html += '<div class="r"><span>RSSI</span><span class="v">' + d.RSSI + ' dBm</span></div>';
     html += '<div class="r"><span>Free Heap</span><span class="v">' + d.FreeHeap + ' bytes</span></div>';
     html += '<div class="r"><span>Uptime</span><span class="v">' + fmtUptime(d.Uptime) + '</span></div>';
-    html += '<div class="r"><span>Chip ID</span><span class="v">' + d.ChipId + '</span></div>';
+    html += '<div class="r"><span>Chip ID</span><span class="v">' + escHtml(d.ChipId) + '</span></div>';
     html += '</div>';
     html += '<div class="card"><h3>Actions</h3>';
     html += '<button class="danger" onclick="if(confirm(\'Reboot device?\'))fetch(\'/reboot\').then(function(){alert(\'Rebooting...\')})">Reboot</button>';
@@ -1375,6 +1390,7 @@ function loadSystemSettings() {
     html += '<button class="save" onclick="saveSyslog()">Save</button> <span class="msg" id="slm"></span>';
     html += '</div>';
     var files = fs.files || [];
+    sysFiles = files;
     html += '<div class="card"><h3>LittleFS Files</h3>';
     if (files.length == 0) {
       html += '<p style="color:#888;font-size:13px">No files found.</p>';
@@ -1382,8 +1398,10 @@ function loadSystemSettings() {
       html += '<div style="max-height:200px;overflow-y:auto"><table class="tbl"><tr><th>File</th><th>Size</th></tr>';
       for (var i = 0; i < files.length; i++) {
         var f = files[i];
-        html += '<tr style="cursor:pointer" onclick="loadFileContent(\'' + f.name + '\')" id="sfr' + i + '">';
-        html += '<td style="font-family:monospace">' + f.name + '</td><td>' + f.size + ' B</td></tr>';
+        // The click passes the file's index, not its name, so no name ever has
+        // to be quoted inside the onclick script.
+        html += '<tr style="cursor:pointer" onclick="loadFileContent(sysFiles[' + i + '].name)" id="sfr' + i + '">';
+        html += '<td style="font-family:monospace">' + escHtml(f.name) + '</td><td>' + f.size + ' B</td></tr>';
       }
       html += '</table></div>';
     }
@@ -1395,7 +1413,7 @@ function loadSystemSettings() {
     html += '</div>';
     byId('t7').innerHTML = html;
   }).catch(function (e) {
-    byId('t7').innerHTML = '<div class="card"><p style="color:#f44">Error: ' + e + '</p></div>';
+    byId('t7').innerHTML = '<div class="card"><p style="color:#f44">Error: ' + escHtml(e) + '</p></div>';
   });
 }
 
@@ -1531,7 +1549,7 @@ function loadTilts() {
     }
     byId('t3').innerHTML = html;
   }).catch(function (e) {
-    byId('t3').innerHTML = '<div class="card"><p style="color:#f44">Error loading Tilt data: ' + e + '</p></div>';
+    byId('t3').innerHTML = '<div class="card"><p style="color:#f44">Error loading Tilt data: ' + escHtml(e) + '</p></div>';
   });
 }
 
@@ -1598,7 +1616,7 @@ function loadISpindels() {
     for (var i = 0; i < ds.length; i++) html += buildISpindelCard(i, ds[i]);
     byId('t4').innerHTML = html;
   }).catch(function (e) {
-    byId('t4').innerHTML = '<div class="card"><p style="color:#f44">Error loading iSpindel data: ' + e + '</p></div>';
+    byId('t4').innerHTML = '<div class="card"><p style="color:#f44">Error loading iSpindel data: ' + escHtml(e) + '</p></div>';
   });
 }
 
@@ -1607,7 +1625,7 @@ function buildISpindelCard(idx, s) {
   var empty   = (s.name == 'None' || s.name == '');
   var hasData = (s.sg > 0 || s.temperature > 0);
   var html = '<div class="card"><h3>Slot ' + idx;
-  if (!empty) html += ': ' + s.name;
+  if (!empty) html += ': ' + escHtml(s.name);
   if (hasData && !empty) html += ' <span class="badge badge-idle">Active</span>';
   html += '</h3>';
   if (!empty) {
@@ -1615,18 +1633,18 @@ function buildISpindelCard(idx, s) {
     if (hasData) {
       html += 'SG: ' + s.sg.toFixed(4) + ' &nbsp; Temp: ' + s.temperature.toFixed(1) + '&deg;' + tempUnit + ' &nbsp; Angle: ' + s.angle.toFixed(1) + '&deg; &nbsp; Batt: ' + s.battery.toFixed(2) + 'V &nbsp; RSSI: ' + s.rssi + 'dBm';
       if (s.corrGravity > 0 || s.velocity > 0) {
-        html += '<br>Corr.SG: ' + s.corrGravity.toFixed(4) + ' &nbsp; Velocity: ' + s.velocity.toFixed(4) + ' &nbsp; Cycle: ' + s.runTime.toFixed(1) + 's' + (s.gravityUnit ? ' &nbsp; Unit: ' + s.gravityUnit : '');
+        html += '<br>Corr.SG: ' + s.corrGravity.toFixed(4) + ' &nbsp; Velocity: ' + s.velocity.toFixed(4) + ' &nbsp; Cycle: ' + s.runTime.toFixed(1) + 's' + (s.gravityUnit ? ' &nbsp; Unit: ' + escHtml(s.gravityUnit) : '');
       }
       var lastSeen = s.minutesSince >= 0xFFFF ? 'Never' : s.minutesSince === 0 ? 'Less than a minute ago' : s.minutesSince + ' min ago';
       html += '<br><span style="color:#888;font-size:12px">Last seen: ' + lastSeen + '</span>';
     }
     html += '</div>';
-    html += row('Device ID', '<span style="color:#53d8fb;font-size:13px">' + (s.id || '—') + '</span>');
+    html += row('Device ID', '<span style="color:#53d8fb;font-size:13px">' + (s.id ? escHtml(s.id) : '—') + '</span>');
   }
   html += row('Fermenter',           '<select id="isf'  + idx + '">' + fermOpts(s.fermenter)   + '</select>');
   // A device that reports its own gravity unit (GravityMon sends "G" or "P")
   // re-applies it on every report, so the dropdown below follows the device.
-  var unitHint = s.gravityUnit ? '<br><span style="color:#888;font-size:12px">Device reports its unit as \'' + s.gravityUnit + '\' and will reset this on its next report</span>' : '';
+  var unitHint = s.gravityUnit ? '<br><span style="color:#888;font-size:12px">Device reports its unit as \'' + escHtml(s.gravityUnit) + '\' and will reset this on its next report</span>' : '';
   html += row('Unit',                '<select id="isu'  + idx + '"><option value="0"' + (s.unit == 0 ? ' selected' : '') + '>SG</option><option value="1"' + (s.unit == 1 ? ' selected' : '') + '>Plato</option></select>' + unitHint);
   html += row('Temperature reading', '<select id="isfn' + idx + '">' + tiltFnOpts(s.function) + '</select>');
   html += row('SG Adjust',           numInput('issa' + idx, s.sgAdjust,   0.0001, 80));
@@ -1665,6 +1683,7 @@ function clearISpindel(idx) {
 
 // ---- LITTLEFS FILE VIEWER ----
 var sysFn = '';
+var sysFiles = [];  // last /fs/files list, so a table row can look up its file by index
 
 // Fetch the named file from LittleFS and show its contents in the file-viewer textarea.
 function loadFileContent(name) {

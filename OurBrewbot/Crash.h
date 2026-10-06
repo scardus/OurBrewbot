@@ -81,6 +81,8 @@ struct CrashInfo {
   uint32_t epc1, epc2, epc3, excvaddr, depc;
   uint32_t sp, spEnd;
   uint32_t stack[CRASH_STACK_WORDS];
+  uint32_t stackFree;        // least loop stack left before the crash, in bytes
+  char     stackAt[40];      // where that happened, e.g. "WEB /iSpindel"
 };
 
 extern CrashInfo g_lastCrash;
@@ -92,6 +94,9 @@ void checkpoint(uint8_t module);
 
 // Name of a checkpoint id, e.g. "MQTT_PEND" - "?" if unknown.
 const char* checkpointName(uint32_t module);
+
+// The CP_* id last passed to checkpoint() - the subsystem running now.
+uint8_t checkpointCurrent();
 
 // Mirror any pending crash/checkpoint detail via the DEFERRED syslog path,
 // and copy it into g_lastCrash for the crash report. Call once from setup()

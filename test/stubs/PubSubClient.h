@@ -52,8 +52,8 @@
 // cleanup run adds the legacy fermenter table on top. 512 records leaves
 // headroom for a publish-then-remove sequence in a single test.
 //
-// Payloads are held at the full 1024 B the firmware configures via
-// setBufferSize(), so a discovery payload is never silently shortened here -
+// Payloads are held at 1024 B, more than the largest the firmware can build
+// (MQTT_DISC_PAYLOAD_SIZE), so a payload is never silently shortened here -
 // the String stub has twice been the hidden cause of a bogus failure by
 // truncating quietly, and overflowCount below exists so this one fails loudly
 // instead.

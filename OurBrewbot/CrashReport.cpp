@@ -77,6 +77,10 @@ bool buildCrashReportJson(const CrashInfo& crash, char* out, size_t outSize) {
       snprintf(hex, sizeof(hex), "%x", crash.stack[i]);
       stack.add(hex);
     }
+
+    // How close the loop stack came to overflowing before the crash
+    doc["stack_free"] = crash.stackFree;
+    doc["stack_at"]   = crash.stackAt;
   }
 
   if (measureJson(doc) + 1 > outSize) return false;
@@ -103,8 +107,9 @@ static bool sendCrashReport() {
   http.begin(client, CRASH_REPORT_URL);
   http.setTimeout(CRASH_REPORT_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");
-  String payload(body);
-  int code = http.POST(payload);
+  // Posted straight from the stack buffer - copying it into a String first
+  // would add a ~550-byte heap allocation for no benefit.
+  int code = http.POST((const uint8_t*)body, strlen(body));
 
   if (code == 200 || code == 204) {
     http.end();

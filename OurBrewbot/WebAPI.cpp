@@ -30,6 +30,9 @@
 #include "Profile.h"
 #include "Tilt.h"
 #include "UpdateCheck.h"
+#include "Crash.h"
+#include "StackCheck.h"
+#include "StackProbe.h"
 
 // Forward refs to global server (defined in .ino)
 extern ESP8266WebServer g_webServer;
@@ -40,6 +43,24 @@ void handleBLESniffPoll(ESP8266WebServer& server);
 void handleBLESniffSend(ESP8266WebServer& server);
 void handleSyslogConfig(ESP8266WebServer& server);
 void handleSyslogConfigPost(ESP8266WebServer& server);
+
+// One buffer shared by the GET handlers that send their reply in chunks:
+// /fermenters, /status, /debug, /ispindels, /smartplugs and /profiles. Each
+// chunk is written here and sent before the next one is built.
+//
+// It is static rather than on the stack because the loop stack is only 4 KB
+// and one /fermenters chunk can be 979 bytes. Sharing it is safe because the
+// web server runs one handler at a time, start to finish, from loop() - so
+// only use it inside those handlers, never from MQTT, logging or iSpindel code.
+//
+// Largest chunk each handler can send (every name char escaped to 2 bytes,
+// every number at its longest - ArduinoJson prints a float in at most 13):
+//   /fermenters  one fermenter  979    /ispindels  one iSpindel  445
+//   /status      one fermenter  271    /smartplugs one plug      272
+//   /profiles    one step       114    /debug      one override  103
+// +1 for the NUL, rounded up to 16. Too small a buffer cuts the JSON off
+// silently, so the WebAPI tests send the worst case through every handler.
+static char s_chunkBuf[992];
 
 // ============================================================
 // SERVER SETUP — register all routes
@@ -136,7 +157,10 @@ static void dispatchApiRequest(ESP8266WebServer& server) {
     memcpy_P(&r, &kRoutes[i], sizeof(r));
     if (r.method == method && strcmp(uri.c_str(), r.path) == 0) {
       if (r.log) logApiCall(server);
+      STACK_PROBE_SET_WHERE(r.path);
       r.handler(server);
+      STACK_PROBE_SET_WHERE(nullptr);
+      stackCheck(CP_WEB, r.path);   // note the URL if this went deeper than ever
       return;
     }
   }
@@ -380,28 +404,31 @@ void buildFermenterJson(JsonDocument& doc, uint8_t i) {
   doc["GravitySource"]  = getGravitySource(i);
 }
 
+// One step of a profile, as it appears in the "steps" array.
+static void buildProfileStepJson(JsonObject st, const ProfileStep& step) {
+  st["stepType"]  = step.stepType;
+  // An unused slot is all-zero, and countProfileSteps() / the WebUI both
+  // detect it by testing those temperatures against 0. Converting them would
+  // report 32 in Fahrenheit and the slot would stop looking empty, so emit
+  // the sentinel verbatim and only convert real step temperatures.
+  if (isStepEmpty(step)) {
+    st["startTemp"] = 0.0f;
+    st["endTemp"]   = 0.0f;
+  } else {
+    st["startTemp"] = toDisplayTemp(step.startTemp);
+    st["endTemp"]   = toDisplayTemp(step.endTemp);
+  }
+  st["sgTrigger"] = step.sgTrigger;
+  st["days"]      = step.days;
+}
+
 void buildProfileJson(JsonDocument& doc, int p) {
   doc["index"] = p;
   doc["name"]  = g_profiles[p].profileName;
   JsonArray steps = doc["steps"].to<JsonArray>();
   uint8_t base = p * MAX_STEPS_PER_PROFILE;
   for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
-    JsonObject st = steps.add<JsonObject>();
-    const ProfileStep& step = g_profileSteps[base + s];
-    st["stepType"]  = step.stepType;
-    // An unused slot is all-zero, and countProfileSteps() / the WebUI both
-    // detect it by testing those temperatures against 0. Converting them would
-    // report 32 in Fahrenheit and the slot would stop looking empty, so emit
-    // the sentinel verbatim and only convert real step temperatures.
-    if (isStepEmpty(step)) {
-      st["startTemp"] = 0.0f;
-      st["endTemp"]   = 0.0f;
-    } else {
-      st["startTemp"] = toDisplayTemp(step.startTemp);
-      st["endTemp"]   = toDisplayTemp(step.endTemp);
-    }
-    st["sgTrigger"] = step.sgTrigger;
-    st["days"]      = step.days;
+    buildProfileStepJson(steps.add<JsonObject>(), g_profileSteps[base + s]);
   }
 }
 
@@ -416,9 +443,10 @@ void handleFermenters(ESP8266WebServer& server) {
     if (i > 0) server.sendContent(",");
     JsonDocument doc;
     buildFermenterJson(doc, i);
-    char buf[768];
-    size_t n = serializeJson(doc, buf, sizeof(buf));
-    server.sendContent(buf, n);
+    // 979 bytes at most: four 31-char names with every char escaped, the
+    // longest status and source strings, and all 12 floats at 13 chars.
+    size_t n = serializeJson(doc, s_chunkBuf, sizeof(s_chunkBuf));
+    server.sendContent(s_chunkBuf, n);
   }
   server.sendContent("]");
   server.sendContent("");  // end chunked transfer
@@ -563,11 +591,11 @@ void handleDebug(ESP8266WebServer& server) {
   sendCORSHeaders(server);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
-  char head[64];
-  int hn = snprintf(head, sizeof(head), "{\"DebugMode\":%s,\"TempUnit\":\"%s\",\"Overrides\":[",
+  // 47 characters at most
+  int hn = snprintf(s_chunkBuf, sizeof(s_chunkBuf), "{\"DebugMode\":%s,\"TempUnit\":\"%s\",\"Overrides\":[",
                     g_fermenterDebugMode ? "true" : "false",
                     (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F");
-  server.sendContent(head, hn);
+  server.sendContent(s_chunkBuf, hn);
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     if (i > 0) server.sendContent(",");
     JsonDocument ov;
@@ -576,9 +604,8 @@ void handleDebug(ESP8266WebServer& server) {
     ov["BeerTemp"]    = toDisplayTemp(g_fermenterDebugOverrides[i].beerTemp);
     ov["AmbientTemp"] = toDisplayTemp(g_fermenterDebugOverrides[i].ambientTemp);
     ov["SG"]          = g_fermenterDebugOverrides[i].sg;
-    char buf[192];
-    size_t n = serializeJson(ov, buf, sizeof(buf));
-    server.sendContent(buf, n);
+    size_t n = serializeJson(ov, s_chunkBuf, sizeof(s_chunkBuf));
+    server.sendContent(s_chunkBuf, n);
   }
   server.sendContent("]}");
   server.sendContent("");  // end chunked transfer
@@ -727,15 +754,14 @@ void handleStatus(ESP8266WebServer& server) {
     doc["ambientTemp"] = (at > TEMP_VALID_MIN) ? toDisplayTemp(at) : TEMP_NONE;
     doc["sg"]          = getCurrentSG(i);
     doc["alarm"]       = g_fermenters[i].alarm;
-    char buf[384];
-    size_t n = serializeJson(doc, buf, sizeof(buf));
-    server.sendContent(buf, n);
+    size_t n = serializeJson(doc, s_chunkBuf, sizeof(s_chunkBuf));
+    server.sendContent(s_chunkBuf, n);
   }
-  char tail[96];
-  int n = snprintf(tail, sizeof(tail), "],\"uptime\":%u,\"freeHeap\":%u,\"ip\":\"%s\"}",
+  // 67 characters at most: two 10-digit numbers and a 15-character IP
+  int n = snprintf(s_chunkBuf, sizeof(s_chunkBuf), "],\"uptime\":%u,\"freeHeap\":%u,\"ip\":\"%s\"}",
                    (unsigned)(millis() / 60000UL), (unsigned)ESP.getFreeHeap(),
                    WiFi.localIP().toString().c_str());
-  server.sendContent(tail, n);
+  server.sendContent(s_chunkBuf, n);
   server.sendContent("");  // end chunked transfer
 }
 
@@ -767,6 +793,7 @@ void handleProbes(ESP8266WebServer& server) {
 void handleHealth(ESP8266WebServer& server) {
   JsonDocument doc;
   doc["freeHeap"]    = ESP.getFreeHeap();
+  doc["freeStack"]   = ESP.getFreeContStack();  // lowest free loop stack since boot
   doc["uptime"]      = (uint32_t)(millis() / 60000UL);
   doc["rssi"]        = WiFi.RSSI();
   doc["ssid"]        = WiFi.SSID();
@@ -876,7 +903,9 @@ void handleOTAUpload(ESP8266WebServer& server) {
 
 void handleiSpindel(ESP8266WebServer& server) {
   handleiSpindelPost(server.arg("plain"));
+  STACK_PROBE_BEGIN(replyProbe);
   sendJsonResponse(server, F("{\"status\":\"ok\"}"));
+  STACK_PROBE_END(PROBE_ISPINDEL_REPLY, replyProbe);
 }
 
 // ============================================================
@@ -913,9 +942,8 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["minutesSince"] = g_iSpindels[i].lastSeen == 0
                           ? 0xFFFF
                           : (uint32_t)(millis() - g_iSpindels[i].lastSeen) / 60000UL;
-    char buf[512];
-    size_t n = serializeJson(s, buf, sizeof(buf));
-    server.sendContent(buf, n);
+    size_t n = serializeJson(s, s_chunkBuf, sizeof(s_chunkBuf));
+    server.sendContent(s_chunkBuf, n);
   }
   server.sendContent("]}");
   server.sendContent("");  // end chunked transfer
@@ -1072,9 +1100,8 @@ void handleSmartPlugs(ESP8266WebServer& server) {
     p["function"]     = g_smartPlugs[i].function;
     p["fermenter"]    = g_smartPlugs[i].fermenter;
     p["state"]        = getPlugState(i);
-    char buf[384];
-    size_t n = serializeJson(p, buf, sizeof(buf));
-    server.sendContent(buf, n);
+    size_t n = serializeJson(p, s_chunkBuf, sizeof(s_chunkBuf));
+    server.sendContent(s_chunkBuf, n);
   }
   server.sendContent("]}");
   server.sendContent("");  // end chunked transfer
@@ -1496,18 +1523,40 @@ void handleMqttDiscover(ESP8266WebServer& server) {
 
 void handleProfiles(ESP8266WebServer& server) {
   // Stream profiles using chunked transfer to avoid a single ~8KB heap spike.
-  // One profile at a time (~1536-byte doc) is built and freed each iteration.
+  // A whole profile serializes to well over 1 KB, too big for one buffer,
+  // so each chunk is one profile's opening or one of its steps: at most 83
+  // bytes for a 31-char name with every char escaped, and 114 for a step
+  // whose four floats all print at full length, plus its comma.
   sendCORSHeaders(server);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
   server.sendContent("{\"profiles\":[");
+  char* buf = s_chunkBuf;
+  const size_t bufSize = sizeof(s_chunkBuf);
   for (int p = 0; p < MAX_PROFILES; p++) {
     if (p > 0) server.sendContent(",");
-    JsonDocument doc;
-    buildProfileJson(doc, p);
-    char buf[1024];
-    size_t n = serializeJson(doc, buf, sizeof(buf));
-    server.sendContent(buf, n);
+
+    // Opening of the profile object: {"index":0,"name":"Ale","steps":[
+    // serializeJson escapes the name for us; the closing brace it adds is
+    // left off so the steps array can follow inside the same object.
+    JsonDocument head;
+    head["index"] = p;
+    head["name"]  = g_profiles[p].profileName;
+    size_t n = serializeJson(head, buf, bufSize);
+    if (n > 0) server.sendContent(buf, n - 1);
+    server.sendContent(",\"steps\":[");
+
+    uint8_t base = p * MAX_STEPS_PER_PROFILE;
+    for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
+      JsonDocument stepDoc;
+      buildProfileStepJson(stepDoc.to<JsonObject>(), g_profileSteps[base + s]);
+      // The comma between steps goes in the same chunk as the step.
+      n = 0;
+      if (s > 0) buf[n++] = ',';
+      n += serializeJson(stepDoc, buf + n, bufSize - n);
+      server.sendContent(buf, n);
+    }
+    server.sendContent("]}");
   }
   server.sendContent("],\"stepTypes\":[");
   for (int t = 0; t <= 9; t++) {
@@ -1515,8 +1564,7 @@ void handleProfiles(ESP8266WebServer& server) {
     JsonDocument tDoc;
     tDoc["id"]   = t;
     tDoc["name"] = getStepTypeDescription(t);
-    char buf[96];
-    size_t n = serializeJson(tDoc, buf, sizeof(buf));
+    size_t n = serializeJson(tDoc, buf, bufSize);
     server.sendContent(buf, n);
   }
   server.sendContent("]}");

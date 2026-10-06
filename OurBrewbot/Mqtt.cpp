@@ -42,6 +42,7 @@
 #include "UpdateCheck.h"
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
+#include <math.h>
 
 static const char* probeFunctionName(uint8_t fn) {
   switch (fn) {
@@ -93,9 +94,22 @@ static void publishValue(const char* base, const char* key, const char* value) {
     logPublishFailure(s_topicBuf);
 }
 
+// dtostrf() writes as many digits as the value needs and is never told the
+// buffer size, so a huge value (3.4e38 prints ~45 characters) would overrun
+// val on the stack - and an iSpindel can POST any float. Below 1e8 with at
+// most 4 decimals the longest it gets is "-100000000.0000" (15 characters,
+// after rounding up), which fits. Anything bigger, infinite or not a number
+// is nonsense for every value published here, so it goes out as "nan".
+// (snprintf's %f would also be safe, but its float formatting needs several
+// hundred more bytes of loop stack, on the deepest path in the firmware.)
 static void publishFloat(const char* base, const char* key, float value, int decimals = 1) {
   char val[16];
-  dtostrf(value, 1, decimals, val);
+  if (decimals > 4) decimals = 4;
+  if (isfinite(value) && fabsf(value) < 1e8f) {
+    dtostrf(value, 1, decimals, val);
+  } else {
+    strlcpy(val, "nan", sizeof(val));
+  }
   publishValue(base, key, val);
 }
 
@@ -124,7 +138,9 @@ static void buildDiscoveryBase(JsonDocument& doc,
     const char* objectId, const char* friendlyName,
     const char* stKey, const char* icon)
 {
-  char uid[56], stTopic[96];
+  // The longest unique ID is an iSpindel's: its 42-char device ID (15-char
+  // iSpindel ID) + "_corrected_gravity" = 60 chars.
+  char uid[64], stTopic[96];
   snprintf(uid,     sizeof(uid),     "%s_%s", devId, objectId);
   snprintf(stTopic, sizeof(stTopic), "%s/%s", base,  stKey);
   doc["uniq_id"] = uid;
@@ -146,12 +162,14 @@ static void buildDiscoveryBase(JsonDocument& doc,
 // Serializes into a static buffer rather than a heap String — a discovery burst
 // publishes ~70 entities back-to-back and the alloc/free churn was the main
 // fragmentation source on this heap-constrained device.
-static char s_discPayload[1024];  // sized to the PubSubClient buffer (setBufferSize)
+static char s_discPayload[MQTT_DISC_PAYLOAD_SIZE];
 
 static void publishAndReset(JsonDocument& doc,
     const char* component, const char* devId, const char* objectId)
 {
-  char discTopic[128];
+  // 88 chars at most: "homeassistant/" + "sensor" + an iSpindel's 42-char
+  // device ID + "corrected_gravity" + the slashes and "/config".
+  char discTopic[96];
   snprintf(discTopic, sizeof(discTopic), "homeassistant/%s/%s/%s/config",
     component, devId, objectId);
   const size_t len = measureJson(doc);
@@ -200,7 +218,9 @@ static void publishSwitchEntity(JsonDocument& doc,
     const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[128];
+  // 66 chars at most: only fermenters and the device itself have commands,
+  // so the longest is a 42-char fermenter base + "/ceiling_temperature/set".
+  char cmdTopic[80];
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"]  = cmdTopic;
   doc["pl_on"]  = "ON";   // pl_on / pl_off are HA abbreviated names for payload_on / payload_off
@@ -218,7 +238,7 @@ static void publishNumberEntity(JsonDocument& doc,
     const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[128];
+  char cmdTopic[80];    // 66 chars at most - see publishSwitchEntity()
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"] = cmdTopic;
   doc["min"]   = minVal;
@@ -239,7 +259,7 @@ static void publishSelectEntity(JsonDocument& doc,
     const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[128];
+  char cmdTopic[80];    // 66 chars at most - see publishSwitchEntity()
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"] = cmdTopic;
   JsonArray opts = doc["ops"].to<JsonArray>();
@@ -255,7 +275,7 @@ static void publishTextEntity(JsonDocument& doc,
     int maxLen = 31, const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[128];
+  char cmdTopic[80];    // 66 chars at most - see publishSwitchEntity()
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"] = cmdTopic;
   doc["max"]   = maxLen;
@@ -268,7 +288,7 @@ static void publishButtonEntity(JsonDocument& doc,
     const char* objectId, const char* name,
     const char* cmdKey, const char* icon = nullptr)
 {
-  char uid[56], cmdTopic[96];
+  char uid[64], cmdTopic[96];
   snprintf(uid,      sizeof(uid),      "%s_%s", devId, objectId);
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base,  cmdKey);
   doc["uniq_id"] = uid;
@@ -297,7 +317,7 @@ static void publishUpdateEntity(JsonDocument& doc,
     const char* objectId, const char* name,
     const char* devClass, const char* entityCat)
 {
-  char uid[56], stTopic[96], latestTopic[96];
+  char uid[64], stTopic[96], latestTopic[96];
   snprintf(uid,         sizeof(uid),         "%s_%s", devId, objectId);
   snprintf(stTopic,     sizeof(stTopic),     "%s/firmware_version", base);
   snprintf(latestTopic, sizeof(latestTopic), "%s/latest_version",   base);
@@ -509,7 +529,7 @@ static void publishEntityFromDesc(JsonDocument& doc, const HaEntityDesc* row,
   HaEntityDesc d;
   memcpy_P(&d, row, sizeof(d));
   const char* unit = (d.flags & HAF_TEMP_UNIT) ? haTempUnit() : d.unit;
-  char cmdKey[48];
+  char cmdKey[32];   // 27 chars at most: "beer_temperature_source/set"
   snprintf(cmdKey, sizeof(cmdKey), "%s/set", d.objectId);
 
   switch (d.kind) {
@@ -697,7 +717,7 @@ static void removeIspindelDiscovery(const char* id) {
 
 // Remove one HA entity by publishing an empty retained payload to its discovery topic.
 static void removeOneEntity(const char* component, const char* devId, const char* objectId) {
-  char discTopic[128];
+  char discTopic[96];   // 88 chars at most - see publishAndReset()
   snprintf(discTopic, sizeof(discTopic), "homeassistant/%s/%s/%s/config",
     component, devId, objectId);
   if (!g_mqtt.publish(discTopic, (const uint8_t*)"", 0, true))
@@ -914,7 +934,7 @@ static bool mqttConnect() {
   snprintf(s_availTopic, sizeof(s_availTopic), "%s/availability", g_mqttConfig.baseTopic);
 
   // Always set buffer and callback here (in case initMqtt() was skipped when MQTT was disabled at boot)
-  g_mqtt.setBufferSize(1024);
+  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);
   g_mqtt.setSocketTimeout(5);  // default 15 s connect stall starves the loop when broker is unreachable
   g_mqtt.setCallback(mqttMessageCallback);
 
@@ -1014,30 +1034,98 @@ void mqttPendingSaveCheck() {
 // to see on the topic. The guard only prevents the publish-from-within-publish
 // recursion that would form an infinite loop.
 
-void mqttPublishLog(uint8_t level, const char* line) {
+// Length of the valid UTF-8 character starting at s (2 to 4 bytes), or 0 if
+// the bytes there are not valid UTF-8 - a garbled Tilt reading, for example.
+// Stops at the first bad byte, so it never reads past the string's NUL.
+static size_t utf8CharLength(const unsigned char* s) {
+  size_t len;
+  unsigned char lo = 0x80, hi = 0xBF;   // allowed range of the second byte
+  if (s[0] >= 0xC2 && s[0] <= 0xDF) {
+    len = 2;
+  } else if (s[0] >= 0xE0 && s[0] <= 0xEF) {
+    len = 3;
+    if (s[0] == 0xE0) lo = 0xA0;   // no over-long encodings
+    if (s[0] == 0xED) hi = 0x9F;   // no UTF-16 surrogates
+  } else if (s[0] >= 0xF0 && s[0] <= 0xF4) {
+    len = 4;
+    if (s[0] == 0xF0) lo = 0x90;   // no over-long encodings
+    if (s[0] == 0xF4) hi = 0x8F;   // nothing above U+10FFFF
+  } else {
+    return 0;
+  }
+  if (s[1] < lo || s[1] > hi) return 0;
+  for (size_t k = 2; k < len; k++) {
+    if (s[k] < 0x80 || s[k] > 0xBF) return 0;
+  }
+  return len;
+}
+
+// Append `in` to out[] starting at position j, escaped so the result is safe
+// inside a JSON string: a backslash goes in front of every " and \, and
+// control characters (a newline in an iSpindel name, say) become \u00XX -
+// JSON does not allow them raw. JSON must also be valid UTF-8, so accented
+// characters are copied whole but any byte that is not part of a valid UTF-8
+// character becomes '?'. Stops early rather than overflow, and never splits
+// an escape or a character, so truncation can't leave a broken one at the end.
+static void appendJsonEscaped(char* out, size_t outSize, size_t& j, const char* in) {
+  for (size_t i = 0; in[i]; ++i) {
+    unsigned char c = (unsigned char)in[i];
+    char esc[8];
+    size_t n;
+    if (c == '"' || c == '\\') {
+      esc[0] = '\\';
+      esc[1] = (char)c;
+      n = 2;
+    } else if (c < 0x20) {
+      n = (size_t)snprintf(esc, sizeof(esc), "\\u%04x", c);
+    } else if (c >= 0x80) {
+      n = utf8CharLength((const unsigned char*)in + i);
+      if (n > 0) {
+        memcpy(esc, in + i, n);
+        i += n - 1;   // the loop's ++i moves past the last byte
+      } else {
+        esc[0] = '?';
+        n = 1;
+      }
+    } else {
+      esc[0] = (char)c;
+      n = 1;
+    }
+    if (j + n >= outSize) break;   // keep room for the terminator
+    memcpy(out + j, esc, n);
+    j += n;
+  }
+  out[j] = '\0';
+}
+
+void mqttPublishLog(uint8_t level, const char* timestamp, const char* msg) {
   static bool s_inLogPublish = false;
   if (s_inLogPublish) return;
   if (!g_mqttConfig.enabled || !g_mqttConfig.logEnabled) return;
   if (!g_mqtt.connected()) return;
-  if (!line || !line[0]) return;
+  if (!timestamp) timestamp = "";
+  if (!msg) msg = "";
+  if (!timestamp[0] && !msg[0]) return;
 
   static const char* const kSev[] = {
     "EMERG","ALERT","CRIT","ERR","WARNING","NOTICE","INFO","DEBUG"
   };
   const char* sev = (level < 8) ? kSev[level] : "INFO";
 
-  // Escape " and \ so the JSON string is always valid.
+  // Join the timestamp and message, escaping " and \ so the JSON string is
+  // always valid. They arrive separately so the caller does not need its own
+  // buffer to join them in.
   // Buffers are static — safe because s_inLogPublish prevents re-entry, keeping
   // ~490 bytes off the call stack per log call.
   static char safe[210];
   size_t j = 0;
-  for (size_t i = 0; line[i] && j < sizeof(safe) - 2; ++i) {
-    if (line[i] == '"' || line[i] == '\\') safe[j++] = '\\';
-    safe[j++] = line[i];
-  }
-  safe[j] = '\0';
+  safe[0] = '\0';
+  appendJsonEscaped(safe, sizeof(safe), j, timestamp);
+  appendJsonEscaped(safe, sizeof(safe), j, msg);
 
-  static char payload[290];  // 40 JSON overhead + 210 safe + closing + margin
+  // 252 chars at most: {"level":%u, (9 + 3 digits) ,"severity":" (13)
+  // + "WARNING" (7) + ","msg":" (9) + 209 of safe text + "} (2). +1 for the NUL.
+  static char payload[256];
   snprintf(payload, sizeof(payload),
            "{\"level\":%u,\"severity\":\"%s\",\"msg\":\"%s\"}", level, sev, safe);
 
@@ -1058,7 +1146,7 @@ void initMqtt() {
   if (!g_mqttConfig.enabled) return;
   g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
   g_mqtt.setCallback(mqttMessageCallback);
-  g_mqtt.setBufferSize(1024);  // writable-entity discovery payloads can reach ~900 bytes; measure in testing
+  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);  // see Mqtt.h for how it is sized
   g_mqtt.setSocketTimeout(5);  // bound connect stalls (default 15 s)
   logMsg("[MQTT] Configured: %s:%d base=%s ha_discovery=%s",
     g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.baseTopic,
@@ -1277,7 +1365,7 @@ bool testMqtt() {
   // existing connection.
   if (!g_mqtt.connected()) {
     g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
-    g_mqtt.setBufferSize(1024);
+    g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);
     g_mqtt.setSocketTimeout(5);  // bound the blocking connect (default 15 s)
     g_mqtt.setCallback(mqttMessageCallback);
 

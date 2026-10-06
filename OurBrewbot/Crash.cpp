@@ -28,13 +28,16 @@
 
 #include "Crash.h"
 #include "Log.h"
+#include "StackCheck.h"
 #include <Arduino.h>
+#include <ctype.h>            // isalnum
+#include <string.h>           // memcpy, strchr, strlcpy
 #include <user_interface.h>   // struct rst_info, REASON_* constants
 
 namespace {
 
 constexpr uint32_t CRASH_OFFSET      = 0;        // dword offset 0
-constexpr uint32_t CHECKPOINT_OFFSET = 35;       // dword offset 35 (past CrashRecord)
+constexpr uint32_t CHECKPOINT_OFFSET = 43;       // dword offset 43 (past CrashRecord)
 constexpr uint32_t CRASH_MAGIC       = 0xC0FFEE42u;
 constexpr uint32_t CP_MAGIC          = 0xC0DECA11u;
 constexpr size_t   STACK_WORDS       = CRASH_STACK_WORDS;
@@ -52,6 +55,9 @@ struct CrashRecord {
   uint32_t stackEnd;
   uint32_t lastCheckpoint;
   uint32_t stack[STACK_WORDS];
+  uint32_t stackFree;                    // least loop stack left since boot (StackCheck.cpp)
+  uint32_t stackModule;                  // the CP_* id that took it there, 0xFF = setup
+  char     stackWhere[STACK_WHERE_LEN];  // e.g. the web URL, "" if none
 };
 
 struct CheckpointRecord {
@@ -60,7 +66,7 @@ struct CheckpointRecord {
 };
 
 static_assert(sizeof(CrashRecord) % 4 == 0, "RTC writes must be 4-byte aligned");
-static_assert(sizeof(CrashRecord)      == 35 * 4, "CrashRecord size pins CHECKPOINT_OFFSET");
+static_assert(sizeof(CrashRecord)      == 43 * 4, "CrashRecord size pins CHECKPOINT_OFFSET");
 static_assert(sizeof(CheckpointRecord) % 4 == 0, "RTC writes must be 4-byte aligned");
 static_assert(sizeof(CrashRecord) + sizeof(CheckpointRecord) <= 512,
               "RTC user memory is 512 bytes total");
@@ -95,6 +101,28 @@ const char* moduleName(uint32_t id) {
   return (id < MODULE_COUNT) ? MODULE_NAMES[id] : "?";
 }
 
+// Where the loop stack got deepest before a crash, as text for the log and the
+// crash report, e.g. "WEB /iSpindel" or "MQTT_PUB". Anything other than a
+// letter, digit or one of " /._-" becomes '?' - RTC memory can hold anything
+// after a bad crash, and the website rejects the whole report if this has any
+// other character in it (STACK_AT in the website's worker/index.js).
+void formatStackAt(const CrashRecord& rec, char* out, size_t outSize) {
+  char where[STACK_WHERE_LEN];
+  // Not strlcpy: that reads the source up to its NUL, and after a bad crash
+  // the RTC copy may not have one - so copy the fixed size and terminate it.
+  memcpy(where, rec.stackWhere, sizeof(where));
+  where[sizeof(where) - 1] = '\0';
+  const char* module = (rec.stackModule == 0xFF) ? "setup" : moduleName(rec.stackModule);
+  if (where[0] != '\0') {
+    snprintf(out, outSize, "%s %s", module, where);
+  } else {
+    snprintf(out, outSize, "%s", module);
+  }
+  for (char* c = out; *c != '\0'; c++) {
+    if (!isalnum((unsigned char)*c) && strchr(" /._-", *c) == nullptr) *c = '?';
+  }
+}
+
 } // namespace
 
 CrashInfo g_lastCrash;
@@ -103,11 +131,18 @@ const char* checkpointName(uint32_t module) {
   return moduleName(module);
 }
 
+// Called from StackProbe.cpp, which is only built with STACK_PROBE defined
+// cppcheck-suppress unusedFunction
+uint8_t checkpointCurrent() {
+  return s_lastModule;
+}
+
 // Called from loop() in OurBrewbot.cpp, which cppcheck does not connect to
 // this definition - hence the suppression rather than a real removal.
 // cppcheck-suppress unusedFunction
 void checkpoint(uint8_t module) {
   if (module == s_lastModule) return;
+  stackCheck(s_lastModule, nullptr);   // did the subsystem that just ran go deeper?
   s_lastModule = module;
   CheckpointRecord rec = { CP_MAGIC, module };
   ESP.rtcUserMemoryWrite(CHECKPOINT_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
@@ -156,6 +191,12 @@ void crashLogPendingDeferred() {
               crashRec.stack[i+0], crashRec.stack[i+1], crashRec.stack[i+2], crashRec.stack[i+3],
               crashRec.stack[i+4], crashRec.stack[i+5], crashRec.stack[i+6], crashRec.stack[i+7]);
     }
+    // How close the loop stack came to overflowing before the crash
+    char stackAt[sizeof(g_lastCrash.stackAt)];
+    formatStackAt(crashRec, stackAt, sizeof(stackAt));
+    logMsgL(SYSLOG_ERR,
+            "DEFERRED [SYS] Loop stack low: %u bytes left, after %s",
+            crashRec.stackFree, stackAt);
     // Keep a copy for the crash report (CrashReport.cpp) before clearing it
     memset(&g_lastCrash, 0, sizeof(g_lastCrash));
     g_lastCrash.valid         = true;
@@ -172,6 +213,8 @@ void crashLogPendingDeferred() {
     g_lastCrash.sp            = crashRec.stackStart;
     g_lastCrash.spEnd         = crashRec.stackEnd;
     memcpy(g_lastCrash.stack, crashRec.stack, sizeof(g_lastCrash.stack));
+    g_lastCrash.stackFree     = crashRec.stackFree;
+    strlcpy(g_lastCrash.stackAt, stackAt, sizeof(g_lastCrash.stackAt));
 
     uint32_t zero = 0;
     ESP.rtcUserMemoryWrite(CRASH_OFFSET, &zero, sizeof(zero));
@@ -245,6 +288,15 @@ extern "C" void custom_crash_callback(struct rst_info* info,
     // cppcheck-suppress knownConditionTrueFalse
     for (size_t i = 0; i < n; i++) rec.stack[i] = sp[i];
   }
+
+  // The deepest the loop stack got before the crash, and where (StackCheck.cpp).
+  // Checked once more first, in case the crash itself is the deepest point.
+  stackCheck(s_lastModule, nullptr);
+  uint8_t     stackModule;
+  const char* stackWhere;
+  stackLowest(rec.stackFree, stackModule, stackWhere);
+  rec.stackModule = stackModule;
+  strlcpy(rec.stackWhere, stackWhere, sizeof(rec.stackWhere));
 
   ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
 }

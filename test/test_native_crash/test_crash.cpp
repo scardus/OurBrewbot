@@ -78,6 +78,21 @@ static bool logContains(const char* needle) {
   return false;
 }
 
+// ---- stack depth check: reads the ESP8266 loop stack, so faked here ----
+// stackLowest() hands back whatever the test puts in these.
+static uint32_t    s_stubStackFree   = 0;
+static uint8_t     s_stubStackModule = 0xFF;
+static const char* s_stubStackWhere  = "";
+static int         s_stackCheckCalls = 0;
+
+void stackCheck(uint8_t, const char*) { s_stackCheckCalls++; }
+
+void stackLowest(uint32_t& freeBytes, uint8_t& module, const char*& where) {
+  freeBytes = s_stubStackFree;
+  module    = s_stubStackModule;
+  where     = s_stubStackWhere;
+}
+
 // The code under test.
 #include "../../OurBrewbot/Crash.cpp"
 
@@ -98,6 +113,9 @@ static void stageCrashRecord(uint32_t lastCheckpoint, uint32_t magic = CRASH_MAG
   rec.stackStart     = 0x3FFFFC00;
   rec.stackEnd       = 0x3FFFFD00;
   rec.lastCheckpoint = lastCheckpoint;
+  rec.stackFree      = 924;
+  rec.stackModule    = CP_WEB;
+  strcpy(rec.stackWhere, "/iSpindel");
   ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
 }
 
@@ -119,6 +137,10 @@ void setUp(void) {
   s_logCount   = 0;
   s_lastModule = 0xFF;   // the value the firmware boots with
   memset(&g_lastCrash, 0, sizeof(g_lastCrash));
+  s_stubStackFree   = 0;
+  s_stubStackModule = 0xFF;
+  s_stubStackWhere  = "";
+  s_stackCheckCalls = 0;
 }
 
 void tearDown(void) {}
@@ -308,7 +330,8 @@ static void test_crash_record_reports_a_panic_reason_after_a_soft_restart(void) 
   TEST_ASSERT_TRUE(logContains("last=MQTT_PEND"));
 }
 
-// 24 stack words at 8 per line = 3 STACK lines, after the detail and SP header.
+// 24 stack words at 8 per line = 3 STACK lines, after the detail and SP
+// header, then the loop stack low.
 static void test_crash_record_dumps_the_whole_stack_slice(void) {
   espTestSetResetReason(REASON_EXCEPTION_RST);
   stageCrashRecord(CP_FERM);
@@ -316,7 +339,41 @@ static void test_crash_record_dumps_the_whole_stack_slice(void) {
   TEST_ASSERT_TRUE(logContains("STACK 00"));
   TEST_ASSERT_TRUE(logContains("STACK 08"));
   TEST_ASSERT_TRUE(logContains("STACK 16"));
-  TEST_ASSERT_EQUAL_INT(5, s_logCount);
+  TEST_ASSERT_EQUAL_INT(6, s_logCount);
+}
+
+static void test_crash_record_reports_the_loop_stack_low(void) {
+  espTestSetResetReason(REASON_EXCEPTION_RST);
+  stageCrashRecord(CP_FERM);
+  crashLogPendingDeferred();
+  TEST_ASSERT_TRUE(logContains("Loop stack low: 924 bytes left, after WEB /iSpindel"));
+}
+
+// 0xFF is the module before the first checkpoint() - i.e. during setup()
+static void test_stack_low_during_setup_is_named_setup(void) {
+  espTestSetResetReason(REASON_EXCEPTION_RST);
+  stageCrashRecord(CP_FERM);
+  CrashRecord rec = readCrashRecord();
+  rec.stackModule   = 0xFF;
+  rec.stackWhere[0] = '\0';
+  ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
+  crashLogPendingDeferred();
+  TEST_ASSERT_TRUE(logContains("Loop stack low: 924 bytes left, after setup"));
+  TEST_ASSERT_EQUAL_STRING("setup", g_lastCrash.stackAt);
+}
+
+// After a bad crash the RTC copy of the URL could be anything: no NUL, and
+// characters the website would reject (it refuses the whole report then).
+// It must come out bounded, with only the characters the website accepts.
+static void test_stack_low_from_a_corrupt_record_is_made_safe(void) {
+  espTestSetResetReason(REASON_EXCEPTION_RST);
+  stageCrashRecord(CP_FERM);
+  CrashRecord rec = readCrashRecord();
+  memset(rec.stackWhere, 0xFF, sizeof(rec.stackWhere));   // no NUL anywhere
+  memcpy(rec.stackWhere, "<b>", 3);                        // printable, but not allowed
+  ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
+  crashLogPendingDeferred();
+  TEST_ASSERT_EQUAL_STRING("WEB ?b?????????????????????", g_lastCrash.stackAt);   // 23 chars, "b" kept
 }
 
 // The magic is cleared once reported, so the same crash isn't re-logged on
@@ -349,6 +406,8 @@ static void test_crash_record_is_kept_for_the_crash_report(void) {
   TEST_ASSERT_EQUAL_HEX32(0x4020DEF0, g_lastCrash.depc);
   TEST_ASSERT_EQUAL_HEX32(0x3FFFFC00, g_lastCrash.sp);
   TEST_ASSERT_EQUAL_UINT32(28, g_lastCrash.exccause);
+  TEST_ASSERT_EQUAL_UINT32(924, g_lastCrash.stackFree);
+  TEST_ASSERT_EQUAL_STRING("WEB /iSpindel", g_lastCrash.stackAt);
 }
 
 // A panic (e.g. a heap-check hit) reboots as a soft restart but leaves a record
@@ -550,6 +609,25 @@ static void test_short_stack_is_clamped_to_what_is_available(void) {
   TEST_ASSERT_EQUAL_HEX32(0, rec.stack[4]);   // untouched, not over-read
 }
 
+// The callback checks the stack once more (the crash may be the deepest point
+// of all), then saves the lowest point and where it was.
+static void test_callback_captures_the_loop_stack_low(void) {
+  REQUIRE_FAKE_STACK();
+  fillFakeStack();
+  s_stubStackFree   = 1348;
+  s_stubStackModule = CP_WEB;
+  s_stubStackWhere  = "/fermenters";
+  s_stackCheckCalls = 0;
+  rst_info info = makeInfo();
+  custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
+
+  CrashRecord rec = readCrashRecord();
+  TEST_ASSERT_EQUAL_INT(1, s_stackCheckCalls);
+  TEST_ASSERT_EQUAL_UINT32(1348, rec.stackFree);
+  TEST_ASSERT_EQUAL_UINT32(CP_WEB, rec.stackModule);
+  TEST_ASSERT_EQUAL_STRING("/fermenters", rec.stackWhere);
+}
+
 // End to end: what the callback writes is what the next boot reports.
 static void test_callback_output_is_readable_by_the_reporting_path(void) {
   REQUIRE_FAKE_STACK();
@@ -563,6 +641,7 @@ static void test_callback_output_is_readable_by_the_reporting_path(void) {
   crashLogPendingDeferred();
   TEST_ASSERT_TRUE(logContains("last=MQTT_PUB"));
   TEST_ASSERT_TRUE(logContains("0x40202222"));   // EPC2 from the callback
+  TEST_ASSERT_TRUE(logContains("Loop stack low:"));
 }
 
 // ============================================================
@@ -591,6 +670,9 @@ int main(int, char**) {
   RUN_TEST(test_crash_record_reports_the_full_register_frame);
   RUN_TEST(test_crash_record_reports_a_panic_reason_after_a_soft_restart);
   RUN_TEST(test_crash_record_dumps_the_whole_stack_slice);
+  RUN_TEST(test_crash_record_reports_the_loop_stack_low);
+  RUN_TEST(test_stack_low_during_setup_is_named_setup);
+  RUN_TEST(test_stack_low_from_a_corrupt_record_is_made_safe);
   RUN_TEST(test_reported_crash_is_cleared_so_it_is_not_logged_twice);
   RUN_TEST(test_crash_record_is_kept_for_the_crash_report);
   RUN_TEST(test_panic_after_a_soft_restart_is_kept_for_the_crash_report);
@@ -607,6 +689,7 @@ int main(int, char**) {
   RUN_TEST(test_misaligned_stack_pointer_skips_the_slice_but_keeps_the_frame);
   RUN_TEST(test_inverted_stack_bounds_skip_the_slice);
   RUN_TEST(test_short_stack_is_clamped_to_what_is_available);
+  RUN_TEST(test_callback_captures_the_loop_stack_low);
   RUN_TEST(test_callback_output_is_readable_by_the_reporting_path);
 
   return UNITY_END();
