@@ -386,28 +386,31 @@ void buildFermenterJson(JsonDocument& doc, uint8_t i) {
   doc["GravitySource"]  = getGravitySource(i);
 }
 
+// One step of a profile, as it appears in the "steps" array.
+static void buildProfileStepJson(JsonObject st, const ProfileStep& step) {
+  st["stepType"]  = step.stepType;
+  // An unused slot is all-zero, and countProfileSteps() / the WebUI both
+  // detect it by testing those temperatures against 0. Converting them would
+  // report 32 in Fahrenheit and the slot would stop looking empty, so emit
+  // the sentinel verbatim and only convert real step temperatures.
+  if (isStepEmpty(step)) {
+    st["startTemp"] = 0.0f;
+    st["endTemp"]   = 0.0f;
+  } else {
+    st["startTemp"] = toDisplayTemp(step.startTemp);
+    st["endTemp"]   = toDisplayTemp(step.endTemp);
+  }
+  st["sgTrigger"] = step.sgTrigger;
+  st["days"]      = step.days;
+}
+
 void buildProfileJson(JsonDocument& doc, int p) {
   doc["index"] = p;
   doc["name"]  = g_profiles[p].profileName;
   JsonArray steps = doc["steps"].to<JsonArray>();
   uint8_t base = p * MAX_STEPS_PER_PROFILE;
   for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
-    JsonObject st = steps.add<JsonObject>();
-    const ProfileStep& step = g_profileSteps[base + s];
-    st["stepType"]  = step.stepType;
-    // An unused slot is all-zero, and countProfileSteps() / the WebUI both
-    // detect it by testing those temperatures against 0. Converting them would
-    // report 32 in Fahrenheit and the slot would stop looking empty, so emit
-    // the sentinel verbatim and only convert real step temperatures.
-    if (isStepEmpty(step)) {
-      st["startTemp"] = 0.0f;
-      st["endTemp"]   = 0.0f;
-    } else {
-      st["startTemp"] = toDisplayTemp(step.startTemp);
-      st["endTemp"]   = toDisplayTemp(step.endTemp);
-    }
-    st["sgTrigger"] = step.sgTrigger;
-    st["days"]      = step.days;
+    buildProfileStepJson(steps.add<JsonObject>(), g_profileSteps[base + s]);
   }
 }
 
@@ -1505,18 +1508,39 @@ void handleMqttDiscover(ESP8266WebServer& server) {
 
 void handleProfiles(ESP8266WebServer& server) {
   // Stream profiles using chunked transfer to avoid a single ~8KB heap spike.
-  // One profile at a time (~1536-byte doc) is built and freed each iteration.
+  // A whole profile serializes to well over 1 KB, too big for a stack buffer,
+  // so each chunk is one profile's opening or one of its steps. 160 bytes
+  // covers the worst case of both: a 31-char name with every char escaped
+  // (~83 bytes) and a step whose four floats all print at full length (~126).
   sendCORSHeaders(server);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
   server.sendContent("{\"profiles\":[");
+  char buf[160];
   for (int p = 0; p < MAX_PROFILES; p++) {
     if (p > 0) server.sendContent(",");
-    JsonDocument doc;
-    buildProfileJson(doc, p);
-    char buf[1024];
-    size_t n = serializeJson(doc, buf, sizeof(buf));
-    server.sendContent(buf, n);
+
+    // Opening of the profile object: {"index":0,"name":"Ale","steps":[
+    // serializeJson escapes the name for us; the closing brace it adds is
+    // left off so the steps array can follow inside the same object.
+    JsonDocument head;
+    head["index"] = p;
+    head["name"]  = g_profiles[p].profileName;
+    size_t n = serializeJson(head, buf, sizeof(buf));
+    if (n > 0) server.sendContent(buf, n - 1);
+    server.sendContent(",\"steps\":[");
+
+    uint8_t base = p * MAX_STEPS_PER_PROFILE;
+    for (int s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
+      JsonDocument stepDoc;
+      buildProfileStepJson(stepDoc.to<JsonObject>(), g_profileSteps[base + s]);
+      // The comma between steps goes in the same chunk as the step.
+      n = 0;
+      if (s > 0) buf[n++] = ',';
+      n += serializeJson(stepDoc, buf + n, sizeof(buf) - n);
+      server.sendContent(buf, n);
+    }
+    server.sendContent("]}");
   }
   server.sendContent("],\"stepTypes\":[");
   for (int t = 0; t <= 9; t++) {
@@ -1524,7 +1548,6 @@ void handleProfiles(ESP8266WebServer& server) {
     JsonDocument tDoc;
     tDoc["id"]   = t;
     tDoc["name"] = getStepTypeDescription(t);
-    char buf[96];
     size_t n = serializeJson(tDoc, buf, sizeof(buf));
     server.sendContent(buf, n);
   }

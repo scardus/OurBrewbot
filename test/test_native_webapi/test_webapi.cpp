@@ -651,6 +651,83 @@ static void test_profile_payload_reads_from_the_right_step_slot(void) {
   TEST_ASSERT_EQUAL_FLOAT(17.5f, doc["steps"][0]["startTemp"].as<float>());
 }
 
+// ---- GET /profiles, streamed as chunks ----
+
+// Fills every step of a profile with values that print long, and gives it the
+// longest name the config holds.
+static void fillProfileWithLongValues(uint8_t p) {
+  strlcpy(g_profiles[p].profileName, "Belgian \"Tripel\" Long Lager 001",
+          sizeof(g_profiles[p].profileName));
+  uint8_t base = p * MAX_STEPS_PER_PROFILE;
+  for (uint8_t s = 0; s < MAX_STEPS_PER_PROFILE; s++) {
+    g_profileSteps[base + s].stepType  = 1 + (s % 9);
+    g_profileSteps[base + s].startTemp = 12.37f + s;
+    g_profileSteps[base + s].endTemp   = 18.73f + s;
+    g_profileSteps[base + s].sgTrigger = 1.0125f;
+    g_profileSteps[base + s].days      = 10.25f;
+    g_profileSteps[base + s].stepNo    = s;
+  }
+}
+
+// A full profile serializes to well over 1 KB. Before the step-by-step
+// streaming, each profile went through a 1 KB buffer and serializeJson cut it
+// off silently, so the WebUI got broken JSON and the profile pages failed.
+static void test_profiles_get_sends_a_full_profile_whole(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  fillProfileWithLongValues(0);
+  handleProfiles(srv);
+
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, g_httpResp.body, g_httpResp.bodyLen);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("Ok", err.c_str(), g_httpResp.body);
+
+  JsonObject first = doc["profiles"][0];
+  TEST_ASSERT_EQUAL_STRING("Belgian \"Tripel\" Long Lager 001", first["name"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(MAX_STEPS_PER_PROFILE, first["steps"].as<JsonArray>().size());
+  JsonObject last = first["steps"][MAX_STEPS_PER_PROFILE - 1];
+  TEST_ASSERT_EQUAL_INT(1 + ((MAX_STEPS_PER_PROFILE - 1) % 9), last["stepType"].as<int>());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, (18.73f + 14) * 1.8f + 32.0f, last["endTemp"].as<float>());
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.0125f, last["sgTrigger"].as<float>());
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 10.25f, last["days"].as<float>());
+}
+
+// Streaming step by step must not change the format: each profile in the body
+// is byte-for-byte what serializing the whole profile document gives.
+static void test_profiles_get_streams_the_same_bytes_as_one_document(void) {
+  fillProfileWithLongValues(2);
+  handleProfiles(srv);
+
+  for (int p = 0; p < MAX_PROFILES; p++) {
+    JsonDocument doc;
+    buildProfileJson(doc, p);
+    char expected[2048];
+    size_t n = serializeJson(doc, expected, sizeof(expected));
+    TEST_ASSERT_TRUE(n < sizeof(expected) - 1);   // not cut off here either
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(g_httpResp.body, expected), expected);
+  }
+}
+
+// Every profile and every step type is listed, each profile with all its slots
+// and the empty ones still reading as the all-zero sentinel.
+static void test_profiles_get_lists_every_profile_and_step_type(void) {
+  fillProfileWithLongValues(1);
+  handleProfiles(srv);
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, g_httpResp.body, g_httpResp.bodyLen);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("Ok", err.c_str(), g_httpResp.body);
+  TEST_ASSERT_EQUAL_INT(MAX_PROFILES, doc["profiles"].as<JsonArray>().size());
+  for (int p = 0; p < MAX_PROFILES; p++) {
+    TEST_ASSERT_EQUAL_INT(p, doc["profiles"][p]["index"].as<int>());
+    TEST_ASSERT_EQUAL_INT(MAX_STEPS_PER_PROFILE, doc["profiles"][p]["steps"].as<JsonArray>().size());
+  }
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.37f, doc["profiles"][1]["steps"][0]["startTemp"].as<float>());
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, doc["profiles"][2]["steps"][0]["startTemp"].as<float>());
+  TEST_ASSERT_EQUAL_INT(10, doc["stepTypes"].as<JsonArray>().size());
+  TEST_ASSERT_EQUAL_STRING("Time and Attn% Step", doc["stepTypes"][9]["name"].as<const char*>());
+}
+
 // sendJsonDoc streams into the client, so a disconnect between header and body
 // must leave the payload empty rather than writing into a dead socket.
 static void test_send_json_doc_writes_nothing_when_the_client_is_gone(void) {
@@ -1534,6 +1611,9 @@ int main(int, char**) {
   RUN_TEST(test_board_info_payload_carries_its_documented_keys);
   RUN_TEST(test_profile_payload_lists_every_step_slot);
   RUN_TEST(test_profile_payload_reads_from_the_right_step_slot);
+  RUN_TEST(test_profiles_get_sends_a_full_profile_whole);
+  RUN_TEST(test_profiles_get_streams_the_same_bytes_as_one_document);
+  RUN_TEST(test_profiles_get_lists_every_profile_and_step_type);
   RUN_TEST(test_send_json_doc_writes_nothing_when_the_client_is_gone);
   RUN_TEST(test_send_json_doc_sets_a_content_length);
 
