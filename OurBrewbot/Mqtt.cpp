@@ -1014,28 +1014,42 @@ void mqttPendingSaveCheck() {
 // to see on the topic. The guard only prevents the publish-from-within-publish
 // recursion that would form an infinite loop.
 
-void mqttPublishLog(uint8_t level, const char* line) {
+// Append `in` to out[] starting at position j, putting a backslash in front of
+// every " and \ so the result is safe inside a JSON string. Stops early rather
+// than overflow; the `- 2` leaves room for an escaped pair plus the
+// terminator, so truncation can never leave a lone backslash at the end.
+static void appendJsonEscaped(char* out, size_t outSize, size_t& j, const char* in) {
+  for (size_t i = 0; in[i] && j < outSize - 2; ++i) {
+    if (in[i] == '"' || in[i] == '\\') out[j++] = '\\';
+    out[j++] = in[i];
+  }
+  out[j] = '\0';
+}
+
+void mqttPublishLog(uint8_t level, const char* timestamp, const char* msg) {
   static bool s_inLogPublish = false;
   if (s_inLogPublish) return;
   if (!g_mqttConfig.enabled || !g_mqttConfig.logEnabled) return;
   if (!g_mqtt.connected()) return;
-  if (!line || !line[0]) return;
+  if (!timestamp) timestamp = "";
+  if (!msg) msg = "";
+  if (!timestamp[0] && !msg[0]) return;
 
   static const char* const kSev[] = {
     "EMERG","ALERT","CRIT","ERR","WARNING","NOTICE","INFO","DEBUG"
   };
   const char* sev = (level < 8) ? kSev[level] : "INFO";
 
-  // Escape " and \ so the JSON string is always valid.
+  // Join the timestamp and message, escaping " and \ so the JSON string is
+  // always valid. They arrive separately so the caller does not need its own
+  // buffer to join them in.
   // Buffers are static — safe because s_inLogPublish prevents re-entry, keeping
   // ~490 bytes off the call stack per log call.
   static char safe[210];
   size_t j = 0;
-  for (size_t i = 0; line[i] && j < sizeof(safe) - 2; ++i) {
-    if (line[i] == '"' || line[i] == '\\') safe[j++] = '\\';
-    safe[j++] = line[i];
-  }
-  safe[j] = '\0';
+  safe[0] = '\0';
+  appendJsonEscaped(safe, sizeof(safe), j, timestamp);
+  appendJsonEscaped(safe, sizeof(safe), j, msg);
 
   static char payload[290];  // 40 JSON overhead + 210 safe + closing + margin
   snprintf(payload, sizeof(payload),

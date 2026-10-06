@@ -36,6 +36,7 @@
 #include <cstdio>
 
 #include "../../OurBrewbot/Config.h"
+#include "../../OurBrewbot/Log.h"
 
 // ---- storage Config.h declares extern, normally defined in Config.cpp ----
 // Only the two Log.cpp actually reads; the rest stay unresolved, which is fine
@@ -53,10 +54,21 @@ static int  s_mqttCalls = 0;
 static int  s_mqttLastLevel = -1;
 static char s_mqttLastLine[256];
 
-void mqttPublishLog(uint8_t level, const char* line) {
+// When set, the double makes one log call of its own BEFORE recording the line
+// it was given - standing in for a log call from something that runs while a
+// line is still being sent (see s_logBufferInUse in Log.cpp).
+static bool s_mqttLogsOnceFromInside = false;
+
+// The real mqttPublishLog() joins the timestamp and message itself; the
+// double joins them the same way so tests can check the whole line.
+void mqttPublishLog(uint8_t level, const char* timestamp, const char* msg) {
+  if (s_mqttLogsOnceFromInside) {
+    s_mqttLogsOnceFromInside = false;
+    logMsg("inner");
+  }
   s_mqttCalls++;
   s_mqttLastLevel = level;
-  snprintf(s_mqttLastLine, sizeof(s_mqttLastLine), "%s", line);
+  snprintf(s_mqttLastLine, sizeof(s_mqttLastLine), "%s%s", timestamp, msg);
 }
 
 // The code under test. Also brings the file-static s_ipResolved/s_syslogIP
@@ -92,6 +104,8 @@ void setUp(void) {
   s_mqttCalls    = 0;
   s_mqttLastLevel = -1;
   s_mqttLastLine[0] = '\0';
+  s_mqttLogsOnceFromInside = false;
+  s_logBufferInUse = false;
   WiFi.connected = true;
   WiFi.resolveOk = true;
   WiFi.resolveTo = IPAddress(192, 168, 0, 50);
@@ -289,6 +303,24 @@ static void test_pri_at_both_extremes(void) {
   TEST_ASSERT_EQUAL_STRING("<191>ourbrewbot ourbrewbot: y", udpTestLastPayload());
 }
 
+// The header and the message are written to the packet separately. The
+// longest message (191 characters) behind the longest header (PRI 191) must
+// still arrive as one complete packet with nothing lost or doubled.
+static void test_longest_message_arrives_whole_behind_the_longest_header(void) {
+  enableSyslog(23, SYSLOG_DEBUG);
+  char big[300];
+  memset(big, 'x', sizeof(big) - 1);
+  big[sizeof(big) - 1] = '\0';
+
+  logMsgL(SYSLOG_DEBUG, "%s", big);
+  TEST_ASSERT_EQUAL_INT(1, g_udpPacketCount);
+
+  char expected[300];
+  snprintf(expected, sizeof(expected), "<191>ourbrewbot ourbrewbot: %.191s", big);
+  TEST_ASSERT_EQUAL_UINT(28 + 191, strlen(expected));
+  TEST_ASSERT_EQUAL_STRING(expected, udpTestLastPayload());
+}
+
 static void test_packet_goes_to_the_resolved_host_and_configured_port(void) {
   WiFi.resolveTo = IPAddress(172, 16, 5, 9);
   enableSyslog();
@@ -433,10 +465,10 @@ static void test_mirror_works_with_syslog_disabled(void) {
   TEST_ASSERT_EQUAL_INT(1, s_mqttCalls);
 }
 
-// buf[] caps a message at 191 characters, and line[208] has to hold the
-// 12-character timestamp on top of that: 203 bytes, so the mirrored line is
-// never itself truncated. Worth pinning because the two buffer sizes are
-// declared 30 lines apart and only work together by arithmetic.
+// buf[] caps a message at 191 characters; the mirror gets the 12-character
+// timestamp on top of that, 203 characters in all, and must pass every one of
+// them on. (The real mqttPublishLog() then escapes into its own 210-byte
+// buffer - that limit is pinned in test_native_mqtt_publish.)
 static void test_longest_possible_message_is_not_truncated_by_the_mirror(void) {
   g_mqttConfig.enabled    = true;
   g_mqttConfig.logEnabled = true;
@@ -448,6 +480,49 @@ static void test_longest_possible_message_is_not_truncated_by_the_mirror(void) {
   TEST_ASSERT_EQUAL_INT(1, s_mqttCalls);
   // 12 (timestamp) + 191 (vsnprintf's 192-byte buffer less its NUL) = 203
   TEST_ASSERT_EQUAL_UINT(203, strlen(s_mqttLastLine));
+}
+
+// ============================================================
+// A LOG CALL MADE WHILE ANOTHER LINE IS STILL BEING SENT
+// ============================================================
+
+// The message is formatted into one shared static buffer. A second log call
+// that arrives while the first line is still being sent must not overwrite
+// it: the second line goes through logMsgNested() and its own buffer, and
+// both lines come out whole on every output, in the order they were made.
+static void test_a_nested_log_call_leaves_both_lines_intact(void) {
+  enableSyslog();
+  g_mqttConfig.enabled    = true;
+  g_mqttConfig.logEnabled = true;
+  s_mqttLogsOnceFromInside = true;   // the MQTT send of "outer" logs "inner"
+
+  logMsg("outer");
+
+  // Without the guard, "inner" would be formatted over "outer" in the shared
+  // buffer and the MQTT copy of the outer line would read "inner".
+  TEST_ASSERT_EQUAL_INT(2, s_mqttCalls);
+  TEST_ASSERT_EQUAL_STRING("[000:00:00] outer", s_mqttLastLine);
+
+  TEST_ASSERT_EQUAL_INT(2, g_udpPacketCount);
+  TEST_ASSERT_EQUAL_STRING("<134>ourbrewbot ourbrewbot: outer",
+                           udpTestPayload(0));
+  TEST_ASSERT_EQUAL_STRING("<134>ourbrewbot ourbrewbot: inner",
+                           udpTestPayload(1));
+
+  TEST_ASSERT_EQUAL_STRING("[000:00:00] outer\r\n[000:00:00] inner\r\n", Serial.buf);
+}
+
+// The shared buffer must be handed back after every line, or every later log
+// call would take the nested path for ever.
+static void test_the_shared_buffer_is_released_after_each_line(void) {
+  logMsg("first");
+  TEST_ASSERT_FALSE(s_logBufferInUse);
+
+  s_mqttLogsOnceFromInside = true;
+  g_mqttConfig.enabled    = true;
+  g_mqttConfig.logEnabled = true;
+  logMsg("second");
+  TEST_ASSERT_FALSE(s_logBufferInUse);
 }
 
 // ============================================================
@@ -474,6 +549,7 @@ int main(int, char**) {
   RUN_TEST(test_pri_for_local0_and_info);
   RUN_TEST(test_pri_for_user_facility_and_error);
   RUN_TEST(test_pri_at_both_extremes);
+  RUN_TEST(test_longest_message_arrives_whole_behind_the_longest_header);
   RUN_TEST(test_packet_goes_to_the_resolved_host_and_configured_port);
 
   RUN_TEST(test_debug_minlevel_passes_everything);
@@ -495,6 +571,9 @@ int main(int, char**) {
   RUN_TEST(test_mirror_sends_timestamp_and_message_with_the_level);
   RUN_TEST(test_mirror_works_with_syslog_disabled);
   RUN_TEST(test_longest_possible_message_is_not_truncated_by_the_mirror);
+
+  RUN_TEST(test_a_nested_log_call_leaves_both_lines_intact);
+  RUN_TEST(test_the_shared_buffer_is_released_after_each_line);
 
   return UNITY_END();
 }

@@ -53,11 +53,17 @@ static void sendSyslog(uint8_t level, const char* msg) {
   uint32_t since = millis() - s_lastSendMs;
   if (since < SYSLOG_MIN_GAP_MS) delay(SYSLOG_MIN_GAP_MS - since);
 
+  // The header and the message are written separately rather than being
+  // joined in one big buffer first. Every log line passes through here, deep
+  // in the call stack, so a 256-byte local buffer cost loop stack on the
+  // deepest path in the firmware. WiFiUDP collects both writes into the same
+  // packet, so what goes on the wire is unchanged.
   uint8_t pri = (g_syslogConfig.facility * 8) + level;
-  char pkt[256];
-  snprintf_P(pkt, sizeof(pkt), PSTR("<%u>ourbrewbot ourbrewbot: %s"), pri, msg);
+  char header[40];   // longest is "<191>ourbrewbot ourbrewbot: " = 28 chars
+  snprintf_P(header, sizeof(header), PSTR("<%u>ourbrewbot ourbrewbot: "), pri);
   s_udp.beginPacket(s_syslogIP, g_syslogConfig.port);
-  s_udp.write((const uint8_t*)pkt, strlen(pkt));
+  s_udp.write((const uint8_t*)header, strlen(header));
+  s_udp.write((const uint8_t*)msg, strlen(msg));
   s_udp.endPacket();
   s_lastSendMs = millis();
 }
@@ -88,6 +94,66 @@ void logInit() {
   delay(SYSLOG_ARP_WARMUP_MS);
 }
 
+// Send one finished log line to every output: serial, syslog and the MQTT
+// log topic. ts is the "[HHH:MM:SS] " timestamp, which serial has already
+// printed by the time this runs.
+static void sendLogLine(uint8_t level, const char* ts, const char* msg) {
+  Serial.print(msg);
+  Serial.print("\r\n");
+
+  // Syslog output. RFC 5424 levels: lower number = more critical.
+  // minLevel = 7 (DEBUG) → allow everything; minLevel = 4 (WARNING) → only
+  // WARNING and worse.
+  if (g_syslogConfig.enabled && s_ipResolved &&
+      WiFi.status() == WL_CONNECTED &&
+      level <= g_syslogConfig.minLevel) {
+
+    STACK_PROBE_BEGIN(syslogProbe);
+    sendSyslog(level, msg);
+    STACK_PROBE_END(PROBE_LOG_SYSLOG, syslogProbe);
+  }
+
+  // MQTT log topic output: timestamp + message in a single payload.
+  // mqttPublishLog() is a no-op when MQTT is disabled / not connected, and
+  // self-guards against re-entry to prevent publish-from-within-publish loops.
+  // The timestamp and message are passed separately and joined inside
+  // mqttPublishLog(), which already has a static buffer to build them in -
+  // joining them here would need another local buffer on the loop stack.
+  if (g_mqttConfig.enabled && g_mqttConfig.logEnabled) {
+    STACK_PROBE_BEGIN(mqttProbe);
+    mqttPublishLog(level, ts, msg);
+    STACK_PROBE_END(PROBE_LOG_MQTT, mqttProbe);
+  }
+}
+
+// The size of a formatted log message, including its terminating NUL.
+#define LOG_MSG_SIZE 192
+
+// The formatted message lives in one shared static buffer rather than on the
+// stack. Every log line is sent from deep in the call stack, and a 192-byte
+// local buffer stayed on the loop stack for the whole of the syslog and MQTT
+// sends - the deepest point measured in the firmware.
+//
+// A shared buffer is only safe while one log line is being handled at a time.
+// Sending a line briefly hands control to the WiFi system (the syslog gap
+// delay(), the MQTT network write), so a log call made from anything that runs
+// during those moments would overwrite the line still being sent. Nothing
+// does that today, but s_logBufferInUse catches it if a later change ever
+// does: the second line is then formatted by logMsgNested() instead.
+static char s_logBuffer[LOG_MSG_SIZE];
+static bool s_logBufferInUse = false;
+
+// Handles a log call made while another one is still using s_logBuffer. It
+// formats into its own local buffer, so neither line is lost or mixed up.
+// noinline keeps that buffer in this function's stack frame, so the stack is
+// only used on the rare occasion this actually runs - never on the normal path.
+static void __attribute__((noinline))
+logMsgNested(uint8_t level, const char* ts, PGM_P fmt, va_list args) {
+  char buf[LOG_MSG_SIZE];
+  vsnprintf_P(buf, sizeof(buf), fmt, args);
+  sendLogLine(level, ts, buf);
+}
+
 static void vlogMsg(uint8_t level, PGM_P fmt, va_list args) {
   // Timestamp: [HHH:MM:SS]
   unsigned long ms = millis();
@@ -100,38 +166,19 @@ static void vlogMsg(uint8_t level, PGM_P fmt, va_list args) {
   snprintf(ts, sizeof(ts), "[%03lu:%02lu:%02lu] ", hours, mins, secs);
   Serial.print(ts);
 
+  if (s_logBufferInUse) {
+    logMsgNested(level, ts, fmt, args);
+    return;
+  }
+  s_logBufferInUse = true;
+
   // Format message — vsnprintf_P reads the format string from flash
-  char buf[192];
   STACK_PROBE_BEGIN(formatProbe);
-  vsnprintf_P(buf, sizeof(buf), fmt, args);
+  vsnprintf_P(s_logBuffer, sizeof(s_logBuffer), fmt, args);
   STACK_PROBE_END(PROBE_LOG_FORMAT, formatProbe);
 
-  Serial.print(buf);
-  Serial.print("\r\n");
-
-  // Syslog output. RFC 5424 levels: lower number = more critical.
-  // minLevel = 7 (DEBUG) → allow everything; minLevel = 4 (WARNING) → only
-  // WARNING and worse.
-  if (g_syslogConfig.enabled && s_ipResolved &&
-      WiFi.status() == WL_CONNECTED &&
-      level <= g_syslogConfig.minLevel) {
-
-    STACK_PROBE_BEGIN(syslogProbe);
-    sendSyslog(level, buf);
-    STACK_PROBE_END(PROBE_LOG_SYSLOG, syslogProbe);
-  }
-
-  // MQTT log topic output: timestamp + message in a single payload.
-  // mqttPublishLog() is a no-op when MQTT is disabled / not connected, and
-  // self-guards against re-entry to prevent publish-from-within-publish loops.
-  if (g_mqttConfig.enabled && g_mqttConfig.logEnabled) {
-    char line[208];
-    snprintf(line, sizeof(line), "%s%s", ts, buf);
-    STACK_PROBE_BEGIN(mqttProbe);
-    mqttPublishLog(level, line);
-    STACK_PROBE_END(PROBE_LOG_MQTT, mqttProbe);
-  }
-
+  sendLogLine(level, ts, s_logBuffer);
+  s_logBufferInUse = false;
 }
 
 void logMsgImpl(uint8_t level, PGM_P fmt, ...) {

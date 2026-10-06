@@ -238,7 +238,7 @@ static void enableLogMirror() {
 
 void test_log_publishes_to_device_log_topic_unretained(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "hello");
+  mqttPublishLog(SYSLOG_INFO, "", "hello");
   TEST_ASSERT_TRUE(mqttTestPublished(LOG_TOPIC));
   // Retaining a log line would make the last message reappear on every
   // subscriber reconnect, forever.
@@ -247,7 +247,7 @@ void test_log_publishes_to_device_log_topic_unretained(void) {
 
 void test_log_payload_is_valid_json_with_level_and_message(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "plain message");
+  mqttPublishLog(SYSLOG_INFO, "", "plain message");
   JsonDocument& d = payloadJson(LOG_TOPIC);
   TEST_ASSERT_EQUAL_INT(SYSLOG_INFO, d["level"].as<int>());
   TEST_ASSERT_EQUAL_STRING("INFO", d["severity"].as<const char*>());
@@ -256,7 +256,7 @@ void test_log_payload_is_valid_json_with_level_and_message(void) {
 
 void test_log_escapes_double_quote(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "probe \"Beer\" failed");
+  mqttPublishLog(SYSLOG_INFO, "", "probe \"Beer\" failed");
   // Parsing it back is the real assertion: an unescaped quote would end the
   // JSON string early and this deserialize would fail.
   JsonDocument& d = payloadJson(LOG_TOPIC);
@@ -265,14 +265,14 @@ void test_log_escapes_double_quote(void) {
 
 void test_log_escapes_backslash(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "path C:\\temp");
+  mqttPublishLog(SYSLOG_INFO, "", "path C:\\temp");
   JsonDocument& d = payloadJson(LOG_TOPIC);
   TEST_ASSERT_EQUAL_STRING("path C:\\temp", d["msg"].as<const char*>());
 }
 
 void test_log_escapes_both_in_one_line(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "\\\"mixed\"\\");
+  mqttPublishLog(SYSLOG_INFO, "", "\\\"mixed\"\\");
   JsonDocument& d = payloadJson(LOG_TOPIC);
   TEST_ASSERT_EQUAL_STRING("\\\"mixed\"\\", d["msg"].as<const char*>());
 }
@@ -284,7 +284,7 @@ void test_log_severity_names_match_syslog_levels(void) {
   };
   for (uint8_t level = 0; level < 8; level++) {
     mqttTestResetRecords();
-    mqttPublishLog(level, "x");
+    mqttPublishLog(level, "", "x");
     JsonDocument& d = payloadJson(LOG_TOPIC);
     TEST_ASSERT_EQUAL_STRING(expected[level], d["severity"].as<const char*>());
     TEST_ASSERT_EQUAL_INT(level, d["level"].as<int>());
@@ -293,7 +293,7 @@ void test_log_severity_names_match_syslog_levels(void) {
 
 void test_log_level_above_range_falls_back_to_info(void) {
   enableLogMirror();
-  mqttPublishLog(8, "out of range");
+  mqttPublishLog(8, "", "out of range");
   JsonDocument& d = payloadJson(LOG_TOPIC);
   TEST_ASSERT_EQUAL_STRING("INFO", d["severity"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(8, d["level"].as<int>());   // level itself is not clamped
@@ -305,7 +305,7 @@ void test_log_long_line_truncates_but_stays_valid_json(void) {
   memset(line, 'A', sizeof(line) - 1);
   line[sizeof(line) - 1] = '\0';
 
-  mqttPublishLog(SYSLOG_INFO, line);
+  mqttPublishLog(SYSLOG_INFO, "", line);
   JsonDocument& d = payloadJson(LOG_TOPIC);
   const char* msg = d["msg"].as<const char*>();
   TEST_ASSERT_NOT_NULL(msg);
@@ -325,7 +325,7 @@ void test_log_truncation_never_leaves_a_dangling_escape(void) {
   memset(line, '\\', sizeof(line) - 1);
   line[sizeof(line) - 1] = '\0';
 
-  mqttPublishLog(SYSLOG_INFO, line);
+  mqttPublishLog(SYSLOG_INFO, "", line);
   const char* raw = mqttTestPayloadFor(LOG_TOPIC);
   TEST_ASSERT_NOT_NULL(raw);
   // Deserializing is the assertion; a trailing lone backslash escapes the
@@ -344,7 +344,7 @@ void test_log_quote_at_the_truncation_boundary_stays_valid(void) {
   memset(line, '"', sizeof(line) - 1);
   line[sizeof(line) - 1] = '\0';
 
-  mqttPublishLog(SYSLOG_INFO, line);
+  mqttPublishLog(SYSLOG_INFO, "", line);
   const char* raw = mqttTestPayloadFor(LOG_TOPIC);
   TEST_ASSERT_NOT_NULL(raw);
   s_doc.clear();
@@ -354,25 +354,60 @@ void test_log_quote_at_the_truncation_boundary_stays_valid(void) {
 void test_log_suppressed_when_mirror_or_link_is_off(void) {
   // Three independent gates, each of which must stop the publish on its own.
   g_mqttConfig.logEnabled = false;
-  mqttPublishLog(SYSLOG_INFO, "x");
+  mqttPublishLog(SYSLOG_INFO, "", "x");
   TEST_ASSERT_EQUAL_INT(0, mqttTestPublishCount());
 
   enableLogMirror();
   g_mqttConfig.enabled = false;
-  mqttPublishLog(SYSLOG_INFO, "x");
+  mqttPublishLog(SYSLOG_INFO, "", "x");
   TEST_ASSERT_EQUAL_INT(0, mqttTestPublishCount());
 
   g_mqttConfig.enabled = true;
   mqttTestSetConnected(false);
-  mqttPublishLog(SYSLOG_INFO, "x");
+  mqttPublishLog(SYSLOG_INFO, "", "x");
   TEST_ASSERT_EQUAL_INT(0, mqttTestPublishCount());
 }
 
 void test_log_empty_line_publishes_nothing(void) {
   enableLogMirror();
-  mqttPublishLog(SYSLOG_INFO, "");
-  mqttPublishLog(SYSLOG_INFO, nullptr);
+  mqttPublishLog(SYSLOG_INFO, "", "");
+  mqttPublishLog(SYSLOG_INFO, "", nullptr);
+  mqttPublishLog(SYSLOG_INFO, nullptr, nullptr);
   TEST_ASSERT_EQUAL_INT(0, mqttTestPublishCount());
+}
+
+void test_log_timestamp_and_message_are_joined(void) {
+  // Log.cpp passes the two halves separately so it needs no buffer of its
+  // own to join them in; the topic must still see one line.
+  enableLogMirror();
+  mqttPublishLog(SYSLOG_INFO, "[001:02:03] ", "probe \"Beer\" ok");
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("[001:02:03] probe \"Beer\" ok", d["msg"].as<const char*>());
+}
+
+void test_log_timestamp_with_empty_message_still_publishes(void) {
+  // logMsg("") used to publish just the timestamp; keep that behaviour.
+  enableLogMirror();
+  mqttPublishLog(SYSLOG_INFO, "[000:00:01] ", "");
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("[000:00:01] ", d["msg"].as<const char*>());
+}
+
+void test_log_long_message_after_a_timestamp_truncates_but_stays_valid_json(void) {
+  // The timestamp uses up part of the escape buffer, so the message is cut
+  // shorter - the second append must respect the same limit as the first.
+  enableLogMirror();
+  char line[400];
+  memset(line, '"', sizeof(line) - 1);
+  line[sizeof(line) - 1] = '\0';
+
+  mqttPublishLog(SYSLOG_INFO, "[123:45:59] ", line);
+  const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+  TEST_ASSERT_NOT_NULL(raw);
+  s_doc.clear();
+  TEST_ASSERT_FALSE_MESSAGE(deserializeJson(s_doc, raw), raw);
+  const char* msg = s_doc["msg"].as<const char*>();
+  TEST_ASSERT_EQUAL_INT(0, strncmp(msg, "[123:45:59] \"", 13));
 }
 
 // The re-entry guard: publishing a log line from inside a publish must not
@@ -380,13 +415,13 @@ void test_log_empty_line_publishes_nothing(void) {
 // moment a publish lands, which is what a logMsg() from inside PubSubClient
 // would do on hardware.
 static void reentrantPublishHook(const char*) {
-  mqttPublishLog(SYSLOG_INFO, "from inside a publish");
+  mqttPublishLog(SYSLOG_INFO, "", "from inside a publish");
 }
 
 void test_log_reentry_guard_stops_recursion(void) {
   enableLogMirror();
   g_mqttTest.onPublish = reentrantPublishHook;
-  mqttPublishLog(SYSLOG_INFO, "outer");
+  mqttPublishLog(SYSLOG_INFO, "", "outer");
   g_mqttTest.onPublish = nullptr;
   // Exactly one publish: the inner call returns immediately on the guard.
   TEST_ASSERT_EQUAL_INT(1, mqttTestPublishCount());
@@ -1160,6 +1195,9 @@ int main(int, char**) {
   RUN_TEST(test_log_quote_at_the_truncation_boundary_stays_valid);
   RUN_TEST(test_log_suppressed_when_mirror_or_link_is_off);
   RUN_TEST(test_log_empty_line_publishes_nothing);
+  RUN_TEST(test_log_timestamp_and_message_are_joined);
+  RUN_TEST(test_log_timestamp_with_empty_message_still_publishes);
+  RUN_TEST(test_log_long_message_after_a_timestamp_truncates_but_stays_valid_json);
   RUN_TEST(test_log_reentry_guard_stops_recursion);
 
   // B. discovery
