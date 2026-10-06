@@ -167,7 +167,9 @@ static char s_discPayload[MQTT_DISC_PAYLOAD_SIZE];
 static void publishAndReset(JsonDocument& doc,
     const char* component, const char* devId, const char* objectId)
 {
-  char discTopic[128];
+  // 88 chars at most: "homeassistant/" + "sensor" + an iSpindel's 42-char
+  // device ID + "corrected_gravity" + the slashes and "/config".
+  char discTopic[96];
   snprintf(discTopic, sizeof(discTopic), "homeassistant/%s/%s/%s/config",
     component, devId, objectId);
   const size_t len = measureJson(doc);
@@ -216,7 +218,9 @@ static void publishSwitchEntity(JsonDocument& doc,
     const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[128];
+  // 66 chars at most: only fermenters and the device itself have commands,
+  // so the longest is a 42-char fermenter base + "/ceiling_temperature/set".
+  char cmdTopic[80];
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"]  = cmdTopic;
   doc["pl_on"]  = "ON";   // pl_on / pl_off are HA abbreviated names for payload_on / payload_off
@@ -234,7 +238,7 @@ static void publishNumberEntity(JsonDocument& doc,
     const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[128];
+  char cmdTopic[80];    // 66 chars at most - see publishSwitchEntity()
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"] = cmdTopic;
   doc["min"]   = minVal;
@@ -255,7 +259,7 @@ static void publishSelectEntity(JsonDocument& doc,
     const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[128];
+  char cmdTopic[80];    // 66 chars at most - see publishSwitchEntity()
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"] = cmdTopic;
   JsonArray opts = doc["ops"].to<JsonArray>();
@@ -271,7 +275,7 @@ static void publishTextEntity(JsonDocument& doc,
     int maxLen = 31, const char* icon = nullptr)
 {
   buildDiscoveryBase(doc, devId, base, devName, objectId, name, stKey, icon);
-  char cmdTopic[128];
+  char cmdTopic[80];    // 66 chars at most - see publishSwitchEntity()
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base, cmdKey);
   doc["cmd_t"] = cmdTopic;
   doc["max"]   = maxLen;
@@ -525,7 +529,7 @@ static void publishEntityFromDesc(JsonDocument& doc, const HaEntityDesc* row,
   HaEntityDesc d;
   memcpy_P(&d, row, sizeof(d));
   const char* unit = (d.flags & HAF_TEMP_UNIT) ? haTempUnit() : d.unit;
-  char cmdKey[48];
+  char cmdKey[32];   // 27 chars at most: "beer_temperature_source/set"
   snprintf(cmdKey, sizeof(cmdKey), "%s/set", d.objectId);
 
   switch (d.kind) {
@@ -713,7 +717,7 @@ static void removeIspindelDiscovery(const char* id) {
 
 // Remove one HA entity by publishing an empty retained payload to its discovery topic.
 static void removeOneEntity(const char* component, const char* devId, const char* objectId) {
-  char discTopic[128];
+  char discTopic[96];   // 88 chars at most - see publishAndReset()
   snprintf(discTopic, sizeof(discTopic), "homeassistant/%s/%s/%s/config",
     component, devId, objectId);
   if (!g_mqtt.publish(discTopic, (const uint8_t*)"", 0, true))

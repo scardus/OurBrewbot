@@ -747,9 +747,16 @@ static void fillWorstDiscovery(uint8_t unit) {
   }
 }
 
+static bool endsWith(const char* s, const char* suffix) {
+  size_t n = strlen(s), m = strlen(suffix);
+  return n >= m && strcmp(s + n - m, suffix) == 0;
+}
+
 // The object ID is the topic segment before "/config":
 // homeassistant/<component>/<device id>/<object id>/config
+// A topic cut short by its buffer loses the "/config" and fails here.
 static const char* objectIdOf(const char* topic, char* out, size_t outSize) {
+  TEST_ASSERT_TRUE_MESSAGE(endsWith(topic, "/config"), topic);
   const char* end   = strstr(topic, "/config");
   const char* start = end;
   while (start > topic && start[-1] != '/') start--;
@@ -792,13 +799,28 @@ void test_no_discovery_payload_exceeds_the_client_buffer(void) {
       snprintf(suffix, sizeof(suffix), "_%s", objectIdOf(r.topic, objectId, sizeof(objectId)));
       const char* uid = d["uniq_id"].as<const char*>();
       TEST_ASSERT_NOT_NULL_MESSAGE(uid, r.topic);
-      size_t uidLen = strlen(uid), suffixLen = strlen(suffix);
-      TEST_ASSERT_TRUE_MESSAGE(uidLen >= suffixLen && strcmp(uid + uidLen - suffixLen, suffix) == 0, r.topic);
+      TEST_ASSERT_TRUE_MESSAGE(endsWith(uid, suffix), r.topic);
+
+      // So is the command topic: <base>/<object id>/set
+      const char* cmd = d["cmd_t"].as<const char*>();
+      if (cmd) {
+        char cmdSuffix[40];
+        snprintf(cmdSuffix, sizeof(cmdSuffix), "/%s/set", objectId);
+        TEST_ASSERT_TRUE_MESSAGE(endsWith(cmd, cmdSuffix), r.topic);
+      }
     }
     // The worst case is 634 bytes (see Mqtt.h). If the longest drops well
     // below that, the fill above stopped working and this test no longer
     // proves the buffers are big enough - fix the fill, not this number.
     TEST_ASSERT_GREATER_OR_EQUAL_UINT(630, longestPayload);
+    mqttTestResetRecords();
+
+    // Removal builds the same topics in its own buffer.
+    cleanupAllHaDiscovery();
+    TEST_ASSERT_GREATER_THAN_INT(0, mqttTestPublishCount());
+    for (int i = 0; i < mqttTestPublishCount(); i++) {
+      TEST_ASSERT_TRUE_MESSAGE(endsWith(g_mqttTest.records[i].topic, "/config"), g_mqttTest.records[i].topic);
+    }
     mqttTestResetRecords();
   }
 }
