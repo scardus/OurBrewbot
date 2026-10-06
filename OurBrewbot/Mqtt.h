@@ -26,6 +26,20 @@
 
 #include "Config.h"
 
+// Buffer sizes, checked against the worst case by the native MQTT tests.
+//
+// The largest HA discovery config is an iSpindel diagnostic sensor such as
+// run_time: 634 bytes when the base topic (31 chars), the iSpindel ID (15)
+// and its name (23) are all quotes, which JSON escapes to two bytes each.
+// +1 for the NUL, rounded up to 16.
+#define MQTT_DISC_PAYLOAD_SIZE  640   // HA discovery JSON is serialized here before publishing
+
+// PubSubClient streams a payload through its buffer, so the buffer only has
+// to hold a topic (88 chars at most + 7), the CONNECT packet (171 bytes at
+// most) and incoming commands. It is the same size as the largest discovery
+// config anyway, so each config still goes to the broker in a single write.
+#define MQTT_CLIENT_BUFFER_SIZE 640   // PubSubClient's own buffer (setBufferSize)
+
 void initMqtt();
 void mqttLoop();
 void reportMqtt();

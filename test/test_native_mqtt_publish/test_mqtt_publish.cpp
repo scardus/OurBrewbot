@@ -309,8 +309,8 @@ void test_log_long_line_truncates_but_stays_valid_json(void) {
   JsonDocument& d = payloadJson(LOG_TOPIC);
   const char* msg = d["msg"].as<const char*>();
   TEST_ASSERT_NOT_NULL(msg);
-  // The escape buffer is 210 B and the loop stops at sizeof(safe) - 2.
-  TEST_ASSERT_LESS_OR_EQUAL_UINT(208, strlen(msg));
+  // The escape buffer is 210 B: 209 characters plus the terminator.
+  TEST_ASSERT_LESS_OR_EQUAL_UINT(209, strlen(msg));
   TEST_ASSERT_GREATER_THAN_UINT(200, strlen(msg));
 }
 
@@ -318,8 +318,8 @@ void test_log_truncation_never_leaves_a_dangling_escape(void) {
   // The pathological case for the escaping loop: a line made entirely of
   // backslashes, so every input character emits two output characters and the
   // truncation boundary lands mid-pair. Ending on a lone '\' would put invalid
-  // JSON on the topic - the loop's `j < sizeof(safe) - 2` guard is what
-  // prevents it, and nothing else pins that guard.
+  // JSON on the topic - the loop only ever copies whole escapes, and
+  // nothing else pins that rule.
   enableLogMirror();
   char line[400];
   memset(line, '\\', sizeof(line) - 1);
@@ -349,6 +349,68 @@ void test_log_quote_at_the_truncation_boundary_stays_valid(void) {
   TEST_ASSERT_NOT_NULL(raw);
   s_doc.clear();
   TEST_ASSERT_FALSE_MESSAGE(deserializeJson(s_doc, raw), raw);
+}
+
+// ArduinoJson happily parses raw control characters, so parsing the payload
+// back can't prove they were escaped - stricter parsers reject them. Check
+// the bytes themselves.
+static void assertNoRawControlChars(const char* raw) {
+  for (size_t i = 0; raw[i]; i++) {
+    TEST_ASSERT_TRUE_MESSAGE((unsigned char)raw[i] >= 0x20, raw);
+  }
+}
+
+void test_log_escapes_control_characters(void) {
+  // JSON does not allow raw control characters inside a string, and a log
+  // line can carry one - an iSpindel name with a newline in it, say.
+  enableLogMirror();
+  mqttPublishLog(SYSLOG_INFO, "", "line1\nline2\ttab\x01 end");
+  const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+  TEST_ASSERT_NOT_NULL(raw);
+  assertNoRawControlChars(raw);
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("line1\nline2\ttab\x01 end", d["msg"].as<const char*>());
+}
+
+void test_log_control_characters_at_the_truncation_boundary_stay_valid(void) {
+  // Each control character becomes a 6-character \u00XX escape, so the
+  // truncation boundary lands inside one - it must be dropped whole.
+  enableLogMirror();
+  char line[400];
+  memset(line, '\x01', sizeof(line) - 1);
+  line[sizeof(line) - 1] = '\0';
+
+  mqttPublishLog(SYSLOG_INFO, "", line);
+  const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+  TEST_ASSERT_NOT_NULL(raw);
+  assertNoRawControlChars(raw);
+  s_doc.clear();
+  TEST_ASSERT_FALSE_MESSAGE(deserializeJson(s_doc, raw), raw);
+  const char* msg = s_doc["msg"].as<const char*>();
+  TEST_ASSERT_NOT_NULL(msg);
+  TEST_ASSERT_GREATER_THAN_UINT(30, strlen(msg));   // 209 / 6 = 34 escapes fit
+  for (size_t i = 0; msg[i]; i++) TEST_ASSERT_EQUAL_CHAR('\x01', msg[i]);
+}
+
+void test_log_longest_payload_is_not_cut_off(void) {
+  // A full escape buffer with the longest severity name and a 3-digit level
+  // is the longest payload there can be (252 characters). If the payload
+  // buffer were too small, snprintf would cut off the closing "} and the
+  // JSON would no longer parse.
+  enableLogMirror();
+  char line[400];
+  memset(line, 'A', sizeof(line) - 1);
+  line[sizeof(line) - 1] = '\0';
+  const uint8_t levels[] = { SYSLOG_WARNING, 255 };
+  for (uint8_t level : levels) {
+    mqttTestResetRecords();
+    mqttPublishLog(level, "", line);
+    const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+    TEST_ASSERT_NOT_NULL(raw);
+    s_doc.clear();
+    TEST_ASSERT_FALSE_MESSAGE(deserializeJson(s_doc, raw), raw);
+    TEST_ASSERT_EQUAL_UINT(209, strlen(s_doc["msg"].as<const char*>()));
+  }
 }
 
 void test_log_suppressed_when_mirror_or_link_is_off(void) {
@@ -658,25 +720,86 @@ void test_discovery_ispindel_named_none_is_skipped(void) {
   TEST_ASSERT_TRUE(mqttTestPublished(DISC("sensor", DEV_ID "_ispindel_A1B2C3", "gravity")));
 }
 
-void test_no_discovery_payload_exceeds_the_client_buffer(void) {
-  // publishAndReset() SKIPS any entity whose serialized config exceeds
-  // s_discPayload (1024 B, sized to PubSubClient's buffer) - silently, from
-  // HA's point of view. Adding a field to a descriptor table is exactly how
-  // that limit gets crossed, so guard every row in every table at once.
+// Fill a char array field with '"' to its full length (keeping the NUL).
+// JSON escapes '"' to two bytes, so this is the longest a text field can get.
+#define FILL_WORST(field) do {                    \
+    memset((field), '"', sizeof(field) - 1);        \
+    (field)[sizeof(field) - 1] = '\0';              \
+  } while (0)
+
+// Every slot configured, with every text that reaches a discovery config at
+// its longest: the base topic (in up to three topics per config), probe
+// addresses and names, iSpindel IDs and names. IDs read from an old or
+// hand-edited config file are not made topic-safe, so they get quotes too.
+static void fillWorstDiscovery(uint8_t unit) {
+  g_globalConfig.unit = unit;
   g_mqttConfig.haDiscovery = true;
-  g_globalConfig.unit = UNIT_FAHRENHEIT;   // longer unit strings than Celsius
-  strlcpy(g_probes[0].address, "28FF1234", sizeof(g_probes[0].address));
-  g_tilts[0].colour = 0;
-  strlcpy(g_iSpindels[0].id,   "A1B2C3",    sizeof(g_iSpindels[0].id));
-  strlcpy(g_iSpindels[0].name, "Spindel 1", sizeof(g_iSpindels[0].name));
+  FILL_WORST(g_mqttConfig.baseTopic);
+  connectFixture();   // rebuilds the availability topic from the new base
+  for (int i = 0; i < MAX_PROBES; i++) {
+    FILL_WORST(g_probes[i].address);
+    FILL_WORST(g_probes[i].probeName);
+  }
+  for (int c = 0; c < MAX_TILTS; c++) g_tilts[c].colour = c;
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    FILL_WORST(g_iSpindels[i].id);
+    FILL_WORST(g_iSpindels[i].name);
+  }
+}
 
-  publishAllHaDiscovery();
+// The object ID is the topic segment before "/config":
+// homeassistant/<component>/<device id>/<object id>/config
+static const char* objectIdOf(const char* topic, char* out, size_t outSize) {
+  const char* end   = strstr(topic, "/config");
+  const char* start = end;
+  while (start > topic && start[-1] != '/') start--;
+  size_t n = (size_t)(end - start);
+  if (n >= outSize) n = outSize - 1;
+  memcpy(out, start, n);
+  out[n] = '\0';
+  return out;
+}
 
-  TEST_ASSERT_GREATER_THAN_INT(0, mqttTestPublishCount());
-  TEST_ASSERT_EQUAL_INT(0, g_mqttTest.overflowCount);
-  for (int i = 0; i < mqttTestPublishCount(); i++) {
-    TEST_ASSERT_LESS_THAN_UINT_MESSAGE(1024, g_mqttTest.records[i].payloadLen,
-                                       g_mqttTest.records[i].topic);
+void test_no_discovery_payload_exceeds_the_client_buffer(void) {
+  // publishAndReset() SKIPS any entity whose serialized config does not fit
+  // s_discPayload - silently, from HA's point of view - and PubSubClient
+  // refuses a publish whose topic does not fit its buffer. Longer names or a
+  // new field in a descriptor table are how those limits get crossed, so
+  // check every config of every device with the worst-case text, in both
+  // units (Fahrenheit has longer min/max numbers).
+  const uint8_t units[] = { UNIT_CELSIUS, UNIT_FAHRENHEIT };
+  for (uint8_t unit : units) {
+    fillWorstDiscovery(unit);
+    publishAllHaDiscovery();
+
+    // 13 device + 24 per fermenter x 4 + 5 per probe x 8 + 6 per tilt x 8
+    // + 11 per iSpindel x 4: if any count is short, one was skipped.
+    TEST_ASSERT_EQUAL_INT(13 + (24 * 4) + (5 * 8) + (6 * 8) + (11 * 4), mqttTestPublishCount());
+    TEST_ASSERT_EQUAL_INT(0, g_mqttTest.overflowCount);
+    size_t longestPayload = 0;
+    for (int i = 0; i < mqttTestPublishCount(); i++) {
+      const MqttPublishRecord& r = g_mqttTest.records[i];
+      TEST_ASSERT_LESS_THAN_UINT_MESSAGE(MQTT_DISC_PAYLOAD_SIZE, r.payloadLen, r.topic);
+      // PubSubClient needs room for a 5-byte header, the 2-byte topic length
+      // and the topic; the payload is streamed through the buffer after it.
+      TEST_ASSERT_LESS_OR_EQUAL_UINT_MESSAGE(MQTT_CLIENT_BUFFER_SIZE, 5 + 2 + strlen(r.topic), r.topic);
+      if (r.payloadLen > longestPayload) longestPayload = r.payloadLen;
+
+      // The unique ID is built in its own buffer - it must not be cut short.
+      JsonDocument d;
+      TEST_ASSERT_EQUAL_STRING_MESSAGE("Ok", deserializeJson(d, r.payload).c_str(), r.topic);
+      char objectId[32], suffix[34];
+      snprintf(suffix, sizeof(suffix), "_%s", objectIdOf(r.topic, objectId, sizeof(objectId)));
+      const char* uid = d["uniq_id"].as<const char*>();
+      TEST_ASSERT_NOT_NULL_MESSAGE(uid, r.topic);
+      size_t uidLen = strlen(uid), suffixLen = strlen(suffix);
+      TEST_ASSERT_TRUE_MESSAGE(uidLen >= suffixLen && strcmp(uid + uidLen - suffixLen, suffix) == 0, r.topic);
+    }
+    // The worst case is 634 bytes (see Mqtt.h). If the longest drops well
+    // below that, the fill above stopped working and this test no longer
+    // proves the buffers are big enough - fix the fill, not this number.
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT(630, longestPayload);
+    mqttTestResetRecords();
   }
 }
 
@@ -1225,6 +1348,9 @@ int main(int, char**) {
   RUN_TEST(test_log_long_line_truncates_but_stays_valid_json);
   RUN_TEST(test_log_truncation_never_leaves_a_dangling_escape);
   RUN_TEST(test_log_quote_at_the_truncation_boundary_stays_valid);
+  RUN_TEST(test_log_escapes_control_characters);
+  RUN_TEST(test_log_control_characters_at_the_truncation_boundary_stay_valid);
+  RUN_TEST(test_log_longest_payload_is_not_cut_off);
   RUN_TEST(test_log_suppressed_when_mirror_or_link_is_off);
   RUN_TEST(test_log_empty_line_publishes_nothing);
   RUN_TEST(test_log_timestamp_and_message_are_joined);

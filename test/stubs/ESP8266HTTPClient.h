@@ -75,6 +75,15 @@ public:
     return g_httpTest.nextStatus;
   }
 
+  // The real client's buffer overload - posts exactly `size` bytes.
+  int POST(const uint8_t* payload, size_t size) {
+    if (size > sizeof(g_httpTest.body) - 1) size = sizeof(g_httpTest.body) - 1;
+    memcpy(g_httpTest.body, payload, size);
+    g_httpTest.body[size] = '\0';
+    g_httpTest.postCount++;
+    return g_httpTest.nextStatus;
+  }
+
   int GET() {
     g_httpTest.getCount++;
     return g_httpTest.nextStatus;

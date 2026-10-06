@@ -107,8 +107,9 @@ static bool sendCrashReport() {
   http.begin(client, CRASH_REPORT_URL);
   http.setTimeout(CRASH_REPORT_TIMEOUT_MS);
   http.addHeader("Content-Type", "application/json");
-  String payload(body);
-  int code = http.POST(payload);
+  // Posted straight from the stack buffer - copying it into a String first
+  // would add a ~550-byte heap allocation for no benefit.
+  int code = http.POST((const uint8_t*)body, strlen(body));
 
   if (code == 200 || code == 204) {
     http.end();

@@ -138,7 +138,9 @@ static void buildDiscoveryBase(JsonDocument& doc,
     const char* objectId, const char* friendlyName,
     const char* stKey, const char* icon)
 {
-  char uid[56], stTopic[96];
+  // The longest unique ID is an iSpindel's: its 42-char device ID (15-char
+  // iSpindel ID) + "_corrected_gravity" = 60 chars.
+  char uid[64], stTopic[96];
   snprintf(uid,     sizeof(uid),     "%s_%s", devId, objectId);
   snprintf(stTopic, sizeof(stTopic), "%s/%s", base,  stKey);
   doc["uniq_id"] = uid;
@@ -160,7 +162,7 @@ static void buildDiscoveryBase(JsonDocument& doc,
 // Serializes into a static buffer rather than a heap String — a discovery burst
 // publishes ~70 entities back-to-back and the alloc/free churn was the main
 // fragmentation source on this heap-constrained device.
-static char s_discPayload[1024];  // sized to the PubSubClient buffer (setBufferSize)
+static char s_discPayload[MQTT_DISC_PAYLOAD_SIZE];
 
 static void publishAndReset(JsonDocument& doc,
     const char* component, const char* devId, const char* objectId)
@@ -282,7 +284,7 @@ static void publishButtonEntity(JsonDocument& doc,
     const char* objectId, const char* name,
     const char* cmdKey, const char* icon = nullptr)
 {
-  char uid[56], cmdTopic[96];
+  char uid[64], cmdTopic[96];
   snprintf(uid,      sizeof(uid),      "%s_%s", devId, objectId);
   snprintf(cmdTopic, sizeof(cmdTopic), "%s/%s", base,  cmdKey);
   doc["uniq_id"] = uid;
@@ -311,7 +313,7 @@ static void publishUpdateEntity(JsonDocument& doc,
     const char* objectId, const char* name,
     const char* devClass, const char* entityCat)
 {
-  char uid[56], stTopic[96], latestTopic[96];
+  char uid[64], stTopic[96], latestTopic[96];
   snprintf(uid,         sizeof(uid),         "%s_%s", devId, objectId);
   snprintf(stTopic,     sizeof(stTopic),     "%s/firmware_version", base);
   snprintf(latestTopic, sizeof(latestTopic), "%s/latest_version",   base);
@@ -928,7 +930,7 @@ static bool mqttConnect() {
   snprintf(s_availTopic, sizeof(s_availTopic), "%s/availability", g_mqttConfig.baseTopic);
 
   // Always set buffer and callback here (in case initMqtt() was skipped when MQTT was disabled at boot)
-  g_mqtt.setBufferSize(1024);
+  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);
   g_mqtt.setSocketTimeout(5);  // default 15 s connect stall starves the loop when broker is unreachable
   g_mqtt.setCallback(mqttMessageCallback);
 
@@ -1028,14 +1030,29 @@ void mqttPendingSaveCheck() {
 // to see on the topic. The guard only prevents the publish-from-within-publish
 // recursion that would form an infinite loop.
 
-// Append `in` to out[] starting at position j, putting a backslash in front of
-// every " and \ so the result is safe inside a JSON string. Stops early rather
-// than overflow; the `- 2` leaves room for an escaped pair plus the
-// terminator, so truncation can never leave a lone backslash at the end.
+// Append `in` to out[] starting at position j, escaped so the result is safe
+// inside a JSON string: a backslash goes in front of every " and \, and
+// control characters (a newline in an iSpindel name, say) become \u00XX -
+// JSON does not allow them raw. Stops early rather than overflow, and never
+// splits an escape, so truncation can't leave a broken one at the end.
 static void appendJsonEscaped(char* out, size_t outSize, size_t& j, const char* in) {
-  for (size_t i = 0; in[i] && j < outSize - 2; ++i) {
-    if (in[i] == '"' || in[i] == '\\') out[j++] = '\\';
-    out[j++] = in[i];
+  for (size_t i = 0; in[i]; ++i) {
+    unsigned char c = (unsigned char)in[i];
+    char esc[8];
+    size_t n;
+    if (c == '"' || c == '\\') {
+      esc[0] = '\\';
+      esc[1] = (char)c;
+      n = 2;
+    } else if (c < 0x20) {
+      n = (size_t)snprintf(esc, sizeof(esc), "\\u%04x", c);
+    } else {
+      esc[0] = (char)c;
+      n = 1;
+    }
+    if (j + n >= outSize) break;   // keep room for the terminator
+    memcpy(out + j, esc, n);
+    j += n;
   }
   out[j] = '\0';
 }
@@ -1065,7 +1082,9 @@ void mqttPublishLog(uint8_t level, const char* timestamp, const char* msg) {
   appendJsonEscaped(safe, sizeof(safe), j, timestamp);
   appendJsonEscaped(safe, sizeof(safe), j, msg);
 
-  static char payload[290];  // 40 JSON overhead + 210 safe + closing + margin
+  // 252 chars at most: {"level":%u, (9 + 3 digits) ,"severity":" (13)
+  // + "WARNING" (7) + ","msg":" (9) + 209 of safe text + "} (2). +1 for the NUL.
+  static char payload[256];
   snprintf(payload, sizeof(payload),
            "{\"level\":%u,\"severity\":\"%s\",\"msg\":\"%s\"}", level, sev, safe);
 
@@ -1086,7 +1105,7 @@ void initMqtt() {
   if (!g_mqttConfig.enabled) return;
   g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
   g_mqtt.setCallback(mqttMessageCallback);
-  g_mqtt.setBufferSize(1024);  // writable-entity discovery payloads can reach ~900 bytes; measure in testing
+  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);  // see Mqtt.h for how it is sized
   g_mqtt.setSocketTimeout(5);  // bound connect stalls (default 15 s)
   logMsg("[MQTT] Configured: %s:%d base=%s ha_discovery=%s",
     g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.baseTopic,
@@ -1305,7 +1324,7 @@ bool testMqtt() {
   // existing connection.
   if (!g_mqtt.connected()) {
     g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
-    g_mqtt.setBufferSize(1024);
+    g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);
     g_mqtt.setSocketTimeout(5);  // bound the blocking connect (default 15 s)
     g_mqtt.setCallback(mqttMessageCallback);
 
