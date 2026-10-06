@@ -895,6 +895,38 @@ void test_report_keeps_the_probe_no_reading_sentinel_unconverted(void) {
   assertPayload(BASE "/Probe/28FF1234/temperature", "-127.0");
 }
 
+void test_report_publishes_impossible_values_as_nan(void) {
+  // publishFloat() formats into a 16-byte stack buffer with dtostrf(), which
+  // writes as many digits as the value needs - 3.4e38 is ~45 characters. An
+  // iSpindel can POST any float, so a huge, infinite or NaN value must come
+  // out as "nan" instead of overrunning the stack.
+  strlcpy(g_iSpindels[0].id,   "A1B2C3",    sizeof(g_iSpindels[0].id));
+  strlcpy(g_iSpindels[0].name, "Spindel 1", sizeof(g_iSpindels[0].name));
+  g_iSpindels[0].angle    = 3.4e38f;
+  g_iSpindels[0].battery  = -3.4e38f;
+  g_iSpindels[0].runTime  = INFINITY;
+  g_iSpindels[0].velocity = NAN;
+
+  reportMqtt();
+  assertPayload(BASE "/iSpindel/A1B2C3/angle",    "nan");
+  assertPayload(BASE "/iSpindel/A1B2C3/battery",  "nan");
+  assertPayload(BASE "/iSpindel/A1B2C3/run_time", "nan");
+  assertPayload(BASE "/iSpindel/A1B2C3/velocity", "nan");
+}
+
+void test_report_still_prints_large_but_possible_values(void) {
+  // Up to 1e8 still prints: the longest it can get with 4 decimals is
+  // "-99999999.9999" (15 characters), which fits the buffer.
+  strlcpy(g_iSpindels[0].id,   "A1B2C3",    sizeof(g_iSpindels[0].id));
+  strlcpy(g_iSpindels[0].name, "Spindel 1", sizeof(g_iSpindels[0].name));
+  g_iSpindels[0].velocity = -9.9e7f;
+  g_iSpindels[0].angle    = 45.25f;
+
+  reportMqtt();
+  assertPayload(BASE "/iSpindel/A1B2C3/velocity", "-99000000.0000");
+  assertPayload(BASE "/iSpindel/A1B2C3/angle",    "45.25");
+}
+
 void test_report_publishes_probe_metadata(void) {
   strlcpy(g_probes[0].address,   "28FF1234", sizeof(g_probes[0].address));
   strlcpy(g_probes[0].probeName, "Beer",     sizeof(g_probes[0].probeName));
@@ -1241,6 +1273,8 @@ int main(int, char**) {
   RUN_TEST(test_report_omits_beer_temperature_when_no_sensor);
   RUN_TEST(test_report_publishes_beer_temperature_when_a_probe_is_assigned);
   RUN_TEST(test_report_keeps_the_probe_no_reading_sentinel_unconverted);
+  RUN_TEST(test_report_publishes_impossible_values_as_nan);
+  RUN_TEST(test_report_still_prints_large_but_possible_values);
   RUN_TEST(test_report_publishes_probe_metadata);
   RUN_TEST(test_report_marks_a_failed_probe_inactive);
   RUN_TEST(test_report_publishes_the_gravity_estimate_when_no_sensor_reports);

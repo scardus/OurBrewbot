@@ -27,6 +27,7 @@
 #include "StackProbe.h"
 #include <ArduinoJson.h>
 #include <ctype.h>
+#include <math.h>
 
 // Normalise an incoming temperature to Celsius, which is what the rest of the
 // firmware stores and calculates in. The iSpindel/GravityMon payload says which
@@ -61,6 +62,21 @@ void validateiSpindelValues(float& sg, float& temp, const char* name, const char
     logMsg("[ISPINDEL] %s (ID:%s): temperature %.1f out of range, ignoring", name, id, temp);
     temp = 0.0f;
   }
+}
+
+// Drop one optional field (return 0, which means "not sent" everywhere it is
+// shown) when it is not a number or outside [lo, hi]. These fields are only
+// displayed and published, never used for control, but anything on the LAN
+// can POST to /iSpindel, and an absurd value would otherwise reach the WebUI,
+// MQTT and Home Assistant. The ranges are far wider than any real device.
+static float dropIfImpossible(float value, float lo, float hi, const char* field,
+                              const char* name, const char* id) {
+  if (value == 0.0f) return value;
+  if (!isfinite(value) || value < lo || value > hi) {
+    logMsg("[ISPINDEL] %s (ID:%s): %s %g out of range, ignoring", name, id, field, value);
+    return 0.0f;
+  }
+  return value;
 }
 
 float platoToSG(float plato) {
@@ -246,6 +262,11 @@ void handleiSpindelPost(const String& body) {
   }
 
   validateiSpindelValues(sg, temp, name, id);
+  corrGravity = dropIfImpossible(corrGravity, 0.900f,  1.200f, "corrected gravity", name, id);
+  battery     = dropIfImpossible(battery,     0.0f,    10.0f,  "battery",           name, id);
+  angle       = dropIfImpossible(angle,      -180.0f,  180.0f, "angle",             name, id);
+  velocity    = dropIfImpossible(velocity,   -100.0f,  100.0f, "velocity",          name, id);
+  runTime     = dropIfImpossible(runTime,     0.0f,    3600.0f, "run time",         name, id);
 
   if (matched >= 0) {
     // Apply calibration offsets

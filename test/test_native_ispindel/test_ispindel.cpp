@@ -587,6 +587,38 @@ void test_unsafe_id_matches_its_slot_without_resaving(void) {
   TEST_ASSERT_EQUAL_STRING("None", g_iSpindels[1].name);   // and no second slot
 }
 
+// The optional fields are only shown and published, but anything on the LAN
+// can POST to /iSpindel, so impossible values are dropped (set to 0, "not
+// sent") one field at a time - the rest of the reading is still used.
+void test_impossible_optional_fields_are_dropped(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  handleiSpindelPost(String(
+      "{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0,"
+      "\"temp_units\":\"C\",\"gravity\":1.050,\"gravity-unit\":\"G\","
+      "\"corr-gravity\":2.5,\"battery\":-5,\"angle\":1e39,"
+      "\"velocity\":500,\"run-time\":99999}"));
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, g_iSpindels[0].sg);   // still used
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].corrGravity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].battery);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].angle);       // 1e39 parses as infinity
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].velocity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].runTime);
+}
+
+void test_realistic_optional_fields_are_kept(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  handleiSpindelPost(String(
+      "{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0,"
+      "\"temp_units\":\"C\",\"gravity\":1.050,\"gravity-unit\":\"G\","
+      "\"corr-gravity\":1.049,\"battery\":3.91,\"angle\":45.25,"
+      "\"velocity\":-2.5,\"run-time\":6.5}"));
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.049f, g_iSpindels[0].corrGravity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 3.91f,  g_iSpindels[0].battery);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 45.25f, g_iSpindels[0].angle);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, -2.5f,  g_iSpindels[0].velocity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 6.5f,   g_iSpindels[0].runTime);
+}
+
 void test_parse_rejects_invalid_json(void) {
   iSpindelReading r;
   TEST_ASSERT_FALSE(parseiSpindelBody(String("{\"name\":\"x\","), r));
@@ -635,6 +667,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_parse_keeps_a_normal_id_as_sent);
   RUN_TEST(test_parse_makes_the_id_safe_for_mqtt_topics);
   RUN_TEST(test_unsafe_id_matches_its_slot_without_resaving);
+  RUN_TEST(test_impossible_optional_fields_are_dropped);
+  RUN_TEST(test_realistic_optional_fields_are_kept);
   RUN_TEST(test_parse_rejects_invalid_json);
   RUN_TEST(test_parse_cuts_long_text_to_the_slot_sizes);
   RUN_TEST(test_invalid_body_changes_nothing);

@@ -42,6 +42,7 @@
 #include "UpdateCheck.h"
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
+#include <math.h>
 
 static const char* probeFunctionName(uint8_t fn) {
   switch (fn) {
@@ -93,9 +94,22 @@ static void publishValue(const char* base, const char* key, const char* value) {
     logPublishFailure(s_topicBuf);
 }
 
+// dtostrf() writes as many digits as the value needs and is never told the
+// buffer size, so a huge value (3.4e38 prints ~45 characters) would overrun
+// val on the stack - and an iSpindel can POST any float. Below 1e8 with at
+// most 4 decimals the longest it gets is "-100000000.0000" (15 characters,
+// after rounding up), which fits. Anything bigger, infinite or not a number
+// is nonsense for every value published here, so it goes out as "nan".
+// (snprintf's %f would also be safe, but its float formatting needs several
+// hundred more bytes of loop stack, on the deepest path in the firmware.)
 static void publishFloat(const char* base, const char* key, float value, int decimals = 1) {
   char val[16];
-  dtostrf(value, 1, decimals, val);
+  if (decimals > 4) decimals = 4;
+  if (isfinite(value) && fabsf(value) < 1e8f) {
+    dtostrf(value, 1, decimals, val);
+  } else {
+    strlcpy(val, "nan", sizeof(val));
+  }
   publishValue(base, key, val);
 }
 
