@@ -392,6 +392,58 @@ void test_log_control_characters_at_the_truncation_boundary_stay_valid(void) {
   for (size_t i = 0; msg[i]; i++) TEST_ASSERT_EQUAL_CHAR('\x01', msg[i]);
 }
 
+void test_log_keeps_valid_utf8_characters(void) {
+  // 2-, 3- and 4-byte characters: e-acute, degree sign, euro sign, an emoji.
+  enableLogMirror();
+  const char* line = "Bi\xC3\xA8re 20\xC2\xB0" "C \xE2\x82\xAC \xF0\x9F\x8D\xBA";
+  mqttPublishLog(SYSLOG_INFO, "", line);
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING(line, d["msg"].as<const char*>());
+}
+
+void test_log_replaces_invalid_utf8_bytes(void) {
+  // A garbled Tilt reading, as captured from the device: JSON must be valid
+  // UTF-8, so bytes that are not part of a real character become '?'.
+  enableLogMirror();
+  mqttPublishLog(SYSLOG_INFO, "", "[TILT] Parsing: OK+DISC:4C0j\xB2\x06\x06&\xFF\xFE");
+  const char* raw = mqttTestPayloadFor(LOG_TOPIC);
+  TEST_ASSERT_NOT_NULL(raw);
+  for (size_t i = 0; raw[i]; i++) TEST_ASSERT_TRUE_MESSAGE((unsigned char)raw[i] < 0x80, raw);
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("[TILT] Parsing: OK+DISC:4C0j?\x06\x06&??", d["msg"].as<const char*>());
+}
+
+void test_log_replaces_broken_and_disallowed_utf8_sequences(void) {
+  enableLogMirror();
+  // A lead byte with no continuation, a stray continuation byte, an
+  // over-long encoding of '/', a UTF-16 surrogate, and a 3-byte character
+  // cut off by the end of the line: each bad byte becomes one '?'.
+  mqttPublishLog(SYSLOG_INFO, "", "a\xC3" "b\x80" "c\xC0\xAF" "d\xED\xA0\x80" "e\xE2\x82");
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  TEST_ASSERT_EQUAL_STRING("a?b?c??d???e??", d["msg"].as<const char*>());
+}
+
+void test_log_truncation_never_splits_a_utf8_character(void) {
+  // 2-byte characters all the way, so the truncation boundary can land
+  // between the two bytes of one - the whole character must be dropped.
+  enableLogMirror();
+  char line[401];
+  for (size_t i = 0; i < 400; i += 2) { line[i] = '\xC3'; line[i + 1] = '\xA9'; }
+  line[400] = '\0';
+
+  mqttPublishLog(SYSLOG_INFO, "", line);
+  JsonDocument& d = payloadJson(LOG_TOPIC);
+  const char* msg = d["msg"].as<const char*>();
+  TEST_ASSERT_NOT_NULL(msg);
+  size_t n = strlen(msg);
+  TEST_ASSERT_GREATER_THAN_UINT(200, n);
+  TEST_ASSERT_EQUAL_UINT(0, n % 2);
+  for (size_t i = 0; i < n; i += 2) {
+    TEST_ASSERT_EQUAL_HEX8(0xC3, (unsigned char)msg[i]);
+    TEST_ASSERT_EQUAL_HEX8(0xA9, (unsigned char)msg[i + 1]);
+  }
+}
+
 void test_log_longest_payload_is_not_cut_off(void) {
   // A full escape buffer with the longest severity name and a 3-digit level
   // is the longest payload there can be (252 characters). If the payload
@@ -1372,6 +1424,10 @@ int main(int, char**) {
   RUN_TEST(test_log_quote_at_the_truncation_boundary_stays_valid);
   RUN_TEST(test_log_escapes_control_characters);
   RUN_TEST(test_log_control_characters_at_the_truncation_boundary_stay_valid);
+  RUN_TEST(test_log_keeps_valid_utf8_characters);
+  RUN_TEST(test_log_replaces_invalid_utf8_bytes);
+  RUN_TEST(test_log_replaces_broken_and_disallowed_utf8_sequences);
+  RUN_TEST(test_log_truncation_never_splits_a_utf8_character);
   RUN_TEST(test_log_longest_payload_is_not_cut_off);
   RUN_TEST(test_log_suppressed_when_mirror_or_link_is_off);
   RUN_TEST(test_log_empty_line_publishes_nothing);
