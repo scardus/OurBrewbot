@@ -495,8 +495,106 @@ void test_register_declared_sg_stores_sg(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.0500f, g_iSpindels[0].sg);
 }
 
+// ---- parseiSpindelBody: copying the POST out of its JSON ----
+
+void test_parse_copies_every_field(void) {
+  // A full GravityMon-style payload, numbers as ArduinoJson writes them.
+  String body("{\"name\":\"ispindel-1\",\"ID\":\"C2CC7C\",\"token\":\"\","
+              "\"interval\":900,\"temperature\":68.123456,\"temp_units\":\"F\","
+              "\"gravity\":12.345678,\"angle\":45.25,\"battery\":3.91,"
+              "\"RSSI\":-61,\"velocity\":-0.25,\"corr-gravity\":12.5,"
+              "\"run-time\":2.75,\"gravity-unit\":\"P\"}");
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(body, r));
+  TEST_ASSERT_EQUAL_STRING("ispindel-1", r.name);
+  TEST_ASSERT_EQUAL_STRING("C2CC7C", r.id);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 68.123456f, r.temperature);
+  TEST_ASSERT_EQUAL_STRING("F", r.tempUnits);
+  TEST_ASSERT_EQUAL_UINT32(900, r.interval);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 12.345678f, r.gravity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 45.25f, r.angle);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 3.91f, r.battery);
+  TEST_ASSERT_EQUAL_INT(-61, r.rssi);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.25f, r.velocity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 12.5f, r.corrGravity);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 2.75f, r.runTime);
+  TEST_ASSERT_EQUAL_STRING("P", r.gravityUnit);
+}
+
+void test_parse_missing_fields_read_as_zero_or_empty(void) {
+  // An iSpindel sends no temp_units, gravity-unit, velocity, corr-gravity or
+  // run-time; each must come out as "not sent", never as leftover memory.
+  iSpindelReading r;
+  memset(&r, 0x5A, sizeof(r));   // fill with junk first
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":\"1\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("", r.tempUnits);
+  TEST_ASSERT_EQUAL_STRING("", r.gravityUnit);
+  TEST_ASSERT_EQUAL_UINT32(0, r.interval);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.temperature);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.gravity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.battery);
+  TEST_ASSERT_EQUAL_INT(0, r.rssi);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.angle);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.velocity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.corrGravity);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.runTime);
+}
+
+void test_parse_numeric_id_becomes_text(void) {
+  // A stock iSpindel sends its chip ID as a JSON number, not a string.
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"x\",\"ID\":12345678}"), r));
+  TEST_ASSERT_EQUAL_STRING("12345678", r.id);
+}
+
+void test_parse_rejects_invalid_json(void) {
+  iSpindelReading r;
+  TEST_ASSERT_FALSE(parseiSpindelBody(String("{\"name\":\"x\","), r));
+  TEST_ASSERT_FALSE(parseiSpindelBody(String("not json"), r));
+}
+
+void test_parse_cuts_long_text_to_the_slot_sizes(void) {
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String(
+      "{\"name\":\"abcdefghijklmnopqrstuvwxyz0123\",\"ID\":\"0123456789ABCDEFGHIJ\","
+      "\"temp_units\":\"Fahrenheit\",\"gravity-unit\":\"Plato\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("abcdefghijklmnopqrstuvw", r.name);   // 23 + NUL
+  TEST_ASSERT_EQUAL_STRING("0123456789ABCDE", r.id);             // 15 + NUL
+  TEST_ASSERT_EQUAL_STRING("Fah", r.tempUnits);                  // first letter is what counts
+  TEST_ASSERT_EQUAL_STRING("Pla", r.gravityUnit);
+}
+
+void test_invalid_body_changes_nothing(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\","));
+  TEST_ASSERT_EQUAL_UINT32(0, g_iSpindels[0].lastSeen);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].sg);
+  TEST_ASSERT_EQUAL_INT(0, s_saveCalls);
+}
+
+void test_over_long_id_matches_its_slot_without_resaving(void) {
+  // The ID is cut to the slot's size before matching, so a device whose ID
+  // is too long to store still matches the slot holding the cut-down copy -
+  // rather than looking "changed" and rewriting the config on every POST.
+  handleiSpindelPost(makeBody("long-id", "0123456789ABCDEFGHIJ", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_STRING("0123456789ABCDE", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // the registration
+
+  handleiSpindelPost(makeBody("long-id", "0123456789ABCDEFGHIJ", 20.5f, "C"));
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // no re-save for the same device
+  TEST_ASSERT_EQUAL_STRING("None", g_iSpindels[1].name);   // and no second slot
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
+
+  RUN_TEST(test_parse_copies_every_field);
+  RUN_TEST(test_parse_missing_fields_read_as_zero_or_empty);
+  RUN_TEST(test_parse_numeric_id_becomes_text);
+  RUN_TEST(test_parse_rejects_invalid_json);
+  RUN_TEST(test_parse_cuts_long_text_to_the_slot_sizes);
+  RUN_TEST(test_invalid_body_changes_nothing);
+  RUN_TEST(test_over_long_id_matches_its_slot_without_resaving);
 
   RUN_TEST(test_validate_keeps_sg_in_range);
   RUN_TEST(test_validate_zeroes_sg_below_floor);

@@ -49,6 +49,31 @@
 // Process an incoming iSpindel POST body (called from WebAPI)
 void handleiSpindelPost(const String& body);
 
+// One iSpindel POST, copied out of its JSON body. Text fields are cut to the
+// size of the matching iSpindelConfig field; a missing field reads as zero or
+// "". Values are exactly as the device sent them - no unit conversion yet.
+struct iSpindelReading {
+  char     name[24];          // same size as iSpindelConfig::name
+  char     id[16];            // same size as iSpindelConfig::id
+  float    temperature;
+  char     tempUnits[4];      // "C", "F" or "K"
+  uint32_t interval;
+  float    gravity;
+  float    battery;
+  int      rssi;
+  float    angle;
+  float    velocity;
+  float    corrGravity;
+  float    runTime;
+  char     gravityUnit[4];    // same size as iSpindelConfig::gravityUnit
+};
+
+// Parse an iSpindel POST body into `out`. Returns false (and logs why) if the
+// body is not valid JSON. Kept separate from handleiSpindelPost() so the JSON
+// parser's memory on the stack is released before the reading is processed
+// and logged - see the comment on the function for why that matters.
+bool parseiSpindelBody(const String& body, iSpindelReading& out);
+
 // Clamp sg/temp to physically plausible ranges, zeroing (and logging) anything
 // outside them. Both MUST already be in the firmware's canonical units — temp
 // in Celsius and sg in Specific Gravity — because the ranges are expressed in

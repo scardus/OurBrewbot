@@ -118,7 +118,12 @@ static const char* gravityUnitName(uint8_t unit) {
 // POST /iSpindel — iSpindel sends: name, ID, temperature, gravity, battery, RSSI
 // ============================================================
 
-void handleiSpindelPost(const String& body) {
+// The JSON parser needs several hundred bytes of loop stack. While it was part
+// of handleiSpindelPost() that space stayed in use for the whole function -
+// including the long log line at the end, whose syslog send was the deepest
+// point measured in the firmware. As a separate function (noinline stops the
+// compiler merging it back in) its stack is released as soon as it returns.
+bool __attribute__((noinline)) parseiSpindelBody(const String& body, iSpindelReading& out) {
   JsonDocument doc;
   STACK_PROBE_BEGIN(parseProbe);
   DeserializationError err = deserializeJson(doc, body);
@@ -126,23 +131,44 @@ void handleiSpindelPost(const String& body) {
 
   if (err) {
     logMsg("[ISPINDEL] Parse error: %s", err.c_str());
-    return;
+    return false;
   }
 
-  const char* name        = doc["name"]         | "";
-  String      idStr       = doc["ID"].as<String>();
-  const char* id          = idStr.c_str();
-  float       temp        = doc["temperature"]  | 0.0f;
-  const char* tempUnits   = doc["temp_units"]   | "";
-  uint32_t    interval    = doc["interval"]     | 0;
-  float       sg          = doc["gravity"]      | 0.0f;
-  float       battery     = doc["battery"]      | 0.0f;
-  int         rssi        = doc["RSSI"]         | 0;
-  float       angle       = doc["angle"]        | 0.0f;
-  float       velocity    = doc["velocity"]     | 0.0f;
-  float       corrGravity = doc["corr-gravity"] | 0.0f;
-  float       runTime     = doc["run-time"]     | 0.0f;
-  const char* gravityUnit = doc["gravity-unit"] | "";
+  // The ID can arrive as a number (an iSpindel's chip ID) or a string, so it
+  // is converted to text whichever it is.
+  strlcpy(out.name,        doc["name"]         | "", sizeof(out.name));
+  strlcpy(out.id,          doc["ID"].as<String>().c_str(), sizeof(out.id));
+  out.temperature        = doc["temperature"]  | 0.0f;
+  strlcpy(out.tempUnits,   doc["temp_units"]   | "", sizeof(out.tempUnits));
+  out.interval           = doc["interval"]     | 0;
+  out.gravity            = doc["gravity"]      | 0.0f;
+  out.battery            = doc["battery"]      | 0.0f;
+  out.rssi               = doc["RSSI"]         | 0;
+  out.angle              = doc["angle"]        | 0.0f;
+  out.velocity           = doc["velocity"]     | 0.0f;
+  out.corrGravity        = doc["corr-gravity"] | 0.0f;
+  out.runTime            = doc["run-time"]     | 0.0f;
+  strlcpy(out.gravityUnit, doc["gravity-unit"] | "", sizeof(out.gravityUnit));
+  return true;
+}
+
+void handleiSpindelPost(const String& body) {
+  iSpindelReading reading;
+  if (!parseiSpindelBody(body, reading)) return;
+
+  const char* name        = reading.name;
+  const char* id          = reading.id;
+  float       temp        = reading.temperature;
+  const char* tempUnits   = reading.tempUnits;
+  uint32_t    interval    = reading.interval;
+  float       sg          = reading.gravity;
+  float       battery     = reading.battery;
+  int         rssi        = reading.rssi;
+  float       angle       = reading.angle;
+  float       velocity    = reading.velocity;
+  float       corrGravity = reading.corrGravity;
+  float       runTime     = reading.runTime;
+  const char* gravityUnit = reading.gravityUnit;
 
   // Normalise to Celsius before anything else touches the value. Doing it here
   // means the range check below, the tempAdjust offset (a Celsius delta) and
