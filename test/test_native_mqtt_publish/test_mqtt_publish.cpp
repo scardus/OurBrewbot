@@ -89,6 +89,7 @@ UpdateStatus g_updateStatus;
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"
 #include "../../OurBrewbot/MqttParse.cpp"
+#include "../../OurBrewbot/TextSafe.cpp"
 #include "../../OurBrewbot/Mqtt.cpp"
 
 // ============================================================

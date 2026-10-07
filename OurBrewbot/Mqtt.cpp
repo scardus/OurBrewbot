@@ -33,6 +33,7 @@
 
 #include "Mqtt.h"
 #include "MqttParse.h"
+#include "TextSafe.h"
 #include "Fermenter.h"
 #include "Temperatures.h"
 #include "Profile.h"
@@ -1033,32 +1034,6 @@ void mqttPendingSaveCheck() {
 // that *describe* MQTT activity (e.g. "[MQTT] Published F0") — those are useful
 // to see on the topic. The guard only prevents the publish-from-within-publish
 // recursion that would form an infinite loop.
-
-// Length of the valid UTF-8 character starting at s (2 to 4 bytes), or 0 if
-// the bytes there are not valid UTF-8 - a garbled Tilt reading, for example.
-// Stops at the first bad byte, so it never reads past the string's NUL.
-static size_t utf8CharLength(const unsigned char* s) {
-  size_t len;
-  unsigned char lo = 0x80, hi = 0xBF;   // allowed range of the second byte
-  if (s[0] >= 0xC2 && s[0] <= 0xDF) {
-    len = 2;
-  } else if (s[0] >= 0xE0 && s[0] <= 0xEF) {
-    len = 3;
-    if (s[0] == 0xE0) lo = 0xA0;   // no over-long encodings
-    if (s[0] == 0xED) hi = 0x9F;   // no UTF-16 surrogates
-  } else if (s[0] >= 0xF0 && s[0] <= 0xF4) {
-    len = 4;
-    if (s[0] == 0xF0) lo = 0x90;   // no over-long encodings
-    if (s[0] == 0xF4) hi = 0x8F;   // nothing above U+10FFFF
-  } else {
-    return 0;
-  }
-  if (s[1] < lo || s[1] > hi) return 0;
-  for (size_t k = 2; k < len; k++) {
-    if (s[k] < 0x80 || s[k] > 0xBF) return 0;
-  }
-  return len;
-}
 
 // Append `in` to out[] starting at position j, escaped so the result is safe
 // inside a JSON string: a backslash goes in front of every " and \, and
