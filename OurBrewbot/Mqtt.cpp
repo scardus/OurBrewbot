@@ -845,11 +845,11 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
       return;
     }
   } else if (strcmp(key, "name") == 0) {
-    strlcpy(g_fermenters[idx].fermenterName, pl, sizeof(g_fermenters[0].fermenterName));
+    copyText(g_fermenters[idx].fermenterName, pl, sizeof(g_fermenters[0].fermenterName));
   } else if (strcmp(key, "beer_name") == 0) {
-    strlcpy(g_fermenters[idx].beerName, pl, sizeof(g_fermenters[0].beerName));
+    copyText(g_fermenters[idx].beerName, pl, sizeof(g_fermenters[0].beerName));
   } else if (strcmp(key, "yeast") == 0) {
-    strlcpy(g_fermenters[idx].yeastName, pl, sizeof(g_fermenters[0].yeastName));
+    copyText(g_fermenters[idx].yeastName, pl, sizeof(g_fermenters[0].yeastName));
   } else if (strcmp(key, "profile_no") == 0) {
     int pno = atoi(pl);
     if (pno < 0 || pno > MAX_PROFILES) {

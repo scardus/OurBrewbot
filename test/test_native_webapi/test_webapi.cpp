@@ -126,6 +126,7 @@ ESP8266WebServer g_webServer;
 #include "../../OurBrewbot/Temperatures.cpp"
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"
+#include "../../OurBrewbot/TextSafe.cpp"
 // ---- stack depth check: reads the ESP8266 loop stack, nothing to do here ----
 void stackCheck(uint8_t, const char*) {}
 
@@ -270,6 +271,22 @@ static void test_rejected_body_does_not_apply_the_name_fields(void) {
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
   TEST_ASSERT_EQUAL_STRING("", g_fermenters[F0].beerName);
   TEST_ASSERT_EQUAL_STRING("Fermenter 1", g_fermenters[F0].fermenterName);
+}
+
+// A name longer than its 31-byte field used to be cut by strlcpy() part way
+// through an accented character, leaving an invalid UTF-8 byte that broke the
+// JSON for strict readers (Python, Home Assistant). The whole character is now
+// dropped, and any invalid byte that arrives is stored as '?'.
+static void test_names_are_stored_as_valid_utf8(void) {
+  postBody("{\"Fermenter\":0,"
+           "\"FermenterName\":\"Fermenter number one, the Bier\xC3\xA9\","
+           "\"BeerName\":\"Ale \xFF\"}");
+  handleFermenter(srv);
+
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  // 30 bytes, then the 2-byte e acute would need bytes 31-32 - only 31 fit.
+  TEST_ASSERT_EQUAL_STRING("Fermenter number one, the Bier", g_fermenters[F0].fermenterName);
+  TEST_ASSERT_EQUAL_STRING("Ale ?", g_fermenters[F0].beerName);
 }
 
 static void test_rejected_body_does_not_change_power_or_temp_control(void) {
@@ -1717,6 +1734,7 @@ int main(int, char**) {
   RUN_TEST(test_rejected_compressor_delay_leaves_the_temperature_trio_untouched);
   RUN_TEST(test_rejected_alarm_tolerance_leaves_everything_untouched);
   RUN_TEST(test_rejected_body_does_not_apply_the_name_fields);
+  RUN_TEST(test_names_are_stored_as_valid_utf8);
   RUN_TEST(test_rejected_body_does_not_change_power_or_temp_control);
   RUN_TEST(test_rejected_body_is_not_persisted);
   RUN_TEST(test_accepted_body_applies_every_field_and_persists);

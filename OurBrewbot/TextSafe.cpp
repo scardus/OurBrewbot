@@ -21,6 +21,7 @@
  */
 
 #include "TextSafe.h"
+#include <string.h>
 
 size_t utf8CharLength(const unsigned char* s) {
   size_t len;
@@ -43,4 +44,33 @@ size_t utf8CharLength(const unsigned char* s) {
     if (s[k] < 0x80 || s[k] > 0xBF) return 0;
   }
   return len;
+}
+
+void copyText(char* dst, const char* src, size_t size) {
+  if (size == 0) return;
+  size_t j = 0;                          // bytes written to dst so far
+  size_t i = 0;                          // read position in src
+  while (src[i] != '\0') {
+    unsigned char c = (unsigned char)src[i];
+    size_t inLen  = 1;                   // bytes this character takes in src
+    size_t outLen = 1;                   // bytes it takes in dst
+    bool   valid  = true;
+    if (c >= 0x80) {
+      inLen = utf8CharLength((const unsigned char*)src + i);
+      if (inLen == 0) {                  // not valid UTF-8: one byte becomes '?'
+        inLen = 1;
+        valid = false;
+      }
+      outLen = valid ? inLen : 1;
+    }
+    if (j + outLen > size - 1) break;    // the whole character won't fit
+    if (valid) {
+      memcpy(dst + j, src + i, outLen);
+    } else {
+      dst[j] = '?';
+    }
+    j += outLen;
+    i += inLen;
+  }
+  dst[j] = '\0';
 }

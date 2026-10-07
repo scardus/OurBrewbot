@@ -89,6 +89,107 @@ void test_utf8_above_the_unicode_range_is_invalid(void) {
   TEST_ASSERT_EQUAL(0, charLen("\xFF"));
 }
 
+// ============================================================
+// copyText()
+// ============================================================
+
+// A field with guard bytes after it, so a test can check nothing was written
+// past the size it was given.
+struct GuardedField {
+  char text[8];
+  char guard[4];
+};
+
+static void fillGuarded(GuardedField& f) {
+  memset(&f, 'X', sizeof(f));
+}
+
+static void assertGuardIntact(const GuardedField& f) {
+  for (size_t k = 0; k < sizeof(f.guard); k++) TEST_ASSERT_EQUAL_CHAR('X', f.guard[k]);
+}
+
+void test_copy_plain_text_is_unchanged(void) {
+  GuardedField f;
+  fillGuarded(f);
+  copyText(f.text, "Pale", sizeof(f.text));
+  TEST_ASSERT_EQUAL_STRING("Pale", f.text);
+  assertGuardIntact(f);
+}
+
+void test_copy_text_that_exactly_fills_the_field(void) {
+  GuardedField f;
+  fillGuarded(f);
+  copyText(f.text, "1234567", sizeof(f.text));   // 7 chars + NUL = 8
+  TEST_ASSERT_EQUAL_STRING("1234567", f.text);
+  assertGuardIntact(f);
+}
+
+void test_copy_cuts_long_plain_text_like_strlcpy(void) {
+  GuardedField f;
+  fillGuarded(f);
+  copyText(f.text, "Imperial Stout", sizeof(f.text));
+  TEST_ASSERT_EQUAL_STRING("Imperia", f.text);
+  assertGuardIntact(f);
+}
+
+void test_copy_keeps_accented_characters(void) {
+  GuardedField f;
+  fillGuarded(f);
+  copyText(f.text, "Bi\xC3\xA8re", sizeof(f.text));   // "Biere" with e grave
+  TEST_ASSERT_EQUAL_STRING("Bi\xC3\xA8re", f.text);
+  assertGuardIntact(f);
+}
+
+void test_copy_never_cuts_a_character_in_half(void) {
+  // "Weisse" with a sharp s at bytes 6-7 of an 8-byte field: only 7 bytes
+  // fit, so strlcpy() would keep the first half of it. The whole character
+  // is dropped instead.
+  GuardedField f;
+  fillGuarded(f);
+  copyText(f.text, "Weisse\xC3\x9F", sizeof(f.text));
+  TEST_ASSERT_EQUAL_STRING("Weisse", f.text);
+  assertGuardIntact(f);
+}
+
+void test_copy_drops_a_four_byte_character_that_does_not_fit(void) {
+  GuardedField f;
+  fillGuarded(f);
+  copyText(f.text, "Beer\xF0\x9F\x8D\xBA", sizeof(f.text));   // 4 + 4 bytes
+  TEST_ASSERT_EQUAL_STRING("Beer", f.text);
+  assertGuardIntact(f);
+}
+
+void test_copy_replaces_invalid_bytes_with_a_question_mark(void) {
+  GuardedField f;
+  fillGuarded(f);
+  copyText(f.text, "a\xFF" "b\xC3" "c", sizeof(f.text));
+  TEST_ASSERT_EQUAL_STRING("a?b?c", f.text);
+  assertGuardIntact(f);
+}
+
+void test_copy_replaces_a_character_already_cut_in_half(void) {
+  // What older firmware stored when it cut a name with strlcpy().
+  GuardedField f;
+  fillGuarded(f);
+  copyText(f.text, "Weisse\xC3", sizeof(f.text));
+  TEST_ASSERT_EQUAL_STRING("Weisse?", f.text);
+  assertGuardIntact(f);
+}
+
+void test_copy_of_empty_text(void) {
+  GuardedField f;
+  fillGuarded(f);
+  copyText(f.text, "", sizeof(f.text));
+  TEST_ASSERT_EQUAL_STRING("", f.text);
+  assertGuardIntact(f);
+}
+
+void test_copy_into_a_one_byte_field_is_just_the_nul(void) {
+  char one[1] = { 'X' };
+  copyText(one, "abc", sizeof(one));
+  TEST_ASSERT_EQUAL_CHAR('\0', one[0]);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -102,6 +203,17 @@ int main(int argc, char** argv) {
   RUN_TEST(test_utf8_overlong_encodings_are_invalid);
   RUN_TEST(test_utf8_surrogates_are_invalid);
   RUN_TEST(test_utf8_above_the_unicode_range_is_invalid);
+
+  RUN_TEST(test_copy_plain_text_is_unchanged);
+  RUN_TEST(test_copy_text_that_exactly_fills_the_field);
+  RUN_TEST(test_copy_cuts_long_plain_text_like_strlcpy);
+  RUN_TEST(test_copy_keeps_accented_characters);
+  RUN_TEST(test_copy_never_cuts_a_character_in_half);
+  RUN_TEST(test_copy_drops_a_four_byte_character_that_does_not_fit);
+  RUN_TEST(test_copy_replaces_invalid_bytes_with_a_question_mark);
+  RUN_TEST(test_copy_replaces_a_character_already_cut_in_half);
+  RUN_TEST(test_copy_of_empty_text);
+  RUN_TEST(test_copy_into_a_one_byte_field_is_just_the_nul);
 
   return UNITY_END();
 }

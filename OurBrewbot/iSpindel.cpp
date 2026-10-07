@@ -25,6 +25,7 @@
 #include "iSpindel.h"
 #include "Log.h"
 #include "StackProbe.h"
+#include "TextSafe.h"
 #include <ArduinoJson.h>
 #include <ctype.h>
 #include <math.h>
@@ -168,7 +169,7 @@ bool __attribute__((noinline)) parseiSpindelBody(const String& body, iSpindelRea
   // is converted to text whichever it is. A missing ID is checked for first:
   // as<String>() would turn it into the text "null", which every device
   // without an ID would then share.
-  strlcpy(out.name,        doc["name"]         | "", sizeof(out.name));
+  copyText(out.name,        doc["name"]         | "", sizeof(out.name));
   if (doc["ID"].isNull()) {
     out.id[0] = '\0';
   } else {
@@ -176,7 +177,7 @@ bool __attribute__((noinline)) parseiSpindelBody(const String& body, iSpindelRea
     makeIdTopicSafe(out.id);
   }
   out.temperature        = doc["temperature"]  | 0.0f;
-  strlcpy(out.tempUnits,   doc["temp_units"]   | "", sizeof(out.tempUnits));
+  copyText(out.tempUnits,   doc["temp_units"]   | "", sizeof(out.tempUnits));
   out.interval           = doc["interval"]     | 0;
   out.gravity            = doc["gravity"]      | 0.0f;
   out.battery            = doc["battery"]      | 0.0f;
@@ -185,7 +186,7 @@ bool __attribute__((noinline)) parseiSpindelBody(const String& body, iSpindelRea
   out.velocity           = doc["velocity"]     | 0.0f;
   out.corrGravity        = doc["corr-gravity"] | 0.0f;
   out.runTime            = doc["run-time"]     | 0.0f;
-  strlcpy(out.gravityUnit, doc["gravity-unit"] | "", sizeof(out.gravityUnit));
+  copyText(out.gravityUnit, doc["gravity-unit"] | "", sizeof(out.gravityUnit));
   return true;
 }
 

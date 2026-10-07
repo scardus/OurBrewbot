@@ -31,3 +31,14 @@
 // the bytes there are not valid UTF-8 - a garbled Tilt reading, for example.
 // Stops at the first bad byte, so it never reads past the string's NUL.
 size_t utf8CharLength(const unsigned char* s);
+
+// Copy text from outside the firmware into a fixed-size field. Use it instead
+// of strlcpy() for names, hosts and IDs. It keeps the copy valid UTF-8, so
+// the JSON it ends up in can be read by strict parsers (Python, Home
+// Assistant), not just browsers:
+//  - any byte that is not part of a valid UTF-8 character becomes '?';
+//  - when the text is too long for the field, it is cut before the first
+//    character that does not fit whole - strlcpy() would cut "Biere" with an
+//    accented e half way through the e, leaving an invalid byte at the end.
+// The result is always NUL terminated. dst and src must not overlap.
+void copyText(char* dst, const char* src, size_t size);
