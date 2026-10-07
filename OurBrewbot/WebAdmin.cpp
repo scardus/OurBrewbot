@@ -451,11 +451,17 @@ button.stepact.del:hover:not(:disabled) {
   line-height: 16px;
 }
 #rfbtn:hover { color: #fff; border-color: #888; }
+#rfmsg {
+  color: #f44;
+  font-size: 11px;
+  white-space: nowrap;
+}
 </style>
 </head>
 <body>
   <div id="rfbar-wrap">
     <div id="rfbar-bg"><div id="rfbar"></div></div>
+    <span id="rfmsg"></span>
     <button id="rfbtn" onclick="togglePause()" title="Pause/resume auto-refresh">&#9208;</button>
   </div>
   <h2>OurBrewbot Admin</h2>
@@ -469,14 +475,14 @@ button.stepact.del:hover:not(:disabled) {
     <button onclick="showTab(6)" id="tb6">Reporting</button>
     <button onclick="showTab(7)" id="tb7">System Settings</button>
   </div>
-  <div id="t0" class="tab active"></div>
-  <div id="t1" class="tab"></div>
-  <div id="t2" class="tab"></div>
-  <div id="t3" class="tab"></div>
-  <div id="t4" class="tab"></div>
-  <div id="t5" class="tab"></div>
-  <div id="t6" class="tab"></div>
-  <div id="t7" class="tab"></div>
+  <div id="t0" class="tab active"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t1" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t2" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t3" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t4" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t5" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t6" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t7" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
 
 <script>
 var activeTab = 0;
@@ -535,6 +541,80 @@ function showMsg(id, t, ok) {
     e.textContent = t;
     e.className = 'msg ' + (ok ? 'ok' : 'err');
   }
+}
+
+// GET a URL and parse the reply as JSON, giving up after FETCH_TIMEOUT_MS.
+// Without a time limit a request lost on a sleeping phone's connection never
+// finishes, and the tab waiting for it stays blank until the page is reloaded.
+var FETCH_TIMEOUT_MS = 8000;
+function getJson(url) {
+  var ctl = new AbortController();
+  var timer = setTimeout(function () { ctl.abort(); }, FETCH_TIMEOUT_MS);
+  return fetch(url, { signal: ctl.signal })
+    .then(function (r) { return r.json(); })
+    .catch(function (e) {
+      if (e.name == 'AbortError') throw new Error('no reply from ' + url + ' after ' + (FETCH_TIMEOUT_MS / 1000) + ' s');
+      throw e;
+    })
+    .finally(function () { clearTimeout(timer); });
+}
+
+// ---- TAB LOAD STATUS ----
+// tabLoaded[n] becomes true once tab n has shown data from the device. Until
+// then the tab shows "Loading...", or the error if its load fails.
+var tabLoaded = [false, false, false, false, false, false, false, false];
+
+// Every tab load takes the next number from startLoad(). A tab switch, a save
+// or the auto refresh can start a new load while an older one is still waiting
+// (common when a phone wakes up), so only the reply to the newest load is used.
+// loadBusy is true while that newest load is waiting; the auto refresh skips a
+// turn instead of piling more requests onto the device.
+var loadSeq = 0;
+var loadBusy = false;
+
+// Call at the start of a tab load. Returns this load's number.
+function startLoad() {
+  loadSeq++;
+  loadBusy = true;
+  return loadSeq;
+}
+
+// Call first when the reply to load number seq arrives. Returns false if the
+// reply must not be drawn: a newer load has started (its reply will be drawn
+// instead), or the user has begun editing since this load was sent (redrawing
+// would wipe their changes).
+function replyIsCurrent(seq) {
+  if (seq != loadSeq) return false;
+  loadBusy = false;
+  return !dirty;
+}
+
+// Call when tab n has drawn fresh data: marks it loaded and clears any earlier error.
+function loadDone(n) {
+  tabLoaded[n] = true;
+  showRefreshError(null);
+}
+
+// Call when load number seq for tab n failed (timeout, lost connection or a
+// bad reply). Ignored if a newer load has started. A tab that has never loaded
+// shows the error in place of its content; a tab that has loaded keeps its
+// last data on screen. Either way the refresh bar shows "Refresh failed" and
+// the next auto refresh tries again.
+function loadFailed(seq, n, e) {
+  if (seq != loadSeq) return;
+  loadBusy = false;
+  if (!tabLoaded[n]) {
+    byId('t' + n).innerHTML = '<div class="card"><p style="color:#f44">Could not load this tab: ' + escHtml(e) + '</p></div>';
+  }
+  showRefreshError(e);
+}
+
+// Show (or clear, when e is null) the short error next to the refresh bar.
+// The full error text is in the tooltip, to keep the bar usable on a phone.
+function showRefreshError(e) {
+  var m = byId('rfmsg');
+  m.textContent = e ? 'Refresh failed' : '';
+  m.title = e ? String(e) : '';
 }
 
 // Confirm with the user, then clear WiFi credentials and reboot into the setup portal.
@@ -630,13 +710,15 @@ var tempUnit = 'C';
 
 // Fetch brew-services / MQTT / fermenters / profiles / debug in parallel, then render fermenter cards.
 function loadFermenters() {
+  var seq = startLoad();
   Promise.all([
-    fetch('/brewservices').then(function (r) { return r.json(); }),
-    fetch('/mqtt').then(function (r) { return r.json(); }),
-    fetch('/fermenters').then(function (r) { return r.json(); }),
-    fetch('/profiles').then(function (r) { return r.json(); }),
-    fetch('/debug').then(function (r) { return r.json(); })
+    getJson('/brewservices'),
+    getJson('/mqtt'),
+    getJson('/fermenters'),
+    getJson('/profiles'),
+    getJson('/debug')
   ]).then(function (res) {
+    if (!replyIsCurrent(seq)) return;
     brewServices = res[0].services || [];
     mqttEnabled = res[1].enabled;
     var d = res[2];
@@ -716,7 +798,8 @@ function loadFermenters() {
       html += '</div>';
     }
     byId('t0').innerHTML = html;
-  });
+    loadDone(0);
+  }).catch(function (e) { loadFailed(seq, 0, e); });
 }
 
 // Gather fermenter i's form values into a body object and POST to /fermenter.
@@ -955,10 +1038,12 @@ function loadProfilesFromState() {
 
 // Fetch profiles + fermenters, build per-profile edit state, then render.
 function loadProfiles() {
+  var seq = startLoad();
   Promise.all([
-    fetch('/profiles').then(function (r) { return r.json(); }),
-    fetch('/fermenters').then(function (r) { return r.json(); })
+    getJson('/profiles'),
+    getJson('/fermenters')
   ]).then(function (res) {
+    if (!replyIsCurrent(seq)) return;
     var d = res[0];
     var ferms = res[1] || [];
     stepTypes = d.stepTypes || [];
@@ -986,7 +1071,8 @@ function loadProfiles() {
       profileEdits.push({ name: pr.name, steps: steps, lockedBy: lockedBy });
     }
     loadProfilesFromState();
-  });
+    loadDone(1);
+  }).catch(function (e) { loadFailed(seq, 1, e); });
 }
 
 // Save profile p — send all 15 slots, padding unused with zeros so backend clears them.
@@ -1035,7 +1121,9 @@ function fermOpts(sel) {
 
 // Fetch all detected probes and render an editable row per probe.
 function loadProbes() {
-  fetch('/probes').then(function (r) { return r.json(); }).then(function (d) {
+  var seq = startLoad();
+  getJson('/probes').then(function (d) {
+    if (!replyIsCurrent(seq)) return;
     var p = d.probes;
     var html = '<div class="card"><table class="tbl"><tr><th>Address</th><th>Temp</th><th>Name</th><th>Function</th><th>Fermenter</th><th>Adjust</th><th></th></tr>';
     if (p.length == 0) html += '<tr><td colspan="7" style="color:#888">No probes detected. Connect DS18B20 probes to the Green Jack.</td></tr>';
@@ -1051,7 +1139,8 @@ function loadProbes() {
     }
     html += '</table><div class="msg" id="pm"></div></div>';
     byId('t2').innerHTML = html;
-  });
+    loadDone(2);
+  }).catch(function (e) { loadFailed(seq, 2, e); });
 }
 
 // Save probe i: function, assigned fermenter, and per-probe temp offset.
@@ -1161,7 +1250,9 @@ function applyPreset(i) {
 
 // Fetch all smart plugs and render an editable card per plug.
 function loadPlugs() {
-  fetch('/smartplugs').then(function (r) { return r.json(); }).then(function (d) {
+  var seq = startLoad();
+  getJson('/smartplugs').then(function (d) {
+    if (!replyIsCurrent(seq)) return;
     var p = d.plugs || [];
     var html = '';
     for (var i = 0; i < p.length; i++) {
@@ -1192,7 +1283,8 @@ function loadPlugs() {
       html += '</div>';
     }
     byId('t5').innerHTML = html;
-  });
+    loadDone(5);
+  }).catch(function (e) { loadFailed(seq, 5, e); });
 }
 
 // Save plug i: codes, RF parameters, function/fermenter assignment.
@@ -1256,10 +1348,12 @@ function mqttSummary(mq) {
 
 // Render the Reporting tab: Services section (BF / BFR / MQTT).
 function loadReporting() {
+  var seq = startLoad();
   Promise.all([
-    fetch('/brewservices').then(function (r) { return r.json(); }),
-    fetch('/mqtt').then(function (r) { return r.json(); })
+    getJson('/brewservices'),
+    getJson('/mqtt')
   ]).then(function (res) {
+    if (!replyIsCurrent(seq)) return;
     var svcs = res[0].services || [];
     var mq = res[1];
     var html = '<h3 style="color:#e94560;margin:6px 0 8px 0;font-size:14px">Services</h3>';
@@ -1290,7 +1384,8 @@ function loadReporting() {
     mqBody += '<span class="msg" id="mqm"></span></div>';
     html += collCard('mqtt', 'MQTT', mq.enabled, mqttSummary(mq), mqBody, false);
     byId('t6').innerHTML = html;
-  });
+    loadDone(6);
+  }).catch(function (e) { loadFailed(seq, 6, e); });
 }
 
 // Firmware update status for the System Info row, followed by a [check] link.
@@ -1328,12 +1423,14 @@ function checkFwUpdate() {
 
 // Render the System Settings tab: globals, syslog, system info, action buttons, file browser.
 function loadSystemSettings() {
+  var seq = startLoad();
   Promise.all([
-    fetch('/controller').then(function (r) { return r.json(); }),
-    fetch('/fs/files').then(function (r) { return r.json(); }),
-    fetch('/syslog').then(function (r) { return r.json(); }),
-    fetch('/debug').then(function (r) { return r.json(); })
+    getJson('/controller'),
+    getJson('/fs/files'),
+    getJson('/syslog'),
+    getJson('/debug')
   ]).then(function (res) {
+    if (!replyIsCurrent(seq)) return;
     var d = res[0], fs = res[1], sl = res[2], dbg = res[3];
     var syslogFacilities = [
       '0 Kernel', '1 User', '2 Mail', '3 Daemon', '4 Auth', '5 Syslog', '6 LPR', '7 News',
@@ -1412,9 +1509,8 @@ function loadSystemSettings() {
     html += '<div style="margin-top:6px"><button class="save" onclick="downloadFile()">Download</button></div>';
     html += '</div>';
     byId('t7').innerHTML = html;
-  }).catch(function (e) {
-    byId('t7').innerHTML = '<div class="card"><p style="color:#f44">Error: ' + escHtml(e) + '</p></div>';
-  });
+    loadDone(7);
+  }).catch(function (e) { loadFailed(seq, 7, e); });
 }
 
 // Save the global controller settings (temp unit, resolution, mDNS, update check, crash reports, debug mode).
@@ -1533,7 +1629,9 @@ function tiltFnOpts(sel) {
 
 // Render the Tilts tab — one card per colour slot, marked Active for any Tilts seen by BLE.
 function loadTilts() {
-  fetch('/tilts').then(function (r) { return r.json(); }).then(function (d) {
+  var seq = startLoad();
+  getJson('/tilts').then(function (d) {
+    if (!replyIsCurrent(seq)) return;
     var ts = d.tilts || [];
     var html = '';
     if (ts.length == 0) {
@@ -1548,9 +1646,8 @@ function loadTilts() {
       for (var c = 0; c < 8; c++) html += buildTiltCard(c, seen[c] || null);
     }
     byId('t3').innerHTML = html;
-  }).catch(function (e) {
-    byId('t3').innerHTML = '<div class="card"><p style="color:#f44">Error loading Tilt data: ' + escHtml(e) + '</p></div>';
-  });
+    loadDone(3);
+  }).catch(function (e) { loadFailed(seq, 3, e); });
 }
 
 // Build a single Tilt slot card. `t` is the seen-Tilt record or null when unconfigured.
@@ -1609,15 +1706,16 @@ var iSpindelUnitNames = { 0: 'SG', 1: 'Plato' };
 
 // Render the iSpindels tab — one card per configured slot.
 function loadISpindels() {
-  fetch('/ispindels').then(function (r) { return r.json(); }).then(function (d) {
+  var seq = startLoad();
+  getJson('/ispindels').then(function (d) {
+    if (!replyIsCurrent(seq)) return;
     var ds = d.ispindels || [];
     var html = '';
     if (ds.length == 0) html = '<div class="card"><p style="color:#888">No iSpindel slots configured.</p></div>';
     for (var i = 0; i < ds.length; i++) html += buildISpindelCard(i, ds[i]);
     byId('t4').innerHTML = html;
-  }).catch(function (e) {
-    byId('t4').innerHTML = '<div class="card"><p style="color:#f44">Error loading iSpindel data: ' + escHtml(e) + '</p></div>';
-  });
+    loadDone(4);
+  }).catch(function (e) { loadFailed(seq, 4, e); });
 }
 
 // Build a single iSpindel slot card. Shows live readings if present, plus per-slot config.
@@ -1837,8 +1935,7 @@ function togglePause() {
   paused = !paused;
   byId('rfbtn').textContent = paused ? '▶' : '⏸';
   if (paused) {
-    if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = null;
+    stopRefresh();
   } else {
     refreshStart = Date.now();
     startRefresh();
@@ -1846,17 +1943,45 @@ function togglePause() {
 }
 
 // ---- AUTO REFRESH ----
-// Re-render the active tab every 10s, but skip while the user has unsaved edits.
+// Re-render the active tab every 10s, but skip while the user has unsaved edits
+// or while the last load is still waiting for the device.
 function startRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(function () {
     refreshStart = Date.now();
-    if (!dirty) loadTab();
+    if (!dirty && !loadBusy) loadTab();
   }, REFRESH_MS);
 }
+
+// Stop the auto refresh.
+function stopRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = null;
+}
+
+// ---- PAUSE WHILE HIDDEN ----
+// A phone freezes a page in the background, and a desktop browser slows its
+// timers to once a minute, so a background tab only ever shows old data. Stop
+// the auto refresh while the page is hidden, and reload the active tab as soon
+// as it is shown again.
+function resumeRefresh() {
+  if (paused || refreshTimer) return;   // paused by the user, or already running
+  refreshStart = Date.now();
+  if (!dirty) loadTab();
+  startRefresh();
+}
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden) stopRefresh();
+  else resumeRefresh();
+});
+// persisted = the browser has brought this page back from its back/forward cache.
+window.addEventListener('pageshow', function (e) {
+  if (e.persisted) resumeRefresh();
+});
+
 refreshStart = Date.now();
 loadTab();
-startRefresh();
+if (!document.hidden) startRefresh();
 setInterval(updateBar, 100);
 document.body.addEventListener('focusin', function (e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') markDirty();
