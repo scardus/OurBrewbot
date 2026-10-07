@@ -49,15 +49,17 @@ size_t utf8CharLength(const unsigned char* s) {
 
 void copyText(char* dst, const char* src, size_t size) {
   if (size == 0) return;
+  // UTF-8 rules are about byte values 0x80-0xFF, so read the text as unsigned bytes.
+  const unsigned char* bytes = reinterpret_cast<const unsigned char*>(src);
   size_t j = 0;                          // bytes written to dst so far
   size_t i = 0;                          // read position in src
   while (src[i] != '\0') {
-    unsigned char c = (unsigned char)src[i];
+    unsigned char c = bytes[i];
     size_t inLen  = 1;                   // bytes this character takes in src
     size_t outLen = 1;                   // bytes it takes in dst
     bool   valid  = true;
     if (c >= 0x80) {
-      inLen = utf8CharLength((const unsigned char*)src + i);
+      inLen = utf8CharLength(bytes + i);
       if (inLen == 0) {                  // not valid UTF-8: one byte becomes '?'
         inLen = 1;
         valid = false;
@@ -80,12 +82,13 @@ bool isValidBaseTopic(const char* topic, size_t fieldSize) {
   size_t len = strlen(topic);
   if (len == 0 || len >= fieldSize) return false;
   if (topic[0] == '$') return false;
+  const unsigned char* bytes = reinterpret_cast<const unsigned char*>(topic);
   for (size_t i = 0; i < len; i++) {
-    unsigned char c = (unsigned char)topic[i];
+    unsigned char c = bytes[i];
     if (c == '+' || c == '#') return false;
     if (c < 0x20 || c == 0x7F) return false;   // control characters
     if (c >= 0x80) {
-      size_t n = utf8CharLength((const unsigned char*)topic + i);
+      size_t n = utf8CharLength(bytes + i);
       if (n == 0) return false;
       i += n - 1;   // the loop's i++ moves past the last byte
     }
