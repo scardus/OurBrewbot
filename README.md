@@ -6,8 +6,7 @@ Replacement firmware for the MyBrewbot ESP8266 fermentation controller.
 
 ## What this does
 
-The original firmware depended on `mybrewbot.co.uk` for cloud
-storage, the Blynk App, and OTA updates. All of those are now dead.
+The original firmware depended on `mybrewbot.co.uk` for cloud storage, the Blynk App, and OTA updates. All of those are now dead.
 
 This firmware keeps your hardware working:
 - All temperature probe control preserved (DS18B20 probes, same addressing)
@@ -20,30 +19,24 @@ This firmware keeps your hardware working:
 - Tilt hydrometer support via HM-10 BLE module (standard and Tilt Pro)
 
 New/Updated Features:
-- Tilt Pro support — auto-detected by broadcast value magnitude; gravity and temperature decoded with correct Pro precision (÷10000 / ÷10), labelled "Pro" in the admin UI
+- Install from your browser at [ourbrewbot.com](https://ourbrewbot.com/install) — no tools needed
+- Web-based admin page for configuring probes, fermenters, Tilts, iSpindels, plugs, and services
+- Full local REST API
+- mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
+- Tilt Pro support - auto-detected by broadcast value magnitude; gravity and temperature decoded with correct Pro precision (÷10000 / ÷10), labelled "Pro" in the admin UI
 - Brewfather integration uses the Custom Stream API
 - MQTT support for publishing fermenter data to any MQTT broker
-- Home Assistant MQTT Discovery — auto-creates HA entities with no YAML needed (optional, per-broker toggle)
-- Home Assistant MQTT control - see section below
-- Full local REST API
-- Web-based admin page for configuring probes, fermenters, Tilts, iSpindels, plugs, and services
-- mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
+- Home Assistant MQTT Discovery & Control - auto-creates HA entities with no YAML needed (optional, per-broker toggle)
 - LittleFS file browser in admin page for inspecting config files
 - BLE AT command console for debugging HM-10 Bluetooth module
 - Rebuilt Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation
-- Daily firmware update check — tells you (admin page, syslog, Home Assistant) when a newer release is out; it never installs anything itself
+- Daily firmware update check — tells you (admin page, syslog, Home Assistant) when a newer release is out
 - Crash reports — after a crash or watchdog reset, the crash details are sent to ourbrewbot.com to help fix bugs
-- Install from your browser at [ourbrewbot.com](https://ourbrewbot.com/install) — no tools needed
 
 The update check and crash reports can each be switched off — see [Contacting ourbrewbot.com](#contacting-ourbrewbotcom).
 
 Not yet implemented / tested:
 - Pressure sensor - __Untested - No hardware__
-
-Removed:
-- mybrewbot.co.uk cloud backend (server gone)
-- Blynk dashboard (replaced with REST API + admin page)
-- Webhook support - Was added in v0.3, but due to stability & memory issues had to be removed.
 
 ---
 
@@ -98,7 +91,7 @@ In `platformio.ini`, set `upload_port` and `monitor_port` to match your device's
 
 ## Backing up your original firmware & settings
 
-Before flashing, back up the full 4 MB flash from your existing MyBrewbot device so you can restore it if needed.
+Before flashing, back up the full 4 MB flash from your existing MyBrewbot device so you can restore it, if needed.
 
 Your config files (probes, fermenters, etc.) live in the LittleFS partition and survive a firmware-only flash — but a full backup protects everything.
 
@@ -174,24 +167,20 @@ Once the firmware is running, navigate to `http://ourbrewbot-XXXXXX.local/update
 
 ## Restoring Your Original Config
 
-If you have the original device, its config files are stored in the
-LittleFS partition. 
-
-These should be auto-detected and used if you flash this firmware to the same device
-(the LittleFS partition is separate and survives firmware updates).
+If you have the original device, its config files are stored in the LittleFS partition. These should be auto-detected and used if you flash this firmware to the same device.
 
 ---
 
 ## Contacting ourbrewbot.com
 
-The controller runs entirely on your own network. It only contacts ourbrewbot.com for these two things, and both can be switched off in the admin page on the **System Settings** tab, under **Global Settings**:
+The controller runs entirely on your own network. It only contacts ourbrewbot.com for two things, and both can be switched off in the admin page on the **System Settings** tab, under **Global Settings**:
 
 | Setting | What it does | What is sent |
 |---------|--------------|--------------|
 | **Update Check** | Once a day, downloads `http://ourbrewbot.com/version.json` and compares it with the running version. The result is shown on the admin page, in syslog and as a Home Assistant `update` entity. Nothing is downloaded or installed. The **[check]** link next to the firmware version (`POST /update/check`) works even when the daily check is off. | The chip ID and firmware version (used to count the controllers in use) |
 | **Crash Reports** | About 2 minutes after the device restarts from a crash or watchdog reset, it sends one report to `http://ourbrewbot.com/api/crash` (retried up to 3 times). Nothing is sent after a normal restart. | The chip ID, firmware version and build date, the reset reason, the last code area that ran, the processor registers, and the top of the stack (raw memory, as hex numbers) |
 
-Neither sends your settings, WiFi details, temperatures or brewing data. The stack snapshot is a few dozen raw memory words from the moment of the crash, used to find which code crashed.
+Neither sends your settings, WiFi details, temperatures or brewing data. The stack snapshot is a few dozen raw memory words from the moment of the crash, used to find which bit of the code crashed.
 
 ---
 
@@ -256,7 +245,7 @@ Neither sends your settings, WiFi details, temperatures or brewing data. The sta
 
 When MQTT is enabled and **HA Discovery** is turned on, the device publishes Home Assistant MQTT discovery payloads on connect and whenever HA restarts. No manual YAML configuration is needed — entities appear automatically in HA.
 
-### Entity types (v0.1.74+)
+### Entity types
 
 Discovery creates one HA device for the controller, one for each fermenter, and one for each configured probe, Tilt and iSpindel. Empty or unassigned slots are skipped.
 
@@ -294,43 +283,6 @@ A ready-made Lovelace dashboard is provided in `HomeAssistant/dashboard.yaml`. I
 
 ---
 
-## Upgrading from earlier firmware
-
-### From v0.1.73 or earlier (pre-MQTT control)
-
-Versions before v0.1.74 published all per-fermenter fields as `sensor` entities. From v0.1.74 onwards, several fields changed to more appropriate HA entity types (switch, number, text, select). The firmware sends empty retained payloads to the old discovery topics on connect to clean up stale HA entities automatically.
-
-**Steps after flashing:**
-
-1. Flash the new binary via OTA (`http://ourbrewbot-XXXXXX.local/update`) or esptool.
-2. Once connected, the device retries HA discovery automatically. If entities don't update immediately, click **HA Discover** in the MQTT settings page of the admin UI, or reboot the device.
-3. HA will remove the old `sensor.*` entities and create the new `switch.*`, `number.*`, `text.*`, and `select.*` entities.
-4. Replace your Lovelace dashboard with the updated `HomeAssistant/dashboard.yaml` from this repository. The new YAML references the correct entity types.
-
-**Entity ID changes (old → new):**
-
-| Old entity ID | New entity ID |
-|---------------|---------------|
-| `sensor.ourbrewbot_fN_power` | `switch.ourbrewbot_fN_power` |
-| `sensor.ourbrewbot_fN_temp_control` | `switch.ourbrewbot_fN_temp_control` |
-| `sensor.ourbrewbot_fN_profile_running` | `switch.ourbrewbot_fN_profile_running` |
-| `sensor.ourbrewbot_fN_ceiling_temperature` | `number.ourbrewbot_fN_ceiling_temperature` |
-| `sensor.ourbrewbot_fN_floor_temperature` | `number.ourbrewbot_fN_floor_temperature` |
-| `sensor.ourbrewbot_fN_hysteresis` | `number.ourbrewbot_fN_hysteresis` |
-| `sensor.ourbrewbot_fN_compressor_delay` | `number.ourbrewbot_fN_compressor_delay` |
-| `sensor.ourbrewbot_fN_og` | `number.ourbrewbot_fN_og` |
-| `sensor.ourbrewbot_fN_tg` | `number.ourbrewbot_fN_tg` |
-| `sensor.ourbrewbot_fN_name` | `text.ourbrewbot_fN_name` |
-| `sensor.ourbrewbot_fN_beer_name` | `text.ourbrewbot_fN_beer_name` |
-| `sensor.ourbrewbot_fN_yeast` | `text.ourbrewbot_fN_yeast` |
-| _(new)_ | `select.ourbrewbot_fN_profile_no` |
-
-> Replace `N` with the fermenter index (0–3).
-
-Any HA automations, template sensors (`binary_sensor.ourbrewbot_fN_online`, `sensor.ourbrewbot_fN_fermentation_progress`, etc.) or Plotly graph history that reference the old `sensor.*` entity IDs will need to be updated to the new IDs.
-
----
-
 ## File Structure
 
 ```
@@ -364,5 +316,4 @@ OurBrewbot is licensed under the [Apache License, Version 2.0](LICENSE). See [NO
 
 ---
 
-*All JSON field names, file paths, REST routes, and error strings are preserved
-verbatim from the original firmware for compatibility with existing device configs.*
+*All JSON field names, file paths, REST routes, and error strings are preserved verbatim from the original firmware for compatibility with existing device configs.*
