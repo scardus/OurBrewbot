@@ -692,6 +692,15 @@ bool loadiSpindelConfig() {
       g_iSpindels[i].function = PROBE_UNASSIGNED;
     }
   }
+  // IDs from incoming readings have been made topic-safe since 0.5.1, but one
+  // stored before that, or imported from a file, would be published under
+  // until the device next reported. The same rule is applied here, so the
+  // device's next reading still matches its slot.
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    if (makeIdTopicSafe(g_iSpindels[i].id)) {
+      logMsg("[CFG] iSpindel slot %d: ID had characters MQTT cannot use - changed to %s", i, g_iSpindels[i].id);
+    }
+  }
   return true;
 }
 

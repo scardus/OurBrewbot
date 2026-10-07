@@ -62,3 +62,14 @@ bool isValidBaseTopic(const char* topic, size_t fieldSize);
 // valid UTF-8 (the config loader's copyText() has seen to that); an empty
 // topic is left for the caller to replace. Returns true if anything changed.
 bool makeBaseTopicSafe(char* topic);
+
+// Make an iSpindel device ID safe to use in topic names, in place. The ID
+// becomes part of MQTT topic names ({base}/iSpindel/{id}/...) and of the Home
+// Assistant discovery topics. A '+' or '#' there is a wildcard the broker
+// answers by dropping the connection, a '/' splits the topic, and Home
+// Assistant ignores discovery topics holding anything outside letters,
+// digits, '_' and '-'. Real devices send a number (iSpindel) or hex text
+// (GravityMon), so any other character is replaced with '_' rather than
+// throwing the reading away. Used on every POST /iSpindel and on IDs loaded
+// from the config. Returns true if anything changed.
+bool makeIdTopicSafe(char* id);

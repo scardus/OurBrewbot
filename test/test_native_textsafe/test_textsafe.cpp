@@ -274,6 +274,31 @@ void test_make_safe_result_passes_the_save_check(void) {
   TEST_ASSERT_TRUE(isValidBaseTopic(topic, sizeof(topic)));
 }
 
+// ============================================================
+// makeIdTopicSafe()
+// (also covered end to end through POST /iSpindel in test_ispindel)
+// ============================================================
+
+void test_id_letters_digits_underscore_and_dash_are_kept(void) {
+  char id[16] = "C2cc-7C_01";
+  TEST_ASSERT_FALSE(makeIdTopicSafe(id));
+  TEST_ASSERT_EQUAL_STRING("C2cc-7C_01", id);
+}
+
+void test_id_other_characters_become_underscores(void) {
+  char id[16] = "a+b#c/d e.f";
+  TEST_ASSERT_TRUE(makeIdTopicSafe(id));
+  TEST_ASSERT_EQUAL_STRING("a_b_c_d_e_f", id);
+}
+
+void test_id_non_ascii_bytes_become_underscores(void) {
+  // Each byte of a multi-byte character is replaced, since Home Assistant
+  // only accepts ASCII letters and digits here.
+  char id[16] = "id\xC3\xA9";
+  TEST_ASSERT_TRUE(makeIdTopicSafe(id));
+  TEST_ASSERT_EQUAL_STRING("id__", id);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -313,6 +338,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_make_safe_replaces_only_a_leading_dollar);
   RUN_TEST(test_make_safe_replaces_control_characters);
   RUN_TEST(test_make_safe_result_passes_the_save_check);
+
+  RUN_TEST(test_id_letters_digits_underscore_and_dash_are_kept);
+  RUN_TEST(test_id_other_characters_become_underscores);
+  RUN_TEST(test_id_non_ascii_bytes_become_underscores);
 
   return UNITY_END();
 }

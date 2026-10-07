@@ -27,7 +27,6 @@
 #include "StackProbe.h"
 #include "TextSafe.h"
 #include <ArduinoJson.h>
-#include <ctype.h>
 #include <math.h>
 
 // Normalise an incoming temperature to Celsius, which is what the rest of the
@@ -135,19 +134,6 @@ static const char* gravityUnitName(uint8_t unit) {
 // ISPINDEL RECEIVE
 // POST /iSpindel — iSpindel sends: name, ID, temperature, gravity, battery, RSSI
 // ============================================================
-
-// The device ID becomes part of MQTT topic names ({base}/iSpindel/{id}/...)
-// and of the Home Assistant discovery topics. A '+' or '#' there is a wildcard
-// the broker answers by dropping the connection, a '/' splits the topic, and
-// Home Assistant ignores discovery topics holding anything outside letters,
-// digits, '_' and '-'. Real devices send a number (iSpindel) or hex text
-// (GravityMon), so any other character is replaced with '_' rather than
-// throwing the reading away.
-static void makeIdTopicSafe(char* id) {
-  for (; *id != '\0'; id++) {
-    if (!isalnum((unsigned char)*id) && *id != '_' && *id != '-') *id = '_';
-  }
-}
 
 // The JSON parser needs several hundred bytes of loop stack. While it was part
 // of handleiSpindelPost() that space stayed in use for the whole function -

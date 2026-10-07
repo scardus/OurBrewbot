@@ -21,6 +21,7 @@
  */
 
 #include "TextSafe.h"
+#include <ctype.h>
 #include <string.h>
 
 size_t utf8CharLength(const unsigned char* s) {
@@ -102,6 +103,17 @@ bool makeBaseTopicSafe(char* topic) {
     unsigned char c = (unsigned char)*p;
     if (c == '+' || c == '#' || c < 0x20 || c == 0x7F) {
       *p = '_';
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+bool makeIdTopicSafe(char* id) {
+  bool changed = false;
+  for (; *id != '\0'; id++) {
+    if (!isalnum((unsigned char)*id) && *id != '_' && *id != '-') {
+      *id = '_';
       changed = true;
     }
   }

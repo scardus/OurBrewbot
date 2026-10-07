@@ -722,6 +722,18 @@ void test_ispindel_absent_function_defaults_to_beer_for_legacy_configs(void) {
   TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_iSpindels[0].function);
 }
 
+void test_ispindel_stored_ids_are_made_topic_safe_on_load(void) {
+  // An ID stored before 0.5.1, or imported, can hold characters that break
+  // MQTT topics. The same rule as for incoming readings is applied, so a
+  // normal ID is untouched and the device's next reading still matches.
+  fsTestWrite(FILE_ISPINDEL, "{\"ID\":[\"a+b#c/d\",\"9b5c5e\",\"\",\"C2cc-7C_01\"]}");
+  TEST_ASSERT_TRUE(loadiSpindelConfig());
+  TEST_ASSERT_EQUAL_STRING("a_b_c_d",    g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_STRING("9b5c5e",     g_iSpindels[1].id);
+  TEST_ASSERT_EQUAL_STRING("",           g_iSpindels[2].id);
+  TEST_ASSERT_EQUAL_STRING("C2cc-7C_01", g_iSpindels[3].id);
+}
+
 void test_profile_steps_load_returns_false_without_touching_state(void) {
   // loadProfileSteps has no default initialiser - a missing file must leave the
   // in-memory steps alone rather than half-clearing them.
@@ -961,6 +973,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_probe_load_mirrors_temperature_into_the_raw_reading);
   RUN_TEST(test_ispindel_legacy_function_values_collapse_to_unassigned);
   RUN_TEST(test_ispindel_absent_function_defaults_to_beer_for_legacy_configs);
+  RUN_TEST(test_ispindel_stored_ids_are_made_topic_safe_on_load);
   RUN_TEST(test_profile_steps_load_returns_false_without_touching_state);
   RUN_TEST(test_profile_steps_round_trip_across_all_slots);
 
