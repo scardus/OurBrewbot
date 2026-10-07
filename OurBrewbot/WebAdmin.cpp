@@ -451,11 +451,17 @@ button.stepact.del:hover:not(:disabled) {
   line-height: 16px;
 }
 #rfbtn:hover { color: #fff; border-color: #888; }
+#rfmsg {
+  color: #f44;
+  font-size: 11px;
+  white-space: nowrap;
+}
 </style>
 </head>
 <body>
   <div id="rfbar-wrap">
     <div id="rfbar-bg"><div id="rfbar"></div></div>
+    <span id="rfmsg"></span>
     <button id="rfbtn" onclick="togglePause()" title="Pause/resume auto-refresh">&#9208;</button>
   </div>
   <h2>OurBrewbot Admin</h2>
@@ -469,14 +475,14 @@ button.stepact.del:hover:not(:disabled) {
     <button onclick="showTab(6)" id="tb6">Reporting</button>
     <button onclick="showTab(7)" id="tb7">System Settings</button>
   </div>
-  <div id="t0" class="tab active"></div>
-  <div id="t1" class="tab"></div>
-  <div id="t2" class="tab"></div>
-  <div id="t3" class="tab"></div>
-  <div id="t4" class="tab"></div>
-  <div id="t5" class="tab"></div>
-  <div id="t6" class="tab"></div>
-  <div id="t7" class="tab"></div>
+  <div id="t0" class="tab active"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t1" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t2" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t3" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t4" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t5" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t6" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+  <div id="t7" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
 
 <script>
 var activeTab = 0;
@@ -551,6 +557,36 @@ function getJson(url) {
       throw e;
     })
     .finally(function () { clearTimeout(timer); });
+}
+
+// ---- TAB LOAD STATUS ----
+// tabLoaded[n] becomes true once tab n has shown data from the device. Until
+// then the tab shows "Loading...", or the error if its load fails.
+var tabLoaded = [false, false, false, false, false, false, false, false];
+
+// Call when tab n has drawn fresh data: marks it loaded and clears any earlier error.
+function loadDone(n) {
+  tabLoaded[n] = true;
+  showRefreshError(null);
+}
+
+// Call when tab n's load failed (timeout, lost connection or a bad reply).
+// A tab that has never loaded shows the error in place of its content; a tab
+// that has loaded keeps its last data on screen. Either way the refresh bar
+// shows "Refresh failed" and the next auto refresh tries again.
+function loadFailed(n, e) {
+  if (!tabLoaded[n]) {
+    byId('t' + n).innerHTML = '<div class="card"><p style="color:#f44">Could not load this tab: ' + escHtml(e) + '</p></div>';
+  }
+  showRefreshError(e);
+}
+
+// Show (or clear, when e is null) the short error next to the refresh bar.
+// The full error text is in the tooltip, to keep the bar usable on a phone.
+function showRefreshError(e) {
+  var m = byId('rfmsg');
+  m.textContent = e ? 'Refresh failed' : '';
+  m.title = e ? String(e) : '';
 }
 
 // Confirm with the user, then clear WiFi credentials and reboot into the setup portal.
@@ -732,7 +768,8 @@ function loadFermenters() {
       html += '</div>';
     }
     byId('t0').innerHTML = html;
-  });
+    loadDone(0);
+  }).catch(function (e) { loadFailed(0, e); });
 }
 
 // Gather fermenter i's form values into a body object and POST to /fermenter.
@@ -1002,7 +1039,8 @@ function loadProfiles() {
       profileEdits.push({ name: pr.name, steps: steps, lockedBy: lockedBy });
     }
     loadProfilesFromState();
-  });
+    loadDone(1);
+  }).catch(function (e) { loadFailed(1, e); });
 }
 
 // Save profile p — send all 15 slots, padding unused with zeros so backend clears them.
@@ -1067,7 +1105,8 @@ function loadProbes() {
     }
     html += '</table><div class="msg" id="pm"></div></div>';
     byId('t2').innerHTML = html;
-  });
+    loadDone(2);
+  }).catch(function (e) { loadFailed(2, e); });
 }
 
 // Save probe i: function, assigned fermenter, and per-probe temp offset.
@@ -1208,7 +1247,8 @@ function loadPlugs() {
       html += '</div>';
     }
     byId('t5').innerHTML = html;
-  });
+    loadDone(5);
+  }).catch(function (e) { loadFailed(5, e); });
 }
 
 // Save plug i: codes, RF parameters, function/fermenter assignment.
@@ -1306,7 +1346,8 @@ function loadReporting() {
     mqBody += '<span class="msg" id="mqm"></span></div>';
     html += collCard('mqtt', 'MQTT', mq.enabled, mqttSummary(mq), mqBody, false);
     byId('t6').innerHTML = html;
-  });
+    loadDone(6);
+  }).catch(function (e) { loadFailed(6, e); });
 }
 
 // Firmware update status for the System Info row, followed by a [check] link.
@@ -1428,9 +1469,8 @@ function loadSystemSettings() {
     html += '<div style="margin-top:6px"><button class="save" onclick="downloadFile()">Download</button></div>';
     html += '</div>';
     byId('t7').innerHTML = html;
-  }).catch(function (e) {
-    byId('t7').innerHTML = '<div class="card"><p style="color:#f44">Error: ' + escHtml(e) + '</p></div>';
-  });
+    loadDone(7);
+  }).catch(function (e) { loadFailed(7, e); });
 }
 
 // Save the global controller settings (temp unit, resolution, mDNS, update check, crash reports, debug mode).
@@ -1564,9 +1604,8 @@ function loadTilts() {
       for (var c = 0; c < 8; c++) html += buildTiltCard(c, seen[c] || null);
     }
     byId('t3').innerHTML = html;
-  }).catch(function (e) {
-    byId('t3').innerHTML = '<div class="card"><p style="color:#f44">Error loading Tilt data: ' + escHtml(e) + '</p></div>';
-  });
+    loadDone(3);
+  }).catch(function (e) { loadFailed(3, e); });
 }
 
 // Build a single Tilt slot card. `t` is the seen-Tilt record or null when unconfigured.
@@ -1631,9 +1670,8 @@ function loadISpindels() {
     if (ds.length == 0) html = '<div class="card"><p style="color:#888">No iSpindel slots configured.</p></div>';
     for (var i = 0; i < ds.length; i++) html += buildISpindelCard(i, ds[i]);
     byId('t4').innerHTML = html;
-  }).catch(function (e) {
-    byId('t4').innerHTML = '<div class="card"><p style="color:#f44">Error loading iSpindel data: ' + escHtml(e) + '</p></div>';
-  });
+    loadDone(4);
+  }).catch(function (e) { loadFailed(4, e); });
 }
 
 // Build a single iSpindel slot card. Shows live readings if present, plus per-slot config.
