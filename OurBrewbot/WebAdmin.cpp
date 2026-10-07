@@ -1935,8 +1935,7 @@ function togglePause() {
   paused = !paused;
   byId('rfbtn').textContent = paused ? '▶' : '⏸';
   if (paused) {
-    if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = null;
+    stopRefresh();
   } else {
     refreshStart = Date.now();
     startRefresh();
@@ -1953,9 +1952,36 @@ function startRefresh() {
     if (!dirty && !loadBusy) loadTab();
   }, REFRESH_MS);
 }
+
+// Stop the auto refresh.
+function stopRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = null;
+}
+
+// ---- PAUSE WHILE HIDDEN ----
+// A phone freezes a page in the background, and a desktop browser slows its
+// timers to once a minute, so a background tab only ever shows old data. Stop
+// the auto refresh while the page is hidden, and reload the active tab as soon
+// as it is shown again.
+function resumeRefresh() {
+  if (paused || refreshTimer) return;   // paused by the user, or already running
+  refreshStart = Date.now();
+  if (!dirty) loadTab();
+  startRefresh();
+}
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden) stopRefresh();
+  else resumeRefresh();
+});
+// persisted = the browser has brought this page back from its back/forward cache.
+window.addEventListener('pageshow', function (e) {
+  if (e.persisted) resumeRefresh();
+});
+
 refreshStart = Date.now();
 loadTab();
-startRefresh();
+if (!document.hidden) startRefresh();
 setInterval(updateBar, 100);
 document.body.addEventListener('focusin', function (e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') markDirty();
