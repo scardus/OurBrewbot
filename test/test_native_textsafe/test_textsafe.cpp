@@ -190,6 +190,54 @@ void test_copy_into_a_one_byte_field_is_just_the_nul(void) {
   TEST_ASSERT_EQUAL_CHAR('\0', one[0]);
 }
 
+// ============================================================
+// isValidBaseTopic()
+// ============================================================
+
+// The base topic field is char[32] in MqttConfig.
+static const size_t kTopicField = 32;
+
+void test_base_topic_plain_name_is_valid(void) {
+  TEST_ASSERT_TRUE(isValidBaseTopic("ourbrewbot", kTopicField));
+}
+
+void test_base_topic_may_have_levels_spaces_and_accents(void) {
+  TEST_ASSERT_TRUE(isValidBaseTopic("home/brewery", kTopicField));
+  TEST_ASSERT_TRUE(isValidBaseTopic("brew bot", kTopicField));
+  TEST_ASSERT_TRUE(isValidBaseTopic("bi\xC3\xA8re", kTopicField));
+}
+
+void test_base_topic_must_not_be_empty(void) {
+  TEST_ASSERT_FALSE(isValidBaseTopic("", kTopicField));
+}
+
+void test_base_topic_must_fit_the_field_whole(void) {
+  TEST_ASSERT_TRUE (isValidBaseTopic("abcdefghijklmnopqrstuvwxyz12345", kTopicField));   // 31
+  TEST_ASSERT_FALSE(isValidBaseTopic("abcdefghijklmnopqrstuvwxyz123456", kTopicField));  // 32
+}
+
+void test_base_topic_must_not_hold_a_wildcard(void) {
+  TEST_ASSERT_FALSE(isValidBaseTopic("brew/+", kTopicField));
+  TEST_ASSERT_FALSE(isValidBaseTopic("brew/#", kTopicField));
+  TEST_ASSERT_FALSE(isValidBaseTopic("a+b", kTopicField));
+}
+
+void test_base_topic_must_not_start_with_a_dollar(void) {
+  TEST_ASSERT_FALSE(isValidBaseTopic("$SYS", kTopicField));
+  TEST_ASSERT_TRUE (isValidBaseTopic("brew$", kTopicField));   // only the first character
+}
+
+void test_base_topic_must_not_hold_control_characters(void) {
+  TEST_ASSERT_FALSE(isValidBaseTopic("brew\tbot", kTopicField));
+  TEST_ASSERT_FALSE(isValidBaseTopic("brew\nbot", kTopicField));
+  TEST_ASSERT_FALSE(isValidBaseTopic("brew\x7F", kTopicField));
+}
+
+void test_base_topic_must_be_valid_utf8(void) {
+  TEST_ASSERT_FALSE(isValidBaseTopic("brew\xFF", kTopicField));
+  TEST_ASSERT_FALSE(isValidBaseTopic("brew\xC3", kTopicField));
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -214,6 +262,15 @@ int main(int argc, char** argv) {
   RUN_TEST(test_copy_replaces_a_character_already_cut_in_half);
   RUN_TEST(test_copy_of_empty_text);
   RUN_TEST(test_copy_into_a_one_byte_field_is_just_the_nul);
+
+  RUN_TEST(test_base_topic_plain_name_is_valid);
+  RUN_TEST(test_base_topic_may_have_levels_spaces_and_accents);
+  RUN_TEST(test_base_topic_must_not_be_empty);
+  RUN_TEST(test_base_topic_must_fit_the_field_whole);
+  RUN_TEST(test_base_topic_must_not_hold_a_wildcard);
+  RUN_TEST(test_base_topic_must_not_start_with_a_dollar);
+  RUN_TEST(test_base_topic_must_not_hold_control_characters);
+  RUN_TEST(test_base_topic_must_be_valid_utf8);
 
   return UNITY_END();
 }

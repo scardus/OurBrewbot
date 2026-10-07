@@ -1123,6 +1123,71 @@ static void test_fs_save_rejects_a_lookalike_path(void) {
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
 }
 
+// ============================================================
+// handleMqttConfigPost - base topic checks
+// ============================================================
+
+static void seedMqttConfig(void) {
+  g_mqttConfig.enabled = false;
+  g_mqttConfig.port    = 1883;
+  strlcpy(g_mqttConfig.host,      "old.host",   sizeof(g_mqttConfig.host));
+  strlcpy(g_mqttConfig.baseTopic, "ourbrewbot", sizeof(g_mqttConfig.baseTopic));
+}
+
+// The fields before the bad one in the body must not have been applied.
+static void assertMqttConfigUnchanged(void) {
+  TEST_ASSERT_FALSE(g_mqttConfig.enabled);
+  TEST_ASSERT_EQUAL_UINT16(1883, g_mqttConfig.port);
+  TEST_ASSERT_EQUAL_STRING("old.host",   g_mqttConfig.host);
+  TEST_ASSERT_EQUAL_STRING("ourbrewbot", g_mqttConfig.baseTopic);
+}
+
+static void test_mqtt_post_rejects_an_unusable_base_topic_and_changes_nothing(void) {
+  // A wildcard makes the broker drop the connection on every publish, '$' is
+  // the broker's own, and a topic too long for its field used to be cut short,
+  // quietly moving every topic. None of them is saved, and neither is anything
+  // else in the same body.
+  const char* bad[] = {
+    "", "brew/+", "brew/#", "$SYS", "brew\tbot", "brew\xFF",
+    "abcdefghijklmnopqrstuvwxyz123456",   // 32 bytes - one too many
+  };
+  for (size_t k = 0; k < sizeof(bad) / sizeof(bad[0]); k++) {
+    seedMqttConfig();
+    JsonDocument body;
+    body["enabled"]   = true;
+    body["host"]      = "new.host";
+    body["port"]      = 1884;
+    body["baseTopic"] = bad[k];
+    static char json[256];
+    serializeJson(body, json, sizeof(json));
+    httpRespReset();
+    postBody(json);
+    handleMqttConfigPost(srv);
+
+    TEST_ASSERT_EQUAL_INT_MESSAGE(400, g_httpResp.code, bad[k]);
+    TEST_ASSERT_TRUE_MESSAGE(bodyContains("Base topic"), bad[k]);
+    assertMqttConfigUnchanged();
+  }
+}
+
+static void test_mqtt_post_rejected_port_changes_nothing(void) {
+  // The port was always checked, but only after enabled and host had already
+  // been applied to the live config.
+  seedMqttConfig();
+  postBody("{\"enabled\":true,\"host\":\"new.host\",\"port\":70000}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  assertMqttConfigUnchanged();
+}
+
+static void test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces(void) {
+  seedMqttConfig();
+  postBody("{\"baseTopic\":\"home/brew bot/12345678901234567\"}");   // 31 bytes
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("home/brew bot/12345678901234567", g_mqttConfig.baseTopic);
+}
+
 static void test_fs_save_rejects_an_empty_body(void) {
   srv.setArg("name", "/jsonGlobal.txt");
   srv.setBody("");
@@ -1814,6 +1879,9 @@ int main(int, char**) {
   RUN_TEST(test_fs_file_accepts_a_name_without_a_leading_slash);
   RUN_TEST(test_fs_save_rejects_a_path_outside_the_whitelist);
   RUN_TEST(test_fs_save_rejects_a_lookalike_path);
+  RUN_TEST(test_mqtt_post_rejects_an_unusable_base_topic_and_changes_nothing);
+  RUN_TEST(test_mqtt_post_rejected_port_changes_nothing);
+  RUN_TEST(test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces);
   RUN_TEST(test_fs_save_rejects_an_empty_body);
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);
   RUN_TEST(test_fs_save_writes_a_whitelisted_file);

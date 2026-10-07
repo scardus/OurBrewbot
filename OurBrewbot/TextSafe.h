@@ -42,3 +42,15 @@ size_t utf8CharLength(const unsigned char* s);
 //    accented e half way through the e, leaving an invalid byte at the end.
 // The result is always NUL terminated. dst and src must not overlap.
 void copyText(char* dst, const char* src, size_t size);
+
+// True if topic can be used as the MQTT base topic, the start of every topic
+// the firmware publishes and subscribes to. fieldSize is the size of the field
+// it will be stored in (the NUL needs one byte of it). It must be:
+//  - not empty, and short enough to fit the field whole - cutting it would
+//    quietly move every topic;
+//  - free of '+' and '#': they are wildcards, and a publish to a topic holding
+//    one makes the broker drop the connection;
+//  - not starting with '$', which is reserved for the broker's own topics;
+//  - free of control characters, and valid UTF-8, which MQTT requires.
+// '/' is allowed (e.g. "home/brewery"), and so are spaces.
+bool isValidBaseTopic(const char* topic, size_t fieldSize);

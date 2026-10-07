@@ -1465,26 +1465,32 @@ void handleMqttConfig(ESP8266WebServer& server) {
 void handleMqttConfigPost(ESP8266WebServer& server) {
   JsonDocument doc;
   if (!parseJsonBody(server, doc)) return;
-  if (!doc["enabled"].isNull())          g_mqttConfig.enabled = doc["enabled"];
-  if (doc["host"].is<const char*>())     copyText(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
+
+  // Check every value before changing anything, so a rejected save leaves the
+  // live config exactly as it was.
+  uint32_t port = 0;
   if (!doc["port"].isNull()) {
-    uint32_t port = doc["port"];
+    port = doc["port"];
     if (port < 1 || port > 65535) {
       sendErr(server, 400, F("port out of range (1-65535)"));
       return;
     }
-    g_mqttConfig.port = (uint16_t)port;
   }
-  if (doc["username"].is<const char*>()) copyText(g_mqttConfig.username, doc["username"].as<const char*>(), sizeof(g_mqttConfig.username));
-  if (doc["password"].is<const char*>()) copyText(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
+  const char* baseTopic = nullptr;
   if (doc["baseTopic"].is<const char*>()) {
-    const char* bt = doc["baseTopic"].as<const char*>();
-    if (bt[0] == '\0') {
-      sendErr(server, 400, F("baseTopic cannot be empty"));
+    baseTopic = doc["baseTopic"].as<const char*>();
+    if (!isValidBaseTopic(baseTopic, sizeof(g_mqttConfig.baseTopic))) {
+      sendErr(server, 400, F("Base topic must be 1 to 31 bytes long, without +, # or control characters, and must not start with $"));
       return;
     }
-    copyText(g_mqttConfig.baseTopic, bt, sizeof(g_mqttConfig.baseTopic));
   }
+
+  if (!doc["enabled"].isNull())          g_mqttConfig.enabled = doc["enabled"];
+  if (doc["host"].is<const char*>())     copyText(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
+  if (!doc["port"].isNull())             g_mqttConfig.port = (uint16_t)port;
+  if (doc["username"].is<const char*>()) copyText(g_mqttConfig.username, doc["username"].as<const char*>(), sizeof(g_mqttConfig.username));
+  if (doc["password"].is<const char*>()) copyText(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
+  if (baseTopic != nullptr)              copyText(g_mqttConfig.baseTopic, baseTopic, sizeof(g_mqttConfig.baseTopic));
   if (!doc["haDiscovery"].isNull()) {
     bool newHa = doc["haDiscovery"];
     if (g_mqttConfig.haDiscovery && !newHa) cleanupAllHaDiscovery();

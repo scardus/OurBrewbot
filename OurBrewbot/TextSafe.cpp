@@ -74,3 +74,20 @@ void copyText(char* dst, const char* src, size_t size) {
   }
   dst[j] = '\0';
 }
+
+bool isValidBaseTopic(const char* topic, size_t fieldSize) {
+  size_t len = strlen(topic);
+  if (len == 0 || len >= fieldSize) return false;
+  if (topic[0] == '$') return false;
+  for (size_t i = 0; i < len; i++) {
+    unsigned char c = (unsigned char)topic[i];
+    if (c == '+' || c == '#') return false;
+    if (c < 0x20 || c == 0x7F) return false;   // control characters
+    if (c >= 0x80) {
+      size_t n = utf8CharLength((const unsigned char*)topic + i);
+      if (n == 0) return false;
+      i += n - 1;   // the loop's i++ moves past the last byte
+    }
+  }
+  return true;
+}
