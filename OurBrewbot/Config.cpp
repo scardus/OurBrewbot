@@ -835,6 +835,15 @@ bool loadMqttConfig() {
     return false;
   }
   cfgLoadScalar(doc, &g_mqttConfig, kMqttFields, CFG_COUNT(kMqttFields));
+  // POST /mqtt now refuses a base topic the broker can't use, but one saved by
+  // older firmware or imported from a file would make every publish fail, so
+  // it is repaired here as well.
+  if (g_mqttConfig.baseTopic[0] == '\0') {
+    strlcpy(g_mqttConfig.baseTopic, "ourbrewbot", sizeof(g_mqttConfig.baseTopic));
+    logMsg("[CFG] MQTT base topic was empty - using ourbrewbot");
+  } else if (makeBaseTopicSafe(g_mqttConfig.baseTopic)) {
+    logMsg("[CFG] MQTT base topic had characters MQTT cannot use - changed to %s", g_mqttConfig.baseTopic);
+  }
   return true;
 }
 

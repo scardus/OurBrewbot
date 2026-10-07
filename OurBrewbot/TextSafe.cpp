@@ -91,3 +91,19 @@ bool isValidBaseTopic(const char* topic, size_t fieldSize) {
   }
   return true;
 }
+
+bool makeBaseTopicSafe(char* topic) {
+  bool changed = false;
+  if (topic[0] == '$') {
+    topic[0] = '_';
+    changed = true;
+  }
+  for (char* p = topic; *p != '\0'; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c == '+' || c == '#' || c < 0x20 || c == 0x7F) {
+      *p = '_';
+      changed = true;
+    }
+  }
+  return changed;
+}

@@ -238,6 +238,42 @@ void test_base_topic_must_be_valid_utf8(void) {
   TEST_ASSERT_FALSE(isValidBaseTopic("brew\xC3", kTopicField));
 }
 
+// ============================================================
+// makeBaseTopicSafe()
+// ============================================================
+
+void test_make_safe_leaves_a_working_topic_alone(void) {
+  char topic[32] = "home/brew bot/bi\xC3\xA8re";
+  TEST_ASSERT_FALSE(makeBaseTopicSafe(topic));
+  TEST_ASSERT_EQUAL_STRING("home/brew bot/bi\xC3\xA8re", topic);
+}
+
+void test_make_safe_replaces_wildcards(void) {
+  char topic[32] = "brew/+/#";
+  TEST_ASSERT_TRUE(makeBaseTopicSafe(topic));
+  TEST_ASSERT_EQUAL_STRING("brew/_/_", topic);
+}
+
+void test_make_safe_replaces_only_a_leading_dollar(void) {
+  char topic[32] = "$brew$";
+  TEST_ASSERT_TRUE(makeBaseTopicSafe(topic));
+  TEST_ASSERT_EQUAL_STRING("_brew$", topic);
+}
+
+void test_make_safe_replaces_control_characters(void) {
+  char topic[32] = "brew\tbot\x7F";
+  TEST_ASSERT_TRUE(makeBaseTopicSafe(topic));
+  TEST_ASSERT_EQUAL_STRING("brew_bot_", topic);
+}
+
+void test_make_safe_result_passes_the_save_check(void) {
+  // Whatever a stored topic held, once repaired it is one POST /mqtt would
+  // accept (the loader has already made it valid UTF-8 and non-empty).
+  char topic[32] = "$a+b#c\x01" "d";
+  makeBaseTopicSafe(topic);
+  TEST_ASSERT_TRUE(isValidBaseTopic(topic, sizeof(topic)));
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -271,6 +307,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_base_topic_must_not_start_with_a_dollar);
   RUN_TEST(test_base_topic_must_not_hold_control_characters);
   RUN_TEST(test_base_topic_must_be_valid_utf8);
+
+  RUN_TEST(test_make_safe_leaves_a_working_topic_alone);
+  RUN_TEST(test_make_safe_replaces_wildcards);
+  RUN_TEST(test_make_safe_replaces_only_a_leading_dollar);
+  RUN_TEST(test_make_safe_replaces_control_characters);
+  RUN_TEST(test_make_safe_result_passes_the_save_check);
 
   return UNITY_END();
 }

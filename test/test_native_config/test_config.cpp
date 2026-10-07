@@ -260,6 +260,26 @@ void test_null_json_value_falls_back_to_the_declared_default(void) {
   TEST_ASSERT_EQUAL_STRING("ourbrewbot", g_mqttConfig.baseTopic);
 }
 
+void test_unusable_stored_base_topic_is_repaired_on_load(void) {
+  // Saved before POST /mqtt checked it, or imported from a file: every
+  // publish under it would fail, so the characters MQTT can't use become '_'.
+  fsTestWrite(FILE_MQTT, "{\"baseTopic\":\"$brew/+/#\"}");
+  TEST_ASSERT_TRUE(loadMqttConfig());
+  TEST_ASSERT_EQUAL_STRING("_brew/_/_", g_mqttConfig.baseTopic);
+}
+
+void test_empty_stored_base_topic_falls_back_to_the_default(void) {
+  fsTestWrite(FILE_MQTT, "{\"baseTopic\":\"\"}");
+  TEST_ASSERT_TRUE(loadMqttConfig());
+  TEST_ASSERT_EQUAL_STRING("ourbrewbot", g_mqttConfig.baseTopic);
+}
+
+void test_working_stored_base_topic_is_loaded_unchanged(void) {
+  fsTestWrite(FILE_MQTT, "{\"baseTopic\":\"home/brew bot\"}");
+  TEST_ASSERT_TRUE(loadMqttConfig());
+  TEST_ASSERT_EQUAL_STRING("home/brew bot", g_mqttConfig.baseTopic);
+}
+
 void test_oversized_string_is_truncated_to_the_member_size(void) {
   // SyslogConfig::host is char[64]; the copy must clamp rather than overflow
   // into the adjacent members.
@@ -893,6 +913,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_missing_keys_fall_back_to_the_declared_defaults);
   RUN_TEST(test_wrong_json_type_falls_back_to_the_declared_default);
   RUN_TEST(test_null_json_value_falls_back_to_the_declared_default);
+  RUN_TEST(test_unusable_stored_base_topic_is_repaired_on_load);
+  RUN_TEST(test_empty_stored_base_topic_falls_back_to_the_default);
+  RUN_TEST(test_working_stored_base_topic_is_loaded_unchanged);
   RUN_TEST(test_oversized_string_is_truncated_to_the_member_size);
   RUN_TEST(test_stored_text_is_made_valid_utf8_on_load);
   RUN_TEST(test_saved_key_order_matches_the_declared_table);

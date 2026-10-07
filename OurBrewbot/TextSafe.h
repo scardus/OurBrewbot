@@ -54,3 +54,11 @@ void copyText(char* dst, const char* src, size_t size);
 //  - free of control characters, and valid UTF-8, which MQTT requires.
 // '/' is allowed (e.g. "home/brewery"), and so are spaces.
 bool isValidBaseTopic(const char* topic, size_t fieldSize);
+
+// Repair a stored base topic in place, for one saved before the checks above
+// existed or imported from a file: '+', '#', control characters and a leading
+// '$' each become '_'. Only characters that could never have worked are
+// changed, so a topic that was already working stays exactly as it is. Expects
+// valid UTF-8 (the config loader's copyText() has seen to that); an empty
+// topic is left for the caller to replace. Returns true if anything changed.
+bool makeBaseTopicSafe(char* topic);
