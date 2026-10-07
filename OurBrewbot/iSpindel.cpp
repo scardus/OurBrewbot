@@ -25,8 +25,8 @@
 #include "iSpindel.h"
 #include "Log.h"
 #include "StackProbe.h"
+#include "TextSafe.h"
 #include <ArduinoJson.h>
-#include <ctype.h>
 #include <math.h>
 
 // Normalise an incoming temperature to Celsius, which is what the rest of the
@@ -135,19 +135,6 @@ static const char* gravityUnitName(uint8_t unit) {
 // POST /iSpindel — iSpindel sends: name, ID, temperature, gravity, battery, RSSI
 // ============================================================
 
-// The device ID becomes part of MQTT topic names ({base}/iSpindel/{id}/...)
-// and of the Home Assistant discovery topics. A '+' or '#' there is a wildcard
-// the broker answers by dropping the connection, a '/' splits the topic, and
-// Home Assistant ignores discovery topics holding anything outside letters,
-// digits, '_' and '-'. Real devices send a number (iSpindel) or hex text
-// (GravityMon), so any other character is replaced with '_' rather than
-// throwing the reading away.
-static void makeIdTopicSafe(char* id) {
-  for (; *id != '\0'; id++) {
-    if (!isalnum((unsigned char)*id) && *id != '_' && *id != '-') *id = '_';
-  }
-}
-
 // The JSON parser needs several hundred bytes of loop stack. While it was part
 // of handleiSpindelPost() that space stayed in use for the whole function -
 // including the long log line at the end, whose syslog send was the deepest
@@ -168,7 +155,7 @@ bool __attribute__((noinline)) parseiSpindelBody(const String& body, iSpindelRea
   // is converted to text whichever it is. A missing ID is checked for first:
   // as<String>() would turn it into the text "null", which every device
   // without an ID would then share.
-  strlcpy(out.name,        doc["name"]         | "", sizeof(out.name));
+  copyText(out.name,        doc["name"]         | "", sizeof(out.name));
   if (doc["ID"].isNull()) {
     out.id[0] = '\0';
   } else {
@@ -176,7 +163,7 @@ bool __attribute__((noinline)) parseiSpindelBody(const String& body, iSpindelRea
     makeIdTopicSafe(out.id);
   }
   out.temperature        = doc["temperature"]  | 0.0f;
-  strlcpy(out.tempUnits,   doc["temp_units"]   | "", sizeof(out.tempUnits));
+  copyText(out.tempUnits,   doc["temp_units"]   | "", sizeof(out.tempUnits));
   out.interval           = doc["interval"]     | 0;
   out.gravity            = doc["gravity"]      | 0.0f;
   out.battery            = doc["battery"]      | 0.0f;
@@ -185,7 +172,7 @@ bool __attribute__((noinline)) parseiSpindelBody(const String& body, iSpindelRea
   out.velocity           = doc["velocity"]     | 0.0f;
   out.corrGravity        = doc["corr-gravity"] | 0.0f;
   out.runTime            = doc["run-time"]     | 0.0f;
-  strlcpy(out.gravityUnit, doc["gravity-unit"] | "", sizeof(out.gravityUnit));
+  copyText(out.gravityUnit, doc["gravity-unit"] | "", sizeof(out.gravityUnit));
   return true;
 }
 

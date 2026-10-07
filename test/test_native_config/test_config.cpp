@@ -47,6 +47,7 @@ void test_setMillis(uint32_t ms) { s_millis = ms; }
 void logMsgImpl(uint8_t, PGM_P, ...) {}
 
 // The code under test.
+#include "../../OurBrewbot/TextSafe.cpp"
 #include "../../OurBrewbot/Config.cpp"
 
 // ---- test fixture ----
@@ -259,8 +260,28 @@ void test_null_json_value_falls_back_to_the_declared_default(void) {
   TEST_ASSERT_EQUAL_STRING("ourbrewbot", g_mqttConfig.baseTopic);
 }
 
+void test_unusable_stored_base_topic_is_repaired_on_load(void) {
+  // Saved before POST /mqtt checked it, or imported from a file: every
+  // publish under it would fail, so the characters MQTT can't use become '_'.
+  fsTestWrite(FILE_MQTT, "{\"baseTopic\":\"$brew/+/#\"}");
+  TEST_ASSERT_TRUE(loadMqttConfig());
+  TEST_ASSERT_EQUAL_STRING("_brew/_/_", g_mqttConfig.baseTopic);
+}
+
+void test_empty_stored_base_topic_falls_back_to_the_default(void) {
+  fsTestWrite(FILE_MQTT, "{\"baseTopic\":\"\"}");
+  TEST_ASSERT_TRUE(loadMqttConfig());
+  TEST_ASSERT_EQUAL_STRING("ourbrewbot", g_mqttConfig.baseTopic);
+}
+
+void test_working_stored_base_topic_is_loaded_unchanged(void) {
+  fsTestWrite(FILE_MQTT, "{\"baseTopic\":\"home/brew bot\"}");
+  TEST_ASSERT_TRUE(loadMqttConfig());
+  TEST_ASSERT_EQUAL_STRING("home/brew bot", g_mqttConfig.baseTopic);
+}
+
 void test_oversized_string_is_truncated_to_the_member_size(void) {
-  // SyslogConfig::host is char[64]; strlcpy must clamp rather than overflow
+  // SyslogConfig::host is char[64]; the copy must clamp rather than overflow
   // into the adjacent members.
   char json[256];
   char host[200];
@@ -272,6 +293,20 @@ void test_oversized_string_is_truncated_to_the_member_size(void) {
   TEST_ASSERT_TRUE(loadSyslogConfig());
   TEST_ASSERT_EQUAL_INT(63, (int)strlen(g_syslogConfig.host));  // sizeof - 1
   TEST_ASSERT_EQUAL_UINT16(515, g_syslogConfig.port);           // next field intact
+}
+
+void test_stored_text_is_made_valid_utf8_on_load(void) {
+  // Older firmware cut long names with strlcpy(), which could stop half way
+  // through an accented character, and an imported file can hold any bytes.
+  // Either way the name went out raw in the API's JSON and broke strict
+  // readers, so it is made valid UTF-8 as it loads: a broken byte becomes '?'.
+  fsTestWrite(FILE_FERMENTER,
+              "{\"FermenterName\":[\"F\xFF\",\"b\",\"c\",\"d\"],"
+              "\"BeerName\":[\"Weisse\xC3\",\"Bi\xC3\xA8re\",\"y\",\"z\"]}");
+  TEST_ASSERT_TRUE(loadFermenterConfig());
+  TEST_ASSERT_EQUAL_STRING("F?",              g_fermenters[0].fermenterName);
+  TEST_ASSERT_EQUAL_STRING("Weisse?",         g_fermenters[0].beerName);
+  TEST_ASSERT_EQUAL_STRING("Bi\xC3\xA8re",    g_fermenters[1].beerName);  // valid: kept
 }
 
 void test_saved_key_order_matches_the_declared_table(void) {
@@ -687,6 +722,18 @@ void test_ispindel_absent_function_defaults_to_beer_for_legacy_configs(void) {
   TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_iSpindels[0].function);
 }
 
+void test_ispindel_stored_ids_are_made_topic_safe_on_load(void) {
+  // An ID stored before 0.5.1, or imported, can hold characters that break
+  // MQTT topics. The same rule as for incoming readings is applied, so a
+  // normal ID is untouched and the device's next reading still matches.
+  fsTestWrite(FILE_ISPINDEL, "{\"ID\":[\"a+b#c/d\",\"9b5c5e\",\"\",\"C2cc-7C_01\"]}");
+  TEST_ASSERT_TRUE(loadiSpindelConfig());
+  TEST_ASSERT_EQUAL_STRING("a_b_c_d",    g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_STRING("9b5c5e",     g_iSpindels[1].id);
+  TEST_ASSERT_EQUAL_STRING("",           g_iSpindels[2].id);
+  TEST_ASSERT_EQUAL_STRING("C2cc-7C_01", g_iSpindels[3].id);
+}
+
 void test_profile_steps_load_returns_false_without_touching_state(void) {
   // loadProfileSteps has no default initialiser - a missing file must leave the
   // in-memory steps alone rather than half-clearing them.
@@ -878,7 +925,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_missing_keys_fall_back_to_the_declared_defaults);
   RUN_TEST(test_wrong_json_type_falls_back_to_the_declared_default);
   RUN_TEST(test_null_json_value_falls_back_to_the_declared_default);
+  RUN_TEST(test_unusable_stored_base_topic_is_repaired_on_load);
+  RUN_TEST(test_empty_stored_base_topic_falls_back_to_the_default);
+  RUN_TEST(test_working_stored_base_topic_is_loaded_unchanged);
   RUN_TEST(test_oversized_string_is_truncated_to_the_member_size);
+  RUN_TEST(test_stored_text_is_made_valid_utf8_on_load);
   RUN_TEST(test_saved_key_order_matches_the_declared_table);
   RUN_TEST(test_array_files_hold_one_array_per_field_with_one_element_per_slot);
 
@@ -922,6 +973,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_probe_load_mirrors_temperature_into_the_raw_reading);
   RUN_TEST(test_ispindel_legacy_function_values_collapse_to_unassigned);
   RUN_TEST(test_ispindel_absent_function_defaults_to_beer_for_legacy_configs);
+  RUN_TEST(test_ispindel_stored_ids_are_made_topic_safe_on_load);
   RUN_TEST(test_profile_steps_load_returns_false_without_touching_state);
   RUN_TEST(test_profile_steps_round_trip_across_all_slots);
 

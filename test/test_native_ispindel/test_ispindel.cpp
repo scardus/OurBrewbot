@@ -55,6 +55,7 @@ static int s_saveCalls = 0;
 bool saveiSpindelConfig() { s_saveCalls++; return true; }
 
 // The functions under test, plus everything else in iSpindel.cpp.
+#include "../../OurBrewbot/TextSafe.cpp"
 #include "../../OurBrewbot/iSpindel.cpp"
 
 // ---- test fixture ----
@@ -575,6 +576,19 @@ void test_parse_makes_the_id_safe_for_mqtt_topics(void) {
   TEST_ASSERT_EQUAL_STRING("a_b_c_d_e_f", r.id);
 }
 
+void test_parse_keeps_the_name_valid_utf8(void) {
+  // The name goes into the web API's JSON and MQTT discovery. A long name is
+  // cut before a character that won't fit whole (the field is 24 bytes, so 23
+  // fit: 22 letters, then a 2-byte e acute would need 24), and an invalid byte
+  // from a garbled payload becomes '?'.
+  iSpindelReading r;
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"iSpindel-in-the-cellar\xC3\xA9\",\"ID\":\"1\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("iSpindel-in-the-cellar", r.name);
+
+  TEST_ASSERT_TRUE(parseiSpindelBody(String("{\"name\":\"Spin\xFF\",\"ID\":\"1\"}"), r));
+  TEST_ASSERT_EQUAL_STRING("Spin?", r.name);
+}
+
 void test_unsafe_id_matches_its_slot_without_resaving(void) {
   // The same unsafe ID is made safe the same way on every POST, so the device
   // keeps matching its slot instead of looking "changed" each time.
@@ -666,6 +680,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_parse_missing_id_reads_as_empty);
   RUN_TEST(test_parse_keeps_a_normal_id_as_sent);
   RUN_TEST(test_parse_makes_the_id_safe_for_mqtt_topics);
+  RUN_TEST(test_parse_keeps_the_name_valid_utf8);
   RUN_TEST(test_unsafe_id_matches_its_slot_without_resaving);
   RUN_TEST(test_impossible_optional_fields_are_dropped);
   RUN_TEST(test_realistic_optional_fields_are_kept);

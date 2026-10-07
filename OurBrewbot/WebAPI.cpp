@@ -33,6 +33,7 @@
 #include "Crash.h"
 #include "StackCheck.h"
 #include "StackProbe.h"
+#include "TextSafe.h"
 
 // Forward refs to global server (defined in .ino)
 extern ESP8266WebServer g_webServer;
@@ -524,9 +525,9 @@ void handleFermenter(ESP8266WebServer& server) {
 
         if (!doc["Power"].isNull())           fc.power           = doc["Power"];
         if (!doc["TempControl"].isNull())     fc.tempControl     = doc["TempControl"];
-        if (doc["BeerName"].is<const char*>())      strlcpy(fc.beerName,      doc["BeerName"].as<const char*>(),      sizeof(fc.beerName));
-        if (doc["FermenterName"].is<const char*>()) strlcpy(fc.fermenterName, doc["FermenterName"].as<const char*>(), sizeof(fc.fermenterName));
-        if (doc["YeastName"].is<const char*>())     strlcpy(fc.yeastName,     doc["YeastName"].as<const char*>(),     sizeof(fc.yeastName));
+        if (doc["BeerName"].is<const char*>())      copyText(fc.beerName,      doc["BeerName"].as<const char*>(),      sizeof(fc.beerName));
+        if (doc["FermenterName"].is<const char*>()) copyText(fc.fermenterName, doc["FermenterName"].as<const char*>(), sizeof(fc.fermenterName));
+        if (doc["YeastName"].is<const char*>())     copyText(fc.yeastName,     doc["YeastName"].as<const char*>(),     sizeof(fc.yeastName));
         if (!doc["BrewServices"].isNull())    fc.brewServices    = doc["BrewServices"];
         if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"]; if (v >= 0 && v <= MAX_PROFILES) fc.profileNo = (uint8_t)v; }
         if (!doc["LiveTest"].isNull())        fc.liveTest        = doc["LiveTest"];
@@ -666,7 +667,7 @@ void handleController(ESP8266WebServer& server) {
       if (!doc["CrashReports"].isNull())  g_globalConfig.crashReports  = doc["CrashReports"];
       if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
       if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
-      if (doc["BrewServiceId"].is<const char*>()) strlcpy(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
+      if (doc["BrewServiceId"].is<const char*>()) copyText(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
       saveGlobalConfig();
       // HA discovery advertises the temperature unit — republish so entities
       // pick up the new unit (retained topics are overwritten in place).
@@ -1118,8 +1119,8 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
   if (idx < 0) return;
   if (!doc["function"].isNull())     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           g_smartPlugs[idx].function    = v; }
   if (!doc["fermenter"].isNull())    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_smartPlugs[idx].fermenter   = v; }
-  if (doc["manufacturer"].is<const char*>()) strlcpy(g_smartPlugs[idx].manufacturer, doc["manufacturer"].as<const char*>(), sizeof(g_smartPlugs[0].manufacturer));
-  if (doc["model"].is<const char*>())        strlcpy(g_smartPlugs[idx].model,         doc["model"].as<const char*>(),         sizeof(g_smartPlugs[0].model));
+  if (doc["manufacturer"].is<const char*>()) copyText(g_smartPlugs[idx].manufacturer, doc["manufacturer"].as<const char*>(), sizeof(g_smartPlugs[0].manufacturer));
+  if (doc["model"].is<const char*>())        copyText(g_smartPlugs[idx].model,         doc["model"].as<const char*>(),         sizeof(g_smartPlugs[0].model));
   if (!doc["onCode"].isNull())       g_smartPlugs[idx].onCode      = doc["onCode"];
   if (!doc["offCode"].isNull())      g_smartPlugs[idx].offCode     = doc["offCode"];
   if (!doc["protocol"].isNull())     { uint8_t v = doc["protocol"]; if (v >= 1)              g_smartPlugs[idx].protocol    = v; }
@@ -1411,8 +1412,8 @@ void handleBrewServicesPost(ESP8266WebServer& server) {
   int idx = getValidIndex(server, doc, "index", MAX_BREW_SERVICES, F("Invalid service index"));
   if (idx < 0) return;
   if (!doc["enabled"].isNull())    g_brewServices[idx].enabled = doc["enabled"];
-  if (doc["serviceId"].is<const char*>())  strlcpy(g_brewServices[idx].serviceId,  doc["serviceId"].as<const char*>(),  sizeof(g_brewServices[0].serviceId));
-  if (doc["deviceName"].is<const char*>()) strlcpy(g_brewServices[idx].deviceName, doc["deviceName"].as<const char*>(), sizeof(g_brewServices[0].deviceName));
+  if (doc["serviceId"].is<const char*>())  copyText(g_brewServices[idx].serviceId,  doc["serviceId"].as<const char*>(),  sizeof(g_brewServices[0].serviceId));
+  if (doc["deviceName"].is<const char*>()) copyText(g_brewServices[idx].deviceName, doc["deviceName"].as<const char*>(), sizeof(g_brewServices[0].deviceName));
   saveBrewServiceConfig();
   sendOk(server, F("Brew service saved"));
 }
@@ -1464,26 +1465,32 @@ void handleMqttConfig(ESP8266WebServer& server) {
 void handleMqttConfigPost(ESP8266WebServer& server) {
   JsonDocument doc;
   if (!parseJsonBody(server, doc)) return;
-  if (!doc["enabled"].isNull())          g_mqttConfig.enabled = doc["enabled"];
-  if (doc["host"].is<const char*>())     strlcpy(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
+
+  // Check every value before changing anything, so a rejected save leaves the
+  // live config exactly as it was.
+  uint32_t port = 0;
   if (!doc["port"].isNull()) {
-    uint32_t port = doc["port"];
+    port = doc["port"];
     if (port < 1 || port > 65535) {
       sendErr(server, 400, F("port out of range (1-65535)"));
       return;
     }
-    g_mqttConfig.port = (uint16_t)port;
   }
-  if (doc["username"].is<const char*>()) strlcpy(g_mqttConfig.username, doc["username"].as<const char*>(), sizeof(g_mqttConfig.username));
-  if (doc["password"].is<const char*>()) strlcpy(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
+  const char* baseTopic = nullptr;
   if (doc["baseTopic"].is<const char*>()) {
-    const char* bt = doc["baseTopic"].as<const char*>();
-    if (bt[0] == '\0') {
-      sendErr(server, 400, F("baseTopic cannot be empty"));
+    baseTopic = doc["baseTopic"].as<const char*>();
+    if (!isValidBaseTopic(baseTopic, sizeof(g_mqttConfig.baseTopic))) {
+      sendErr(server, 400, F("Base topic must be 1 to 31 bytes long, without +, # or control characters, and must not start with $"));
       return;
     }
-    strlcpy(g_mqttConfig.baseTopic, bt, sizeof(g_mqttConfig.baseTopic));
   }
+
+  if (!doc["enabled"].isNull())          g_mqttConfig.enabled = doc["enabled"];
+  if (doc["host"].is<const char*>())     copyText(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
+  if (!doc["port"].isNull())             g_mqttConfig.port = (uint16_t)port;
+  if (doc["username"].is<const char*>()) copyText(g_mqttConfig.username, doc["username"].as<const char*>(), sizeof(g_mqttConfig.username));
+  if (doc["password"].is<const char*>()) copyText(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
+  if (baseTopic != nullptr)              copyText(g_mqttConfig.baseTopic, baseTopic, sizeof(g_mqttConfig.baseTopic));
   if (!doc["haDiscovery"].isNull()) {
     bool newHa = doc["haDiscovery"];
     if (g_mqttConfig.haDiscovery && !newHa) cleanupAllHaDiscovery();
@@ -1581,7 +1588,7 @@ void handleProfilePost(ESP8266WebServer& server) {
   int idx = getValidIndex(server, doc, "index", MAX_PROFILES, F("Invalid profile index"));
   if (idx < 0) return;
   if (doc["name"].is<const char*>()) {
-    strlcpy(g_profiles[idx].profileName, doc["name"].as<const char*>(), sizeof(g_profiles[0].profileName));
+    copyText(g_profiles[idx].profileName, doc["name"].as<const char*>(), sizeof(g_profiles[0].profileName));
   }
   if (!doc["steps"].isNull()) {
     JsonArray steps = doc["steps"];
@@ -1834,7 +1841,7 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
   JsonDocument doc;
   if (!parseJsonBody(server, doc)) return;
   if (!doc["enabled"].isNull())  g_syslogConfig.enabled  = doc["enabled"];
-  if (doc["host"].is<const char*>()) strlcpy(g_syslogConfig.host, doc["host"].as<const char*>(), sizeof(g_syslogConfig.host));
+  if (doc["host"].is<const char*>()) copyText(g_syslogConfig.host, doc["host"].as<const char*>(), sizeof(g_syslogConfig.host));
   if (!doc["port"].isNull()) {
     uint32_t port = doc["port"];
     if (port < 1 || port > 65535) {

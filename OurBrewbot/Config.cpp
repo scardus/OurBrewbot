@@ -29,6 +29,7 @@
 
 #include "Config.h"
 #include "Log.h"
+#include "TextSafe.h"
 #include <user_interface.h>     // rst_info struct, REASON_EXCEPTION_RST
 #include <cstddef>              // offsetof
 #include <type_traits>
@@ -137,8 +138,11 @@ static void cfgLoadField(void* obj, const CfgField& f, JsonVariantConst v) {
   void* p = (uint8_t*)obj + f.offset;
   switch (f.type) {
     case CT_STR: {
+      // copyText() rather than strlcpy(): a name saved by older firmware may
+      // end in half a character, and an imported file can hold anything, so
+      // the text is made valid UTF-8 again as it is loaded.
       const char* s = v.as<const char*>();
-      strlcpy((char*)p, s ? s : (f.defStr ? f.defStr : ""), f.strSize);
+      copyText((char*)p, s ? s : (f.defStr ? f.defStr : ""), f.strSize);
       break;
     }
     case CT_BOOL:  *(bool*)p     = v | (f.defNum != 0.0f);  break;
@@ -688,6 +692,15 @@ bool loadiSpindelConfig() {
       g_iSpindels[i].function = PROBE_UNASSIGNED;
     }
   }
+  // IDs from incoming readings have been made topic-safe since 0.5.1, but one
+  // stored before that, or imported from a file, would be published under
+  // until the device next reported. The same rule is applied here, so the
+  // device's next reading still matches its slot.
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    if (makeIdTopicSafe(g_iSpindels[i].id)) {
+      logMsg("[CFG] iSpindel slot %d: ID had characters MQTT cannot use - changed to %s", i, g_iSpindels[i].id);
+    }
+  }
   return true;
 }
 
@@ -798,12 +811,12 @@ bool loadBrewServiceConfig() {
   // Detect old 3-slot config (BF, Monitor Beer, Brewfather) and remap to 2-slot
   if (doc["Enabled"].size() == 3) {
     g_brewServices[0].enabled = doc["Enabled"][0] | false;
-    strlcpy(g_brewServices[0].serviceId, doc["ServiceId"][0] | "", sizeof(g_brewServices[0].serviceId));
-    strlcpy(g_brewServices[0].deviceName, doc["DeviceName"][0] | "OurBrewbot", sizeof(g_brewServices[0].deviceName));
+    copyText(g_brewServices[0].serviceId, doc["ServiceId"][0] | "", sizeof(g_brewServices[0].serviceId));
+    copyText(g_brewServices[0].deviceName, doc["DeviceName"][0] | "OurBrewbot", sizeof(g_brewServices[0].deviceName));
     // Old slot 1 was Monitor Beer (removed); old slot 2 was Brewfather → new slot 1
     g_brewServices[1].enabled = doc["Enabled"][2] | false;
-    strlcpy(g_brewServices[1].serviceId, doc["ServiceId"][2] | "", sizeof(g_brewServices[1].serviceId));
-    strlcpy(g_brewServices[1].deviceName, doc["DeviceName"][2] | "OurBrewbot", sizeof(g_brewServices[1].deviceName));
+    copyText(g_brewServices[1].serviceId, doc["ServiceId"][2] | "", sizeof(g_brewServices[1].serviceId));
+    copyText(g_brewServices[1].deviceName, doc["DeviceName"][2] | "OurBrewbot", sizeof(g_brewServices[1].deviceName));
     logMsg("[CFG] Migrated 3-slot brew service config to 2-slot (Monitor Beer removed)");
     saveBrewServiceConfig();
   } else {
@@ -831,6 +844,15 @@ bool loadMqttConfig() {
     return false;
   }
   cfgLoadScalar(doc, &g_mqttConfig, kMqttFields, CFG_COUNT(kMqttFields));
+  // POST /mqtt now refuses a base topic the broker can't use, but one saved by
+  // older firmware or imported from a file would make every publish fail, so
+  // it is repaired here as well.
+  if (g_mqttConfig.baseTopic[0] == '\0') {
+    strlcpy(g_mqttConfig.baseTopic, "ourbrewbot", sizeof(g_mqttConfig.baseTopic));
+    logMsg("[CFG] MQTT base topic was empty - using ourbrewbot");
+  } else if (makeBaseTopicSafe(g_mqttConfig.baseTopic)) {
+    logMsg("[CFG] MQTT base topic had characters MQTT cannot use - changed to %s", g_mqttConfig.baseTopic);
+  }
   return true;
 }
 

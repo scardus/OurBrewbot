@@ -89,6 +89,7 @@ UpdateStatus g_updateStatus;
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"
 #include "../../OurBrewbot/MqttParse.cpp"
+#include "../../OurBrewbot/TextSafe.cpp"
 #include "../../OurBrewbot/Mqtt.cpp"
 
 // ============================================================
@@ -1351,6 +1352,15 @@ void test_inbound_rejected_value_is_not_stored(void) {
   assertNotPublished(F0_BASE "/profile_no");
 }
 
+void test_inbound_name_is_stored_as_valid_utf8(void) {
+  // An MQTT payload is raw bytes. A name is stored the same way as one from
+  // the WebUI: an invalid byte becomes '?', so it can't break the JSON the
+  // name goes into later.
+  g_mqttConfig.allowControl = true;
+  mqttTestInject(BASE "/Fermenter0/beer_name/set", "Ale \xFF");
+  TEST_ASSERT_EQUAL_STRING("Ale ?", g_fermenters[F0].beerName);
+}
+
 void test_mqtt_loop_only_runs_while_connected(void) {
   g_mqttTest.loopCount = 0;
   mqttLoop();
@@ -1503,6 +1513,7 @@ int main(int, char**) {
   RUN_TEST(test_inbound_command_ignored_when_control_is_disabled);
   RUN_TEST(test_inbound_switch_command_applies_and_echoes);
   RUN_TEST(test_inbound_rejected_value_is_not_stored);
+  RUN_TEST(test_inbound_name_is_stored_as_valid_utf8);
   RUN_TEST(test_mqtt_loop_only_runs_while_connected);
   RUN_TEST(test_failed_connect_backs_off_before_retrying);
   RUN_TEST(test_successful_connect_resets_the_backoff);
