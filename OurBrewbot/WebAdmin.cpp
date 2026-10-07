@@ -537,6 +537,22 @@ function showMsg(id, t, ok) {
   }
 }
 
+// GET a URL and parse the reply as JSON, giving up after FETCH_TIMEOUT_MS.
+// Without a time limit a request lost on a sleeping phone's connection never
+// finishes, and the tab waiting for it stays blank until the page is reloaded.
+var FETCH_TIMEOUT_MS = 8000;
+function getJson(url) {
+  var ctl = new AbortController();
+  var timer = setTimeout(function () { ctl.abort(); }, FETCH_TIMEOUT_MS);
+  return fetch(url, { signal: ctl.signal })
+    .then(function (r) { return r.json(); })
+    .catch(function (e) {
+      if (e.name == 'AbortError') throw new Error('no reply from ' + url + ' after ' + (FETCH_TIMEOUT_MS / 1000) + ' s');
+      throw e;
+    })
+    .finally(function () { clearTimeout(timer); });
+}
+
 // Confirm with the user, then clear WiFi credentials and reboot into the setup portal.
 function resetWiFiSettings() {
   if (!confirm('Are you sure you want to clear WiFi settings? The controller will reboot and reopen the setup portal.')) return;
@@ -631,11 +647,11 @@ var tempUnit = 'C';
 // Fetch brew-services / MQTT / fermenters / profiles / debug in parallel, then render fermenter cards.
 function loadFermenters() {
   Promise.all([
-    fetch('/brewservices').then(function (r) { return r.json(); }),
-    fetch('/mqtt').then(function (r) { return r.json(); }),
-    fetch('/fermenters').then(function (r) { return r.json(); }),
-    fetch('/profiles').then(function (r) { return r.json(); }),
-    fetch('/debug').then(function (r) { return r.json(); })
+    getJson('/brewservices'),
+    getJson('/mqtt'),
+    getJson('/fermenters'),
+    getJson('/profiles'),
+    getJson('/debug')
   ]).then(function (res) {
     brewServices = res[0].services || [];
     mqttEnabled = res[1].enabled;
@@ -956,8 +972,8 @@ function loadProfilesFromState() {
 // Fetch profiles + fermenters, build per-profile edit state, then render.
 function loadProfiles() {
   Promise.all([
-    fetch('/profiles').then(function (r) { return r.json(); }),
-    fetch('/fermenters').then(function (r) { return r.json(); })
+    getJson('/profiles'),
+    getJson('/fermenters')
   ]).then(function (res) {
     var d = res[0];
     var ferms = res[1] || [];
@@ -1035,7 +1051,7 @@ function fermOpts(sel) {
 
 // Fetch all detected probes and render an editable row per probe.
 function loadProbes() {
-  fetch('/probes').then(function (r) { return r.json(); }).then(function (d) {
+  getJson('/probes').then(function (d) {
     var p = d.probes;
     var html = '<div class="card"><table class="tbl"><tr><th>Address</th><th>Temp</th><th>Name</th><th>Function</th><th>Fermenter</th><th>Adjust</th><th></th></tr>';
     if (p.length == 0) html += '<tr><td colspan="7" style="color:#888">No probes detected. Connect DS18B20 probes to the Green Jack.</td></tr>';
@@ -1161,7 +1177,7 @@ function applyPreset(i) {
 
 // Fetch all smart plugs and render an editable card per plug.
 function loadPlugs() {
-  fetch('/smartplugs').then(function (r) { return r.json(); }).then(function (d) {
+  getJson('/smartplugs').then(function (d) {
     var p = d.plugs || [];
     var html = '';
     for (var i = 0; i < p.length; i++) {
@@ -1257,8 +1273,8 @@ function mqttSummary(mq) {
 // Render the Reporting tab: Services section (BF / BFR / MQTT).
 function loadReporting() {
   Promise.all([
-    fetch('/brewservices').then(function (r) { return r.json(); }),
-    fetch('/mqtt').then(function (r) { return r.json(); })
+    getJson('/brewservices'),
+    getJson('/mqtt')
   ]).then(function (res) {
     var svcs = res[0].services || [];
     var mq = res[1];
@@ -1329,10 +1345,10 @@ function checkFwUpdate() {
 // Render the System Settings tab: globals, syslog, system info, action buttons, file browser.
 function loadSystemSettings() {
   Promise.all([
-    fetch('/controller').then(function (r) { return r.json(); }),
-    fetch('/fs/files').then(function (r) { return r.json(); }),
-    fetch('/syslog').then(function (r) { return r.json(); }),
-    fetch('/debug').then(function (r) { return r.json(); })
+    getJson('/controller'),
+    getJson('/fs/files'),
+    getJson('/syslog'),
+    getJson('/debug')
   ]).then(function (res) {
     var d = res[0], fs = res[1], sl = res[2], dbg = res[3];
     var syslogFacilities = [
@@ -1533,7 +1549,7 @@ function tiltFnOpts(sel) {
 
 // Render the Tilts tab — one card per colour slot, marked Active for any Tilts seen by BLE.
 function loadTilts() {
-  fetch('/tilts').then(function (r) { return r.json(); }).then(function (d) {
+  getJson('/tilts').then(function (d) {
     var ts = d.tilts || [];
     var html = '';
     if (ts.length == 0) {
@@ -1609,7 +1625,7 @@ var iSpindelUnitNames = { 0: 'SG', 1: 'Plato' };
 
 // Render the iSpindels tab — one card per configured slot.
 function loadISpindels() {
-  fetch('/ispindels').then(function (r) { return r.json(); }).then(function (d) {
+  getJson('/ispindels').then(function (d) {
     var ds = d.ispindels || [];
     var html = '';
     if (ds.length == 0) html = '<div class="card"><p style="color:#888">No iSpindel slots configured.</p></div>';
