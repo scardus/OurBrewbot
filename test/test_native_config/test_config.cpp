@@ -47,6 +47,7 @@ void test_setMillis(uint32_t ms) { s_millis = ms; }
 void logMsgImpl(uint8_t, PGM_P, ...) {}
 
 // The code under test.
+#include "../../OurBrewbot/TextSafe.cpp"
 #include "../../OurBrewbot/Config.cpp"
 
 // ---- test fixture ----
@@ -260,7 +261,7 @@ void test_null_json_value_falls_back_to_the_declared_default(void) {
 }
 
 void test_oversized_string_is_truncated_to_the_member_size(void) {
-  // SyslogConfig::host is char[64]; strlcpy must clamp rather than overflow
+  // SyslogConfig::host is char[64]; the copy must clamp rather than overflow
   // into the adjacent members.
   char json[256];
   char host[200];
@@ -272,6 +273,20 @@ void test_oversized_string_is_truncated_to_the_member_size(void) {
   TEST_ASSERT_TRUE(loadSyslogConfig());
   TEST_ASSERT_EQUAL_INT(63, (int)strlen(g_syslogConfig.host));  // sizeof - 1
   TEST_ASSERT_EQUAL_UINT16(515, g_syslogConfig.port);           // next field intact
+}
+
+void test_stored_text_is_made_valid_utf8_on_load(void) {
+  // Older firmware cut long names with strlcpy(), which could stop half way
+  // through an accented character, and an imported file can hold any bytes.
+  // Either way the name went out raw in the API's JSON and broke strict
+  // readers, so it is made valid UTF-8 as it loads: a broken byte becomes '?'.
+  fsTestWrite(FILE_FERMENTER,
+              "{\"FermenterName\":[\"F\xFF\",\"b\",\"c\",\"d\"],"
+              "\"BeerName\":[\"Weisse\xC3\",\"Bi\xC3\xA8re\",\"y\",\"z\"]}");
+  TEST_ASSERT_TRUE(loadFermenterConfig());
+  TEST_ASSERT_EQUAL_STRING("F?",              g_fermenters[0].fermenterName);
+  TEST_ASSERT_EQUAL_STRING("Weisse?",         g_fermenters[0].beerName);
+  TEST_ASSERT_EQUAL_STRING("Bi\xC3\xA8re",    g_fermenters[1].beerName);  // valid: kept
 }
 
 void test_saved_key_order_matches_the_declared_table(void) {
@@ -879,6 +894,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_wrong_json_type_falls_back_to_the_declared_default);
   RUN_TEST(test_null_json_value_falls_back_to_the_declared_default);
   RUN_TEST(test_oversized_string_is_truncated_to_the_member_size);
+  RUN_TEST(test_stored_text_is_made_valid_utf8_on_load);
   RUN_TEST(test_saved_key_order_matches_the_declared_table);
   RUN_TEST(test_array_files_hold_one_array_per_field_with_one_element_per_slot);
 

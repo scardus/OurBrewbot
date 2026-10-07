@@ -51,6 +51,7 @@ void logMsgImpl(uint8_t, PGM_P, ...) {}
 // Config.cpp is #included directly (not linked) so the real production
 // source is what runs. It also defines every g_* config global, so nothing
 // else has to.
+#include "../../OurBrewbot/TextSafe.cpp"
 #include "../../OurBrewbot/Config.cpp"
 
 static const char* const PRIMARY = "/test_cfg.txt";
