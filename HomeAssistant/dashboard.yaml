@@ -175,10 +175,13 @@ views:
                   shape: spline
               - entity: number.ourbrewbot_f0_tg
                 name: TG
+                yaxis: y2
               - entity: number.ourbrewbot_f0_og
                 name: OG
+                yaxis: y2
               - entity: sensor.ourbrewbot_f0_gravity
                 name: SG
+                yaxis: y2
                 statistic: mean
                 period: auto
                 line:
@@ -188,9 +191,13 @@ views:
             refresh_interval: 10
             layout:
               yaxis:
-                title: Temperature
+                title:
+                  text: Temperature
               yaxis2:
-                title: Gravity
+                title:
+                  text: Gravity
+                overlaying: 'y'
+                side: right
               xaxis:
                 rangeselector:
                   'y': 1.2
@@ -447,10 +454,13 @@ views:
                   shape: spline
               - entity: number.ourbrewbot_f1_tg
                 name: TG
+                yaxis: y2
               - entity: number.ourbrewbot_f1_og
                 name: OG
+                yaxis: y2
               - entity: sensor.ourbrewbot_f1_gravity
                 name: SG
+                yaxis: y2
                 statistic: mean
                 period: auto
                 line:
@@ -460,9 +470,13 @@ views:
             refresh_interval: 10
             layout:
               yaxis:
-                title: Temperature
+                title:
+                  text: Temperature
               yaxis2:
-                title: Gravity
+                title:
+                  text: Gravity
+                overlaying: 'y'
+                side: right
               xaxis:
                 rangeselector:
                   'y': 1.2
@@ -719,10 +733,13 @@ views:
                   shape: spline
               - entity: number.ourbrewbot_f2_tg
                 name: TG
+                yaxis: y2
               - entity: number.ourbrewbot_f2_og
                 name: OG
+                yaxis: y2
               - entity: sensor.ourbrewbot_f2_gravity
                 name: SG
+                yaxis: y2
                 statistic: mean
                 period: auto
                 line:
@@ -732,9 +749,13 @@ views:
             refresh_interval: 10
             layout:
               yaxis:
-                title: Temperature
+                title:
+                  text: Temperature
               yaxis2:
-                title: Gravity
+                title:
+                  text: Gravity
+                overlaying: 'y'
+                side: right
               xaxis:
                 rangeselector:
                   'y': 1.2
@@ -991,10 +1012,13 @@ views:
                   shape: spline
               - entity: number.ourbrewbot_f3_tg
                 name: TG
+                yaxis: y2
               - entity: number.ourbrewbot_f3_og
                 name: OG
+                yaxis: y2
               - entity: sensor.ourbrewbot_f3_gravity
                 name: SG
+                yaxis: y2
                 statistic: mean
                 period: auto
                 line:
@@ -1004,9 +1028,13 @@ views:
             refresh_interval: 10
             layout:
               yaxis:
-                title: Temperature
+                title:
+                  text: Temperature
               yaxis2:
-                title: Gravity
+                title:
+                  text: Gravity
+                overlaying: 'y'
+                side: right
               xaxis:
                 rangeselector:
                   'y': 1.2
