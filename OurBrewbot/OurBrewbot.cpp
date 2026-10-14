@@ -349,6 +349,8 @@ void loop() {
       if (now - g_lastUptimeTime >= INTERVAL_UPTIME_MS) {
         g_lastUptimeTime = now;
         g_globalConfig.lastUptime++;
+        // WiFi signal for the crash record (see crashNoteRssi in Crash.h)
+        crashNoteRssi(WiFi.isConnected() ? WiFi.RSSI() : 0);
       }
       break;
 

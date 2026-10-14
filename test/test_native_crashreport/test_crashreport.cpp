@@ -80,6 +80,9 @@ static void stageException() {
   for (int i = 0; i < CRASH_STACK_WORDS; i++) g_lastCrash.stack[i] = 0x40201000 + i;
   g_lastCrash.stackFree     = 924;
   strcpy(g_lastCrash.stackAt, "WEB /iSpindel");
+  g_lastCrash.uptimeSec     = 7260;
+  g_lastCrash.freeHeap      = 17480;
+  g_lastCrash.rssi          = -63;
 }
 
 static void stageWatchdog() {
@@ -146,6 +149,23 @@ static void test_report_carries_the_full_register_frame(void) {
   TEST_ASSERT_EQUAL_STRING("40201017", doc["stack"][23].as<const char*>());
   TEST_ASSERT_EQUAL_INT(924, doc["stack_free"].as<int>());
   TEST_ASSERT_EQUAL_STRING("WEB /iSpindel", doc["stack_at"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(7260,  doc["uptime"].as<int>());
+  TEST_ASSERT_EQUAL_INT(17480, doc["heap"].as<int>());
+  TEST_ASSERT_EQUAL_INT(-63,   doc["rssi"].as<int>());
+}
+
+// 0 means loop() never passed a signal strength in - leave it out rather
+// than report a perfect 0 dBm
+static void test_unknown_rssi_is_left_out(void) {
+  stageException();
+  g_lastCrash.rssi = 0;
+  char out[768];
+  TEST_ASSERT_TRUE(buildCrashReportJson(g_lastCrash, out, sizeof(out)));
+
+  JsonDocument doc;
+  deserializeJson(doc, out);
+  TEST_ASSERT_TRUE(doc["rssi"].isNull());
+  TEST_ASSERT_EQUAL_INT(7260, doc["uptime"].as<int>());   // the rest still sent
 }
 
 // The website accepts at most 2048 bytes; keep well clear of it
@@ -154,6 +174,9 @@ static void test_a_full_report_is_well_under_the_website_limit(void) {
   for (int i = 0; i < CRASH_STACK_WORDS; i++) g_lastCrash.stack[i] = 0xFFFFFFFF;
   g_lastCrash.stackFree = 4096;
   memset(g_lastCrash.stackAt, 'x', sizeof(g_lastCrash.stackAt) - 1);   // longest possible
+  g_lastCrash.uptimeSec = 0xFFFFFFFF;
+  g_lastCrash.freeHeap  = 0xFFFFFFFF;
+  g_lastCrash.rssi      = -128;
   char out[768];
   TEST_ASSERT_TRUE(buildCrashReportJson(g_lastCrash, out, sizeof(out)));
   TEST_ASSERT_LESS_THAN(700, (int)strlen(out));
@@ -172,6 +195,7 @@ static void test_watchdog_report_has_no_registers_or_stack(void) {
   TEST_ASSERT_TRUE(doc["epc1"].isNull());
   TEST_ASSERT_TRUE(doc["stack"].isNull());
   TEST_ASSERT_TRUE(doc["stack_free"].isNull());
+  TEST_ASSERT_TRUE(doc["uptime"].isNull());
 }
 
 static void test_report_that_does_not_fit_is_refused(void) {
@@ -266,6 +290,7 @@ int main(int argc, char** argv) {
   UNITY_BEGIN();
 
   RUN_TEST(test_report_carries_the_full_register_frame);
+  RUN_TEST(test_unknown_rssi_is_left_out);
   RUN_TEST(test_a_full_report_is_well_under_the_website_limit);
   RUN_TEST(test_watchdog_report_has_no_registers_or_stack);
   RUN_TEST(test_report_that_does_not_fit_is_refused);

@@ -37,8 +37,10 @@
 namespace {
 
 constexpr uint32_t CRASH_OFFSET      = 0;        // dword offset 0
-constexpr uint32_t CHECKPOINT_OFFSET = 43;       // dword offset 43 (past CrashRecord)
-constexpr uint32_t CRASH_MAGIC       = 0xC0FFEE42u;
+constexpr uint32_t CHECKPOINT_OFFSET = 46;       // dword offset 46 (past CrashRecord)
+// Changed whenever CrashRecord's layout changes, so a record written by older
+// firmware just before an update is ignored rather than misread.
+constexpr uint32_t CRASH_MAGIC       = 0xC0FFEE43u;
 constexpr uint32_t CP_MAGIC          = 0xC0DECA11u;
 constexpr size_t   STACK_WORDS       = CRASH_STACK_WORDS;
 
@@ -58,6 +60,9 @@ struct CrashRecord {
   uint32_t stackFree;                    // least loop stack left since boot (StackCheck.cpp)
   uint32_t stackModule;                  // the CP_* id that took it there, 0xFF = setup
   char     stackWhere[STACK_WHERE_LEN];  // e.g. the web URL, "" if none
+  uint32_t uptimeSec;                    // millis() / 1000 at the crash
+  uint32_t freeHeap;                     // ESP.getFreeHeap() at the crash
+  int32_t  rssi;                         // last value passed to crashNoteRssi()
 };
 
 struct CheckpointRecord {
@@ -66,7 +71,7 @@ struct CheckpointRecord {
 };
 
 static_assert(sizeof(CrashRecord) % 4 == 0, "RTC writes must be 4-byte aligned");
-static_assert(sizeof(CrashRecord)      == 43 * 4, "CrashRecord size pins CHECKPOINT_OFFSET");
+static_assert(sizeof(CrashRecord)      == 46 * 4, "CrashRecord size pins CHECKPOINT_OFFSET");
 static_assert(sizeof(CheckpointRecord) % 4 == 0, "RTC writes must be 4-byte aligned");
 static_assert(sizeof(CrashRecord) + sizeof(CheckpointRecord) <= 512,
               "RTC user memory is 512 bytes total");
@@ -75,6 +80,10 @@ static_assert(sizeof(CrashRecord) + sizeof(CheckpointRecord) <= 512,
 // context) reads it. Initialised to a value outside the enum so the first
 // checkpoint() call always writes.
 volatile uint8_t s_lastModule = 0xFF;
+
+// WiFi signal strength from loop(), for the crash record. `volatile` for the
+// same reason as s_lastModule.
+volatile int32_t s_lastRssi = 0;
 
 const char* const MODULE_NAMES[] = {
   "INIT",        // CP_INIT
@@ -137,6 +146,13 @@ uint8_t checkpointCurrent() {
   return s_lastModule;
 }
 
+// Called from loop() in OurBrewbot.cpp - same cross-file blind spot as
+// checkpoint() below.
+// cppcheck-suppress unusedFunction
+void crashNoteRssi(int32_t rssi) {
+  s_lastRssi = rssi;
+}
+
 // Called from loop() in OurBrewbot.cpp, which cppcheck does not connect to
 // this definition - hence the suppression rather than a real removal.
 // cppcheck-suppress unusedFunction
@@ -197,6 +213,9 @@ void crashLogPendingDeferred() {
     logMsgL(SYSLOG_ERR,
             "DEFERRED [SYS] Loop stack low: %u bytes left, after %s",
             crashRec.stackFree, stackAt);
+    logMsgL(SYSLOG_ERR,
+            "DEFERRED [SYS] At the crash: uptime %u s, free heap %u bytes, WiFi RSSI %d dBm",
+            crashRec.uptimeSec, crashRec.freeHeap, (int)crashRec.rssi);
     // Keep a copy for the crash report (CrashReport.cpp) before clearing it
     memset(&g_lastCrash, 0, sizeof(g_lastCrash));
     g_lastCrash.valid         = true;
@@ -215,6 +234,9 @@ void crashLogPendingDeferred() {
     memcpy(g_lastCrash.stack, crashRec.stack, sizeof(g_lastCrash.stack));
     g_lastCrash.stackFree     = crashRec.stackFree;
     strlcpy(g_lastCrash.stackAt, stackAt, sizeof(g_lastCrash.stackAt));
+    g_lastCrash.uptimeSec     = crashRec.uptimeSec;
+    g_lastCrash.freeHeap      = crashRec.freeHeap;
+    g_lastCrash.rssi          = crashRec.rssi;
 
     uint32_t zero = 0;
     ESP.rtcUserMemoryWrite(CRASH_OFFSET, &zero, sizeof(zero));
@@ -299,6 +321,11 @@ extern "C" void custom_crash_callback(struct rst_info* info,
   stackLowest(rec.stackFree, stackModule, stackWhere);
   rec.stackModule = stackModule;
   strlcpy(rec.stackWhere, stackWhere, sizeof(rec.stackWhere));
+
+  // Plain reads only - nothing here may call into the WiFi driver
+  rec.uptimeSec = millis() / 1000;
+  rec.freeHeap  = ESP.getFreeHeap();
+  rec.rssi      = s_lastRssi;
 
   ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
 }

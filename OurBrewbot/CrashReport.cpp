@@ -81,6 +81,12 @@ bool buildCrashReportJson(const CrashInfo& crash, char* out, size_t outSize) {
     // How close the loop stack came to overflowing before the crash
     doc["stack_free"] = crash.stackFree;
     doc["stack_at"]   = crash.stackAt;
+
+    // The device's state at the crash, to tell device-specific problems
+    // (weak WiFi, low memory) from firmware ones
+    doc["uptime"] = crash.uptimeSec;
+    doc["heap"]   = crash.freeHeap;
+    if (crash.rssi < 0) doc["rssi"] = crash.rssi;   // 0 = not known
   }
 
   if (measureJson(doc) + 1 > outSize) return false;
