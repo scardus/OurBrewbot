@@ -1161,14 +1161,28 @@ void handleSmartPlugTest(ESP8266WebServer& server) {
 // RF SNIFFER — capture codes from remotes via MX-RM-5V receiver
 // ============================================================
 
-static bool s_sniffActive = false;
+// The receiver is only switched on while the sniffer page is open: the page
+// polls every 500 ms, and checkRFSniffTimeout() switches it off again once the
+// polls stop. Normal running only ever transmits.
+static unsigned long s_rfSniffLastPoll = 0;
+
+// Called from main loop to switch the receiver off after 10s of no polls
+void checkRFSniffTimeout() {
+  if (g_rfSniffActive && millis() - s_rfSniffLastPoll > 10000) {
+    g_rcSwitch.disableReceive();
+    g_rfSniffActive = false;
+    logMsg("[RF] Sniffer closed - receiver off");
+  }
+}
 
 void handleRFSniffPoll(ESP8266WebServer& server) {
   // Start receiver if not already running
-  if (!s_sniffActive) {
+  if (!g_rfSniffActive) {
     g_rcSwitch.enableReceive(digitalPinToInterrupt(PIN_RF_RECEIVE));
-    s_sniffActive = true;
+    g_rfSniffActive = true;
+    logMsg("[RF] Sniffer open - receiver on");
   }
+  s_rfSniffLastPoll = millis();
 
   JsonDocument doc;
   if (g_rcSwitch.available()) {
@@ -1238,9 +1252,6 @@ static const char RF_SNIFF_PAGE[] PROGMEM =
     "</body></html>";
 
 void handleRFSniff(ESP8266WebServer& server) {
-  // Stop receiver when leaving (will restart on poll)
-  s_sniffActive = false;
-
   server.setContentLength(strlen_P(RF_SNIFF_PAGE));
   server.send(200, "text/html", "");
   server.sendContent_P(RF_SNIFF_PAGE);

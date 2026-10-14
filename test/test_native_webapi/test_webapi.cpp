@@ -100,6 +100,7 @@ void handleAdmin(ESP8266WebServer&) {}
 // endpoint can be checked without an RCSwitch.
 static int s_rfTransmits = 0;
 void rfTransmit(uint32_t, uint8_t, uint16_t, uint8_t) { s_rfTransmits++; }
+bool g_rfSniffActive = false;
 
 // OurBrewbot.cpp - restartDevice() sends the mDNS goodbye, then restarts.
 // Recorded so the reboot endpoints can be checked without restarting anything.
@@ -164,6 +165,9 @@ void setUp(void) {
   clientTestSetConnected(true);
   s_millis      = 1000000;
   s_rfTransmits = 0;
+  rcTestReset();
+  g_rfSniffActive   = false;
+  s_rfSniffLastPoll = 0;
   s_restarts       = 0;
   s_lastForgetWiFi = false;
 
@@ -1373,6 +1377,47 @@ static void test_smartplug_test_refuses_when_no_code_is_configured(void) {
 }
 
 // ============================================================
+// RF sniffer - the receiver is on only while the page is polling
+// ============================================================
+
+static void test_rf_sniffer_poll_switches_the_receiver_on(void) {
+  handleRFSniffPoll(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(g_rfTest.receiveEnabled);
+  TEST_ASSERT_TRUE(g_rfSniffActive);
+}
+
+static void test_rf_sniffer_stays_on_while_the_page_keeps_polling(void) {
+  handleRFSniffPoll(srv);
+  for (int i = 0; i < 40; i++) {   // 20 s of polls every 500 ms
+    s_millis += 500;
+    handleRFSniffPoll(srv);
+    checkRFSniffTimeout();
+  }
+  TEST_ASSERT_TRUE(g_rfTest.receiveEnabled);
+  TEST_ASSERT_TRUE(g_rfSniffActive);
+}
+
+static void test_rf_sniffer_switches_the_receiver_off_10s_after_the_last_poll(void) {
+  handleRFSniffPoll(srv);
+  s_millis += 10000;
+  checkRFSniffTimeout();
+  TEST_ASSERT_TRUE(g_rfTest.receiveEnabled);    // exactly 10 s - not yet
+  s_millis += 1;
+  checkRFSniffTimeout();
+  TEST_ASSERT_FALSE(g_rfTest.receiveEnabled);
+  TEST_ASSERT_FALSE(g_rfSniffActive);
+}
+
+// Opening the page itself doesn't switch the receiver on - only its polls do
+static void test_rf_sniffer_page_alone_leaves_the_receiver_off(void) {
+  handleRFSniff(srv);
+  checkRFSniffTimeout();
+  TEST_ASSERT_FALSE(g_rfTest.receiveEnabled);
+  TEST_ASSERT_FALSE(g_rfSniffActive);
+}
+
+// ============================================================
 // RESTARTS GO THROUGH restartDevice() (0.4.14)
 //
 // A bare ESP.restart() skips the mDNS goodbye, leaving phones and PCs holding
@@ -1905,6 +1950,10 @@ int main(int, char**) {
   RUN_TEST(test_smartplug_post_requires_a_valid_index);
   RUN_TEST(test_smartplug_test_transmits_the_selected_code);
   RUN_TEST(test_smartplug_test_refuses_when_no_code_is_configured);
+  RUN_TEST(test_rf_sniffer_poll_switches_the_receiver_on);
+  RUN_TEST(test_rf_sniffer_stays_on_while_the_page_keeps_polling);
+  RUN_TEST(test_rf_sniffer_switches_the_receiver_off_10s_after_the_last_poll);
+  RUN_TEST(test_rf_sniffer_page_alone_leaves_the_receiver_off);
 
   // Restarts go through restartDevice() (0.4.14)
   RUN_TEST(test_reboot_restarts_through_restart_device);

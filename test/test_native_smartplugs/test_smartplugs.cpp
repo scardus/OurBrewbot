@@ -71,6 +71,7 @@ void setUp(void) {
     s_plugState[i]  = false;
   }
   rcTestReset();
+  g_rfSniffActive = false;
 }
 
 void tearDown(void) {}
@@ -161,10 +162,20 @@ static void test_transmit_repeats_ten_times_on_the_configured_pin(void) {
   TEST_ASSERT_EQUAL_INT(PIN_RF_TRANSMIT, g_rfTest.lastTransmitPin);
 }
 
-// The receiver is muted for the duration of the burst so the sniffer doesn't
-// hear our own transmission, then switched back on.
-static void test_receiver_is_re_enabled_after_the_burst(void) {
+// Normal running only transmits. Before 0.6.3 every transmit switched the
+// receiver on, so an idle receiver's noise interrupted the CPU from then on.
+static void test_receiver_stays_off_after_the_burst(void) {
   configurePlug(P);
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_FALSE(g_rfTest.receiveEnabled);
+  TEST_ASSERT_FALSE(g_rfTest.transmitEnabled);
+}
+
+// While the RF sniffer page is open the receiver is muted for the burst, so
+// the sniffer doesn't hear our own transmission, then switched back on.
+static void test_receiver_is_re_enabled_after_the_burst_while_sniffing(void) {
+  configurePlug(P);
+  g_rfSniffActive = true;
   smartPlugSwitch(P, true);
   TEST_ASSERT_TRUE(g_rfTest.receiveEnabled);
   TEST_ASSERT_FALSE(g_rfTest.transmitEnabled);
@@ -227,7 +238,8 @@ int main(int, char**) {
   RUN_TEST(test_on_and_off_select_their_own_codes);
   RUN_TEST(test_rf_parameters_reach_the_transmitter_unmodified);
   RUN_TEST(test_transmit_repeats_ten_times_on_the_configured_pin);
-  RUN_TEST(test_receiver_is_re_enabled_after_the_burst);
+  RUN_TEST(test_receiver_stays_off_after_the_burst);
+  RUN_TEST(test_receiver_is_re_enabled_after_the_burst_while_sniffing);
 
   RUN_TEST(test_state_defaults_to_off);
   RUN_TEST(test_state_follows_a_successful_switch);

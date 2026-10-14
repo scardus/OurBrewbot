@@ -25,6 +25,10 @@
 // RCSwitch instance (defined in SmartPlugs.cpp)
 extern RCSwitch g_rcSwitch;
 
+// True while the RF sniffer page is polling (set in WebAPI.cpp). The receiver
+// is only switched on then.
+extern bool g_rfSniffActive;
+
 // Transmit RF code to switch a plug on or off
 void smartPlugSwitch(uint8_t plugIndex, bool on);
 

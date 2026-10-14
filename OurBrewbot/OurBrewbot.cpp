@@ -229,6 +229,7 @@ void loop() {
   tcpClearTimeWait();   // must run every pass - see TcpCleanup.cpp
   STACK_PROBE_IRQ_SAMPLE();   // diagnostic build only - see StackProbe.cpp
   checkpoint(CP_BLE);          checkBLESniffTimeout();
+                               checkRFSniffTimeout();
   checkpoint(CP_TILT);         serviceTilt();   // drain any in-flight BLE scan every pass
   // mDNS runs entirely from here now (see MicroMDNS.h). The heap gate and
   // ESP.wdtFeed() that used to wrap this call were both dead weight: the old
