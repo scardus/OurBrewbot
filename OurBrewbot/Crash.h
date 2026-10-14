@@ -42,6 +42,7 @@
  */
 
 #include <stdint.h>
+#include "FirstFault.h"
 
 // Subsystem IDs for the main-loop checkpoint breadcrumb. New entries MUST
 // be appended (existing values are persisted in RTC across a reset and
@@ -86,6 +87,8 @@ struct CrashInfo {
   uint32_t uptimeSec;        // how long the device had been running, in seconds
   uint32_t freeHeap;         // free heap at the moment of the crash, in bytes
   int32_t  rssi;             // WiFi signal in dBm shortly before the crash, 0 if unknown
+  bool       haveFirstFault; // firstFault is filled in (see FirstFault.h)
+  FirstFault firstFault;     // the CPU exception that started the crash
 };
 
 extern CrashInfo g_lastCrash;

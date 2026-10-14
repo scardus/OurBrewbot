@@ -94,6 +94,17 @@ void stackLowest(uint32_t& freeBytes, uint8_t& module, const char*& where) {
 }
 
 // The code under test.
+// FirstFault.cpp is device-only (it installs a real CPU exception handler),
+// so the first fault the crash callback picks up is set by each test.
+static bool       s_stubHaveFirstFault = false;
+static FirstFault s_stubFirstFault     = {};
+
+bool firstFaultGet(FirstFault& out) {
+  if (!s_stubHaveFirstFault) return false;
+  out = s_stubFirstFault;
+  return true;
+}
+
 #include "../../OurBrewbot/Crash.cpp"
 
 // ---- fixture helpers ----
@@ -140,6 +151,8 @@ void setUp(void) {
   s_logCount   = 0;
   s_lastModule = 0xFF;   // the value the firmware boots with
   s_lastRssi   = 0;
+  s_stubHaveFirstFault = false;
+  s_stubFirstFault     = FirstFault{};
   s_millis     = 0;
   g_espFreeHeap = 24000;
   memset(&g_lastCrash, 0, sizeof(g_lastCrash));
@@ -656,6 +669,54 @@ static void test_callback_captures_uptime_heap_and_the_last_rssi(void) {
   TEST_ASSERT_EQUAL_INT32(-71, rec.rssi);
 }
 
+// The exception that started the crash, when FirstFault.cpp caught it - the
+// register frame can be a second fault inside the SDK's crash handling
+static void test_callback_saves_the_first_fault(void) {
+  REQUIRE_FAKE_STACK();
+  fillFakeStack();
+  s_stubHaveFirstFault = true;
+  s_stubFirstFault = { 9, 0x40216A42, 0x00000030, 0x4020B182, 0x3FFFFF50, 0x40106196 };
+  rst_info info = makeInfo();
+  custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
+
+  CrashRecord rec = readCrashRecord();
+  TEST_ASSERT_EQUAL_UINT32(1, rec.haveFirstFault);
+  TEST_ASSERT_EQUAL_UINT32(9, rec.firstFault.cause);
+  TEST_ASSERT_EQUAL_HEX32(0x40216A42, rec.firstFault.epc);
+  TEST_ASSERT_EQUAL_HEX32(0x00000030, rec.firstFault.ps);
+  TEST_ASSERT_EQUAL_HEX32(0x4020B182, rec.firstFault.a0);
+  TEST_ASSERT_EQUAL_HEX32(0x3FFFFF50, rec.firstFault.sp);
+  TEST_ASSERT_EQUAL_HEX32(0x40106196, rec.firstFault.excvaddr);
+}
+
+static void test_callback_without_a_first_fault_leaves_it_out(void) {
+  REQUIRE_FAKE_STACK();
+  fillFakeStack();
+  rst_info info = makeInfo();
+  custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
+
+  CrashRecord rec = readCrashRecord();
+  TEST_ASSERT_EQUAL_UINT32(0, rec.haveFirstFault);
+}
+
+// End to end: a first fault saved by the callback is logged and kept for the
+// crash report on the next boot
+static void test_first_fault_is_logged_and_kept_for_the_crash_report(void) {
+  REQUIRE_FAKE_STACK();
+  fillFakeStack();
+  s_stubHaveFirstFault = true;
+  s_stubFirstFault = { 0, 0x40216A42, 0x00000030, 0x4020B182, 0x3FFFFF50, 0 };
+  rst_info info = makeInfo();
+  custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
+
+  espTestSetResetReason(REASON_EXCEPTION_RST);
+  s_logCount = 0;
+  crashLogPendingDeferred();
+  TEST_ASSERT_TRUE(logContains("First fault: cause 0 at 0x40216a42, a0 0x4020b182, SP 0x3fffff50"));
+  TEST_ASSERT_TRUE(g_lastCrash.haveFirstFault);
+  TEST_ASSERT_EQUAL_HEX32(0x40216A42, g_lastCrash.firstFault.epc);
+}
+
 // Before loop() has passed a signal strength in, the record says "unknown"
 static void test_callback_records_rssi_as_unknown_until_one_is_noted(void) {
   REQUIRE_FAKE_STACK();
@@ -731,6 +792,9 @@ int main(int, char**) {
   RUN_TEST(test_callback_captures_the_loop_stack_low);
   RUN_TEST(test_callback_captures_uptime_heap_and_the_last_rssi);
   RUN_TEST(test_callback_records_rssi_as_unknown_until_one_is_noted);
+  RUN_TEST(test_callback_saves_the_first_fault);
+  RUN_TEST(test_callback_without_a_first_fault_leaves_it_out);
+  RUN_TEST(test_first_fault_is_logged_and_kept_for_the_crash_report);
   RUN_TEST(test_callback_output_is_readable_by_the_reporting_path);
 
   return UNITY_END();

@@ -37,10 +37,10 @@
 namespace {
 
 constexpr uint32_t CRASH_OFFSET      = 0;        // dword offset 0
-constexpr uint32_t CHECKPOINT_OFFSET = 46;       // dword offset 46 (past CrashRecord)
+constexpr uint32_t CHECKPOINT_OFFSET = 53;       // dword offset 53 (past CrashRecord)
 // Changed whenever CrashRecord's layout changes, so a record written by older
 // firmware just before an update is ignored rather than misread.
-constexpr uint32_t CRASH_MAGIC       = 0xC0FFEE43u;
+constexpr uint32_t CRASH_MAGIC       = 0xC0FFEE44u;
 constexpr uint32_t CP_MAGIC          = 0xC0DECA11u;
 constexpr size_t   STACK_WORDS       = CRASH_STACK_WORDS;
 
@@ -63,6 +63,8 @@ struct CrashRecord {
   uint32_t uptimeSec;                    // millis() / 1000 at the crash
   uint32_t freeHeap;                     // ESP.getFreeHeap() at the crash
   int32_t  rssi;                         // last value passed to crashNoteRssi()
+  uint32_t haveFirstFault;               // 1 if firstFault is filled in
+  FirstFault firstFault;                 // the exception that started it (FirstFault.cpp)
 };
 
 struct CheckpointRecord {
@@ -71,7 +73,7 @@ struct CheckpointRecord {
 };
 
 static_assert(sizeof(CrashRecord) % 4 == 0, "RTC writes must be 4-byte aligned");
-static_assert(sizeof(CrashRecord)      == 46 * 4, "CrashRecord size pins CHECKPOINT_OFFSET");
+static_assert(sizeof(CrashRecord)      == 53 * 4, "CrashRecord size pins CHECKPOINT_OFFSET");
 static_assert(sizeof(CheckpointRecord) % 4 == 0, "RTC writes must be 4-byte aligned");
 static_assert(sizeof(CrashRecord) + sizeof(CheckpointRecord) <= 512,
               "RTC user memory is 512 bytes total");
@@ -216,6 +218,15 @@ void crashLogPendingDeferred() {
     logMsgL(SYSLOG_ERR,
             "DEFERRED [SYS] At the crash: uptime %u s, free heap %u bytes, WiFi RSSI %d dBm",
             crashRec.uptimeSec, crashRec.freeHeap, (int)crashRec.rssi);
+    // The exception that started it, if FirstFault.cpp caught one - it can
+    // differ from the registers above when the crash handling faulted too
+    const bool haveFirstFault = (crashRec.haveFirstFault == 1);
+    if (haveFirstFault) {
+      const FirstFault& ff = crashRec.firstFault;
+      logMsgL(SYSLOG_ERR,
+              "DEFERRED [SYS] First fault: cause %u at 0x%08x, a0 0x%08x, SP 0x%08x, EXCVADDR 0x%08x, PS 0x%08x",
+              ff.cause, ff.epc, ff.a0, ff.sp, ff.excvaddr, ff.ps);
+    }
     // Keep a copy for the crash report (CrashReport.cpp) before clearing it
     memset(&g_lastCrash, 0, sizeof(g_lastCrash));
     g_lastCrash.valid         = true;
@@ -237,6 +248,8 @@ void crashLogPendingDeferred() {
     g_lastCrash.uptimeSec     = crashRec.uptimeSec;
     g_lastCrash.freeHeap      = crashRec.freeHeap;
     g_lastCrash.rssi          = crashRec.rssi;
+    g_lastCrash.haveFirstFault = haveFirstFault;
+    if (haveFirstFault) g_lastCrash.firstFault = crashRec.firstFault;
 
     uint32_t zero = 0;
     ESP.rtcUserMemoryWrite(CRASH_OFFSET, &zero, sizeof(zero));
@@ -326,6 +339,9 @@ extern "C" void custom_crash_callback(struct rst_info* info,
   rec.uptimeSec = millis() / 1000;
   rec.freeHeap  = ESP.getFreeHeap();
   rec.rssi      = s_lastRssi;
+
+  // The first exception, if FirstFault.cpp caught it before the crash path ran
+  if (firstFaultGet(rec.firstFault)) rec.haveFirstFault = 1;
 
   ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
 }

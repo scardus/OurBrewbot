@@ -57,6 +57,7 @@
 #include "WebAPI.h"
 #include "StackProbe.h"
 #include "Crash.h"
+#include "FirstFault.h"
 #include "UpdateCheck.h"
 #include "CrashReport.h"
 #include "TcpCleanup.h"
@@ -121,6 +122,9 @@ void onTenMinuteTimer();
 // SETUP
 // ============================================================
 void setup() {
+  // First, so even a crash during start-up has its first exception recorded
+  firstFaultInstall();
+
   Serial.begin(115200);
   delay(100);
 
@@ -230,6 +234,7 @@ void loop() {
   STACK_PROBE_IRQ_SAMPLE();   // diagnostic build only - see StackProbe.cpp
   checkpoint(CP_BLE);          checkBLESniffTimeout();
                                checkRFSniffTimeout();
+                               firstFaultLoop();   // logs a CPU exception the device survived
   checkpoint(CP_TILT);         serviceTilt();   // drain any in-flight BLE scan every pass
   // mDNS runs entirely from here now (see MicroMDNS.h). The heap gate and
   // ESP.wdtFeed() that used to wrap this call were both dead weight: the old
