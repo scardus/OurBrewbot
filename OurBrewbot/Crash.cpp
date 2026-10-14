@@ -290,8 +290,10 @@ extern "C" void custom_crash_callback(struct rst_info* info,
   }
 
   // The deepest the loop stack got before the crash, and where (StackCheck.cpp).
-  // Checked once more first, in case the crash itself is the deepest point.
-  stackCheck(s_lastModule, nullptr);
+  // Deliberately NOT checked again here: the SDK's crash printer, the core's
+  // crash handler and this callback are all running on the loop stack right
+  // now, so a fresh check would count their ~1.3 KB as the program's own use.
+  // How deep the crash itself was is already in stackStart.
   uint8_t     stackModule;
   const char* stackWhere;
   stackLowest(rec.stackFree, stackModule, stackWhere);

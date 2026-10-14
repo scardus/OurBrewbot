@@ -609,8 +609,10 @@ static void test_short_stack_is_clamped_to_what_is_available(void) {
   TEST_ASSERT_EQUAL_HEX32(0, rec.stack[4]);   // untouched, not over-read
 }
 
-// The callback checks the stack once more (the crash may be the deepest point
-// of all), then saves the lowest point and where it was.
+// The callback saves the lowest point from before the crash and where it was.
+// It must NOT check the stack again: the crash handlers are running on the
+// loop stack at that moment, and counting them made v0.6.2 crash reports show
+// ~1.3 KB less stack than the program had really used.
 static void test_callback_captures_the_loop_stack_low(void) {
   REQUIRE_FAKE_STACK();
   fillFakeStack();
@@ -622,7 +624,7 @@ static void test_callback_captures_the_loop_stack_low(void) {
   custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
 
   CrashRecord rec = readCrashRecord();
-  TEST_ASSERT_EQUAL_INT(1, s_stackCheckCalls);
+  TEST_ASSERT_EQUAL_INT(0, s_stackCheckCalls);
   TEST_ASSERT_EQUAL_UINT32(1348, rec.stackFree);
   TEST_ASSERT_EQUAL_UINT32(CP_WEB, rec.stackModule);
   TEST_ASSERT_EQUAL_STRING("/fermenters", rec.stackWhere);
