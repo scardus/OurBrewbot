@@ -407,6 +407,25 @@ void test_initBLE_marks_not_ready_when_module_silent(void) {
   TEST_ASSERT_FALSE(s_bleReady);
 }
 
+void test_initBLE_uses_a_supported_stored_baud(void) {
+  g_globalConfig.bleBaud = 19200;
+  initBLE();
+  TEST_ASSERT_EQUAL_UINT32(19200, g_bleSerial.baud());
+}
+
+void test_initBLE_falls_back_to_9600_when_stored_baud_is_zero(void) {
+  // SoftwareSerial divides by the baud rate - a 0 crashed v0.6.2 at boot
+  g_globalConfig.bleBaud = 0;
+  initBLE();
+  TEST_ASSERT_EQUAL_UINT32(9600, g_bleSerial.baud());
+}
+
+void test_initBLE_falls_back_to_9600_when_stored_baud_is_unsupported(void) {
+  g_globalConfig.bleBaud = 1234;
+  initBLE();
+  TEST_ASSERT_EQUAL_UINT32(9600, g_bleSerial.baud());
+}
+
 // ---- serviceTilt: draining an AT+DISI? response ----
 
 void test_serviceTilt_parses_two_records_in_one_response(void) {
@@ -582,6 +601,9 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_initBLE_marks_ready_on_ok_response);
   RUN_TEST(test_initBLE_marks_not_ready_when_module_silent);
+  RUN_TEST(test_initBLE_uses_a_supported_stored_baud);
+  RUN_TEST(test_initBLE_falls_back_to_9600_when_stored_baud_is_zero);
+  RUN_TEST(test_initBLE_falls_back_to_9600_when_stored_baud_is_unsupported);
 
   RUN_TEST(test_serviceTilt_parses_two_records_in_one_response);
   RUN_TEST(test_serviceTilt_reassembles_a_record_split_across_passes);

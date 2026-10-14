@@ -33,12 +33,13 @@ class SoftwareSerial {
   int  rxLen_  = 0;   // bytes queued
   int  rxRead_ = 0;   // bytes already handed to read()
   char lastPrint_[64] = {0};
+  uint32_t baud_ = 0;  // what begin() was last given
 
 public:
   SoftwareSerial(int /*rxPin*/, int /*txPin*/) {}
-  void begin(uint32_t /*baud*/, int /*config*/, int /*rxPin*/, int /*txPin*/,
+  void begin(uint32_t baud, int /*config*/, int /*rxPin*/, int /*txPin*/,
              bool /*invert*/, unsigned int /*bufCapacity*/,
-             unsigned int /*isrBufCapacity*/) {}
+             unsigned int /*isrBufCapacity*/) { baud_ = baud; }
 
   void print(const char* s) {
     strncpy(lastPrint_, s ? s : "", sizeof(lastPrint_) - 1);
@@ -64,7 +65,12 @@ public:
   void reset() {
     rxLen_ = rxRead_ = 0;
     lastPrint_[0] = '\0';
+    baud_ = 0;
   }
+
+  // The baud rate passed to the last begin(), so tests can check what the
+  // module would actually be driven at.
+  uint32_t baud() const { return baud_; }
 
   // The last AT command written, so tests can tell "started a scan" from
   // "decided not to".

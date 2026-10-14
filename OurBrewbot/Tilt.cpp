@@ -156,13 +156,28 @@ static bool decodeTiltReading(const char* fields, int colour,
   return true;
 }
 
+// The baud rate to drive the HM-10 at. SoftwareSerial divides by it, so a 0
+// crashes with a divide by zero (seen in a v0.6.2 crash report), and any other
+// odd value leaves the module unreadable. A rate the HM-10 doesn't support
+// falls back to its factory 9600. (It also does 115200 and 230400, but those
+// don't fit in the 16-bit setting.)
+static uint32_t bleBaudToUse() {
+  static const uint16_t HM10_BAUDS[] = { 1200, 2400, 4800, 9600, 19200, 38400, 57600 };
+  for (uint16_t baud : HM10_BAUDS) {
+    if (g_globalConfig.bleBaud == baud) return baud;
+  }
+  logMsg("[BLE] Stored baud rate %u is not one the HM-10 supports - using 9600",
+         g_globalConfig.bleBaud);
+  return 9600;
+}
+
 void initBLE() {
   // Hold a full AT+DISI? response (<=320 B, see BLE_BUF_SIZE) even if a loop
   // pass stalls mid-scan. isrBufCapacity is passed EXPLICITLY: left at 0 the
   // library derives it as bufCapacity*10 uint32 entries, so bufCapacity=384
   // with default ISR sizing would cost ~15 KB; capping the edge buffer keeps
   // the total near ~2.4 KB (384 B byte queue + 512*4 B edge queue).
-  g_bleSerial.begin(g_globalConfig.bleBaud, SWSERIAL_8N1, PIN_BLE_RX, PIN_BLE_TX,
+  g_bleSerial.begin(bleBaudToUse(), SWSERIAL_8N1, PIN_BLE_RX, PIN_BLE_TX,
                     false, /*bufCapacity=*/384, /*isrBufCapacity=*/512);
   delay(100);
 

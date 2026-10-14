@@ -37,8 +37,10 @@
 namespace {
 
 constexpr uint32_t CRASH_OFFSET      = 0;        // dword offset 0
-constexpr uint32_t CHECKPOINT_OFFSET = 43;       // dword offset 43 (past CrashRecord)
-constexpr uint32_t CRASH_MAGIC       = 0xC0FFEE42u;
+constexpr uint32_t CHECKPOINT_OFFSET = 53;       // dword offset 53 (past CrashRecord)
+// Changed whenever CrashRecord's layout changes, so a record written by older
+// firmware just before an update is ignored rather than misread.
+constexpr uint32_t CRASH_MAGIC       = 0xC0FFEE44u;
 constexpr uint32_t CP_MAGIC          = 0xC0DECA11u;
 constexpr size_t   STACK_WORDS       = CRASH_STACK_WORDS;
 
@@ -58,6 +60,11 @@ struct CrashRecord {
   uint32_t stackFree;                    // least loop stack left since boot (StackCheck.cpp)
   uint32_t stackModule;                  // the CP_* id that took it there, 0xFF = setup
   char     stackWhere[STACK_WHERE_LEN];  // e.g. the web URL, "" if none
+  uint32_t uptimeSec;                    // millis() / 1000 at the crash
+  uint32_t freeHeap;                     // ESP.getFreeHeap() at the crash
+  int32_t  rssi;                         // last value passed to crashNoteRssi()
+  uint32_t haveFirstFault;               // 1 if firstFault is filled in
+  FirstFault firstFault;                 // the exception that started it (FirstFault.cpp)
 };
 
 struct CheckpointRecord {
@@ -66,7 +73,7 @@ struct CheckpointRecord {
 };
 
 static_assert(sizeof(CrashRecord) % 4 == 0, "RTC writes must be 4-byte aligned");
-static_assert(sizeof(CrashRecord)      == 43 * 4, "CrashRecord size pins CHECKPOINT_OFFSET");
+static_assert(sizeof(CrashRecord)      == 53 * 4, "CrashRecord size pins CHECKPOINT_OFFSET");
 static_assert(sizeof(CheckpointRecord) % 4 == 0, "RTC writes must be 4-byte aligned");
 static_assert(sizeof(CrashRecord) + sizeof(CheckpointRecord) <= 512,
               "RTC user memory is 512 bytes total");
@@ -75,6 +82,10 @@ static_assert(sizeof(CrashRecord) + sizeof(CheckpointRecord) <= 512,
 // context) reads it. Initialised to a value outside the enum so the first
 // checkpoint() call always writes.
 volatile uint8_t s_lastModule = 0xFF;
+
+// WiFi signal strength from loop(), for the crash record. `volatile` for the
+// same reason as s_lastModule.
+volatile int32_t s_lastRssi = 0;
 
 const char* const MODULE_NAMES[] = {
   "INIT",        // CP_INIT
@@ -137,6 +148,13 @@ uint8_t checkpointCurrent() {
   return s_lastModule;
 }
 
+// Called from loop() in OurBrewbot.cpp - same cross-file blind spot as
+// checkpoint() below.
+// cppcheck-suppress unusedFunction
+void crashNoteRssi(int32_t rssi) {
+  s_lastRssi = rssi;
+}
+
 // Called from loop() in OurBrewbot.cpp, which cppcheck does not connect to
 // this definition - hence the suppression rather than a real removal.
 // cppcheck-suppress unusedFunction
@@ -197,6 +215,18 @@ void crashLogPendingDeferred() {
     logMsgL(SYSLOG_ERR,
             "DEFERRED [SYS] Loop stack low: %u bytes left, after %s",
             crashRec.stackFree, stackAt);
+    logMsgL(SYSLOG_ERR,
+            "DEFERRED [SYS] At the crash: uptime %u s, free heap %u bytes, WiFi RSSI %d dBm",
+            crashRec.uptimeSec, crashRec.freeHeap, (int)crashRec.rssi);
+    // The exception that started it, if FirstFault.cpp caught one - it can
+    // differ from the registers above when the crash handling faulted too
+    const bool haveFirstFault = (crashRec.haveFirstFault == 1);
+    if (haveFirstFault) {
+      const FirstFault& ff = crashRec.firstFault;
+      logMsgL(SYSLOG_ERR,
+              "DEFERRED [SYS] First fault: cause %u at 0x%08x, a0 0x%08x, SP 0x%08x, EXCVADDR 0x%08x, PS 0x%08x",
+              ff.cause, ff.epc, ff.a0, ff.sp, ff.excvaddr, ff.ps);
+    }
     // Keep a copy for the crash report (CrashReport.cpp) before clearing it
     memset(&g_lastCrash, 0, sizeof(g_lastCrash));
     g_lastCrash.valid         = true;
@@ -215,6 +245,11 @@ void crashLogPendingDeferred() {
     memcpy(g_lastCrash.stack, crashRec.stack, sizeof(g_lastCrash.stack));
     g_lastCrash.stackFree     = crashRec.stackFree;
     strlcpy(g_lastCrash.stackAt, stackAt, sizeof(g_lastCrash.stackAt));
+    g_lastCrash.uptimeSec     = crashRec.uptimeSec;
+    g_lastCrash.freeHeap      = crashRec.freeHeap;
+    g_lastCrash.rssi          = crashRec.rssi;
+    g_lastCrash.haveFirstFault = haveFirstFault;
+    if (haveFirstFault) g_lastCrash.firstFault = crashRec.firstFault;
 
     uint32_t zero = 0;
     ESP.rtcUserMemoryWrite(CRASH_OFFSET, &zero, sizeof(zero));
@@ -290,13 +325,23 @@ extern "C" void custom_crash_callback(struct rst_info* info,
   }
 
   // The deepest the loop stack got before the crash, and where (StackCheck.cpp).
-  // Checked once more first, in case the crash itself is the deepest point.
-  stackCheck(s_lastModule, nullptr);
+  // Deliberately NOT checked again here: the SDK's crash printer, the core's
+  // crash handler and this callback are all running on the loop stack right
+  // now, so a fresh check would count their ~1.3 KB as the program's own use.
+  // How deep the crash itself was is already in stackStart.
   uint8_t     stackModule;
   const char* stackWhere;
   stackLowest(rec.stackFree, stackModule, stackWhere);
   rec.stackModule = stackModule;
   strlcpy(rec.stackWhere, stackWhere, sizeof(rec.stackWhere));
+
+  // Plain reads only - nothing here may call into the WiFi driver
+  rec.uptimeSec = millis() / 1000;
+  rec.freeHeap  = ESP.getFreeHeap();
+  rec.rssi      = s_lastRssi;
+
+  // The first exception, if FirstFault.cpp caught it before the crash path ran
+  if (firstFaultGet(rec.firstFault)) rec.haveFirstFault = 1;
 
   ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
 }

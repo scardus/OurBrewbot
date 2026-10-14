@@ -35,7 +35,7 @@
 #define CRASH_REPORT_RETRY_MS    (10UL * 60UL * 1000UL)   // then every 10 min...
 #define CRASH_REPORT_ATTEMPTS    4                        // ...for up to 4 tries in all
 #define CRASH_REPORT_TIMEOUT_MS  5000                     // same as the update check
-#define CRASH_REPORT_MAX_BYTES   768                      // a full report is ~550 bytes
+#define CRASH_REPORT_MAX_BYTES   800                      // longest possible report 785 + NUL, rounded to 16 (see test)
 
 static uint8_t  s_attempts      = 0;      // tries so far
 static uint32_t s_lastAttemptMs = 0;      // millis() of the last try (0 = boot)
@@ -81,6 +81,26 @@ bool buildCrashReportJson(const CrashInfo& crash, char* out, size_t outSize) {
     // How close the loop stack came to overflowing before the crash
     doc["stack_free"] = crash.stackFree;
     doc["stack_at"]   = crash.stackAt;
+
+    // The device's state at the crash, to tell device-specific problems
+    // (weak WiFi, low memory) from firmware ones
+    doc["uptime"] = crash.uptimeSec;
+    doc["heap"]   = crash.freeHeap;
+    if (crash.rssi < 0) doc["rssi"] = crash.rssi;   // 0 = not known
+
+    // The exception that started the crash (FirstFault.h), when it was caught
+    if (crash.haveFirstFault) {
+      const FirstFault& ff = crash.firstFault;
+      doc["ff_cause"] = ff.cause;
+      const struct { const char* key; uint32_t value; } firstFault[] = {
+        { "ff_epc", ff.epc }, { "ff_ps", ff.ps }, { "ff_a0", ff.a0 },
+        { "ff_sp", ff.sp }, { "ff_excvaddr", ff.excvaddr },
+      };
+      for (const auto& r : firstFault) {
+        snprintf(hex, sizeof(hex), "%x", r.value);
+        doc[r.key] = hex;
+      }
+    }
   }
 
   if (measureJson(doc) + 1 > outSize) return false;

@@ -42,6 +42,7 @@
  */
 
 #include <stdint.h>
+#include "FirstFault.h"
 
 // Subsystem IDs for the main-loop checkpoint breadcrumb. New entries MUST
 // be appended (existing values are persisted in RTC across a reset and
@@ -83,9 +84,19 @@ struct CrashInfo {
   uint32_t stack[CRASH_STACK_WORDS];
   uint32_t stackFree;        // least loop stack left before the crash, in bytes
   char     stackAt[40];      // where that happened, e.g. "WEB /iSpindel"
+  uint32_t uptimeSec;        // how long the device had been running, in seconds
+  uint32_t freeHeap;         // free heap at the moment of the crash, in bytes
+  int32_t  rssi;             // WiFi signal in dBm shortly before the crash, 0 if unknown
+  bool       haveFirstFault; // firstFault is filled in (see FirstFault.h)
+  FirstFault firstFault;     // the CPU exception that started the crash
 };
 
 extern CrashInfo g_lastCrash;
+
+// Remember the WiFi signal strength for the crash record. The crash handler
+// can't safely ask the WiFi driver itself, so loop() hands it over once a
+// minute. Pass 0 when not connected.
+void crashNoteRssi(int32_t rssi);
 
 // Mark `module` as the currently-running subsystem. Cheap: skips the RTC
 // write when the module hasn't changed since the previous call. Call before

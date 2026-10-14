@@ -94,6 +94,17 @@ void stackLowest(uint32_t& freeBytes, uint8_t& module, const char*& where) {
 }
 
 // The code under test.
+// FirstFault.cpp is device-only (it installs a real CPU exception handler),
+// so the first fault the crash callback picks up is set by each test.
+static bool       s_stubHaveFirstFault = false;
+static FirstFault s_stubFirstFault     = {};
+
+bool firstFaultGet(FirstFault& out) {
+  if (!s_stubHaveFirstFault) return false;
+  out = s_stubFirstFault;
+  return true;
+}
+
 #include "../../OurBrewbot/Crash.cpp"
 
 // ---- fixture helpers ----
@@ -116,6 +127,9 @@ static void stageCrashRecord(uint32_t lastCheckpoint, uint32_t magic = CRASH_MAG
   rec.stackFree      = 924;
   rec.stackModule    = CP_WEB;
   strcpy(rec.stackWhere, "/iSpindel");
+  rec.uptimeSec      = 7260;
+  rec.freeHeap       = 17480;
+  rec.rssi           = -63;   // the last field - the one an overlap would hit first
   ESP.rtcUserMemoryWrite(CRASH_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
 }
 
@@ -136,6 +150,11 @@ void setUp(void) {
   espTestSetResetReason(REASON_DEFAULT_RST);
   s_logCount   = 0;
   s_lastModule = 0xFF;   // the value the firmware boots with
+  s_lastRssi   = 0;
+  s_stubHaveFirstFault = false;
+  s_stubFirstFault     = FirstFault{};
+  s_millis     = 0;
+  g_espFreeHeap = 24000;
   memset(&g_lastCrash, 0, sizeof(g_lastCrash));
   s_stubStackFree   = 0;
   s_stubStackModule = 0xFF;
@@ -234,6 +253,7 @@ static void test_checkpoint_write_does_not_disturb_the_crash_record(void) {
   CrashRecord rec = readCrashRecord();
   TEST_ASSERT_EQUAL_HEX32(CRASH_MAGIC, rec.magic);
   TEST_ASSERT_EQUAL_HEX32(0x40201234, rec.epc1);
+  TEST_ASSERT_EQUAL_INT32(-63, rec.rssi);
 }
 
 // ============================================================
@@ -331,7 +351,7 @@ static void test_crash_record_reports_a_panic_reason_after_a_soft_restart(void) 
 }
 
 // 24 stack words at 8 per line = 3 STACK lines, after the detail and SP
-// header, then the loop stack low.
+// header, then the loop stack low and the uptime/heap/RSSI line.
 static void test_crash_record_dumps_the_whole_stack_slice(void) {
   espTestSetResetReason(REASON_EXCEPTION_RST);
   stageCrashRecord(CP_FERM);
@@ -339,7 +359,7 @@ static void test_crash_record_dumps_the_whole_stack_slice(void) {
   TEST_ASSERT_TRUE(logContains("STACK 00"));
   TEST_ASSERT_TRUE(logContains("STACK 08"));
   TEST_ASSERT_TRUE(logContains("STACK 16"));
-  TEST_ASSERT_EQUAL_INT(6, s_logCount);
+  TEST_ASSERT_EQUAL_INT(7, s_logCount);
 }
 
 static void test_crash_record_reports_the_loop_stack_low(void) {
@@ -408,6 +428,10 @@ static void test_crash_record_is_kept_for_the_crash_report(void) {
   TEST_ASSERT_EQUAL_UINT32(28, g_lastCrash.exccause);
   TEST_ASSERT_EQUAL_UINT32(924, g_lastCrash.stackFree);
   TEST_ASSERT_EQUAL_STRING("WEB /iSpindel", g_lastCrash.stackAt);
+  TEST_ASSERT_EQUAL_UINT32(7260, g_lastCrash.uptimeSec);
+  TEST_ASSERT_EQUAL_UINT32(17480, g_lastCrash.freeHeap);
+  TEST_ASSERT_EQUAL_INT32(-63, g_lastCrash.rssi);
+  TEST_ASSERT_TRUE(logContains("At the crash: uptime 7260 s, free heap 17480 bytes, WiFi RSSI -63 dBm"));
 }
 
 // A panic (e.g. a heap-check hit) reboots as a soft restart but leaves a record
@@ -609,8 +633,10 @@ static void test_short_stack_is_clamped_to_what_is_available(void) {
   TEST_ASSERT_EQUAL_HEX32(0, rec.stack[4]);   // untouched, not over-read
 }
 
-// The callback checks the stack once more (the crash may be the deepest point
-// of all), then saves the lowest point and where it was.
+// The callback saves the lowest point from before the crash and where it was.
+// It must NOT check the stack again: the crash handlers are running on the
+// loop stack at that moment, and counting them made v0.6.2 crash reports show
+// ~1.3 KB less stack than the program had really used.
 static void test_callback_captures_the_loop_stack_low(void) {
   REQUIRE_FAKE_STACK();
   fillFakeStack();
@@ -622,10 +648,84 @@ static void test_callback_captures_the_loop_stack_low(void) {
   custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
 
   CrashRecord rec = readCrashRecord();
-  TEST_ASSERT_EQUAL_INT(1, s_stackCheckCalls);
+  TEST_ASSERT_EQUAL_INT(0, s_stackCheckCalls);
   TEST_ASSERT_EQUAL_UINT32(1348, rec.stackFree);
   TEST_ASSERT_EQUAL_UINT32(CP_WEB, rec.stackModule);
   TEST_ASSERT_EQUAL_STRING("/fermenters", rec.stackWhere);
+}
+
+static void test_callback_captures_uptime_heap_and_the_last_rssi(void) {
+  REQUIRE_FAKE_STACK();
+  fillFakeStack();
+  s_millis      = 7260999;   // 7,260.999 s - whole seconds are kept
+  g_espFreeHeap = 17480;
+  crashNoteRssi(-71);
+  rst_info info = makeInfo();
+  custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
+
+  CrashRecord rec = readCrashRecord();
+  TEST_ASSERT_EQUAL_UINT32(7260, rec.uptimeSec);
+  TEST_ASSERT_EQUAL_UINT32(17480, rec.freeHeap);
+  TEST_ASSERT_EQUAL_INT32(-71, rec.rssi);
+}
+
+// The exception that started the crash, when FirstFault.cpp caught it - the
+// register frame can be a second fault inside the SDK's crash handling
+static void test_callback_saves_the_first_fault(void) {
+  REQUIRE_FAKE_STACK();
+  fillFakeStack();
+  s_stubHaveFirstFault = true;
+  s_stubFirstFault = { 9, 0x40216A42, 0x00000030, 0x4020B182, 0x3FFFFF50, 0x40106196 };
+  rst_info info = makeInfo();
+  custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
+
+  CrashRecord rec = readCrashRecord();
+  TEST_ASSERT_EQUAL_UINT32(1, rec.haveFirstFault);
+  TEST_ASSERT_EQUAL_UINT32(9, rec.firstFault.cause);
+  TEST_ASSERT_EQUAL_HEX32(0x40216A42, rec.firstFault.epc);
+  TEST_ASSERT_EQUAL_HEX32(0x00000030, rec.firstFault.ps);
+  TEST_ASSERT_EQUAL_HEX32(0x4020B182, rec.firstFault.a0);
+  TEST_ASSERT_EQUAL_HEX32(0x3FFFFF50, rec.firstFault.sp);
+  TEST_ASSERT_EQUAL_HEX32(0x40106196, rec.firstFault.excvaddr);
+}
+
+static void test_callback_without_a_first_fault_leaves_it_out(void) {
+  REQUIRE_FAKE_STACK();
+  fillFakeStack();
+  rst_info info = makeInfo();
+  custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
+
+  CrashRecord rec = readCrashRecord();
+  TEST_ASSERT_EQUAL_UINT32(0, rec.haveFirstFault);
+}
+
+// End to end: a first fault saved by the callback is logged and kept for the
+// crash report on the next boot
+static void test_first_fault_is_logged_and_kept_for_the_crash_report(void) {
+  REQUIRE_FAKE_STACK();
+  fillFakeStack();
+  s_stubHaveFirstFault = true;
+  s_stubFirstFault = { 0, 0x40216A42, 0x00000030, 0x4020B182, 0x3FFFFF50, 0 };
+  rst_info info = makeInfo();
+  custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
+
+  espTestSetResetReason(REASON_EXCEPTION_RST);
+  s_logCount = 0;
+  crashLogPendingDeferred();
+  TEST_ASSERT_TRUE(logContains("First fault: cause 0 at 0x40216a42, a0 0x4020b182, SP 0x3fffff50"));
+  TEST_ASSERT_TRUE(g_lastCrash.haveFirstFault);
+  TEST_ASSERT_EQUAL_HEX32(0x40216A42, g_lastCrash.firstFault.epc);
+}
+
+// Before loop() has passed a signal strength in, the record says "unknown"
+static void test_callback_records_rssi_as_unknown_until_one_is_noted(void) {
+  REQUIRE_FAKE_STACK();
+  fillFakeStack();
+  rst_info info = makeInfo();
+  custom_crash_callback(&info, fakeStackAddr(0), fakeStackAddr(FAKE_STACK_WORDS));
+
+  CrashRecord rec = readCrashRecord();
+  TEST_ASSERT_EQUAL_INT32(0, rec.rssi);
 }
 
 // End to end: what the callback writes is what the next boot reports.
@@ -690,6 +790,11 @@ int main(int, char**) {
   RUN_TEST(test_inverted_stack_bounds_skip_the_slice);
   RUN_TEST(test_short_stack_is_clamped_to_what_is_available);
   RUN_TEST(test_callback_captures_the_loop_stack_low);
+  RUN_TEST(test_callback_captures_uptime_heap_and_the_last_rssi);
+  RUN_TEST(test_callback_records_rssi_as_unknown_until_one_is_noted);
+  RUN_TEST(test_callback_saves_the_first_fault);
+  RUN_TEST(test_callback_without_a_first_fault_leaves_it_out);
+  RUN_TEST(test_first_fault_is_logged_and_kept_for_the_crash_report);
   RUN_TEST(test_callback_output_is_readable_by_the_reporting_path);
 
   return UNITY_END();

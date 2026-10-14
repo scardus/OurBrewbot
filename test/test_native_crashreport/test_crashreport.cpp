@@ -80,6 +80,9 @@ static void stageException() {
   for (int i = 0; i < CRASH_STACK_WORDS; i++) g_lastCrash.stack[i] = 0x40201000 + i;
   g_lastCrash.stackFree     = 924;
   strcpy(g_lastCrash.stackAt, "WEB /iSpindel");
+  g_lastCrash.uptimeSec     = 7260;
+  g_lastCrash.freeHeap      = 17480;
+  g_lastCrash.rssi          = -63;
 }
 
 static void stageWatchdog() {
@@ -146,17 +149,77 @@ static void test_report_carries_the_full_register_frame(void) {
   TEST_ASSERT_EQUAL_STRING("40201017", doc["stack"][23].as<const char*>());
   TEST_ASSERT_EQUAL_INT(924, doc["stack_free"].as<int>());
   TEST_ASSERT_EQUAL_STRING("WEB /iSpindel", doc["stack_at"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(7260,  doc["uptime"].as<int>());
+  TEST_ASSERT_EQUAL_INT(17480, doc["heap"].as<int>());
+  TEST_ASSERT_EQUAL_INT(-63,   doc["rssi"].as<int>());
 }
 
-// The website accepts at most 2048 bytes; keep well clear of it
-static void test_a_full_report_is_well_under_the_website_limit(void) {
+// The exception that started the crash, when FirstFault.cpp caught it
+static void test_report_carries_the_first_fault(void) {
   stageException();
-  for (int i = 0; i < CRASH_STACK_WORDS; i++) g_lastCrash.stack[i] = 0xFFFFFFFF;
-  g_lastCrash.stackFree = 4096;
-  memset(g_lastCrash.stackAt, 'x', sizeof(g_lastCrash.stackAt) - 1);   // longest possible
+  g_lastCrash.haveFirstFault = true;
+  g_lastCrash.firstFault = { 0, 0x40216A42, 0x30, 0x4020B182, 0x3FFFFF50, 0 };
   char out[768];
   TEST_ASSERT_TRUE(buildCrashReportJson(g_lastCrash, out, sizeof(out)));
-  TEST_ASSERT_LESS_THAN(700, (int)strlen(out));
+
+  JsonDocument doc;
+  deserializeJson(doc, out);
+  TEST_ASSERT_EQUAL_INT(0, doc["ff_cause"].as<int>());
+  TEST_ASSERT_EQUAL_STRING("40216a42", doc["ff_epc"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("30",       doc["ff_ps"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("4020b182", doc["ff_a0"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("3fffff50", doc["ff_sp"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("0",        doc["ff_excvaddr"].as<const char*>());
+}
+
+static void test_report_without_a_first_fault_leaves_it_out(void) {
+  stageException();
+  char out[768];
+  TEST_ASSERT_TRUE(buildCrashReportJson(g_lastCrash, out, sizeof(out)));
+
+  JsonDocument doc;
+  deserializeJson(doc, out);
+  TEST_ASSERT_TRUE(doc["ff_cause"].isNull());
+  TEST_ASSERT_TRUE(doc["ff_epc"].isNull());
+}
+
+// 0 means loop() never passed a signal strength in - leave it out rather
+// than report a perfect 0 dBm
+static void test_unknown_rssi_is_left_out(void) {
+  stageException();
+  g_lastCrash.rssi = 0;
+  char out[768];
+  TEST_ASSERT_TRUE(buildCrashReportJson(g_lastCrash, out, sizeof(out)));
+
+  JsonDocument doc;
+  deserializeJson(doc, out);
+  TEST_ASSERT_TRUE(doc["rssi"].isNull());
+  TEST_ASSERT_EQUAL_INT(7260, doc["uptime"].as<int>());   // the rest still sent
+}
+
+// The longest report there can be - every number at its widest, the longest
+// checkpoint name and stack_at, and a first fault - must fit the buffer
+// sendCrashReport() builds it in, and the website's 2048-byte limit.
+static void test_the_longest_report_fits_the_buffer(void) {
+  stageException();
+  g_lastCrash.resetCode  = 255;
+  g_lastCrash.lastModule = CP_PROBE_SCAN;                   // longest name
+  g_lastCrash.reason     = 0xFFFFFFFF;
+  g_lastCrash.exccause   = 0xFFFFFFFF;
+  g_lastCrash.epc1 = g_lastCrash.epc2 = g_lastCrash.epc3 = 0xFFFFFFFF;
+  g_lastCrash.excvaddr = g_lastCrash.depc = 0xFFFFFFFF;
+  g_lastCrash.sp = g_lastCrash.spEnd = 0xFFFFFFFF;
+  for (int i = 0; i < CRASH_STACK_WORDS; i++) g_lastCrash.stack[i] = 0xFFFFFFFF;
+  g_lastCrash.stackFree = 0xFFFFFFFF;
+  memset(g_lastCrash.stackAt, 'x', sizeof(g_lastCrash.stackAt) - 1);   // longest possible
+  g_lastCrash.uptimeSec = 0xFFFFFFFF;
+  g_lastCrash.freeHeap  = 0xFFFFFFFF;
+  g_lastCrash.rssi      = -2147483647 - 1;                  // widest negative number
+  g_lastCrash.haveFirstFault = true;
+  g_lastCrash.firstFault = { 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF };
+  char out[CRASH_REPORT_MAX_BYTES];
+  TEST_ASSERT_TRUE(buildCrashReportJson(g_lastCrash, out, sizeof(out)));
+  TEST_ASSERT_LESS_THAN(2048, (int)strlen(out));
 }
 
 static void test_watchdog_report_has_no_registers_or_stack(void) {
@@ -172,6 +235,7 @@ static void test_watchdog_report_has_no_registers_or_stack(void) {
   TEST_ASSERT_TRUE(doc["epc1"].isNull());
   TEST_ASSERT_TRUE(doc["stack"].isNull());
   TEST_ASSERT_TRUE(doc["stack_free"].isNull());
+  TEST_ASSERT_TRUE(doc["uptime"].isNull());
 }
 
 static void test_report_that_does_not_fit_is_refused(void) {
@@ -266,7 +330,10 @@ int main(int argc, char** argv) {
   UNITY_BEGIN();
 
   RUN_TEST(test_report_carries_the_full_register_frame);
-  RUN_TEST(test_a_full_report_is_well_under_the_website_limit);
+  RUN_TEST(test_unknown_rssi_is_left_out);
+  RUN_TEST(test_report_carries_the_first_fault);
+  RUN_TEST(test_report_without_a_first_fault_leaves_it_out);
+  RUN_TEST(test_the_longest_report_fits_the_buffer);
   RUN_TEST(test_watchdog_report_has_no_registers_or_stack);
   RUN_TEST(test_report_that_does_not_fit_is_refused);
 

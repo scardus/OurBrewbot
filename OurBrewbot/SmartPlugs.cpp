@@ -26,6 +26,9 @@
 // RCSwitch instance — handles all RF protocol timing
 RCSwitch g_rcSwitch;
 
+// True while the RF sniffer page is polling (managed in WebAPI.cpp)
+bool g_rfSniffActive = false;
+
 // Track plug states
 static bool s_plugState[MAX_SMART_PLUGS] = {false};
 
@@ -42,8 +45,11 @@ void rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol)
   g_rcSwitch.setRepeatTransmit(10);
   g_rcSwitch.send(code, bits);
   g_rcSwitch.disableTransmit();
-  // Re-enable receiver if sniffing was active
-  g_rcSwitch.enableReceive(digitalPinToInterrupt(PIN_RF_RECEIVE));
+  // Re-enable the receiver only if the RF sniffer is in use. Left on, an idle
+  // 433 MHz receiver outputs constant noise and every edge interrupts the CPU.
+  if (g_rfSniffActive) {
+    g_rcSwitch.enableReceive(digitalPinToInterrupt(PIN_RF_RECEIVE));
+  }
 }
 
 // ============================================================
