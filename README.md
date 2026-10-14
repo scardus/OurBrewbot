@@ -178,9 +178,9 @@ The controller runs entirely on your own network. It only contacts ourbrewbot.co
 | Setting | What it does | What is sent |
 |---------|--------------|--------------|
 | **Update Check** | Once a day, downloads `http://ourbrewbot.com/version.json` and compares it with the running version. The result is shown on the admin page, in syslog and as a Home Assistant `update` entity. Nothing is downloaded or installed. The **[check]** link next to the firmware version (`POST /update/check`) works even when the daily check is off. | The chip ID and firmware version (used to count the controllers in use) |
-| **Crash Reports** | About 2 minutes after the device restarts from a crash or watchdog reset, it sends one report to `http://ourbrewbot.com/api/crash` (retried up to 3 times). Nothing is sent after a normal restart. | The chip ID, firmware version and build date, the reset reason, the last code area that ran, the processor registers, and the top of the stack (raw memory, as hex numbers) |
+| **Crash Reports** | About 2 minutes after the device restarts from a crash or watchdog reset, it sends one report to `http://ourbrewbot.com/api/crash` (retried up to 3 times). Nothing is sent after a normal restart. | The chip ID, firmware version and build date, the reset reason, the last code area that ran, the processor registers (including those of the first CPU exception, if a second one followed), the top of the stack (raw memory, as hex numbers), how long the device had been running, its free memory, and its WiFi signal strength |
 
-Neither sends your settings, WiFi details, temperatures or brewing data. The stack snapshot is a few dozen raw memory words from the moment of the crash, used to find which bit of the code crashed.
+Neither sends your settings, WiFi network name or password, temperatures or brewing data. The stack snapshot is a few dozen raw memory words from the moment of the crash, used to find which bit of the code crashed. The running time, free memory and WiFi signal strength help tell a hardware or WiFi problem from a firmware bug.
 
 ---
 
@@ -302,6 +302,7 @@ OurBrewbot/
   WebAdmin.cpp         Admin configuration page (PROGMEM HTML)
   Log.h/.cpp           Centralised serial & syslog logging with timestamps
   Crash.h/.cpp         Crash and watchdog-reset details saved across reboot, logged on the next boot
+  FirstFault.h/.cpp    Keeps the first CPU exception of a crash, in case the crash handling faults too
   CrashReport.h/.cpp   Sends the saved crash details to ourbrewbot.com
   UpdateCheck.h/.cpp   Daily check of ourbrewbot.com for a newer firmware release
   Pins.h               Hardware GPIO pin assignments
