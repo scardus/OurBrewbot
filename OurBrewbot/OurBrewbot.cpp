@@ -77,6 +77,11 @@
 #define INTERVAL_UPTIME_MS      60000   // Uptime counter increment
 #define INTERVAL_PROBE_SCAN_MS  30000   // Probe hot-plug scanning
 
+// WiFi at boot and while offline (see setupWiFi() and wifiLoop())
+#define WIFI_BOOT_WAIT_MS       10000   // wait this long for the saved network at boot
+#define WIFI_OFFLINE_MS         300000  // offline this long -> open the setup hotspot
+#define WIFI_HOTSPOT_MS         300000  // hotspot stays up this long, then reconnecting resumes
+
 // ============================================================
 // CONTROLLER STATE MACHINE
 // ============================================================
@@ -117,6 +122,7 @@ ESP8266WebServer g_webServer(80);
 
 // Functions
 void setupWiFi();
+void wifiLoop();
 void onTenMinuteTimer();
 
 // ============================================================
@@ -197,8 +203,9 @@ void setup() {
 
   // Re-send boot messages via syslog now that WiFi (and syslog host) is available.
   // Severity here mirrors the original pre-WiFi logMsgL calls so syslog/webhook
-  // filtering treats them consistently.
-  if (g_syslogConfig.enabled) {
+  // filtering treats them consistently. Skipped if WiFi was down at boot - there
+  // is no syslog to send them to.
+  if (g_syslogConfig.enabled && g_wifiConnected) {
     struct rst_info *ri = ESP.getResetInfoPtr();
     logMsg("DEFERRED [SYS] OurBrewbot Firmware %s - Built: %s", FW_VERSION, FW_BUILD_DATE);
     logMsgL(SYSLOG_NOTICE, "DEFERRED [SYS] Reset reason: %s (code %u)", ESP.getResetReason().c_str(), ri->reason);
@@ -231,6 +238,7 @@ void loop() {
   // checkpoint() drops a one-byte breadcrumb to RTC so a hardware-watchdog reset
   // (which bypasses custom_crash_callback) still tells us which subsystem hung.
   checkpoint(CP_WEB);          g_webServer.handleClient();
+                               wifiLoop();   // only does anything if WiFi was down at boot
   tcpClearTimeWait();   // must run every pass - see TcpCleanup.cpp
   STACK_PROBE_IRQ_SAMPLE();   // diagnostic build only - see StackProbe.cpp
   checkpoint(CP_BLE);          checkBLESniffTimeout();
@@ -420,26 +428,25 @@ void restartDevice(bool forgetWiFi) {
   ESP.restart();
 }
 
-void setupWiFi() {
-  WiFiManager wifiManager;
-  wifiManager.setConnectTimeout(20);
-  wifiManager.setConfigPortalTimeout(180);
-
-  wifiManager.setTitle("OurBrewbot Setup");
-  wifiManager.setCustomHeadElement(WM_PORTAL_CSS);
-
-  // Use chip ID in AP name to make it unique per device
+// The setup hotspot's name, e.g. "OurBrewbot-2924FA" (chip ID makes it unique)
+static String setupHotspotName() {
   String apName = "OurBrewbot-" + String(ESP.getChipId(), HEX);
   apName.toUpperCase();
+  return apName;
+}
 
-  logMsg("[WIFI] Connecting... AP name if needed: %s", apName.c_str());
+// Settings shared by the boot-time and the offline setup hotspot
+static void configureWiFiManager(WiFiManager& wifiManager) {
+  wifiManager.setConnectTimeout(20);
+  wifiManager.setConfigPortalTimeout(180);
+  wifiManager.setTitle("OurBrewbot Setup");
+  wifiManager.setCustomHeadElement(WM_PORTAL_CSS);
+}
 
-  if (!wifiManager.autoConnect(apName.c_str())) {
-    logMsgL(SYSLOG_ERR, "[WIFI] Failed to connect - restarting");
-    delay(3000);
-    restartDevice();
-  }
-
+// Everything that needs a WiFi connection, run the first time WiFi connects -
+// during setup() normally, or later from wifiLoop() if the device booted while
+// its network was down.
+static void onWiFiConnected() {
   // Modem sleep's periodic DTIM beacon wake/parse cycle is the known trigger
   // for a null-pointer crash inside the closed-source SDK's beacon parser
   // (scan_parse_beacon/cnx_update_bss_more, cause 29). Disabling sleep avoids
@@ -461,6 +468,109 @@ void setupWiFi() {
     mdnsAddService("http", "tcp", 80);
   } else {
     logMsg("[MDNS] Disabled");
+  }
+}
+
+void setupWiFi() {
+  WiFiManager wifiManager;
+  configureWiFiManager(wifiManager);
+  String apName = setupHotspotName();
+
+  if (!wifiManager.getWiFiIsSaved()) {
+    // A brand-new device with no WiFi saved: the setup hotspot, waiting until
+    // it is set up, as before. There is nothing to control yet.
+    logMsg("[WIFI] No WiFi saved - starting setup hotspot %s", apName.c_str());
+    if (!wifiManager.autoConnect(apName.c_str())) {
+      logMsgL(SYSLOG_ERR, "[WIFI] Failed to connect - restarting");
+      delay(3000);
+      restartDevice();
+    }
+  } else {
+    // WiFi saved: give it a few seconds, then carry on either way. The
+    // fermenters are controlled whether WiFi is up or not - before 0.6.4 the
+    // device sat in the setup hotspot and restarted until WiFi came back,
+    // controlling nothing (and leaving the plugs as they were) all that time.
+    logMsg("[WIFI] Connecting to %s...", WiFi.SSID().c_str());
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin();
+    unsigned long start = millis();
+    while (!WiFi.isConnected() && millis() - start < WIFI_BOOT_WAIT_MS) {
+      delay(100);
+    }
+  }
+
+  if (WiFi.isConnected()) {
+    onWiFiConnected();
+  } else {
+    logMsgL(SYSLOG_WARNING, "[WIFI] Not connected - controlling offline and retrying in the background");
+  }
+}
+
+// ============================================================
+// WIFI WHILE OFFLINE
+// ============================================================
+// Only used when the device booted without reaching its saved network. It
+// keeps trying in the background; if WiFi still isn't up after 5 minutes it
+// also opens the setup hotspot, so new WiFi details can be entered from a
+// phone (e.g. after a WiFi password change).
+//
+// The hotspot and reconnecting take turns, 5 minutes each: while the hotspot
+// is up, the WiFi library switches reconnecting off (running both at once
+// makes the hotspot unreliable). Our web server is stopped while the hotspot
+// is up, as both use port 80. Once WiFi has connected the SDK reconnects by
+// itself after any later drop, as it always has, and this does nothing.
+
+static bool          s_wifiUpSinceBoot = false;
+static WiFiManager*  s_hotspot         = nullptr;   // non-null while the hotspot is up
+static unsigned long s_wifiPhaseStart  = 0;         // when reconnecting / the hotspot started
+
+static void openSetupHotspot() {
+  String apName = setupHotspotName();
+  logMsgL(SYSLOG_WARNING, "[WIFI] Still not connected - opening setup hotspot %s for 5 min", apName.c_str());
+  g_webServer.stop();
+  s_hotspot = new WiFiManager();
+  configureWiFiManager(*s_hotspot);
+  s_hotspot->setConfigPortalBlocking(false);
+  s_hotspot->startConfigPortal(apName.c_str());
+}
+
+static void closeSetupHotspot() {
+  s_hotspot->stopConfigPortal();
+  delete s_hotspot;
+  s_hotspot = nullptr;
+  g_webServer.begin();
+  if (!WiFi.isConnected()) {
+    logMsg("[WIFI] Setup hotspot closed - trying the saved network again");
+    WiFi.mode(WIFI_STA);
+    WiFi.begin();
+  }
+}
+
+void wifiLoop() {
+  if (s_wifiUpSinceBoot) return;
+  if (g_wifiConnected) {             // connected during setup()
+    s_wifiUpSinceBoot = true;
+    return;
+  }
+
+  unsigned long now = millis();
+  if (s_hotspot != nullptr) {
+    s_hotspot->process();            // serves the hotspot's pages
+    if (WiFi.isConnected() || now - s_wifiPhaseStart >= WIFI_HOTSPOT_MS) {
+      closeSetupHotspot();
+      s_wifiPhaseStart = now;
+    }
+  } else if (!WiFi.isConnected() && now - s_wifiPhaseStart >= WIFI_OFFLINE_MS) {
+    openSetupHotspot();
+    s_wifiPhaseStart = now;
+  }
+
+  if (s_hotspot == nullptr && WiFi.isConnected()) {
+    onWiFiConnected();
+    s_wifiUpSinceBoot = true;
+    logMsgL(SYSLOG_NOTICE, "[WIFI] Connected %lu min after boot - the fermenters were controlled offline until then",
+      millis() / 60000UL);
   }
 }
 
