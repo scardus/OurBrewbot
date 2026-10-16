@@ -22,6 +22,7 @@
 #include "SmartPlugs.h"
 #include "Profile.h"
 #include "Log.h"
+#include "iSpindel.h"
 
 // Track compressor delay per fermenter (millis of last cooling stop)
 static unsigned long s_lastCoolingStop[MAX_FERMENTERS] = {0};
@@ -306,8 +307,12 @@ static GravitySrc findGravitySource(uint8_t i, int& slot) {
       return SG_SRC_TILT;
     }
   }
+  // An iSpindel only while it is reporting and has sent a gravity, so a stale
+  // or gravity-less one falls back to the estimate
   for (int s = 0; s < MAX_ISPINDELS; s++) {
-    if (g_iSpindels[s].collectData && g_iSpindels[s].fermenter == i) {
+    if (g_iSpindels[s].collectData && g_iSpindels[s].fermenter == i &&
+        iSpindelIsFresh(g_iSpindels[s]) &&
+        (g_iSpindels[s].sg > SG_VALID_MIN || g_iSpindels[s].corrGravity > SG_VALID_MIN)) {
       slot = s;
       return SG_SRC_ISPINDEL;
     }

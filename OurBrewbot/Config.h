@@ -387,6 +387,7 @@ struct iSpindelConfig {
   float    runTime;             // per-wake cycle duration: wake-up to report sent (seconds)
   char     gravityUnit[4];      // unit string from device ("SG", "G", "P")
   uint32_t lastSeen;            // millis() of last POST received (0 = never seen since boot)
+  uint32_t interval;            // reporting interval the device last sent, seconds (0 = not sent)
 };
 
 // ============================================================

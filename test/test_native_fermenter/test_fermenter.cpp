@@ -776,10 +776,18 @@ void test_gravity_falls_back_to_estimate(void) {
   TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
 }
 
+// An iSpindel that has just reported (iSpindelIsFresh() needs a report since boot)
+static void markIspindelReported(uint8_t slot) {
+  test_setMillis(1000000);
+  g_iSpindels[slot].lastSeen = 1000000;
+  g_iSpindels[slot].interval = 900;
+}
+
 void test_gravity_uses_ispindel_when_assigned(void) {
   g_iSpindels[0].collectData = true;
   g_iSpindels[0].fermenter   = F;
   g_iSpindels[0].sg          = 1.040f;
+  markIspindelReported(0);
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.040f, getCurrentSG(F));
   TEST_ASSERT_EQUAL_STRING("iSpindel", getGravitySource(F));
 }
@@ -791,7 +799,26 @@ void test_gravity_prefers_ispindel_corrected_reading(void) {
   g_iSpindels[0].fermenter    = F;
   g_iSpindels[0].sg           = 1.040f;
   g_iSpindels[0].corrGravity  = 1.038f;
+  markIspindelReported(0);
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.038f, getCurrentSG(F));
+}
+
+// A stale iSpindel's gravity is no longer used - the estimate takes over
+void test_gravity_skips_a_stale_ispindel(void) {
+  g_iSpindels[0].collectData = true;
+  g_iSpindels[0].fermenter   = F;
+  g_iSpindels[0].sg          = 1.040f;
+  markIspindelReported(0);
+  test_setMillis(1000000 + 3600001);
+  TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
+}
+
+// Reporting, but with no gravity in its reports - the estimate is used
+void test_gravity_skips_an_ispindel_with_no_gravity(void) {
+  g_iSpindels[0].collectData = true;
+  g_iSpindels[0].fermenter   = F;
+  markIspindelReported(0);
+  TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
 }
 
 void test_gravity_tilt_beats_ispindel(void) {
@@ -963,6 +990,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_gravity_falls_back_to_estimate);
   RUN_TEST(test_gravity_uses_ispindel_when_assigned);
   RUN_TEST(test_gravity_prefers_ispindel_corrected_reading);
+  RUN_TEST(test_gravity_skips_a_stale_ispindel);
+  RUN_TEST(test_gravity_skips_an_ispindel_with_no_gravity);
   RUN_TEST(test_gravity_tilt_beats_ispindel);
   RUN_TEST(test_gravity_debug_override_beats_everything);
   RUN_TEST(test_gravity_ignores_source_assigned_to_another_fermenter);

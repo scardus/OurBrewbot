@@ -279,6 +279,7 @@ void handleiSpindelPost(const String& body) {
     g_iSpindels[matched].runTime     = runTime;
     strlcpy(g_iSpindels[matched].gravityUnit, gravityUnit, sizeof(g_iSpindels[matched].gravityUnit));
     g_iSpindels[matched].lastSeen    = millis();
+    g_iSpindels[matched].interval    = interval;
 
     // Sync name/ID if changed
     bool configChanged = false;
@@ -324,6 +325,8 @@ void handleiSpindelPost(const String& body) {
       g_iSpindels[i].corrGravity = corrGravity;
       g_iSpindels[i].runTime     = runTime;
       strlcpy(g_iSpindels[i].gravityUnit, gravityUnit, sizeof(g_iSpindels[i].gravityUnit));
+      g_iSpindels[i].lastSeen    = millis();
+      g_iSpindels[i].interval    = interval;
       g_iSpindels[i].collectData = true;
       logMsg("[ISPINDEL] Registered %s (ID:%s) in slot %d as %s", name, id, i, gravityUnitName(unit));
       saveiSpindelConfig();
@@ -332,4 +335,26 @@ void handleiSpindelPost(const String& body) {
   }
 
   logMsg("[ISPINDEL] Ignored %s (ID:%s) - no free slots", name, id);
+}
+
+// ============================================================
+// FRESHNESS LOG
+// ============================================================
+
+void iSpindelCheckFreshness() {
+  // Starts false for every slot, so nothing is logged for a device that
+  // simply hasn't reported since boot
+  static bool s_wasFresh[MAX_ISPINDELS] = {false};
+
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    bool fresh = iSpindelIsFresh(g_iSpindels[i]);
+    if (fresh == s_wasFresh[i]) continue;
+    s_wasFresh[i] = fresh;
+    if (fresh) {
+      logMsg("[ISPINDEL] Slot %d (%s): reporting again - its readings are used", i, g_iSpindels[i].name);
+    } else {
+      logMsg("[ISPINDEL] Slot %d (%s): no report for %u min - its readings are no longer used",
+        i, g_iSpindels[i].name, (unsigned)((millis() - g_iSpindels[i].lastSeen) / 60000UL));
+    }
+  }
 }

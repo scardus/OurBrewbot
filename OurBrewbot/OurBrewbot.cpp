@@ -52,6 +52,7 @@
 #include "Temperatures.h"
 #include "SmartPlugs.h"
 #include "Tilt.h"
+#include "iSpindel.h"
 #include "Reports.h"
 #include "Mqtt.h"
 #include "WebAPI.h"
@@ -316,6 +317,7 @@ void loop() {
           }
         }
         processFermenters();
+        iSpindelCheckFreshness();   // logs an iSpindel going stale or coming back
       }
 
       // Cloud / service reporting (HTTP services only). The 15-min tick only

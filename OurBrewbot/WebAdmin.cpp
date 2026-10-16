@@ -1736,6 +1736,7 @@ function buildISpindelCard(idx, s) {
       }
       var lastSeen = s.minutesSince >= 0xFFFF ? 'Never' : s.minutesSince === 0 ? 'Less than a minute ago' : s.minutesSince + ' min ago';
       html += '<br><span style="color:#888;font-size:12px">Last seen: ' + lastSeen + '</span>';
+      if (!s.fresh) html += ' <span style="color:#ffd166;font-size:12px">&ndash; not used: no recent report</span>';
     }
     html += '</div>';
     html += row('Device ID', '<span style="color:#53d8fb;font-size:13px">' + (s.id ? escHtml(s.id) : '—') + '</span>');

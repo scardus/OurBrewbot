@@ -942,6 +942,7 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["corrGravity"]  = g_iSpindels[i].corrGravity;
     s["runTime"]      = g_iSpindels[i].runTime;
     s["gravityUnit"]  = g_iSpindels[i].gravityUnit;
+    s["fresh"]        = iSpindelIsFresh(g_iSpindels[i]);   // readings in use
     s["minutesSince"] = g_iSpindels[i].lastSeen == 0
                           ? 0xFFFF
                           : (uint32_t)(millis() - g_iSpindels[i].lastSeen) / 60000UL;

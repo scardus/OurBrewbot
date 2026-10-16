@@ -110,6 +110,70 @@ static void seedSlot0(const char* name, const char* id) {
   g_iSpindels[0].collectData = true;
 }
 
+// ---- iSpindelIsFresh: how long readings stay usable ----
+
+static iSpindelConfig reportedAt(uint32_t ms, uint32_t intervalS) {
+  iSpindelConfig s{};
+  s.lastSeen = ms;
+  s.interval = intervalS;
+  return s;
+}
+
+void test_fresh_is_false_until_the_device_reports(void) {
+  test_setMillis(1000000);
+  TEST_ASSERT_FALSE(iSpindelIsFresh(reportedAt(0, 900)));
+}
+
+// 3 x 15 min is 45 min, under the 60 min minimum, so 60 min applies
+void test_fresh_for_60_minutes_with_a_short_interval(void) {
+  iSpindelConfig s = reportedAt(1000000, 900);
+  test_setMillis(1000000 + 3600000);
+  TEST_ASSERT_TRUE(iSpindelIsFresh(s));
+  test_setMillis(1000000 + 3600001);
+  TEST_ASSERT_FALSE(iSpindelIsFresh(s));
+}
+
+// 3 x 30 min = 90 min
+void test_fresh_for_3_intervals_with_a_long_interval(void) {
+  iSpindelConfig s = reportedAt(1000000, 1800);
+  test_setMillis(1000000 + 5400000);
+  TEST_ASSERT_TRUE(iSpindelIsFresh(s));
+  test_setMillis(1000000 + 5400001);
+  TEST_ASSERT_FALSE(iSpindelIsFresh(s));
+}
+
+void test_fresh_for_60_minutes_when_no_interval_was_sent(void) {
+  iSpindelConfig s = reportedAt(1000000, 0);
+  test_setMillis(1000000 + 3600001);
+  TEST_ASSERT_FALSE(iSpindelIsFresh(s));
+}
+
+// A silly interval is capped at a day (3 days fresh), so 3 x it can't overflow
+// into a tiny limit
+void test_fresh_caps_a_huge_interval(void) {
+  iSpindelConfig s = reportedAt(1000000, 4000000000UL);
+  test_setMillis(1000000 + 2UL * 86400000UL);
+  TEST_ASSERT_TRUE(iSpindelIsFresh(s));
+}
+
+void test_post_records_when_and_how_often_the_device_reports(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  test_setMillis(5000000);
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0,\"interval\":1800}"));
+  TEST_ASSERT_EQUAL_UINT32(5000000, g_iSpindels[0].lastSeen);
+  TEST_ASSERT_EQUAL_UINT32(1800,    g_iSpindels[0].interval);
+}
+
+// A newly registered device counts as reporting straight away
+void test_registration_records_when_the_device_reported(void) {
+  test_setMillis(5000000);
+  handleiSpindelPost(String("{\"name\":\"new\",\"ID\":\"AABBCC\",\"temperature\":20.0,\"interval\":900}"));
+  TEST_ASSERT_EQUAL_STRING("AABBCC", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_UINT32(5000000, g_iSpindels[0].lastSeen);
+  TEST_ASSERT_EQUAL_UINT32(900,     g_iSpindels[0].interval);
+  TEST_ASSERT_TRUE(iSpindelIsFresh(g_iSpindels[0]));
+}
+
 // ---- validateiSpindelValues: gravity range ----
 
 void test_validate_keeps_sg_in_range(void) {
@@ -790,6 +854,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_register_name_suffix_declares_sg);
   RUN_TEST(test_register_declared_unit_beats_name_suffix);
   RUN_TEST(test_register_declared_sg_stores_sg);
+  RUN_TEST(test_fresh_is_false_until_the_device_reports);
+  RUN_TEST(test_fresh_for_60_minutes_with_a_short_interval);
+  RUN_TEST(test_fresh_for_3_intervals_with_a_long_interval);
+  RUN_TEST(test_fresh_for_60_minutes_when_no_interval_was_sent);
+  RUN_TEST(test_fresh_caps_a_huge_interval);
+  RUN_TEST(test_post_records_when_and_how_often_the_device_reports);
+  RUN_TEST(test_registration_records_when_the_device_reported);
 
   return UNITY_END();
 }
