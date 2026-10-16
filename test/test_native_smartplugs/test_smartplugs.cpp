@@ -37,7 +37,7 @@
 // ---- storage Config.h declares extern, normally defined in Config.cpp ----
 SmartPlugConfig g_smartPlugs[MAX_SMART_PLUGS];
 
-// ---- millis(), unused here but required by the Arduino stub ----
+// ---- millis(), for the once-a-minute resend ----
 static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
@@ -69,8 +69,11 @@ void setUp(void) {
   for (int i = 0; i < MAX_SMART_PLUGS; i++) {
     g_smartPlugs[i] = SmartPlugConfig{};
     s_plugState[i]  = false;
+    s_plugSent[i]   = false;
+    s_plugSentAt[i] = 0;
   }
   rcTestReset();
+  test_setMillis(0);
   g_rfSniffActive = false;
 }
 
@@ -234,6 +237,94 @@ static void test_slots_keep_independent_state(void) {
 }
 
 // ============================================================
+// RESEND — a change is sent at once, an unchanged state once a minute (0.6.4)
+// ============================================================
+
+// The control loop asks every 10 s; before 0.6.4 each ask was an RF burst
+static void test_an_unchanged_state_is_not_resent_within_a_minute(void) {
+  configurePlug(P);
+  test_setMillis(1000);
+  smartPlugSwitch(P, false);                 // first ask after boot is sent
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+  for (uint32_t t = 11000; t < 1000 + PLUG_RESEND_MS; t += 10000) {
+    test_setMillis(t);
+    smartPlugSwitch(P, false);
+  }
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+}
+
+static void test_an_unchanged_state_is_resent_after_a_minute(void) {
+  configurePlug(P);
+  test_setMillis(1000);
+  smartPlugSwitch(P, true);
+  test_setMillis(1000 + PLUG_RESEND_MS);
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_EQUAL_INT(2, g_rfTest.sendCount);
+  TEST_ASSERT_EQUAL_HEX32(0x123456, g_rfTest.lastCode);
+}
+
+// On the device the send time is taken after the ~0.5 s burst, but the 10 s
+// control loop must still re-send on its sixth pass - every 60 s, not 70 s
+static void test_a_plug_asked_every_10_s_is_resent_every_60_s(void) {
+  configurePlug(P);
+  test_setMillis(1900);                      // sent 0.9 s into the pass
+  smartPlugSwitch(P, false);
+  for (uint32_t t = 11000; t <= 51000; t += 10000) {
+    test_setMillis(t);
+    smartPlugSwitch(P, false);
+  }
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+  test_setMillis(61000);                     // the sixth pass
+  smartPlugSwitch(P, false);
+  TEST_ASSERT_EQUAL_INT(2, g_rfTest.sendCount);
+}
+
+// Heating/cooling must still start and stop without waiting for the resend
+static void test_a_change_of_state_is_sent_at_once(void) {
+  configurePlug(P);
+  test_setMillis(1000);
+  smartPlugSwitch(P, false);
+  test_setMillis(11000);
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_EQUAL_INT(2, g_rfTest.sendCount);
+  TEST_ASSERT_EQUAL_HEX32(0x123456, g_rfTest.lastCode);
+}
+
+// millis() is 0 at boot, so "last sent at 0" must not count as already sent
+static void test_the_first_ask_at_boot_is_sent(void) {
+  configurePlug(P);
+  test_setMillis(0);
+  smartPlugSwitch(P, false);
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+}
+
+static void test_the_resend_survives_millis_wrapping(void) {
+  configurePlug(P);
+  test_setMillis(0xFFFFFFFFUL - 5000);
+  smartPlugSwitch(P, true);
+  test_setMillis(10000);                     // 15 s later, past the wrap
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+  test_setMillis(PLUG_RESEND_MS - 5000);     // a minute later
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_EQUAL_INT(2, g_rfTest.sendCount);
+}
+
+// After a force-off (a plug's codes or role changing) the control loop's next
+// ask is sent at once, with whatever codes the plug has by then
+static void test_the_next_ask_after_a_force_off_is_sent_at_once(void) {
+  configurePlug(P);
+  test_setMillis(1000);
+  smartPlugSwitch(P, false);
+  smartPlugForceOff(P);
+  g_smartPlugs[P].offCode = 0x654321;        // new codes saved
+  test_setMillis(11000);
+  smartPlugSwitch(P, false);
+  TEST_ASSERT_EQUAL_INT(3, g_rfTest.sendCount);
+  TEST_ASSERT_EQUAL_HEX32(0x654321, g_rfTest.lastCode);
+}
+
+// ============================================================
 // FORCE OFF — reaches a plug whatever its role
 // ============================================================
 
@@ -288,6 +379,13 @@ int main(int, char**) {
   RUN_TEST(test_transmit_repeats_ten_times_on_the_configured_pin);
   RUN_TEST(test_receiver_stays_off_after_the_burst);
   RUN_TEST(test_transmit_yields_before_the_burst);
+  RUN_TEST(test_an_unchanged_state_is_not_resent_within_a_minute);
+  RUN_TEST(test_an_unchanged_state_is_resent_after_a_minute);
+  RUN_TEST(test_a_plug_asked_every_10_s_is_resent_every_60_s);
+  RUN_TEST(test_a_change_of_state_is_sent_at_once);
+  RUN_TEST(test_the_first_ask_at_boot_is_sent);
+  RUN_TEST(test_the_resend_survives_millis_wrapping);
+  RUN_TEST(test_the_next_ask_after_a_force_off_is_sent_at_once);
   RUN_TEST(test_receiver_is_re_enabled_after_the_burst_while_sniffing);
 
   RUN_TEST(test_state_defaults_to_off);
