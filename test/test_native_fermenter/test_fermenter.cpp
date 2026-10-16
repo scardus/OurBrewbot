@@ -320,18 +320,38 @@ void test_plug_mapping_is_per_fermenter(void) {
 
 // ---- checkFermenterAlarm: severe vs. mild-with-dwell ----
 
-void test_alarm_skipped_when_powered_off(void) {
+// Before 0.6.4 these two cases left the alarm as it was, so an alarm raised
+// before the fermenter was switched off (or lost its probe) stayed on.
+void test_alarm_cleared_when_powered_off(void) {
   g_fermenters[F].power = false;
-  g_fermenters[F].alarm = true;  // pre-existing value must be left alone
+  g_fermenters[F].alarm = true;
   checkFermenterAlarm(F);
-  TEST_ASSERT_TRUE(g_fermenters[F].alarm);
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
 }
 
-void test_alarm_skipped_on_no_reading(void) {
+void test_alarm_cleared_on_no_reading(void) {
   s_controlTemp = TEMP_NONE;
   g_fermenters[F].alarm = true;
   checkFermenterAlarm(F);
-  TEST_ASSERT_TRUE(g_fermenters[F].alarm);
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
+}
+
+// A mild deviation's dwell must start again after a gap with no reading,
+// not carry on from a time before the gap.
+void test_alarm_dwell_restarts_after_no_reading(void) {
+  g_fermenters[F].floorTemp      = 18.0f;
+  g_fermenters[F].ceilingTemp    = 22.0f;
+  g_fermenters[F].alarmTolerance = 3.0f;
+  g_globalConfig.alarmDwellSec   = 600;
+  test_setMillis(1000000);
+  s_controlTemp = 23.0f;                 // mild: 1.0 over the ceiling
+  checkFermenterAlarm(F);                // dwell starts
+  s_controlTemp = TEMP_NONE;
+  checkFermenterAlarm(F);                // probe lost - dwell reset
+  test_setMillis(1000000 + 600001);      // past the old dwell
+  s_controlTemp = 23.0f;
+  checkFermenterAlarm(F);                // dwell starts again from here
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
 }
 
 void test_alarm_clears_when_in_band(void) {
@@ -541,6 +561,16 @@ void test_dispatch_powered_off_skips_alarm_entirely(void) {
   TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
   TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[F]);
   TEST_ASSERT_EQUAL(0, lastPlugState(0));     // plug forced off
+}
+
+// The control loop must reach the alarm check for a powered-off fermenter too,
+// or an alarm raised before it was switched off is never cleared.
+void test_dispatch_powered_off_clears_an_earlier_alarm(void) {
+  g_fermenters[F].power = false;
+  g_fermenters[F].alarm = true;
+  s_controlTemp = 26.0f;
+  processFermenters();
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
 }
 
 void test_dispatch_temp_control_off_still_alarms(void) {
@@ -885,8 +915,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_no_reading_forces_plugs_off_and_idle);
   RUN_TEST(test_plug_mapping_is_per_fermenter);
 
-  RUN_TEST(test_alarm_skipped_when_powered_off);
-  RUN_TEST(test_alarm_skipped_on_no_reading);
+  RUN_TEST(test_alarm_cleared_when_powered_off);
+  RUN_TEST(test_alarm_cleared_on_no_reading);
+  RUN_TEST(test_alarm_dwell_restarts_after_no_reading);
   RUN_TEST(test_alarm_clears_when_in_band);
   RUN_TEST(test_alarm_fires_immediately_on_severe_deviation);
   RUN_TEST(test_alarm_does_not_fire_immediately_on_mild_deviation);
@@ -909,6 +940,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_validate_accepts_null_errmsg_pointer);
 
   RUN_TEST(test_dispatch_powered_off_skips_alarm_entirely);
+  RUN_TEST(test_dispatch_powered_off_clears_an_earlier_alarm);
   RUN_TEST(test_dispatch_temp_control_off_still_alarms);
   RUN_TEST(test_dispatch_controls_normally_when_powered_and_enabled);
 

@@ -56,6 +56,7 @@ void processFermenters() {
       setFermenterPlugs(i, false, false);
       g_fermenters[i].status = STATUS_IDLE;
       goIdle(i);
+      checkFermenterAlarm(i);   // clears any alarm left from before
       continue;
     }
     if (!g_fermenters[i].tempControl) {
@@ -205,10 +206,15 @@ void switchOffAll() {
 // ============================================================
 
 void checkFermenterAlarm(uint8_t i) {
-  if (!g_fermenters[i].power) return;
-
-  float temp = getControlTemp(i);
-  if (temp < TEMP_VALID_MIN) return;
+  // Powered off, or no reading to judge: the alarm is cleared rather than left
+  // as it was. Leaving it meant an alarm stayed on (in the WebUI and HA) for
+  // as long as the fermenter was off or its probe was missing.
+  float temp = g_fermenters[i].power ? getControlTemp(i) : TEMP_NONE;
+  if (temp < TEMP_VALID_MIN) {
+    g_fermenters[i].alarm = false;
+    s_outOfRangeSince[i]  = 0;   // a mild deviation's dwell starts again
+    return;
+  }
 
   float ceiling   = g_fermenters[i].ceilingTemp;
   float floor_    = g_fermenters[i].floorTemp;
