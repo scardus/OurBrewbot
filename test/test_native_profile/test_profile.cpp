@@ -418,6 +418,67 @@ void test_advance_free_rise_uses_step_bounds_directly(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 25.0f, g_fermenters[F].ceilingTemp);
 }
 
+// ---- the profile band and hysteresis ----
+// Before 0.6.4 a profile always set target +/- 0.5. With hysteresis above 0.5
+// the controller heated past the ceiling and cooled past the floor, so the
+// heater and fridge took turns. The band now widens to the hysteresis.
+
+void test_advance_band_widens_to_the_hysteresis(void) {
+  runProfile(F, 1, 0, /*hour=*/10);
+  g_fermenters[F].hysteresis = 1.0f;
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 2.0f, 20.0f, 20.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 19.0f, g_fermenters[F].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 21.0f, g_fermenters[F].ceilingTemp);
+}
+
+void test_advance_band_stays_at_its_minimum_for_a_small_hysteresis(void) {
+  runProfile(F, 1, 0, /*hour=*/10);
+  g_fermenters[F].hysteresis = 0.2f;
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 2.0f, 20.0f, 20.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f - PROFILE_TEMP_BAND, g_fermenters[F].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f + PROFILE_TEMP_BAND, g_fermenters[F].ceilingTemp);
+}
+
+// With the wider band the temperature can settle up to the hysteresis away
+// from the target, so "at target" must use the same width or the step stalls.
+void test_TempReached_uses_the_widened_band(void) {
+  g_fermenters[F].hysteresis = 1.0f;
+  ProfileStep step = makeStep(STEP_TEMP_REACHED, 0, 0, 20.0f, 0);
+  s_controlTemp = 20.9f;
+  TEST_ASSERT_TRUE(isStepComplete(F, step));
+  s_controlTemp = 21.2f;
+  TEST_ASSERT_FALSE(isStepComplete(F, step));
+}
+
+void test_TempOverTime_uses_the_widened_band(void) {
+  g_fermenters[F].hysteresis = 1.0f;
+  ProfileStep step = makeStep(STEP_TEMP_OVER_TIME, 1.0f, 18.0f, 20.0f, 0);
+  g_fermenters[F].currentHour = 24;
+  s_controlTemp = 19.1f;
+  TEST_ASSERT_TRUE(isStepComplete(F, step));
+}
+
+// A Free Rise step entered "backwards" (end below start) still gets the lower
+// temperature as the floor.
+void test_advance_free_rise_puts_the_lower_temperature_on_the_floor(void) {
+  runProfile(F, 1, 0, /*hour=*/0);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_FREE_RISE, 3.0f, 25.0f, 15.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 15.0f, g_fermenters[F].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 25.0f, g_fermenters[F].ceilingTemp);
+}
+
+void test_advance_free_rise_is_widened_to_twice_the_hysteresis(void) {
+  runProfile(F, 1, 0, /*hour=*/0);
+  g_fermenters[F].hysteresis = 1.0f;
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_FREE_RISE, 3.0f, 18.0f, 18.5f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 18.0f, g_fermenters[F].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, g_fermenters[F].ceilingTemp);
+}
+
 void test_advance_moves_to_next_step_and_resets_hour(void) {
   runProfile(F, 1, 0, /*hour=*/24);
   g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);  // complete
@@ -670,6 +731,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_advance_sets_band_around_ramp_target);
   RUN_TEST(test_advance_sets_band_around_flat_target);
   RUN_TEST(test_advance_free_rise_uses_step_bounds_directly);
+  RUN_TEST(test_advance_band_widens_to_the_hysteresis);
+  RUN_TEST(test_advance_band_stays_at_its_minimum_for_a_small_hysteresis);
+  RUN_TEST(test_TempReached_uses_the_widened_band);
+  RUN_TEST(test_TempOverTime_uses_the_widened_band);
+  RUN_TEST(test_advance_free_rise_puts_the_lower_temperature_on_the_floor);
+  RUN_TEST(test_advance_free_rise_is_widened_to_twice_the_hysteresis);
   RUN_TEST(test_advance_moves_to_next_step_and_resets_hour);
   RUN_TEST(test_advance_finishes_when_next_step_is_empty);
   RUN_TEST(test_advance_finishes_on_empty_current_step);
