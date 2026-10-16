@@ -757,6 +757,58 @@ void test_ispindel_defaults_are_all_unassigned(void) {
   }
 }
 
+// ---- range checks on load (0.6.4) ----
+// A bad or imported file used to load out-of-range values unchecked.
+
+void test_load_corrects_an_out_of_range_probe_resolution(void) {
+  fsTestWrite(FILE_GLOBAL, "{\"resolution\":0}");
+  TEST_ASSERT_TRUE(loadGlobalConfig());
+  TEST_ASSERT_EQUAL_UINT8(11, g_globalConfig.resolution);
+  fsTestWrite(FILE_GLOBAL, "{\"resolution\":13}");
+  TEST_ASSERT_TRUE(loadGlobalConfig());
+  TEST_ASSERT_EQUAL_UINT8(11, g_globalConfig.resolution);
+}
+
+void test_load_keeps_a_valid_probe_resolution(void) {
+  fsTestWrite(FILE_GLOBAL, "{\"resolution\":9}");
+  TEST_ASSERT_TRUE(loadGlobalConfig());
+  TEST_ASSERT_EQUAL_UINT8(9, g_globalConfig.resolution);
+}
+
+void test_load_stops_a_profile_that_does_not_exist(void) {
+  fsTestWrite(FILE_FERMENTER,
+    "{\"ProfileNo\":[7,2,0,0],\"ProfileRunning\":[true,true,false,false],"
+    "\"CurrentStep\":[3,4,0,0],\"CurrentHour\":[10,10,0,0]}");
+  TEST_ASSERT_TRUE(loadFermenterConfig());
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[0].profileNo);
+  TEST_ASSERT_FALSE(g_fermenters[0].profileRunning);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[0].currentStep);
+  // A valid profile is left alone
+  TEST_ASSERT_EQUAL_UINT8(2, g_fermenters[1].profileNo);
+  TEST_ASSERT_TRUE(g_fermenters[1].profileRunning);
+  TEST_ASSERT_EQUAL_UINT8(4, g_fermenters[1].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(10, g_fermenters[1].currentHour);
+}
+
+void test_load_corrects_an_out_of_range_profile_step(void) {
+  fsTestWrite(FILE_FERMENTER,
+    "{\"ProfileNo\":[1,0,0,0],\"ProfileRunning\":[true,false,false,false],"
+    "\"CurrentStep\":[15,0,0,0],\"CurrentHour\":[5,0,0,0]}");
+  TEST_ASSERT_TRUE(loadFermenterConfig());
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[0].profileNo);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[0].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(0, g_fermenters[0].currentHour);
+}
+
+void test_load_corrects_an_out_of_range_plug_bit_count(void) {
+  fsTestWrite(FILE_SMARTPLUGS, "{\"Bits\":[0,33,12,32,24,24,24,24,24,24]}");
+  TEST_ASSERT_TRUE(loadSmartPlugConfig());
+  TEST_ASSERT_EQUAL_UINT8(24, g_smartPlugs[0].bits);
+  TEST_ASSERT_EQUAL_UINT8(24, g_smartPlugs[1].bits);
+  TEST_ASSERT_EQUAL_UINT8(12, g_smartPlugs[2].bits);
+  TEST_ASSERT_EQUAL_UINT8(32, g_smartPlugs[3].bits);
+}
+
 void test_profile_steps_load_returns_false_without_touching_state(void) {
   // loadProfileSteps has no default initialiser - a missing file must leave the
   // in-memory steps alone rather than half-clearing them.
@@ -999,6 +1051,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_ispindel_stored_ids_are_made_topic_safe_on_load);
   RUN_TEST(test_ispindel_temperature_starts_as_no_reading);
   RUN_TEST(test_ispindel_defaults_are_all_unassigned);
+  RUN_TEST(test_load_corrects_an_out_of_range_probe_resolution);
+  RUN_TEST(test_load_keeps_a_valid_probe_resolution);
+  RUN_TEST(test_load_stops_a_profile_that_does_not_exist);
+  RUN_TEST(test_load_corrects_an_out_of_range_profile_step);
+  RUN_TEST(test_load_corrects_an_out_of_range_plug_bit_count);
   RUN_TEST(test_profile_steps_load_returns_false_without_touching_state);
   RUN_TEST(test_profile_steps_round_trip_across_all_slots);
 

@@ -508,6 +508,16 @@ bool loadGlobalConfig() {
     return false;
   }
   cfgLoadScalar(doc, &g_globalConfig, kGlobalFields, CFG_COUNT(kGlobalFields));
+
+  // Range-check what the WebUI checks on save, as a bad or imported file can
+  // hold anything. The probe wait is 94 << (resolution - 9) ms, which goes
+  // wrong for anything outside 9-12 bits.
+  if (g_globalConfig.resolution < 9 || g_globalConfig.resolution > 12) {
+    logMsg("[CFG] Probe resolution %u is out of range (9-12) - using 11",
+           g_globalConfig.resolution);
+    g_globalConfig.resolution = 11;
+    saveGlobalConfig();
+  }
   return true;
 }
 
@@ -575,6 +585,26 @@ bool loadFermenterConfig() {
       corrected = true;
     }
   }
+  // Profile number and step index the profile steps array, so a bad value
+  // would read past its end
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    FermenterConfig& f = g_fermenters[i];
+    if (f.profileNo > MAX_PROFILES) {
+      logMsg("[CFG] Fermenter %d: profile %u does not exist - profile stopped", i, f.profileNo);
+      f.profileNo      = 0;
+      f.profileRunning = false;
+      f.profilePaused  = false;
+      f.currentStep    = 0;
+      f.currentHour    = 0;
+      corrected = true;
+    }
+    if (f.currentStep >= MAX_STEPS_PER_PROFILE) {
+      logMsg("[CFG] Fermenter %d: profile step %u is out of range - back to step 1", i, f.currentStep);
+      f.currentStep = 0;
+      f.currentHour = 0;
+      corrected = true;
+    }
+  }
   if (corrected) saveFermenterConfig();
   return true;
 }
@@ -627,6 +657,17 @@ bool loadSmartPlugConfig() {
   for (int i = 0; i < MAX_SMART_PLUGS; i++) {
     g_smartPlugs[i].plugNo = doc["PlugNo"][i] | (uint8_t)i;
   }
+  // The same 1-32 bit range the WebUI enforces: an RF code is at most 32 bits.
+  // (The RF library already falls back to protocol 1 for a bad protocol.)
+  bool corrected = false;
+  for (int i = 0; i < MAX_SMART_PLUGS; i++) {
+    if (g_smartPlugs[i].bits < 1 || g_smartPlugs[i].bits > 32) {
+      logMsg("[CFG] Plug %d: %u-bit code is out of range (1-32) - using 24", i, g_smartPlugs[i].bits);
+      g_smartPlugs[i].bits = 24;
+      corrected = true;
+    }
+  }
+  if (corrected) saveSmartPlugConfig();
   return true;
 }
 
