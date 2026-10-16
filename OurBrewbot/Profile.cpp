@@ -229,11 +229,20 @@ void startProfile(uint8_t i, uint8_t profileIndex) {
   g_fermenters[i].profileNo      = profileIndex;  // 1-4
   g_fermenters[i].currentStep    = 0;
   g_fermenters[i].currentHour    = 0;
+  g_fermenters[i].profileHours   = 0;   // only reset here - see profileAddHour()
   g_fermenters[i].profileRunning = true;
   g_fermenters[i].profilePaused  = false;
   g_fermenters[i].startMillis    = millis();
   logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile %d started", i, g_fermenters[i].fermenterName, profileIndex);
   saveFermenterConfig();
+}
+
+// currentHour starts again at every step change; profileHours runs across all
+// the steps and is only reset when a profile starts, so after the profile ends
+// the gravity estimate stays where it got to instead of jumping back to OG.
+void profileAddHour(uint8_t i) {
+  g_fermenters[i].currentHour++;
+  if (g_fermenters[i].profileHours < 0xFFFF) g_fermenters[i].profileHours++;
 }
 
 void stopProfile(uint8_t i) {

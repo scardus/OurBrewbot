@@ -726,16 +726,16 @@ void test_setFermenterPower_ignores_out_of_range_index(void) {
 void test_estimateGravity_flat_during_lag_phase(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 0;
+  g_fermenters[F].profileHours = 0;
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, estimateGravity(F));
-  g_fermenters[F].currentHour = 24;
+  g_fermenters[F].profileHours = 24;
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, estimateGravity(F));
 }
 
 void test_estimateGravity_mid_primary_phase(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 60;  // halfway through the 24-96 h window
+  g_fermenters[F].profileHours = 60;  // halfway through the 24-96 h window
   // 0.5 * 0.9 * 0.040 = 0.018 dropped
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.032f, estimateGravity(F));
 }
@@ -743,16 +743,16 @@ void test_estimateGravity_mid_primary_phase(void) {
 void test_estimateGravity_at_end_of_primary_phase(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 96;  // 90% of the range gone
+  g_fermenters[F].profileHours = 96;  // 90% of the range gone
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.014f, estimateGravity(F));
 }
 
 void test_estimateGravity_reaches_tg_and_clamps(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 168;  // 96 + 72: final 10% complete
+  g_fermenters[F].profileHours = 168;  // 96 + 72: final 10% complete
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, estimateGravity(F));
-  g_fermenters[F].currentHour = 1000;  // must not keep falling past TG
+  g_fermenters[F].profileHours = 1000;  // must not keep falling past TG
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, estimateGravity(F));
 }
 
@@ -760,7 +760,7 @@ void test_estimateGravity_returns_og_when_tg_not_below_og(void) {
   // Misconfigured OG/TG must not produce a rising or inverted estimate.
   g_fermenters[F].og = 1.010f;
   g_fermenters[F].tg = 1.050f;
-  g_fermenters[F].currentHour = 100;
+  g_fermenters[F].profileHours = 100;
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, estimateGravity(F));
 }
 
@@ -771,7 +771,7 @@ void test_estimateGravity_returns_og_when_tg_not_below_og(void) {
 void test_gravity_falls_back_to_estimate(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 60;
+  g_fermenters[F].profileHours = 60;
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.032f, getCurrentSG(F));
   TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
 }
@@ -853,7 +853,7 @@ void test_gravity_debug_override_beats_everything(void) {
 void test_gravity_ignores_source_assigned_to_another_fermenter(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 0;
+  g_fermenters[F].profileHours = 0;
 
   g_tilts[0].active    = true;
   g_tilts[0].fermenter = 1;          // someone else's Tilt

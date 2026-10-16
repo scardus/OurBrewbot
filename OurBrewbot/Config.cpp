@@ -307,6 +307,7 @@ static const CfgField kGlobalFields[] PROGMEM = { GLOBAL_CONFIG_FIELDS(CFG_ROW) 
   X("ProfileNo",            profileNo,       U8,    0)            \
   X("CurrentStep",          currentStep,     U8,    0)            \
   X("CurrentHour",          currentHour,     U16,   0)            \
+  X("ProfileHours",         profileHours,    U16,   0)            \
   X("LiveTest",             liveTest,        BOOL,  false)        \
   X("Status",               status,          U8,    0)            \
   X("ProfileRunning",       profileRunning,  BOOL,  false)        \

@@ -279,7 +279,9 @@ void checkFermenterAlarm(uint8_t i) {
 float estimateGravity(uint8_t i) {
   float og = g_fermenters[i].og;
   float tg = g_fermenters[i].tg;
-  float h  = g_fermenters[i].currentHour;
+  // Hours since the profile started. (It used currentHour, which starts again
+  // at every step change, so the estimate jumped back to OG each time.)
+  float h  = g_fermenters[i].profileHours;
   float range = og - tg;
 
   if (h <= 24.0f || og <= tg) {

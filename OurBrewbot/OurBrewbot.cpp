@@ -313,7 +313,7 @@ void loop() {
         // LiveTest mode: advance 1 hour per 10-second tick
         for (int i = 0; i < MAX_FERMENTERS; i++) {
           if (g_fermenters[i].liveTest && g_fermenters[i].profileRunning && g_fermenters[i].power) {
-            g_fermenters[i].currentHour++;
+            profileAddHour(i);
           }
         }
         processFermenters();
@@ -486,14 +486,14 @@ void onTenMinuteTimer() {
     logMsg("[TCP] Cleared %u closed connections from TIME_WAIT in the last 10 min", cleared);
   }
 
-  // Increment currentHour for active profile steps (6 calls × 10 min = 1 hour)
+  // Count profile hours for running profiles (6 calls × 10 min = 1 hour)
   static uint8_t s_hourTick[MAX_FERMENTERS] = {0};
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     if (g_fermenters[i].profileRunning && g_fermenters[i].power && !g_fermenters[i].liveTest) {
       s_hourTick[i]++;
       if (s_hourTick[i] >= 6) {
         s_hourTick[i] = 0;
-        g_fermenters[i].currentHour++;
+        profileAddHour(i);
       }
     } else {
       s_hourTick[i] = 0;

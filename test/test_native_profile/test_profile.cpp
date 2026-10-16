@@ -479,6 +479,52 @@ void test_advance_free_rise_is_widened_to_twice_the_hysteresis(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, g_fermenters[F].ceilingTemp);
 }
 
+// ---- profileHours: the whole profile's clock (0.6.4) ----
+// The gravity estimate uses it. It runs across step changes and is only reset
+// when a profile starts, so the estimate no longer jumps back to OG.
+
+void test_profileAddHour_counts_the_step_and_the_profile(void) {
+  runProfile(F, 1, 0, /*hour=*/5);
+  g_fermenters[F].profileHours = 40;
+  profileAddHour(F);
+  TEST_ASSERT_EQUAL_UINT16(6,  g_fermenters[F].currentHour);
+  TEST_ASSERT_EQUAL_UINT16(41, g_fermenters[F].profileHours);
+}
+
+void test_profile_hours_survive_a_step_change(void) {
+  runProfile(F, 1, 0, /*hour=*/24);
+  g_fermenters[F].profileHours = 24;
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);  // complete
+  g_profileSteps[flat(1, 1)] = makeStep(STEP_TIME_OVER_TEMP, 2.0f, 0, 20.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_UINT8(1,   g_fermenters[F].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(0,  g_fermenters[F].currentHour);
+  TEST_ASSERT_EQUAL_UINT16(24, g_fermenters[F].profileHours);
+}
+
+// Kept when the profile finishes, so the estimate stays at its end value
+void test_profile_hours_survive_the_profile_finishing(void) {
+  runProfile(F, 1, 0, /*hour=*/24);
+  g_fermenters[F].profileHours = 200;
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);  // last step, complete
+  advanceProfileStep(F);
+  TEST_ASSERT_FALSE(g_fermenters[F].profileRunning);
+  TEST_ASSERT_EQUAL_UINT16(200, g_fermenters[F].profileHours);
+}
+
+void test_profile_hours_reset_when_a_profile_starts(void) {
+  g_fermenters[F].profileHours = 200;
+  startProfile(F, 1);
+  TEST_ASSERT_EQUAL_UINT16(0, g_fermenters[F].profileHours);
+}
+
+void test_profile_hours_stop_at_the_top_of_their_range(void) {
+  runProfile(F, 1, 0, /*hour=*/0);
+  g_fermenters[F].profileHours = 0xFFFF;
+  profileAddHour(F);
+  TEST_ASSERT_EQUAL_UINT16(0xFFFF, g_fermenters[F].profileHours);
+}
+
 void test_advance_moves_to_next_step_and_resets_hour(void) {
   runProfile(F, 1, 0, /*hour=*/24);
   g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);  // complete
@@ -731,6 +777,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_advance_sets_band_around_ramp_target);
   RUN_TEST(test_advance_sets_band_around_flat_target);
   RUN_TEST(test_advance_free_rise_uses_step_bounds_directly);
+  RUN_TEST(test_profileAddHour_counts_the_step_and_the_profile);
+  RUN_TEST(test_profile_hours_survive_a_step_change);
+  RUN_TEST(test_profile_hours_survive_the_profile_finishing);
+  RUN_TEST(test_profile_hours_reset_when_a_profile_starts);
+  RUN_TEST(test_profile_hours_stop_at_the_top_of_their_range);
   RUN_TEST(test_advance_band_widens_to_the_hysteresis);
   RUN_TEST(test_advance_band_stays_at_its_minimum_for_a_small_hysteresis);
   RUN_TEST(test_TempReached_uses_the_widened_band);
