@@ -68,6 +68,13 @@ static int      s_plugCallCount;
 void smartPlugSwitch(uint8_t plugIndex, bool on) {
   if (s_plugCallCount < 32) s_plugCalls[s_plugCallCount++] = {plugIndex, on};
 }
+// A forced OFF is recorded as an OFF, and also counted on its own so a test
+// can tell it apart from a normal switch (which skips plugs with no role).
+static int s_forceOffCount;
+void smartPlugForceOff(uint8_t plugIndex) {
+  s_forceOffCount++;
+  if (s_plugCallCount < 32) s_plugCalls[s_plugCallCount++] = {plugIndex, false};
+}
 // Last recorded on/off state for a given plug, or -1 if never called.
 static int lastPlugState(uint8_t plugIndex) {
   for (int i = s_plugCallCount - 1; i >= 0; i--) {
@@ -99,6 +106,7 @@ void setUp(void) {
   s_controlTemp   = TEMP_NONE;
   s_millis        = 0;
   s_plugCallCount = 0;
+  s_forceOffCount = 0;
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     s_state[i]            = STATUS_IDLE;
     s_lastCoolingStop[i]  = 0;
@@ -160,6 +168,90 @@ void test_idle_blocks_cooling_during_compressor_delay(void) {
   test_setMillis(t + 600001);
   processSingleFermenter(F);
   TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
+}
+
+// ---- the compressor delay holds whichever way cooling stopped ----
+// Before 0.6.4 only the normal COOLING -> IDLE change recorded the stop time.
+// A lost reading, power off, temp control off or "all off" stopped the fridge
+// without recording it, so the compressor could restart within seconds.
+
+static const uint32_t COOL_STOP_AT = 1000000;   // well clear of the 0 sentinel
+
+// Fermenter F set up to want cooling (23.0 against a 22.0 ceiling), already
+// cooling, with a 10 minute compressor delay. Cooling stops at COOL_STOP_AT.
+static void startCooling(void) {
+  g_fermenters[F].floorTemp       = 18.0f;
+  g_fermenters[F].ceilingTemp     = 22.0f;
+  g_fermenters[F].hysteresis      = 0.5f;
+  g_fermenters[F].compressorDelay = 10;   // 600000 ms
+  test_setMillis(COOL_STOP_AT);
+  s_controlTemp = 23.0f;
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, s_state[F]);
+}
+
+// With control restored and still too warm, cooling must wait for the delay.
+static void assertCoolingWaitsForTheDelay(void) {
+  g_fermenters[F].power       = true;
+  g_fermenters[F].tempControl = true;
+  s_controlTemp = 23.0f;
+
+  test_setMillis(COOL_STOP_AT + 100);
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+
+  test_setMillis(COOL_STOP_AT + 600001);
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
+}
+
+void test_compressor_delay_holds_after_a_lost_reading(void) {
+  startCooling();
+  s_controlTemp = TEMP_NONE;   // probe drops out while cooling
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[F]);
+  assertCoolingWaitsForTheDelay();
+}
+
+void test_compressor_delay_holds_after_power_off(void) {
+  startCooling();
+  g_fermenters[F].power = false;
+  processFermenters();
+  assertCoolingWaitsForTheDelay();
+}
+
+void test_compressor_delay_holds_after_setFermenterPower_off(void) {
+  startCooling();
+  setFermenterPower(F, false);
+  assertCoolingWaitsForTheDelay();
+}
+
+void test_compressor_delay_holds_after_temp_control_off(void) {
+  startCooling();
+  g_fermenters[F].tempControl = false;
+  processFermenters();
+  assertCoolingWaitsForTheDelay();
+}
+
+void test_compressor_delay_holds_after_switchOffAll(void) {
+  startCooling();
+  switchOffAll();
+  assertCoolingWaitsForTheDelay();
+}
+
+// Stopping when NOT cooling must not start a compressor delay: a heater
+// switched off would otherwise block cooling for no reason.
+void test_stopping_while_heating_does_not_start_a_compressor_delay(void) {
+  g_fermenters[F].floorTemp       = 18.0f;
+  g_fermenters[F].ceilingTemp     = 22.0f;
+  g_fermenters[F].compressorDelay = 10;
+  test_setMillis(COOL_STOP_AT);
+  s_controlTemp = 17.0f;
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_HEATING, s_state[F]);
+
+  setFermenterPower(F, false);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[F]);
 }
 
 void test_heating_to_idle_at_floor_plus_hysteresis(void) {
@@ -228,18 +320,38 @@ void test_plug_mapping_is_per_fermenter(void) {
 
 // ---- checkFermenterAlarm: severe vs. mild-with-dwell ----
 
-void test_alarm_skipped_when_powered_off(void) {
+// Before 0.6.4 these two cases left the alarm as it was, so an alarm raised
+// before the fermenter was switched off (or lost its probe) stayed on.
+void test_alarm_cleared_when_powered_off(void) {
   g_fermenters[F].power = false;
-  g_fermenters[F].alarm = true;  // pre-existing value must be left alone
+  g_fermenters[F].alarm = true;
   checkFermenterAlarm(F);
-  TEST_ASSERT_TRUE(g_fermenters[F].alarm);
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
 }
 
-void test_alarm_skipped_on_no_reading(void) {
+void test_alarm_cleared_on_no_reading(void) {
   s_controlTemp = TEMP_NONE;
   g_fermenters[F].alarm = true;
   checkFermenterAlarm(F);
-  TEST_ASSERT_TRUE(g_fermenters[F].alarm);
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
+}
+
+// A mild deviation's dwell must start again after a gap with no reading,
+// not carry on from a time before the gap.
+void test_alarm_dwell_restarts_after_no_reading(void) {
+  g_fermenters[F].floorTemp      = 18.0f;
+  g_fermenters[F].ceilingTemp    = 22.0f;
+  g_fermenters[F].alarmTolerance = 3.0f;
+  g_globalConfig.alarmDwellSec   = 600;
+  test_setMillis(1000000);
+  s_controlTemp = 23.0f;                 // mild: 1.0 over the ceiling
+  checkFermenterAlarm(F);                // dwell starts
+  s_controlTemp = TEMP_NONE;
+  checkFermenterAlarm(F);                // probe lost - dwell reset
+  test_setMillis(1000000 + 600001);      // past the old dwell
+  s_controlTemp = 23.0f;
+  checkFermenterAlarm(F);                // dwell starts again from here
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
 }
 
 void test_alarm_clears_when_in_band(void) {
@@ -451,6 +563,16 @@ void test_dispatch_powered_off_skips_alarm_entirely(void) {
   TEST_ASSERT_EQUAL(0, lastPlugState(0));     // plug forced off
 }
 
+// The control loop must reach the alarm check for a powered-off fermenter too,
+// or an alarm raised before it was switched off is never cleared.
+void test_dispatch_powered_off_clears_an_earlier_alarm(void) {
+  g_fermenters[F].power = false;
+  g_fermenters[F].alarm = true;
+  s_controlTemp = 26.0f;
+  processFermenters();
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
+}
+
 void test_dispatch_temp_control_off_still_alarms(void) {
   g_fermenters[F].tempControl    = false;
   g_fermenters[F].floorTemp      = 18.0f;
@@ -525,6 +647,37 @@ void test_switchOffAll_turns_off_every_plug(void) {
   }
 }
 
+// A plug with no role is skipped by smartPlugSwitch(), so the emergency off
+// must use the forced OFF - otherwise a plug that was unassigned while ON
+// would be the one plug "all off" can't reach.
+void test_switchOffAll_forces_off_plugs_with_no_role(void) {
+  // Every plug left at its default: no fermenter, no role
+  switchOffAll();
+  TEST_ASSERT_EQUAL(MAX_SMART_PLUGS, s_forceOffCount);
+  for (int p = 0; p < MAX_SMART_PLUGS; p++) {
+    TEST_ASSERT_EQUAL(0, lastPlugState(p));
+  }
+}
+
+// Before 0.6.4 "all off" left every fermenter powered on, so the next control
+// pass (10 s later) switched the plugs straight back on.
+void test_switchOffAll_stays_off_at_the_next_control_pass(void) {
+  g_fermenters[F].floorTemp   = 18.0f;
+  g_fermenters[F].ceilingTemp = 22.0f;
+  g_smartPlugs[0].fermenter = F;
+  g_smartPlugs[0].function  = PLUG_FN_F1_HOT;
+  s_controlTemp = 17.0f;   // below the floor - would heat if allowed
+
+  switchOffAll();
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    TEST_ASSERT_FALSE(g_fermenters[i].power);
+  }
+
+  processFermenters();
+  TEST_ASSERT_EQUAL(0, lastPlugState(0));
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+}
+
 void test_switchOffAll_clears_latched_control_state(void) {
   // The internal state machine must be reset too, not just the plugs -
   // otherwise the next pass resumes HEATING from where it left off.
@@ -573,16 +726,16 @@ void test_setFermenterPower_ignores_out_of_range_index(void) {
 void test_estimateGravity_flat_during_lag_phase(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 0;
+  g_fermenters[F].profileHours = 0;
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, estimateGravity(F));
-  g_fermenters[F].currentHour = 24;
+  g_fermenters[F].profileHours = 24;
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.050f, estimateGravity(F));
 }
 
 void test_estimateGravity_mid_primary_phase(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 60;  // halfway through the 24-96 h window
+  g_fermenters[F].profileHours = 60;  // halfway through the 24-96 h window
   // 0.5 * 0.9 * 0.040 = 0.018 dropped
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.032f, estimateGravity(F));
 }
@@ -590,16 +743,16 @@ void test_estimateGravity_mid_primary_phase(void) {
 void test_estimateGravity_at_end_of_primary_phase(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 96;  // 90% of the range gone
+  g_fermenters[F].profileHours = 96;  // 90% of the range gone
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.014f, estimateGravity(F));
 }
 
 void test_estimateGravity_reaches_tg_and_clamps(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 168;  // 96 + 72: final 10% complete
+  g_fermenters[F].profileHours = 168;  // 96 + 72: final 10% complete
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, estimateGravity(F));
-  g_fermenters[F].currentHour = 1000;  // must not keep falling past TG
+  g_fermenters[F].profileHours = 1000;  // must not keep falling past TG
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, estimateGravity(F));
 }
 
@@ -607,7 +760,7 @@ void test_estimateGravity_returns_og_when_tg_not_below_og(void) {
   // Misconfigured OG/TG must not produce a rising or inverted estimate.
   g_fermenters[F].og = 1.010f;
   g_fermenters[F].tg = 1.050f;
-  g_fermenters[F].currentHour = 100;
+  g_fermenters[F].profileHours = 100;
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, estimateGravity(F));
 }
 
@@ -618,15 +771,23 @@ void test_estimateGravity_returns_og_when_tg_not_below_og(void) {
 void test_gravity_falls_back_to_estimate(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 60;
+  g_fermenters[F].profileHours = 60;
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.032f, getCurrentSG(F));
   TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
+}
+
+// An iSpindel that has just reported (iSpindelIsFresh() needs a report since boot)
+static void markIspindelReported(uint8_t slot) {
+  test_setMillis(1000000);
+  g_iSpindels[slot].lastSeen = 1000000;
+  g_iSpindels[slot].interval = 900;
 }
 
 void test_gravity_uses_ispindel_when_assigned(void) {
   g_iSpindels[0].collectData = true;
   g_iSpindels[0].fermenter   = F;
   g_iSpindels[0].sg          = 1.040f;
+  markIspindelReported(0);
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.040f, getCurrentSG(F));
   TEST_ASSERT_EQUAL_STRING("iSpindel", getGravitySource(F));
 }
@@ -638,7 +799,26 @@ void test_gravity_prefers_ispindel_corrected_reading(void) {
   g_iSpindels[0].fermenter    = F;
   g_iSpindels[0].sg           = 1.040f;
   g_iSpindels[0].corrGravity  = 1.038f;
+  markIspindelReported(0);
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.038f, getCurrentSG(F));
+}
+
+// A stale iSpindel's gravity is no longer used - the estimate takes over
+void test_gravity_skips_a_stale_ispindel(void) {
+  g_iSpindels[0].collectData = true;
+  g_iSpindels[0].fermenter   = F;
+  g_iSpindels[0].sg          = 1.040f;
+  markIspindelReported(0);
+  test_setMillis(1000000 + 3600001);
+  TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
+}
+
+// Reporting, but with no gravity in its reports - the estimate is used
+void test_gravity_skips_an_ispindel_with_no_gravity(void) {
+  g_iSpindels[0].collectData = true;
+  g_iSpindels[0].fermenter   = F;
+  markIspindelReported(0);
+  TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
 }
 
 void test_gravity_tilt_beats_ispindel(void) {
@@ -673,7 +853,7 @@ void test_gravity_debug_override_beats_everything(void) {
 void test_gravity_ignores_source_assigned_to_another_fermenter(void) {
   g_fermenters[F].og = 1.050f;
   g_fermenters[F].tg = 1.010f;
-  g_fermenters[F].currentHour = 0;
+  g_fermenters[F].profileHours = 0;
 
   g_tilts[0].active    = true;
   g_tilts[0].fermenter = 1;          // someone else's Tilt
@@ -751,13 +931,20 @@ int main(int argc, char** argv) {
   RUN_TEST(test_idle_to_heating_when_below_floor);
   RUN_TEST(test_idle_to_cooling_when_above_ceiling_and_delay_elapsed);
   RUN_TEST(test_idle_blocks_cooling_during_compressor_delay);
+  RUN_TEST(test_compressor_delay_holds_after_a_lost_reading);
+  RUN_TEST(test_compressor_delay_holds_after_power_off);
+  RUN_TEST(test_compressor_delay_holds_after_setFermenterPower_off);
+  RUN_TEST(test_compressor_delay_holds_after_temp_control_off);
+  RUN_TEST(test_compressor_delay_holds_after_switchOffAll);
+  RUN_TEST(test_stopping_while_heating_does_not_start_a_compressor_delay);
   RUN_TEST(test_heating_to_idle_at_floor_plus_hysteresis);
   RUN_TEST(test_cooling_to_idle_at_ceiling_minus_hysteresis);
   RUN_TEST(test_no_reading_forces_plugs_off_and_idle);
   RUN_TEST(test_plug_mapping_is_per_fermenter);
 
-  RUN_TEST(test_alarm_skipped_when_powered_off);
-  RUN_TEST(test_alarm_skipped_on_no_reading);
+  RUN_TEST(test_alarm_cleared_when_powered_off);
+  RUN_TEST(test_alarm_cleared_on_no_reading);
+  RUN_TEST(test_alarm_dwell_restarts_after_no_reading);
   RUN_TEST(test_alarm_clears_when_in_band);
   RUN_TEST(test_alarm_fires_immediately_on_severe_deviation);
   RUN_TEST(test_alarm_does_not_fire_immediately_on_mild_deviation);
@@ -780,12 +967,15 @@ int main(int argc, char** argv) {
   RUN_TEST(test_validate_accepts_null_errmsg_pointer);
 
   RUN_TEST(test_dispatch_powered_off_skips_alarm_entirely);
+  RUN_TEST(test_dispatch_powered_off_clears_an_earlier_alarm);
   RUN_TEST(test_dispatch_temp_control_off_still_alarms);
   RUN_TEST(test_dispatch_controls_normally_when_powered_and_enabled);
 
   RUN_TEST(test_plug_mapping_for_third_and_fourth_fermenters);
 
   RUN_TEST(test_switchOffAll_turns_off_every_plug);
+  RUN_TEST(test_switchOffAll_forces_off_plugs_with_no_role);
+  RUN_TEST(test_switchOffAll_stays_off_at_the_next_control_pass);
   RUN_TEST(test_switchOffAll_clears_latched_control_state);
 
   RUN_TEST(test_setFermenterPower_off_forces_plugs_off_and_idle);
@@ -800,6 +990,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_gravity_falls_back_to_estimate);
   RUN_TEST(test_gravity_uses_ispindel_when_assigned);
   RUN_TEST(test_gravity_prefers_ispindel_corrected_reading);
+  RUN_TEST(test_gravity_skips_a_stale_ispindel);
+  RUN_TEST(test_gravity_skips_an_ispindel_with_no_gravity);
   RUN_TEST(test_gravity_tilt_beats_ispindel);
   RUN_TEST(test_gravity_debug_override_beats_everything);
   RUN_TEST(test_gravity_ignores_source_assigned_to_another_fermenter);

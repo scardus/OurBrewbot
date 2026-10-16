@@ -110,6 +110,92 @@ static void seedSlot0(const char* name, const char* id) {
   g_iSpindels[0].collectData = true;
 }
 
+// ---- iSpindelIsFresh: how long readings stay usable ----
+
+static iSpindelConfig reportedAt(uint32_t ms, uint32_t intervalS) {
+  iSpindelConfig s{};
+  s.lastSeen = ms;
+  s.interval = intervalS;
+  return s;
+}
+
+void test_fresh_is_false_until_the_device_reports(void) {
+  test_setMillis(1000000);
+  TEST_ASSERT_FALSE(iSpindelIsFresh(reportedAt(0, 900)));
+}
+
+// 3 x 15 min is 45 min, under the 60 min minimum, so 60 min applies
+void test_fresh_for_60_minutes_with_a_short_interval(void) {
+  iSpindelConfig s = reportedAt(1000000, 900);
+  test_setMillis(1000000 + 3600000);
+  TEST_ASSERT_TRUE(iSpindelIsFresh(s));
+  test_setMillis(1000000 + 3600001);
+  TEST_ASSERT_FALSE(iSpindelIsFresh(s));
+}
+
+// 3 x 30 min = 90 min
+void test_fresh_for_3_intervals_with_a_long_interval(void) {
+  iSpindelConfig s = reportedAt(1000000, 1800);
+  test_setMillis(1000000 + 5400000);
+  TEST_ASSERT_TRUE(iSpindelIsFresh(s));
+  test_setMillis(1000000 + 5400001);
+  TEST_ASSERT_FALSE(iSpindelIsFresh(s));
+}
+
+void test_fresh_for_60_minutes_when_no_interval_was_sent(void) {
+  iSpindelConfig s = reportedAt(1000000, 0);
+  test_setMillis(1000000 + 3600001);
+  TEST_ASSERT_FALSE(iSpindelIsFresh(s));
+}
+
+// A silly interval is capped at a day (3 days fresh), so 3 x it can't overflow
+// into a tiny limit
+void test_fresh_caps_a_huge_interval(void) {
+  iSpindelConfig s = reportedAt(1000000, 4000000000UL);
+  test_setMillis(1000000 + 2UL * 86400000UL);
+  TEST_ASSERT_TRUE(iSpindelIsFresh(s));
+}
+
+void test_post_records_when_and_how_often_the_device_reports(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  test_setMillis(5000000);
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0,\"interval\":1800}"));
+  TEST_ASSERT_EQUAL_UINT32(5000000, g_iSpindels[0].lastSeen);
+  TEST_ASSERT_EQUAL_UINT32(1800,    g_iSpindels[0].interval);
+}
+
+// A newly registered device counts as reporting straight away
+void test_registration_records_when_the_device_reported(void) {
+  test_setMillis(5000000);
+  handleiSpindelPost(String("{\"name\":\"new\",\"ID\":\"AABBCC\",\"temperature\":20.0,\"interval\":900}"));
+  TEST_ASSERT_EQUAL_STRING("AABBCC", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_UINT32(5000000, g_iSpindels[0].lastSeen);
+  TEST_ASSERT_EQUAL_UINT32(900,     g_iSpindels[0].interval);
+  TEST_ASSERT_TRUE(iSpindelIsFresh(g_iSpindels[0]));
+}
+
+// ---- a new iSpindel registers unassigned ----
+
+// Before 0.6.4 a new device took the slot's defaults, and slot 0's linked it
+// straight to Fermenter 1's beer temperature. Simulate those old defaults.
+void test_new_ispindel_registers_unassigned(void) {
+  g_iSpindels[0].fermenter = 0;
+  g_iSpindels[0].function  = PROBE_FN_BEER;
+  handleiSpindelPost(makeBody("newspindel", "AABBCC", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_STRING("AABBCC", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[0].fermenter);
+  TEST_ASSERT_FALSE(g_iSpindels[0].collectData);
+}
+
+// A device already in a slot keeps its assignment when it reports
+void test_known_ispindel_keeps_its_assignment(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].fermenter = 2;
+  handleiSpindelPost(makeBody("ispindel-1", "C2A080", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_UINT8(2, g_iSpindels[0].fermenter);
+  TEST_ASSERT_TRUE(g_iSpindels[0].collectData);
+}
+
 // ---- validateiSpindelValues: gravity range ----
 
 void test_validate_keeps_sg_in_range(void) {
@@ -156,16 +242,24 @@ void test_validate_keeps_temp_in_range(void) {
   TEST_ASSERT_EQUAL_FLOAT(20.0f, temp);
 }
 
-void test_validate_zeroes_temp_below_floor(void) {
+// A rejected temperature is "no reading" (TEMP_NONE). Before 0.6.4 it became
+// 0.0, which the controller took as a real 0 C and heated for.
+void test_validate_rejects_temp_below_floor_as_no_reading(void) {
   float sg = 1.050f, temp = -50.0f;
   validateiSpindelValues(sg, temp, "Test", "abc123");
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, temp);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, temp);
 }
 
-void test_validate_zeroes_temp_above_ceiling(void) {
+void test_validate_rejects_temp_above_ceiling_as_no_reading(void) {
   float sg = 1.050f, temp = 90.0f;
   validateiSpindelValues(sg, temp, "Test", "abc123");
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, temp);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, temp);
+}
+
+void test_validate_leaves_no_reading_alone(void) {
+  float sg = 1.050f, temp = TEMP_NONE;
+  validateiSpindelValues(sg, temp, "Test", "abc123");
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, temp);
 }
 
 void test_validate_keeps_temp_at_exact_boundaries(void) {
@@ -178,6 +272,7 @@ void test_validate_keeps_temp_at_exact_boundaries(void) {
   TEST_ASSERT_EQUAL_FLOAT(80.0f, temp);
 }
 
+// 0 C is a real (in-range) temperature, not "missing"
 void test_validate_leaves_zero_temp_alone(void) {
   float sg = 1.050f, temp = 0.0f;
   validateiSpindelValues(sg, temp, "Test", "abc123");
@@ -277,10 +372,33 @@ void test_post_warm_fahrenheit_survives_range_check(void) {
 
 void test_post_absurd_fahrenheit_still_rejected(void) {
   // The range check must still do its job after conversion: 250 F is 121 C,
-  // outside the plausible range, so it is zeroed.
+  // outside the plausible range, so it is stored as "no reading".
   seedSlot0("ispindel-1", "C2A080");
   handleiSpindelPost(makeBody("ispindel-1", "C2A080", 250.0f, "F"));
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].temperature);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_iSpindels[0].temperature);
+}
+
+// No temperature in the POST: stored as "no reading", and the calibration
+// offset is not added to it
+void test_post_without_temperature_stores_no_reading(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].tempAdjust = 1.0f;
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"gravity\":1.050}"));
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_iSpindels[0].temperature);
+}
+
+void test_post_with_a_non_numeric_temperature_stores_no_reading(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":\"warm\"}"));
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_iSpindels[0].temperature);
+}
+
+// A genuine 0 C reading is now kept (with its offset), not treated as missing
+void test_post_of_zero_celsius_is_a_real_reading(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].tempAdjust = 0.5f;
+  handleiSpindelPost(makeBody("ispindel-1", "C2A080", 0.0f, "C"));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f, g_iSpindels[0].temperature);
 }
 
 void test_post_temp_adjust_applied_as_celsius_delta(void) {
@@ -531,7 +649,7 @@ void test_parse_missing_fields_read_as_zero_or_empty(void) {
   TEST_ASSERT_EQUAL_STRING("", r.tempUnits);
   TEST_ASSERT_EQUAL_STRING("", r.gravityUnit);
   TEST_ASSERT_EQUAL_UINT32(0, r.interval);
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.temperature);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, r.temperature);   // no reading, not 0 C
   TEST_ASSERT_EQUAL_FLOAT(0.0f, r.gravity);
   TEST_ASSERT_EQUAL_FLOAT(0.0f, r.battery);
   TEST_ASSERT_EQUAL_INT(0, r.rssi);
@@ -696,8 +814,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_validate_leaves_zero_sg_alone);
 
   RUN_TEST(test_validate_keeps_temp_in_range);
-  RUN_TEST(test_validate_zeroes_temp_below_floor);
-  RUN_TEST(test_validate_zeroes_temp_above_ceiling);
+  RUN_TEST(test_validate_rejects_temp_below_floor_as_no_reading);
+  RUN_TEST(test_validate_rejects_temp_above_ceiling_as_no_reading);
+  RUN_TEST(test_validate_leaves_no_reading_alone);
   RUN_TEST(test_validate_keeps_temp_at_exact_boundaries);
   RUN_TEST(test_validate_leaves_zero_temp_alone);
 
@@ -720,6 +839,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_post_kelvin_stored_as_celsius);
   RUN_TEST(test_post_warm_fahrenheit_survives_range_check);
   RUN_TEST(test_post_absurd_fahrenheit_still_rejected);
+  RUN_TEST(test_post_without_temperature_stores_no_reading);
+  RUN_TEST(test_post_with_a_non_numeric_temperature_stores_no_reading);
+  RUN_TEST(test_post_of_zero_celsius_is_a_real_reading);
   RUN_TEST(test_post_temp_adjust_applied_as_celsius_delta);
   RUN_TEST(test_post_registration_path_stores_celsius);
   RUN_TEST(test_post_conversion_does_not_disturb_gravity);
@@ -754,6 +876,15 @@ int main(int argc, char** argv) {
   RUN_TEST(test_register_name_suffix_declares_sg);
   RUN_TEST(test_register_declared_unit_beats_name_suffix);
   RUN_TEST(test_register_declared_sg_stores_sg);
+  RUN_TEST(test_fresh_is_false_until_the_device_reports);
+  RUN_TEST(test_fresh_for_60_minutes_with_a_short_interval);
+  RUN_TEST(test_fresh_for_3_intervals_with_a_long_interval);
+  RUN_TEST(test_fresh_for_60_minutes_when_no_interval_was_sent);
+  RUN_TEST(test_fresh_caps_a_huge_interval);
+  RUN_TEST(test_post_records_when_and_how_often_the_device_reports);
+  RUN_TEST(test_registration_records_when_the_device_reported);
+  RUN_TEST(test_new_ispindel_registers_unassigned);
+  RUN_TEST(test_known_ispindel_keeps_its_assignment);
 
   return UNITY_END();
 }

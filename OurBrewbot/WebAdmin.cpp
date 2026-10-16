@@ -1721,7 +1721,8 @@ function loadISpindels() {
 // Build a single iSpindel slot card. Shows live readings if present, plus per-slot config.
 function buildISpindelCard(idx, s) {
   var empty   = (s.name == 'None' || s.name == '');
-  var hasData = (s.sg > 0 || s.temperature > 0);
+  var hasTemp = (s.temperature > -100);   // -127 means no temperature reading
+  var hasData = (s.sg > 0 || hasTemp);
   var html = '<div class="card"><h3>Slot ' + idx;
   if (!empty) html += ': ' + escHtml(s.name);
   if (hasData && !empty) html += ' <span class="badge badge-idle">Active</span>';
@@ -1729,12 +1730,13 @@ function buildISpindelCard(idx, s) {
   if (!empty) {
     html += '<div class="live">';
     if (hasData) {
-      html += 'SG: ' + s.sg.toFixed(4) + ' &nbsp; Temp: ' + s.temperature.toFixed(1) + '&deg;' + tempUnit + ' &nbsp; Angle: ' + s.angle.toFixed(1) + '&deg; &nbsp; Batt: ' + s.battery.toFixed(2) + 'V &nbsp; RSSI: ' + s.rssi + 'dBm';
+      html += 'SG: ' + s.sg.toFixed(4) + ' &nbsp; Temp: ' + (hasTemp ? s.temperature.toFixed(1) + '&deg;' + tempUnit : '&ndash;') + ' &nbsp; Angle: ' + s.angle.toFixed(1) + '&deg; &nbsp; Batt: ' + s.battery.toFixed(2) + 'V &nbsp; RSSI: ' + s.rssi + 'dBm';
       if (s.corrGravity > 0 || s.velocity > 0) {
         html += '<br>Corr.SG: ' + s.corrGravity.toFixed(4) + ' &nbsp; Velocity: ' + s.velocity.toFixed(4) + ' &nbsp; Cycle: ' + s.runTime.toFixed(1) + 's' + (s.gravityUnit ? ' &nbsp; Unit: ' + escHtml(s.gravityUnit) : '');
       }
       var lastSeen = s.minutesSince >= 0xFFFF ? 'Never' : s.minutesSince === 0 ? 'Less than a minute ago' : s.minutesSince + ' min ago';
       html += '<br><span style="color:#888;font-size:12px">Last seen: ' + lastSeen + '</span>';
+      if (!s.fresh) html += ' <span style="color:#ffd166;font-size:12px">&ndash; not used: no recent report</span>';
     }
     html += '</div>';
     html += row('Device ID', '<span style="color:#53d8fb;font-size:13px">' + (s.id ? escHtml(s.id) : '—') + '</span>');

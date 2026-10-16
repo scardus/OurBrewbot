@@ -22,6 +22,7 @@
 #include "Config.h"
 #include "Pins.h"
 #include "Log.h"
+#include "iSpindel.h"
 
 // Hardware bus instances — defined here, declared extern in Temperatures.h
 OneWire        g_oneWireBus1(PIN_ONE_WIRE_BUS1);
@@ -241,8 +242,12 @@ void readTempResults() {
     } else {
       g_probes[i].failCount++;
       if (g_probes[i].failCount <= PROBE_FAIL_THRESHOLD) {
-        logMsgL(SYSLOG_WARNING, "[TEMP] Probe %s not responding (fail %d/%d)",
-          g_probes[i].address, g_probes[i].failCount, PROBE_FAIL_THRESHOLD);
+        logMsgL(SYSLOG_WARNING, "[TEMP] Probe %s not responding (fail %u/%d)",
+          g_probes[i].address, (unsigned)g_probes[i].failCount, PROBE_FAIL_THRESHOLD);
+      } else if (g_probes[i].failCount % PROBE_REMINDER_FAILS == 0) {
+        // One plain reminder an hour while the probe stays missing
+        logMsgL(SYSLOG_WARNING, "[TEMP] Probe %s still not responding (%u min)",
+          g_probes[i].address, (unsigned)(g_probes[i].failCount / 12));
       }
       if (g_probes[i].failCount >= PROBE_FAIL_THRESHOLD) {
         g_probes[i].temperature = TEMP_NONE;
@@ -287,7 +292,10 @@ float getTempQuick(const char* addressStr) {
 
 // Single resolver behind getBeerTemp()/getBeerTempSource() — one priority
 // chain (Tilt > Probe > iSpindel) shared by both, so the value and its
-// source label cannot drift apart.
+// source label cannot drift apart. Each source is used only while it has a
+// reading, so a failed beer probe falls through to a working iSpindel (and a
+// stale iSpindel to nothing, leaving control to the ambient probe). Before
+// 0.6.4 the first CONFIGURED source was used whether it had a reading or not.
 enum BeerTempSrc : int8_t { BEER_SRC_NONE = -1, BEER_SRC_DEBUG, BEER_SRC_TILT, BEER_SRC_PROBE, BEER_SRC_ISPINDEL };
 
 static BeerTempSrc findBeerTempSource(uint8_t fermenterIndex, int& slot) {
@@ -297,7 +305,8 @@ static BeerTempSrc findBeerTempSource(uint8_t fermenterIndex, int& slot) {
   for (int i = 0; i < MAX_TILTS; i++) {
     if (g_tilts[i].active &&
         g_tilts[i].fermenter == fermenterIndex &&
-        g_tilts[i].function  == PROBE_FN_BEER) {
+        g_tilts[i].function  == PROBE_FN_BEER &&
+        g_tilts[i].temperature > TEMP_VALID_MIN) {
       slot = i;
       return BEER_SRC_TILT;
     }
@@ -306,16 +315,20 @@ static BeerTempSrc findBeerTempSource(uint8_t fermenterIndex, int& slot) {
   for (int i = 0; i < MAX_PROBES; i++) {
     if (g_probes[i].fermenter == fermenterIndex &&
         g_probes[i].function  == PROBE_FN_BEER &&
-        strlen(g_probes[i].address) > 0) {
+        strlen(g_probes[i].address) > 0 &&
+        g_probes[i].temperature > TEMP_VALID_MIN) {
       slot = i;
       return BEER_SRC_PROBE;
     }
   }
-  // Priority 3: iSpindel (only when configured to provide beer temp)
+  // Priority 3: iSpindel (only when configured to provide beer temp, and only
+  // while it is reporting - see iSpindelIsFresh())
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     if (g_iSpindels[i].collectData &&
         g_iSpindels[i].fermenter == fermenterIndex &&
-        g_iSpindels[i].function  == PROBE_FN_BEER) {
+        g_iSpindels[i].function  == PROBE_FN_BEER &&
+        iSpindelIsFresh(g_iSpindels[i]) &&
+        g_iSpindels[i].temperature > TEMP_VALID_MIN) {
       slot = i;
       return BEER_SRC_ISPINDEL;
     }

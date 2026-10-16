@@ -37,6 +37,8 @@ The update check and crash reports can each be switched off — see [Contacting 
 
 Not yet implemented / tested:
 - Pressure sensor - __Untested - No hardware__
+- Aux 1 / Aux 2 smart plug roles - __Not implemented__ - from the original firmware; a plug can be given the role, but nothing switches it
+- SG Control - __Not implemented__ - from the original firmware; the setting is kept in the config file but does nothing. Use the gravity-based profile steps instead
 
 ---
 
@@ -163,6 +165,8 @@ Once the firmware is running, navigate to `http://ourbrewbot-XXXXXX.local/update
 4. The device reboots, connects to your network and registers its name in mDNS
 5. Open http://ourbrewbot-XXXXXX.local (the XXXXXX noted in step 1) in your browser.  If this does not work, find your device's IP from your router admin page, then open `http://DEVICEIP/` in a browser.
 
+If your WiFi is down when the device starts, it carries on controlling the fermenters without it and keeps trying to reconnect. After 5 minutes without WiFi it also opens the `OurBrewbot-XXXXXX` access point for 5 minutes at a time (taking turns with reconnecting), so you can enter new WiFi details if they have changed.
+
 ---
 
 ## Restoring Your Original Config
@@ -271,6 +275,10 @@ Discovery creates one HA device for the controller, one for each fermenter, and 
 By default the device is read-only from HA's perspective. Enable **Allow HA Control** in the MQTT settings page to allow Home Assistant to send commands back to the device.
 
 When enabled, the device subscribes to `<baseTopic>/+/+/set` and accepts commands for all writable entity types (switch, number, text, select, button). Commands are validated — out-of-range values are silently rejected and the HA entity reverts to the actual device state within ~60 seconds via the regular state publish.
+
+The **All Off** button switches every smart plug off and powers every fermenter off, so nothing comes back on until a fermenter's Power switch is turned on again.
+
+The **profile_running** switch pauses a fermenter's profile when turned off and resumes it at the same step when turned on. Turned on with no profile running, it starts the selected profile. Stopping a profile is done from the WebUI.
 
 When disabled, all discovery entities are still advertised (so the dashboard YAML remains stable), but the device ignores any incoming commands.
 

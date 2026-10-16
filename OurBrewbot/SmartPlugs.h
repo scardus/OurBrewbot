@@ -29,8 +29,21 @@ extern RCSwitch g_rcSwitch;
 // is only switched on then.
 extern bool g_rfSniffActive;
 
-// Transmit RF code to switch a plug on or off
+// How often a plug is re-sent a state it already has. The plugs can't confirm
+// a command, so this puts right a plug that missed one, or was switched by its
+// own button or power-cycled. A change of state is always sent straight away.
+// Just under a minute: the control loop runs every 10 s and the send time is
+// taken after the ~0.5 s burst, so a full 60000 would only be passed on the
+// seventh pass, making it every 70 s. 55000 gives a resend every 60 s.
+#define PLUG_RESEND_MS 55000
+
+// Set a plug on or off. Called by the control loop every 10 s: the RF code is
+// only transmitted when the state changes, or every PLUG_RESEND_MS otherwise.
 void smartPlugSwitch(uint8_t plugIndex, bool on);
+
+// Send a plug its OFF code whatever its role, even when it has none. Used
+// before a plug's settings change, and by the emergency switch-off.
+void smartPlugForceOff(uint8_t plugIndex);
 
 // Get current state of a plug (on/off)
 bool getPlugState(uint8_t plugIndex);

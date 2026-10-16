@@ -814,6 +814,13 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
       restartDevice();
     } else if (strcmp(key, "all_off") == 0) {
       switchOffAll();
+      // switchOffAll() powers every fermenter off: save that, and show it on
+      // each fermenter's Power switch in HA straight away
+      g_mqttPendingSave   = true;
+      g_mqttPendingSaveAt = millis();
+      for (int i = 0; i < MAX_FERMENTERS; i++) {
+        publishFermenterField(i, "power");
+      }
     }
     return;
   }
@@ -829,8 +836,27 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
   } else if (strcmp(key, "temp_control") == 0) {
     g_fermenters[idx].tempControl = on;
   } else if (strcmp(key, "profile_running") == 0) {
-    if (on) startProfile(idx, g_fermenters[idx].profileNo);
-    else    stopProfile(idx);
+    // OFF pauses the profile and ON resumes it, so turning the switch off and
+    // on in HA loses nothing. (OFF used to stop the profile and ON always
+    // started it again from step 0.) Stopping a profile is done in the WebUI.
+    FermenterConfig& f = g_fermenters[idx];
+    if (!on) {
+      if (f.profileRunning) pauseProfile(idx);
+    } else if (f.profileRunning) {
+      // Already running - nothing to do
+    } else if (f.profilePaused && f.profileNo > 0) {
+      resumeProfile(idx);
+    } else {
+      // Not started yet: start it only if a profile with steps is selected,
+      // the same check the WebUI makes
+      if (f.profileNo < 1 || f.profileNo > MAX_PROFILES ||
+          countProfileSteps(f.profileNo - 1) == 0) {
+        logMsg("[MQTT] cmd rejected: F%d has no profile with steps selected", idx);
+        publishFermenterField(idx, key);   // puts HA's switch back to OFF
+        return;
+      }
+      startProfile(idx, f.profileNo);
+    }
   } else if (strcmp(key, "ceiling_temperature") == 0 ||
              strcmp(key, "floor_temperature")   == 0 ||
              strcmp(key, "hysteresis")          == 0 ||
@@ -1181,7 +1207,9 @@ static void publishIspindels() {
     if (strcmp(g_iSpindels[i].name, "None") == 0) continue;
     snprintf(base, sizeof(base), "%s/iSpindel/%s",
       g_mqttConfig.baseTopic, g_iSpindels[i].id);
-    publishFloat(base, "temperature",       toDisplayTemp(g_iSpindels[i].temperature));
+    // Preserve the -127 "no reading" sentinel, as for probes
+    float spindelTemp = g_iSpindels[i].temperature;
+    publishFloat(base, "temperature",       spindelTemp > TEMP_VALID_MIN ? toDisplayTemp(spindelTemp) : spindelTemp);
     publishFloat(base, "gravity",           g_iSpindels[i].sg, 4);
     publishFloat(base, "corrected_gravity", g_iSpindels[i].corrGravity, 4);
     publishFloat(base, "battery",           g_iSpindels[i].battery, 3);

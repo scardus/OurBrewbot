@@ -57,6 +57,7 @@ bool saveProbeConfig()     { return true; }
 // Referenced inside Fermenter.cpp's processFermenters()/setFermenterPlugs(),
 // neither of which these tests call - the symbols still have to resolve.
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugForceOff(uint8_t) {}
 void processProfiles() {}
 
 // The code under test, plus the reading/conversion sources its payload uses.

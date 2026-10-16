@@ -33,6 +33,17 @@ static inline uint8_t flatStepIndex(uint8_t i) {
   return (g_fermenters[i].profileNo - 1) * MAX_STEPS_PER_PROFILE + g_fermenters[i].currentStep;
 }
 
+// How far either side of a profile's target temperature the floor and ceiling
+// are set, and how close the temperature must be to count as "at target".
+// It is PROFILE_TEMP_BAND, widened to the fermenter's hysteresis when that is
+// bigger. The controller only stops heating at floor + hysteresis and only stops
+// cooling at ceiling - hysteresis, so a band narrower than 2 x hysteresis made
+// the heater and the fridge take turns.
+static float profileBand(uint8_t i) {
+  float hysteresis = g_fermenters[i].hysteresis;
+  return (hysteresis > PROFILE_TEMP_BAND) ? hysteresis : PROFILE_TEMP_BAND;
+}
+
 // Helper: mark a profile as naturally finished and clear all state so saved
 // config matches stopProfile(). Called from all natural-finish paths.
 static void finishProfile(uint8_t i) {
@@ -41,6 +52,7 @@ static void finishProfile(uint8_t i) {
   g_fermenters[i].profileNo      = 0;
   g_fermenters[i].currentStep    = 0;
   g_fermenters[i].currentHour    = 0;
+  g_fermenters[i].hourTicks      = 0;
 }
 
 // Check if a step is empty (unused slot). Declared in Profile.h because the
@@ -81,12 +93,18 @@ void advanceProfileStep(uint8_t i) {
   // Update CeilingTemp/FloorTemp from current step's target
   float target = getProfileTargetTemp(i);
   if (step.stepType == STEP_FREE_RISE) {
-    // Free Rise: use startTemp as floor and endTemp as ceiling
-    g_fermenters[i].floorTemp   = step.startTemp;
-    g_fermenters[i].ceilingTemp = step.endTemp;
+    // Free Rise: the step's two temperatures are the floor and ceiling,
+    // whichever way round they were entered, and at least 2 x hysteresis
+    // apart (see profileBand() for why)
+    float lowest  = min(step.startTemp, step.endTemp);
+    float highest = max(step.startTemp, step.endTemp);
+    float minGap  = 2.0f * g_fermenters[i].hysteresis;
+    if (highest - lowest < minGap) highest = lowest + minGap;
+    g_fermenters[i].floorTemp   = lowest;
+    g_fermenters[i].ceilingTemp = highest;
   } else if (target > TEMP_VALID_MIN) {
-    g_fermenters[i].floorTemp   = target - PROFILE_TEMP_BAND;
-    g_fermenters[i].ceilingTemp = target + PROFILE_TEMP_BAND;
+    g_fermenters[i].floorTemp   = target - profileBand(i);
+    g_fermenters[i].ceilingTemp = target + profileBand(i);
   }
 
   // Check if step completion conditions are met
@@ -95,6 +113,7 @@ void advanceProfileStep(uint8_t i) {
       i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep, g_fermenters[i].currentStep + 1);
     g_fermenters[i].currentStep++;
     g_fermenters[i].currentHour = 0;
+    g_fermenters[i].hourTicks   = 0;
 
     // Check for profile end
     if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
@@ -123,7 +142,7 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
       // Days elapsed AND temp at target
       if (hours < daysInHours) return false;
       if (temp < TEMP_VALID_MIN) return false;
-      if (fabs(temp - step.endTemp) > PROFILE_TEMP_BAND) {
+      if (fabs(temp - step.endTemp) > profileBand(i)) {
         logMsg("[PROF] Profile stalled on Temp/Time: %.1f != %.1f", temp, step.endTemp);
         return false;
       }
@@ -166,7 +185,7 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
     case STEP_TEMP_REACHED:
       // Temperature reached target
       if (temp < TEMP_VALID_MIN) return false;
-      if (fabs(temp - step.endTemp) <= PROFILE_TEMP_BAND) {
+      if (fabs(temp - step.endTemp) <= profileBand(i)) {
         logMsg("[PROF] Temp target reached: %.1f", temp);
         return true;
       }
@@ -212,11 +231,33 @@ void startProfile(uint8_t i, uint8_t profileIndex) {
   g_fermenters[i].profileNo      = profileIndex;  // 1-4
   g_fermenters[i].currentStep    = 0;
   g_fermenters[i].currentHour    = 0;
+  g_fermenters[i].hourTicks      = 0;
+  g_fermenters[i].profileHours   = 0;   // only reset here - see profileAddHour()
   g_fermenters[i].profileRunning = true;
   g_fermenters[i].profilePaused  = false;
   g_fermenters[i].startMillis    = millis();
   logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile %d started", i, g_fermenters[i].fermenterName, profileIndex);
   saveFermenterConfig();
+}
+
+// currentHour starts again at every step change; profileHours runs across all
+// the steps and is only reset when a profile starts, so after the profile ends
+// the gravity estimate stays where it got to instead of jumping back to OG.
+void profileAddHour(uint8_t i) {
+  g_fermenters[i].currentHour++;
+  if (g_fermenters[i].profileHours < 0xFFFF) g_fermenters[i].profileHours++;
+}
+
+// Called every 10 minutes for a running profile. The ticks are saved with the
+// fermenter config, so a reboot loses at most the last few minutes - before
+// 0.6.4 they were kept in memory only, and a reboot (or a pause, or power off)
+// lost up to 59 minutes of the step.
+void profileAddTenMinutes(uint8_t i) {
+  g_fermenters[i].hourTicks++;
+  if (g_fermenters[i].hourTicks >= 6) {
+    g_fermenters[i].hourTicks = 0;
+    profileAddHour(i);
+  }
 }
 
 void stopProfile(uint8_t i) {
@@ -226,6 +267,7 @@ void stopProfile(uint8_t i) {
   g_fermenters[i].profileNo      = 0;
   g_fermenters[i].currentStep    = 0;
   g_fermenters[i].currentHour    = 0;
+  g_fermenters[i].hourTicks      = 0;
   saveFermenterConfig();
 }
 
@@ -259,6 +301,7 @@ bool nextProfileStep(uint8_t i) {
   }
   g_fermenters[i].currentStep++;
   g_fermenters[i].currentHour = 0;
+  g_fermenters[i].hourTicks   = 0;
   logMsg("[PROF] F%d (%s): Manual advance to step %d", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
   saveFermenterConfig();
   return true;
@@ -271,6 +314,7 @@ bool prevProfileStep(uint8_t i) {
 
   g_fermenters[i].currentStep--;
   g_fermenters[i].currentHour = 0;
+  g_fermenters[i].hourTicks   = 0;
   logMsg("[PROF] F%d (%s): Manual retreat to step %d", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
   saveFermenterConfig();
   return true;

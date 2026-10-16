@@ -22,6 +22,7 @@
 #include "SmartPlugs.h"
 #include "Profile.h"
 #include "Log.h"
+#include "iSpindel.h"
 
 // Track compressor delay per fermenter (millis of last cooling stop)
 static unsigned long s_lastCoolingStop[MAX_FERMENTERS] = {0};
@@ -34,6 +35,17 @@ static uint8_t s_state[MAX_FERMENTERS] = {STATUS_IDLE};  // STATUS_IDLE / STATUS
 // Runtime-only — fresh dwell on every boot.
 static uint32_t s_outOfRangeSince[MAX_FERMENTERS] = {0};
 
+// Put a fermenter's control state back to IDLE. Every way out of cooling must
+// come through here, because it records when the compressor stopped and the
+// compressor delay is counted from then. Setting s_state to IDLE directly would
+// leave the old stop time in place, so the compressor could restart at once.
+static void goIdle(uint8_t i) {
+  if (s_state[i] == STATUS_COOLING) {
+    s_lastCoolingStop[i] = millis();
+  }
+  s_state[i] = STATUS_IDLE;
+}
+
 // ============================================================
 // MAIN PROCESSOR
 // ============================================================
@@ -44,14 +56,15 @@ void processFermenters() {
       // Fermenter off — ensure all its plugs are off
       setFermenterPlugs(i, false, false);
       g_fermenters[i].status = STATUS_IDLE;
-      s_state[i] = STATUS_IDLE;
+      goIdle(i);
+      checkFermenterAlarm(i);   // clears any alarm left from before
       continue;
     }
     if (!g_fermenters[i].tempControl) {
       // Temp control paused — plugs off but fermenter still watches for alarms
       setFermenterPlugs(i, false, false);
       g_fermenters[i].status = STATUS_IDLE;
-      s_state[i] = STATUS_IDLE;
+      goIdle(i);
       checkFermenterAlarm(i);
       continue;
     }
@@ -85,6 +98,9 @@ void processSingleFermenter(uint8_t i) {
     logMsg("[FERM] F%d (%s): no temperature reading", i, g_fermenters[i].fermenterName);
     setFermenterPlugs(i, false, false);
     g_fermenters[i].status = STATUS_IDLE;
+    // Back to IDLE too, so when the reading returns a fridge that was
+    // cooling waits out the compressor delay instead of restarting at once
+    goIdle(i);
     return;
   }
 
@@ -118,8 +134,7 @@ void processSingleFermenter(uint8_t i) {
 
     case STATUS_COOLING:
       if (temp <= ceiling - hysteresis) {
-        s_lastCoolingStop[i] = millis();
-        s_state[i] = STATUS_IDLE;
+        goIdle(i);
       }
       break;
   }
@@ -174,12 +189,16 @@ void setFermenterPlugs(uint8_t fermenterIndex, bool heat, bool cool) {
 
 void switchOffAll() {
   logMsg("[FERM] SwitchOffAll - emergency off");
+  // Forced, so a plug with no role is switched off too
   for (int p = 0; p < MAX_SMART_PLUGS; p++) {
-    smartPlugSwitch(p, false);
+    smartPlugForceOff(p);
   }
+  // Every fermenter is powered off too. If they were left on, the control
+  // loop would switch the plugs straight back on at its next pass (<= 10 s).
   for (int i = 0; i < MAX_FERMENTERS; i++) {
+    g_fermenters[i].power  = false;
     g_fermenters[i].status = STATUS_IDLE;
-    s_state[i] = STATUS_IDLE;
+    goIdle(i);
   }
 }
 
@@ -188,10 +207,15 @@ void switchOffAll() {
 // ============================================================
 
 void checkFermenterAlarm(uint8_t i) {
-  if (!g_fermenters[i].power) return;
-
-  float temp = getControlTemp(i);
-  if (temp < TEMP_VALID_MIN) return;
+  // Powered off, or no reading to judge: the alarm is cleared rather than left
+  // as it was. Leaving it meant an alarm stayed on (in the WebUI and HA) for
+  // as long as the fermenter was off or its probe was missing.
+  float temp = g_fermenters[i].power ? getControlTemp(i) : TEMP_NONE;
+  if (temp < TEMP_VALID_MIN) {
+    g_fermenters[i].alarm = false;
+    s_outOfRangeSince[i]  = 0;   // a mild deviation's dwell starts again
+    return;
+  }
 
   float ceiling   = g_fermenters[i].ceilingTemp;
   float floor_    = g_fermenters[i].floorTemp;
@@ -255,7 +279,9 @@ void checkFermenterAlarm(uint8_t i) {
 float estimateGravity(uint8_t i) {
   float og = g_fermenters[i].og;
   float tg = g_fermenters[i].tg;
-  float h  = g_fermenters[i].currentHour;
+  // Hours since the profile started. (It used currentHour, which starts again
+  // at every step change, so the estimate jumped back to OG each time.)
+  float h  = g_fermenters[i].profileHours;
   float range = og - tg;
 
   if (h <= 24.0f || og <= tg) {
@@ -283,8 +309,12 @@ static GravitySrc findGravitySource(uint8_t i, int& slot) {
       return SG_SRC_TILT;
     }
   }
+  // An iSpindel only while it is reporting and has sent a gravity, so a stale
+  // or gravity-less one falls back to the estimate
   for (int s = 0; s < MAX_ISPINDELS; s++) {
-    if (g_iSpindels[s].collectData && g_iSpindels[s].fermenter == i) {
+    if (g_iSpindels[s].collectData && g_iSpindels[s].fermenter == i &&
+        iSpindelIsFresh(g_iSpindels[s]) &&
+        (g_iSpindels[s].sg > SG_VALID_MIN || g_iSpindels[s].corrGravity > SG_VALID_MIN)) {
       slot = s;
       return SG_SRC_ISPINDEL;
     }
@@ -337,6 +367,7 @@ void setFermenterPower(uint8_t index, bool on) {
   if (!on) {
     setFermenterPlugs(index, false, false);
     g_fermenters[index].status = STATUS_IDLE;
+    goIdle(index);
     logMsg("[FERM] F%d (%s): powered off", index, g_fermenters[index].fermenterName);
   }
 }

@@ -54,7 +54,10 @@ uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
 // ---- no-op stubs ----
-void logMsgImpl(uint8_t, PGM_P, ...) {}
+// Warnings are counted so the probe-failure tests can check how often a
+// missing probe is reported
+static int s_warnings = 0;
+void logMsgImpl(uint8_t level, PGM_P, ...) { if (level == 4 /* SYSLOG_WARNING */) s_warnings++; }
 
 // A call counter rather than a no-op: periodicProbeScan() is supposed to
 // write to flash only when the scan actually changed something, and no
@@ -448,6 +451,37 @@ void test_readTempResults_only_retries_the_first_failure(void) {
   TEST_ASSERT_EQUAL_INT(0, g_sensors1.testRequestCount());
 }
 
+// Before 0.6.4 the count was a uint8_t and went back to 0 after 255 failed
+// reads (~21 min): the warnings and the 750 ms blocking retry then repeated
+void test_readTempResults_fail_count_does_not_wrap(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_probes[0].failCount = 255;
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+  g_sensors1.testSetFailures(ADDR_A, 99);
+  s_warnings = 0;
+
+  readTempResults();
+  TEST_ASSERT_EQUAL_UINT32(256, g_probes[0].failCount);
+  TEST_ASSERT_EQUAL_INT(0, g_sensors1.testRequestCount());   // no blocking retry
+  TEST_ASSERT_EQUAL_INT(0, s_warnings);                      // no repeat warning
+}
+
+// While the probe stays missing, one plain reminder an hour (720 reads at 5 s)
+void test_readTempResults_reminds_hourly_while_a_probe_is_missing(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_probes[0].failCount = PROBE_REMINDER_FAILS - 1;
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+  g_sensors1.testSetFailures(ADDR_A, 9999);
+  s_warnings = 0;
+
+  readTempResults();                       // the 720th failed read
+  TEST_ASSERT_EQUAL_INT(1, s_warnings);
+  for (int i = 0; i < PROBE_REMINDER_FAILS - 1; i++) readTempResults();
+  TEST_ASSERT_EQUAL_INT(1, s_warnings);    // nothing more in the next hour
+  readTempResults();                       // the 1440th
+  TEST_ASSERT_EQUAL_INT(2, s_warnings);
+}
+
 void test_readTempResults_counts_a_persistent_failure(void) {
   configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
   g_probes[0].failCount = 2;
@@ -633,16 +667,25 @@ void test_cleanup_leaves_distinct_probes_untouched(void) {
 // getBeerTemp / getBeerTempSource: Tilt > Probe > iSpindel > None
 // ============================================================
 
+// An iSpindel assigned as fermenter F's beer temperature, that has just
+// reported (iSpindelIsFresh() needs a report since boot)
+static void assignReportingIspindel(uint8_t slot, float tempC) {
+  test_setMillis(1000000);
+  g_iSpindels[slot].collectData = true;
+  g_iSpindels[slot].fermenter   = F;
+  g_iSpindels[slot].function    = PROBE_FN_BEER;
+  g_iSpindels[slot].temperature = tempC;
+  g_iSpindels[slot].lastSeen    = 1000000;
+  g_iSpindels[slot].interval    = 900;
+}
+
 void test_getBeerTemp_none_when_nothing_assigned(void) {
   TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getBeerTemp(F));
   TEST_ASSERT_EQUAL_STRING("None", getBeerTempSource(F));
 }
 
 void test_getBeerTemp_uses_ispindel_when_assigned(void) {
-  g_iSpindels[0].collectData = true;
-  g_iSpindels[0].fermenter   = F;
-  g_iSpindels[0].function    = PROBE_FN_BEER;
-  g_iSpindels[0].temperature = 19.5f;
+  assignReportingIspindel(0, 19.5f);
   TEST_ASSERT_EQUAL_FLOAT(19.5f, getBeerTemp(F));
   TEST_ASSERT_EQUAL_STRING("iSpindel", getBeerTempSource(F));
 }
@@ -659,6 +702,53 @@ void test_getBeerTemp_probe_beats_ispindel(void) {
   g_probes[0].temperature = 20.1f;
 
   TEST_ASSERT_EQUAL_FLOAT(20.1f, getBeerTemp(F));
+  TEST_ASSERT_EQUAL_STRING("Probe", getBeerTempSource(F));
+}
+
+// ---- each source only while it has a reading (0.6.4) ----
+
+// An iSpindel not heard from for over 60 min (3 x its 15 min interval is less,
+// so the 60 min minimum applies) is no longer used
+void test_getBeerTemp_skips_a_stale_ispindel(void) {
+  assignReportingIspindel(0, 19.5f);
+  test_setMillis(1000000 + 3600001);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getBeerTemp(F));
+  TEST_ASSERT_EQUAL_STRING("None", getBeerTempSource(F));
+}
+
+// After a reboot nothing has reported yet - lastSeen is 0
+void test_getBeerTemp_skips_an_ispindel_not_heard_since_boot(void) {
+  assignReportingIspindel(0, 19.5f);
+  g_iSpindels[0].lastSeen = 0;
+  TEST_ASSERT_EQUAL_STRING("None", getBeerTempSource(F));
+}
+
+void test_getBeerTemp_skips_an_ispindel_with_no_temperature(void) {
+  assignReportingIspindel(0, TEMP_NONE);
+  TEST_ASSERT_EQUAL_STRING("None", getBeerTempSource(F));
+}
+
+// A beer probe that has failed falls through to a working iSpindel, rather
+// than straight to the ambient probe
+void test_getBeerTemp_failed_beer_probe_falls_back_to_the_ispindel(void) {
+  assignReportingIspindel(0, 19.5f);
+  strlcpy(g_probes[0].address, "0000000000000001", sizeof(g_probes[0].address));
+  g_probes[0].fermenter   = F;
+  g_probes[0].function    = PROBE_FN_BEER;
+  g_probes[0].temperature = TEMP_NONE;   // failed
+  TEST_ASSERT_EQUAL_FLOAT(19.5f, getBeerTemp(F));
+  TEST_ASSERT_EQUAL_STRING("iSpindel", getBeerTempSource(F));
+}
+
+void test_getBeerTemp_tilt_without_a_temperature_falls_back_to_the_probe(void) {
+  g_tilts[0].active      = true;
+  g_tilts[0].fermenter   = F;
+  g_tilts[0].function    = PROBE_FN_BEER;
+  g_tilts[0].temperature = TEMP_NONE;
+  strlcpy(g_probes[0].address, "0000000000000001", sizeof(g_probes[0].address));
+  g_probes[0].fermenter   = F;
+  g_probes[0].function    = PROBE_FN_BEER;
+  g_probes[0].temperature = 20.1f;
   TEST_ASSERT_EQUAL_STRING("Probe", getBeerTempSource(F));
 }
 
@@ -824,6 +914,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_readTempResults_leaves_the_bus_non_blocking_after_a_retry);
   RUN_TEST(test_readTempResults_only_retries_the_first_failure);
   RUN_TEST(test_readTempResults_counts_a_persistent_failure);
+  RUN_TEST(test_readTempResults_fail_count_does_not_wrap);
+  RUN_TEST(test_readTempResults_reminds_hourly_while_a_probe_is_missing);
   RUN_TEST(test_readTempResults_keeps_the_last_reading_below_the_threshold);
   RUN_TEST(test_readTempResults_marks_the_probe_inactive_at_the_threshold);
   RUN_TEST(test_readTempResults_clears_the_fail_count_on_recovery);
@@ -850,6 +942,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_getBeerTemp_probe_beats_ispindel);
   RUN_TEST(test_getBeerTemp_tilt_beats_probe);
   RUN_TEST(test_getBeerTemp_debug_override_beats_everything);
+  RUN_TEST(test_getBeerTemp_skips_a_stale_ispindel);
+  RUN_TEST(test_getBeerTemp_skips_an_ispindel_not_heard_since_boot);
+  RUN_TEST(test_getBeerTemp_skips_an_ispindel_with_no_temperature);
+  RUN_TEST(test_getBeerTemp_failed_beer_probe_falls_back_to_the_ispindel);
+  RUN_TEST(test_getBeerTemp_tilt_without_a_temperature_falls_back_to_the_probe);
 
   RUN_TEST(test_getAmbientTemp_none_when_nothing_assigned);
   RUN_TEST(test_getAmbientTemp_uses_assigned_probe);

@@ -49,9 +49,31 @@
 // Process an incoming iSpindel POST body (called from WebAPI)
 void handleiSpindelPost(const String& body);
 
+// How long an iSpindel's readings stay usable: 3 x its reporting interval, but
+// never less than 60 minutes (also the limit when it sends no interval).
+#define ISPINDEL_STALE_MIN_MS    3600000UL
+#define ISPINDEL_INTERVAL_MAX_S  86400UL   // caps the interval so 3 x it can't overflow
+
+// True while an iSpindel's readings can be used for control and gravity: it has
+// reported since boot, and recently enough (see above). A stale iSpindel is
+// skipped, so the next source with a reading is used instead. Before 0.6.4 an
+// iSpindel whose battery died kept controlling with its last reading forever.
+inline bool iSpindelIsFresh(const iSpindelConfig& s) {
+  if (s.lastSeen == 0) return false;   // not heard from since boot
+  uint32_t intervalS = (s.interval < ISPINDEL_INTERVAL_MAX_S) ? s.interval : ISPINDEL_INTERVAL_MAX_S;
+  uint32_t limitMs   = 3UL * intervalS * 1000UL;
+  if (limitMs < ISPINDEL_STALE_MIN_MS) limitMs = ISPINDEL_STALE_MIN_MS;
+  return (millis() - s.lastSeen) <= limitMs;
+}
+
+// Log when an iSpindel's readings stop being used (no recent report) and when
+// they are used again. Called from the main loop's fermenter tick.
+void iSpindelCheckFreshness();
+
 // One iSpindel POST, copied out of its JSON body. Text fields are cut to the
 // size of the matching iSpindelConfig field; a missing field reads as zero or
-// "". Values are exactly as the device sent them - no unit conversion yet.
+// "", except a missing temperature, which reads as TEMP_NONE (no reading).
+// Values are exactly as the device sent them - no unit conversion yet.
 struct iSpindelReading {
   char     name[24];          // same size as iSpindelConfig::name
   char     id[16];            // same size as iSpindelConfig::id
@@ -74,8 +96,8 @@ struct iSpindelReading {
 // and logged - see the comment on the function for why that matters.
 bool parseiSpindelBody(const String& body, iSpindelReading& out);
 
-// Clamp sg/temp to physically plausible ranges, zeroing (and logging) anything
-// outside them. Both MUST already be in the firmware's canonical units — temp
+// Reject (and log) an sg/temp outside physically plausible ranges: the gravity
+// becomes 0 and the temperature TEMP_NONE. Both MUST already be in the firmware's canonical units — temp
 // in Celsius and sg in Specific Gravity — because the ranges are expressed in
 // those units. name/id are only used for the log message. Extracted from
 // handleiSpindelPost so it can be unit tested directly.

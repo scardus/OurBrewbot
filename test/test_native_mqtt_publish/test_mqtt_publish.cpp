@@ -72,6 +72,7 @@ const char* getTiltColourName(uint8_t colour) {
 
 // SmartPlugs.cpp - Fermenter.cpp drives the plugs; nothing here asserts on them.
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugForceOff(uint8_t) {}
 bool getPlugState(uint8_t) { return false; }
 
 // The main sketch owns the debug overrides and the reboot reason string.
@@ -1361,6 +1362,103 @@ void test_inbound_name_is_stored_as_valid_utf8(void) {
   TEST_ASSERT_EQUAL_STRING("Ale ?", g_fermenters[F0].beerName);
 }
 
+// "All Off" must stick: every fermenter is powered off (so the control loop
+// can't switch the plugs back on), the change is saved, and each fermenter's
+// Power switch in HA is updated straight away.
+void test_inbound_all_off_powers_every_fermenter_off(void) {
+  g_mqttConfig.allowControl = true;
+  g_mqttPendingSave = false;   // file-static, so clear what earlier tests left
+
+  mqttTestInject(BASE "/Device/all_off/set", "PRESS");
+
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    TEST_ASSERT_FALSE(g_fermenters[i].power);
+  }
+  TEST_ASSERT_TRUE(g_mqttPendingSave);
+  assertPayload(BASE "/Fermenter0/power", "OFF");
+  assertPayload(BASE "/Fermenter3/power", "OFF");
+}
+
+// ---- the profile_running switch: ON starts or resumes, OFF pauses ----
+// Before 0.6.4 OFF stopped the profile and ON always restarted it from step 0,
+// so turning the HA switch off and on threw away the profile's progress.
+
+// Profile 1 with two steps, part-way through step 2 on fermenter 0.
+static void runProfileOnF0(void) {
+  g_profileSteps[0].startTemp = 20.0f;
+  g_profileSteps[0].endTemp   = 20.0f;
+  g_profileSteps[0].days      = 2;
+  g_profileSteps[1].startTemp = 22.0f;
+  g_profileSteps[1].endTemp   = 22.0f;
+  g_profileSteps[1].days      = 3;
+  g_fermenters[F0].profileNo      = 1;
+  g_fermenters[F0].profileRunning = true;
+  g_fermenters[F0].profilePaused  = false;
+  g_fermenters[F0].currentStep    = 1;
+  g_fermenters[F0].currentHour    = 30;
+}
+
+void test_inbound_profile_on_leaves_a_running_profile_where_it_is(void) {
+  g_mqttConfig.allowControl = true;
+  runProfileOnF0();
+  mqttTestInject(BASE "/Fermenter0/profile_running/set", "ON");
+  TEST_ASSERT_TRUE(g_fermenters[F0].profileRunning);
+  TEST_ASSERT_EQUAL_UINT8(1,   g_fermenters[F0].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(30, g_fermenters[F0].currentHour);
+}
+
+void test_inbound_profile_off_pauses_and_keeps_progress(void) {
+  g_mqttConfig.allowControl = true;
+  runProfileOnF0();
+  mqttTestInject(BASE "/Fermenter0/profile_running/set", "OFF");
+  TEST_ASSERT_FALSE(g_fermenters[F0].profileRunning);
+  TEST_ASSERT_TRUE(g_fermenters[F0].profilePaused);
+  TEST_ASSERT_EQUAL_UINT8(1,   g_fermenters[F0].profileNo);
+  TEST_ASSERT_EQUAL_UINT8(1,   g_fermenters[F0].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(30, g_fermenters[F0].currentHour);
+  assertPayload(F0_BASE "/profile_running", "OFF");
+}
+
+void test_inbound_profile_off_then_on_resumes_where_it_was(void) {
+  g_mqttConfig.allowControl = true;
+  runProfileOnF0();
+  mqttTestInject(BASE "/Fermenter0/profile_running/set", "OFF");
+  mqttTestInject(BASE "/Fermenter0/profile_running/set", "ON");
+  TEST_ASSERT_TRUE(g_fermenters[F0].profileRunning);
+  TEST_ASSERT_FALSE(g_fermenters[F0].profilePaused);
+  TEST_ASSERT_EQUAL_UINT8(1,   g_fermenters[F0].currentStep);
+  TEST_ASSERT_EQUAL_UINT16(30, g_fermenters[F0].currentHour);
+}
+
+void test_inbound_profile_on_starts_a_selected_profile_from_step_1(void) {
+  g_mqttConfig.allowControl = true;
+  runProfileOnF0();
+  g_fermenters[F0].profileRunning = false;   // selected, not started
+  g_fermenters[F0].currentStep    = 0;
+  g_fermenters[F0].currentHour    = 0;
+  mqttTestInject(BASE "/Fermenter0/profile_running/set", "ON");
+  TEST_ASSERT_TRUE(g_fermenters[F0].profileRunning);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[F0].currentStep);
+  assertPayload(F0_BASE "/profile_running", "ON");
+}
+
+// Nothing to run: refused, and the switch is put straight back to OFF
+void test_inbound_profile_on_is_refused_without_a_profile(void) {
+  g_mqttConfig.allowControl = true;
+  g_fermenters[F0].profileNo = 0;
+  mqttTestInject(BASE "/Fermenter0/profile_running/set", "ON");
+  TEST_ASSERT_FALSE(g_fermenters[F0].profileRunning);
+  assertPayload(F0_BASE "/profile_running", "OFF");
+}
+
+void test_inbound_profile_on_is_refused_for_a_profile_with_no_steps(void) {
+  g_mqttConfig.allowControl = true;
+  g_fermenters[F0].profileNo = 2;            // all its steps are empty
+  mqttTestInject(BASE "/Fermenter0/profile_running/set", "ON");
+  TEST_ASSERT_FALSE(g_fermenters[F0].profileRunning);
+  assertPayload(F0_BASE "/profile_running", "OFF");
+}
+
 void test_mqtt_loop_only_runs_while_connected(void) {
   g_mqttTest.loopCount = 0;
   mqttLoop();
@@ -1514,6 +1612,13 @@ int main(int, char**) {
   RUN_TEST(test_inbound_switch_command_applies_and_echoes);
   RUN_TEST(test_inbound_rejected_value_is_not_stored);
   RUN_TEST(test_inbound_name_is_stored_as_valid_utf8);
+  RUN_TEST(test_inbound_all_off_powers_every_fermenter_off);
+  RUN_TEST(test_inbound_profile_on_leaves_a_running_profile_where_it_is);
+  RUN_TEST(test_inbound_profile_off_pauses_and_keeps_progress);
+  RUN_TEST(test_inbound_profile_off_then_on_resumes_where_it_was);
+  RUN_TEST(test_inbound_profile_on_starts_a_selected_profile_from_step_1);
+  RUN_TEST(test_inbound_profile_on_is_refused_without_a_profile);
+  RUN_TEST(test_inbound_profile_on_is_refused_for_a_profile_with_no_steps);
   RUN_TEST(test_mqtt_loop_only_runs_while_connected);
   RUN_TEST(test_failed_connect_backs_off_before_retrying);
   RUN_TEST(test_successful_connect_resets_the_backoff);

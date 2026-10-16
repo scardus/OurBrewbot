@@ -77,6 +77,8 @@ void setUp(void) {
   s_bleBuf[0]         = '\0';
   s_bleReady          = true;
   s_lastBleInitRetry  = 0;
+  s_scanAnswered      = false;
+  s_silentScans       = 0;
   g_bleSniffActive    = false;
   s_reportsPending    = false;
   g_bleSerial.reset();
@@ -391,6 +393,69 @@ void test_startTiltScan_counts_a_miss_when_module_not_ready(void) {
   TEST_ASSERT_EQUAL_INT(1, s_missedReads[0]);  // still ages a stale Tilt
 }
 
+// ---- restarting an HM-10 that stops answering ----
+// Before 0.6.4 only a module that failed at boot was ever set up again; one
+// that stopped answering later gave no Tilt readings until the next reboot.
+
+// One whole scan: start it on the next 5 s tick, let the module send `reply`
+// (nothing at all if null), then let the 4 s window run out.
+static void runScan(const char* reply) {
+  test_setMillis(s_millis + 5000);
+  startTiltScan();
+  if (reply) g_bleSerial.feed(reply);
+  serviceTilt();
+  expireScanWindow();
+  serviceTilt();
+}
+
+void test_three_silent_scans_mark_the_module_for_a_restart(void) {
+  test_setMillis(1000000);
+  runScan(nullptr);
+  runScan(nullptr);
+  TEST_ASSERT_TRUE(s_bleReady);     // two silent scans - not yet
+  runScan(nullptr);
+  TEST_ASSERT_FALSE(s_bleReady);
+}
+
+void test_the_next_tick_after_silence_sets_the_module_up_again(void) {
+  test_setMillis(1000000);
+  runScan(nullptr);
+  runScan(nullptr);
+  runScan(nullptr);
+  g_bleSerial.feed("OK");           // the module answers the restart's AT
+  test_setMillis(s_millis + 5000);
+  startTiltScan();
+  TEST_ASSERT_TRUE(s_bleReady);
+}
+
+// No beacons in range is a normal answer, not silence
+void test_a_scan_answered_with_no_beacons_is_not_silence(void) {
+  test_setMillis(1000000);
+  for (int i = 0; i < 5; i++) runScan("OK+DISISOK+DISCE");
+  TEST_ASSERT_TRUE(s_bleReady);
+  TEST_ASSERT_EQUAL_UINT8(0, s_silentScans);
+}
+
+void test_an_answered_scan_resets_the_silence_count(void) {
+  test_setMillis(1000000);
+  runScan(nullptr);
+  runScan(nullptr);
+  runScan(discRecord(1, "0044041AF6"));
+  runScan(nullptr);
+  runScan(nullptr);
+  TEST_ASSERT_TRUE(s_bleReady);
+}
+
+// Requested in the first 5 minutes after boot, millis() - 5 min wraps round,
+// but the restart must still be due at once
+void test_a_restart_requested_soon_after_boot_is_due_at_once(void) {
+  test_setMillis(20000);
+  bleRequestReinit();
+  g_bleSerial.feed("OK");
+  startTiltScan();
+  TEST_ASSERT_TRUE(s_bleReady);
+}
+
 // ---- initBLE: HM-10 handshake ----
 
 void test_initBLE_marks_ready_on_ok_response(void) {
@@ -603,6 +668,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_initBLE_marks_not_ready_when_module_silent);
   RUN_TEST(test_initBLE_uses_a_supported_stored_baud);
   RUN_TEST(test_initBLE_falls_back_to_9600_when_stored_baud_is_zero);
+  RUN_TEST(test_three_silent_scans_mark_the_module_for_a_restart);
+  RUN_TEST(test_the_next_tick_after_silence_sets_the_module_up_again);
+  RUN_TEST(test_a_scan_answered_with_no_beacons_is_not_silence);
+  RUN_TEST(test_an_answered_scan_resets_the_silence_count);
+  RUN_TEST(test_a_restart_requested_soon_after_boot_is_due_at_once);
   RUN_TEST(test_initBLE_falls_back_to_9600_when_stored_baud_is_unsupported);
 
   RUN_TEST(test_serviceTilt_parses_two_records_in_one_response);

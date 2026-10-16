@@ -467,14 +467,18 @@ void handleFermenter(ESP8266WebServer& server) {
         // returned 400 having already moved the ceiling/floor/hysteresis — and
         // the control loop reads those from RAM, so a rejected save really did
         // change how the fermenter was driven until the next config load.
-        FermenterConfig fc = g_fermenters[idx];
+        // static, not on the loop stack: with the config save below on top
+        // of it this handler reached the build's deepest stack point (1,136 B
+        // left). Requests are handled one at a time, so sharing it is safe.
+        static FermenterConfig fc;
+        fc = g_fermenters[idx];
 
         // Validated numeric fields — validateFermenterField() owns single-
         // field ranges; CeilingTemp / FloorTemp / Hysteresis are validated
         // holistically below against the would-be combined state so a save
         // can correct an invalid in-memory config.
         const char* valErr;
-        char valJson[128];
+        static char valJson[128];   // static for the same reason as fc
         #define REJECT(msg) { \
             snprintf(valJson, sizeof(valJson), "{\"status\":\"error\",\"msg\":\"%s\"}", msg); \
             sendJsonResponse(server, valJson, 400); return; \
@@ -932,7 +936,9 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["tempAdjust"]  = toDisplayTempDelta(g_iSpindels[i].tempAdjust);  // a calibration offset: span, not absolute
     s["sgAdjust"]    = g_iSpindels[i].sgAdjust;
     s["sg"]          = g_iSpindels[i].sg;
-    s["temperature"] = toDisplayTemp(g_iSpindels[i].temperature);
+    // TEMP_NONE (no reading) is passed through unconverted, like a probe's
+    float spindelTemp = g_iSpindels[i].temperature;
+    s["temperature"] = (spindelTemp > TEMP_VALID_MIN) ? toDisplayTemp(spindelTemp) : TEMP_NONE;
     s["battery"]     = g_iSpindels[i].battery;
     s["rssi"]        = g_iSpindels[i].rssi;
     s["angle"]       = g_iSpindels[i].angle;
@@ -940,6 +946,7 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["corrGravity"]  = g_iSpindels[i].corrGravity;
     s["runTime"]      = g_iSpindels[i].runTime;
     s["gravityUnit"]  = g_iSpindels[i].gravityUnit;
+    s["fresh"]        = iSpindelIsFresh(g_iSpindels[i]);   // readings in use
     s["minutesSince"] = g_iSpindels[i].lastSeen == 0
                           ? 0xFFFF
                           : (uint32_t)(millis() - g_iSpindels[i].lastSeen) / 60000UL;
@@ -972,7 +979,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     g_iSpindels[idx].tempAdjust  = 0.0f;
     g_iSpindels[idx].sgAdjust    = 0.0f;
     g_iSpindels[idx].sg             = 0.0f;
-    g_iSpindels[idx].temperature    = 0.0f;
+    g_iSpindels[idx].temperature    = TEMP_NONE;
     g_iSpindels[idx].battery        = 0.0f;
     g_iSpindels[idx].rssi           = 0;
     g_iSpindels[idx].angle          = 0.0f;
@@ -1117,16 +1124,39 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
   if (!parseJsonBody(server, doc)) return;
   int idx = getValidIndex(server, doc, "index", MAX_SMART_PLUGS, F("Invalid plug index"));
   if (idx < 0) return;
-  if (!doc["function"].isNull())     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           g_smartPlugs[idx].function    = v; }
-  if (!doc["fermenter"].isNull())    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_smartPlugs[idx].fermenter   = v; }
-  if (doc["manufacturer"].is<const char*>()) copyText(g_smartPlugs[idx].manufacturer, doc["manufacturer"].as<const char*>(), sizeof(g_smartPlugs[0].manufacturer));
-  if (doc["model"].is<const char*>())        copyText(g_smartPlugs[idx].model,         doc["model"].as<const char*>(),         sizeof(g_smartPlugs[0].model));
-  if (!doc["onCode"].isNull())       g_smartPlugs[idx].onCode      = doc["onCode"];
-  if (!doc["offCode"].isNull())      g_smartPlugs[idx].offCode     = doc["offCode"];
-  if (!doc["protocol"].isNull())     { uint8_t v = doc["protocol"]; if (v >= 1)              g_smartPlugs[idx].protocol    = v; }
-  if (!doc["bits"].isNull())         { uint8_t v = doc["bits"];     if (v >= 1 && v <= 32)   g_smartPlugs[idx].bits        = v; }
-  if (!doc["delay"].isNull())        g_smartPlugs[idx].delayLength = doc["delay"];
-  if (!doc["codeset"].isNull())      g_smartPlugs[idx].codeset     = doc["codeset"];
+
+  // The changes go into a copy first, so they can be compared with the plug's
+  // current settings before anything is replaced (see below).
+  SmartPlugConfig plug = g_smartPlugs[idx];
+  if (!doc["function"].isNull())     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           plug.function    = v; }
+  if (!doc["fermenter"].isNull())    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) plug.fermenter   = v; }
+  if (doc["manufacturer"].is<const char*>()) copyText(plug.manufacturer, doc["manufacturer"].as<const char*>(), sizeof(plug.manufacturer));
+  if (doc["model"].is<const char*>())        copyText(plug.model,         doc["model"].as<const char*>(),         sizeof(plug.model));
+  if (!doc["onCode"].isNull())       plug.onCode      = doc["onCode"];
+  if (!doc["offCode"].isNull())      plug.offCode     = doc["offCode"];
+  if (!doc["protocol"].isNull())     { uint8_t v = doc["protocol"]; if (v >= 1)              plug.protocol    = v; }
+  if (!doc["bits"].isNull())         { uint8_t v = doc["bits"];     if (v >= 1 && v <= 32)   plug.bits        = v; }
+  if (!doc["delay"].isNull())        plug.delayLength = doc["delay"];
+  if (!doc["codeset"].isNull())      plug.codeset     = doc["codeset"];
+
+  // If the change affects how, or whether, the plug is switched, send it OFF
+  // first while its old settings are still in place. Otherwise a plug that was
+  // ON would stay on for good: the control loop only switches a plug by its NEW
+  // role, and only the OLD code and timing are what the plug responds to.
+  // The WebUI sends every field on each save, so an unchanged save sends nothing.
+  const SmartPlugConfig& old = g_smartPlugs[idx];
+  bool switchingChanged = plug.function    != old.function    ||
+                          plug.fermenter   != old.fermenter   ||
+                          plug.onCode      != old.onCode      ||
+                          plug.offCode     != old.offCode     ||
+                          plug.protocol    != old.protocol    ||
+                          plug.bits        != old.bits        ||
+                          plug.delayLength != old.delayLength;
+  if (switchingChanged) {
+    smartPlugForceOff(idx);
+  }
+
+  g_smartPlugs[idx] = plug;
   saveSmartPlugConfig();
   sendOk(server, F("Plug updated"));
 }
@@ -1273,6 +1303,10 @@ void checkBLESniffTimeout() {
     g_bleSniffActive = false;
     s_bleSniffLastPoll = 0;
     s_bleSniffLen = 0;
+    // The console can send any AT command (role, baud, ...), so put the
+    // module back the way Tilt scanning needs it
+    logMsg("[BLE] Console closed - restarting HM-10");
+    bleRequestReinit();
   }
 }
 
@@ -1676,9 +1710,13 @@ void handleFermenterProfile(ESP8266WebServer& server) {
     resumeProfile(idx);
     sendOk(server, F("Profile resumed"));
   } else if (strcmp(action, "next") == 0) {
+    // Noted first: finishing the profile clears profileNo, so it can't be
+    // checked afterwards (it was, so "Profile complete" was never sent and a
+    // finished profile was reported as an error)
+    bool wasRunning = g_fermenters[idx].profileRunning;
     if (nextProfileStep(idx)) {
       sendOk(server, F("Advanced to next step"));
-    } else if (!g_fermenters[idx].profileRunning && g_fermenters[idx].profileNo > 0) {
+    } else if (wasRunning) {
       sendOk(server, F("Profile complete"));
     } else {
       sendErr(server, 400, F("Profile not running"));

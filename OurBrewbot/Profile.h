@@ -33,6 +33,13 @@ bool isStepComplete(uint8_t fermenterIndex, const ProfileStep& step);
 // Start a profile on a fermenter
 void startProfile(uint8_t fermenterIndex, uint8_t profileIndex);
 
+// Count one more hour of a running profile: the current step's hour and the
+// whole profile's (which the gravity estimate uses)
+void profileAddHour(uint8_t fermenterIndex);
+
+// Count 10 minutes of a running profile; every sixth call adds an hour
+void profileAddTenMinutes(uint8_t fermenterIndex);
+
 // Stop/pause/resume a profile
 void stopProfile(uint8_t fermenterIndex);
 void pauseProfile(uint8_t fermenterIndex);
