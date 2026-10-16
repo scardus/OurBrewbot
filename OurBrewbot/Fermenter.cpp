@@ -34,6 +34,17 @@ static uint8_t s_state[MAX_FERMENTERS] = {STATUS_IDLE};  // STATUS_IDLE / STATUS
 // Runtime-only — fresh dwell on every boot.
 static uint32_t s_outOfRangeSince[MAX_FERMENTERS] = {0};
 
+// Put a fermenter's control state back to IDLE. Every way out of cooling must
+// come through here, because it records when the compressor stopped and the
+// compressor delay is counted from then. Setting s_state to IDLE directly would
+// leave the old stop time in place, so the compressor could restart at once.
+static void goIdle(uint8_t i) {
+  if (s_state[i] == STATUS_COOLING) {
+    s_lastCoolingStop[i] = millis();
+  }
+  s_state[i] = STATUS_IDLE;
+}
+
 // ============================================================
 // MAIN PROCESSOR
 // ============================================================
@@ -44,14 +55,14 @@ void processFermenters() {
       // Fermenter off — ensure all its plugs are off
       setFermenterPlugs(i, false, false);
       g_fermenters[i].status = STATUS_IDLE;
-      s_state[i] = STATUS_IDLE;
+      goIdle(i);
       continue;
     }
     if (!g_fermenters[i].tempControl) {
       // Temp control paused — plugs off but fermenter still watches for alarms
       setFermenterPlugs(i, false, false);
       g_fermenters[i].status = STATUS_IDLE;
-      s_state[i] = STATUS_IDLE;
+      goIdle(i);
       checkFermenterAlarm(i);
       continue;
     }
@@ -85,6 +96,9 @@ void processSingleFermenter(uint8_t i) {
     logMsg("[FERM] F%d (%s): no temperature reading", i, g_fermenters[i].fermenterName);
     setFermenterPlugs(i, false, false);
     g_fermenters[i].status = STATUS_IDLE;
+    // Back to IDLE too, so when the reading returns a fridge that was
+    // cooling waits out the compressor delay instead of restarting at once
+    goIdle(i);
     return;
   }
 
@@ -118,8 +132,7 @@ void processSingleFermenter(uint8_t i) {
 
     case STATUS_COOLING:
       if (temp <= ceiling - hysteresis) {
-        s_lastCoolingStop[i] = millis();
-        s_state[i] = STATUS_IDLE;
+        goIdle(i);
       }
       break;
   }
@@ -180,7 +193,7 @@ void switchOffAll() {
   }
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     g_fermenters[i].status = STATUS_IDLE;
-    s_state[i] = STATUS_IDLE;
+    goIdle(i);
   }
 }
 
@@ -338,6 +351,7 @@ void setFermenterPower(uint8_t index, bool on) {
   if (!on) {
     setFermenterPlugs(index, false, false);
     g_fermenters[index].status = STATUS_IDLE;
+    goIdle(index);
     logMsg("[FERM] F%d (%s): powered off", index, g_fermenters[index].fermenterName);
   }
 }

@@ -170,6 +170,90 @@ void test_idle_blocks_cooling_during_compressor_delay(void) {
   TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
 }
 
+// ---- the compressor delay holds whichever way cooling stopped ----
+// Before 0.6.4 only the normal COOLING -> IDLE change recorded the stop time.
+// A lost reading, power off, temp control off or "all off" stopped the fridge
+// without recording it, so the compressor could restart within seconds.
+
+static const uint32_t COOL_STOP_AT = 1000000;   // well clear of the 0 sentinel
+
+// Fermenter F set up to want cooling (23.0 against a 22.0 ceiling), already
+// cooling, with a 10 minute compressor delay. Cooling stops at COOL_STOP_AT.
+static void startCooling(void) {
+  g_fermenters[F].floorTemp       = 18.0f;
+  g_fermenters[F].ceilingTemp     = 22.0f;
+  g_fermenters[F].hysteresis      = 0.5f;
+  g_fermenters[F].compressorDelay = 10;   // 600000 ms
+  test_setMillis(COOL_STOP_AT);
+  s_controlTemp = 23.0f;
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, s_state[F]);
+}
+
+// With control restored and still too warm, cooling must wait for the delay.
+static void assertCoolingWaitsForTheDelay(void) {
+  g_fermenters[F].power       = true;
+  g_fermenters[F].tempControl = true;
+  s_controlTemp = 23.0f;
+
+  test_setMillis(COOL_STOP_AT + 100);
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+
+  test_setMillis(COOL_STOP_AT + 600001);
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
+}
+
+void test_compressor_delay_holds_after_a_lost_reading(void) {
+  startCooling();
+  s_controlTemp = TEMP_NONE;   // probe drops out while cooling
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[F]);
+  assertCoolingWaitsForTheDelay();
+}
+
+void test_compressor_delay_holds_after_power_off(void) {
+  startCooling();
+  g_fermenters[F].power = false;
+  processFermenters();
+  assertCoolingWaitsForTheDelay();
+}
+
+void test_compressor_delay_holds_after_setFermenterPower_off(void) {
+  startCooling();
+  setFermenterPower(F, false);
+  assertCoolingWaitsForTheDelay();
+}
+
+void test_compressor_delay_holds_after_temp_control_off(void) {
+  startCooling();
+  g_fermenters[F].tempControl = false;
+  processFermenters();
+  assertCoolingWaitsForTheDelay();
+}
+
+void test_compressor_delay_holds_after_switchOffAll(void) {
+  startCooling();
+  switchOffAll();
+  assertCoolingWaitsForTheDelay();
+}
+
+// Stopping when NOT cooling must not start a compressor delay: a heater
+// switched off would otherwise block cooling for no reason.
+void test_stopping_while_heating_does_not_start_a_compressor_delay(void) {
+  g_fermenters[F].floorTemp       = 18.0f;
+  g_fermenters[F].ceilingTemp     = 22.0f;
+  g_fermenters[F].compressorDelay = 10;
+  test_setMillis(COOL_STOP_AT);
+  s_controlTemp = 17.0f;
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_HEATING, s_state[F]);
+
+  setFermenterPower(F, false);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[F]);
+}
+
 void test_heating_to_idle_at_floor_plus_hysteresis(void) {
   g_fermenters[F].floorTemp   = 18.0f;
   g_fermenters[F].ceilingTemp = 22.0f;
@@ -771,6 +855,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_idle_to_heating_when_below_floor);
   RUN_TEST(test_idle_to_cooling_when_above_ceiling_and_delay_elapsed);
   RUN_TEST(test_idle_blocks_cooling_during_compressor_delay);
+  RUN_TEST(test_compressor_delay_holds_after_a_lost_reading);
+  RUN_TEST(test_compressor_delay_holds_after_power_off);
+  RUN_TEST(test_compressor_delay_holds_after_setFermenterPower_off);
+  RUN_TEST(test_compressor_delay_holds_after_temp_control_off);
+  RUN_TEST(test_compressor_delay_holds_after_switchOffAll);
+  RUN_TEST(test_stopping_while_heating_does_not_start_a_compressor_delay);
   RUN_TEST(test_heating_to_idle_at_floor_plus_hysteresis);
   RUN_TEST(test_cooling_to_idle_at_ceiling_minus_hysteresis);
   RUN_TEST(test_no_reading_forces_plugs_off_and_idle);
