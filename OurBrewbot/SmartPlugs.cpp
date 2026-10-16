@@ -34,8 +34,10 @@ static bool s_plugState[MAX_SMART_PLUGS] = {false};
 
 // When each plug was last transmitted to. s_plugSent says whether it has been
 // sent anything yet: a plain time can't, as millis() starts at 0 after a boot.
-static bool          s_plugSent[MAX_SMART_PLUGS]   = {false};
-static unsigned long s_plugSentAt[MAX_SMART_PLUGS] = {0};
+// uint32_t to match millis(), so the subtraction wraps correctly on every
+// build (unsigned long is 64-bit on the Linux test runner).
+static bool     s_plugSent[MAX_SMART_PLUGS]   = {false};
+static uint32_t s_plugSentAt[MAX_SMART_PLUGS] = {0};
 
 // ============================================================
 // RF TRANSMISSION via RCSwitch
