@@ -37,6 +37,8 @@ The update check and crash reports can each be switched off — see [Contacting 
 
 Not yet implemented / tested:
 - Pressure sensor - __Untested - No hardware__
+- Aux 1 / Aux 2 smart plug roles - __Not implemented__ - from the original firmware; a plug can be given the role, but nothing switches it
+- SG Control - __Not implemented__ - from the original firmware; the setting is kept in the config file but does nothing. Use the gravity-based profile steps instead
 
 ---
 
