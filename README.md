@@ -274,6 +274,8 @@ When enabled, the device subscribes to `<baseTopic>/+/+/set` and accepts command
 
 The **All Off** button switches every smart plug off and powers every fermenter off, so nothing comes back on until a fermenter's Power switch is turned on again.
 
+The **profile_running** switch pauses a fermenter's profile when turned off and resumes it at the same step when turned on. Turned on with no profile running, it starts the selected profile. Stopping a profile is done from the WebUI.
+
 When disabled, all discovery entities are still advertised (so the dashboard YAML remains stable), but the device ignores any incoming commands.
 
 ### Dashboard

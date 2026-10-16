@@ -836,8 +836,27 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
   } else if (strcmp(key, "temp_control") == 0) {
     g_fermenters[idx].tempControl = on;
   } else if (strcmp(key, "profile_running") == 0) {
-    if (on) startProfile(idx, g_fermenters[idx].profileNo);
-    else    stopProfile(idx);
+    // OFF pauses the profile and ON resumes it, so turning the switch off and
+    // on in HA loses nothing. (OFF used to stop the profile and ON always
+    // started it again from step 0.) Stopping a profile is done in the WebUI.
+    FermenterConfig& f = g_fermenters[idx];
+    if (!on) {
+      if (f.profileRunning) pauseProfile(idx);
+    } else if (f.profileRunning) {
+      // Already running - nothing to do
+    } else if (f.profilePaused && f.profileNo > 0) {
+      resumeProfile(idx);
+    } else {
+      // Not started yet: start it only if a profile with steps is selected,
+      // the same check the WebUI makes
+      if (f.profileNo < 1 || f.profileNo > MAX_PROFILES ||
+          countProfileSteps(f.profileNo - 1) == 0) {
+        logMsg("[MQTT] cmd rejected: F%d has no profile with steps selected", idx);
+        publishFermenterField(idx, key);   // puts HA's switch back to OFF
+        return;
+      }
+      startProfile(idx, f.profileNo);
+    }
   } else if (strcmp(key, "ceiling_temperature") == 0 ||
              strcmp(key, "floor_temperature")   == 0 ||
              strcmp(key, "hysteresis")          == 0 ||
