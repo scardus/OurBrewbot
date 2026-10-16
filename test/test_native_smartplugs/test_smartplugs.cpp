@@ -162,6 +162,15 @@ static void test_transmit_repeats_ten_times_on_the_configured_pin(void) {
   TEST_ASSERT_EQUAL_INT(PIN_RF_TRANSMIT, g_rfTest.lastTransmitPin);
 }
 
+// The WiFi task gets a moment before each burst, so a syslog line queued
+// just before it is sent rather than lost (0.6.4)
+static void test_transmit_yields_before_the_burst(void) {
+  configurePlug(P);
+  delayTestTotal() = 0;
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_EQUAL_UINT32(10, delayTestTotal());
+}
+
 // Normal running only transmits. Before 0.6.3 every transmit switched the
 // receiver on, so an idle receiver's noise interrupted the CPU from then on.
 static void test_receiver_stays_off_after_the_burst(void) {
@@ -278,6 +287,7 @@ int main(int, char**) {
   RUN_TEST(test_rf_parameters_reach_the_transmitter_unmodified);
   RUN_TEST(test_transmit_repeats_ten_times_on_the_configured_pin);
   RUN_TEST(test_receiver_stays_off_after_the_burst);
+  RUN_TEST(test_transmit_yields_before_the_burst);
   RUN_TEST(test_receiver_is_re_enabled_after_the_burst_while_sniffing);
 
   RUN_TEST(test_state_defaults_to_off);

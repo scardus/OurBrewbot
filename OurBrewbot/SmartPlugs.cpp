@@ -37,6 +37,12 @@ static bool s_plugState[MAX_SMART_PLUGS] = {false};
 // ============================================================
 
 void rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol) {
+  // Let the WiFi task send anything already queued (e.g. the syslog line just
+  // logged) first. The burst below busy-waits for ~0.5 s without yielding, and
+  // a datagram queued just before it was lost - which is why no "Plug 0" line
+  // ever reached syslog while plug 1 transmitted straight after it.
+  delay(10);
+
   // Disable receiver during transmit to avoid self-reception
   g_rcSwitch.disableReceive();
   g_rcSwitch.enableTransmit(PIN_RF_TRANSMIT);
