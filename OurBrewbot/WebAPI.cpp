@@ -1296,6 +1296,10 @@ void checkBLESniffTimeout() {
     g_bleSniffActive = false;
     s_bleSniffLastPoll = 0;
     s_bleSniffLen = 0;
+    // The console can send any AT command (role, baud, ...), so put the
+    // module back the way Tilt scanning needs it
+    logMsg("[BLE] Console closed - restarting HM-10");
+    bleRequestReinit();
   }
 }
 

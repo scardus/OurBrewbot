@@ -83,6 +83,12 @@ static unsigned long s_lastBleInitRetry = 0;
 #define BLE_SCAN_TIMEOUT_MS 4000       // same ceiling the old busy-wait used
 #define BLE_REINIT_RETRY_MS 300000UL   // retry a failed HM-10 init every 5 min
 
+// Spotting an HM-10 that has stopped answering. A working module replies to
+// every AT+DISI? with "OK+DIS..." lines, even with no beacons in range.
+static bool    s_scanAnswered = false;  // this scan got an "OK+DIS" reply
+static uint8_t s_silentScans  = 0;      // scans in a row with no reply at all
+#define BLE_SILENT_SCANS_MAX 3          // ~15 s of silence -> restart the module
+
 // Parse a 4-char hex string to uint16_t.
 // Returns false if ANY of the 4 characters is not hex — a garbled frame must be
 // rejected, not silently turned into a plausible-looking number.
@@ -337,9 +343,17 @@ void startTiltScan() {
 
   // Start iBeacon discovery scan; serviceTilt() drains the response.
   g_bleSerial.print("AT+DISI?");
-  s_scanStart  = millis();
-  s_bleBufLen  = 0;
-  s_scanActive = true;
+  s_scanStart    = millis();
+  s_bleBufLen    = 0;
+  s_scanAnswered = false;
+  s_scanActive   = true;
+}
+
+// Have the next scan tick set the HM-10 up again (startTiltScan() calls
+// initBLE() when the module isn't ready and a retry is due).
+void bleRequestReinit() {
+  s_bleReady         = false;
+  s_lastBleInitRetry = millis() - BLE_REINIT_RETRY_MS;   // due straight away
 }
 
 // Drain an in-flight AT+DISI? response, a chunk per loop pass (no busy-wait).
@@ -370,6 +384,13 @@ void serviceTilt() {
     }
     s_bleBuf[s_bleBufLen++] = c;
     s_bleBuf[s_bleBufLen] = '\0';
+
+    // Any "OK+DIS..." reply - the start marker, a record or the end marker -
+    // shows the module is alive
+    if (!s_scanAnswered && s_bleBufLen >= 6 &&
+        strncmp(s_bleBuf + s_bleBufLen - 6, "OK+DIS", 6) == 0) {
+      s_scanAnswered = true;
+    }
 
     // Check for end-of-scan marker
     if (s_bleBufLen >= 8 && strcmp(s_bleBuf + s_bleBufLen - 8, "OK+DISCE") == 0) {
@@ -412,6 +433,17 @@ void serviceTilt() {
   }
   s_bleBufLen  = 0;
   s_scanActive = false;
+
+  // Restart a module that has stopped answering. Before, only a module that
+  // failed at boot was ever set up again, so one that stopped later (or was
+  // left changed) gave no Tilt readings until the next reboot.
+  if (s_scanAnswered) {
+    s_silentScans = 0;
+  } else if (++s_silentScans >= BLE_SILENT_SCANS_MAX) {
+    logMsg("[BLE] HM-10 not answering - restarting it");
+    s_silentScans = 0;
+    bleRequestReinit();
+  }
 
   // Increment missed reads for active Tilts not seen this scan
   for (int i = 0; i < MAX_TILTS; i++) {

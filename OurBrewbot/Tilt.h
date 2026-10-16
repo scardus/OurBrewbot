@@ -43,6 +43,10 @@ void initBLE();
 void startTiltScan();   // 5 s tick: begin a scan if idle and allowed
 void serviceTilt();     // every loop pass: drain an in-flight scan, finish on OK+DISCE or 4 s
 
+// Set the HM-10 up again at the next scan tick - used when it stops answering,
+// and when the BLE console page closes (to undo any AT commands sent from it)
+void bleRequestReinit();
+
 // Process a received Tilt reading (isPro: auto-detected as Tilt Pro)
 void processTiltReading(uint8_t colour, float sg, float tempC, bool isPro);
 

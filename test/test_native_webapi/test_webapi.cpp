@@ -87,6 +87,8 @@ const char* getTiltColourName(uint8_t colour) {
 }
 bool g_bleSniffActive = false;
 SoftwareSerial g_bleSerial(PIN_BLE_RX, PIN_BLE_TX);
+static int s_bleReinits = 0;
+void bleRequestReinit() { s_bleReinits++; }
 
 // iSpindel.cpp
 void handleiSpindelPost(const String&) {}
@@ -176,6 +178,9 @@ void setUp(void) {
   s_millis      = 1000000;
   s_rfTransmits = 0;
   s_forceOffs   = 0;
+  s_bleReinits  = 0;
+  g_bleSniffActive   = false;
+  s_bleSniffLastPoll = 0;
   s_plugAtForceOff = SmartPlugConfig{};
   rcTestReset();
   g_rfSniffActive   = false;
@@ -1513,6 +1518,21 @@ static void test_rf_sniffer_page_alone_leaves_the_receiver_off(void) {
   TEST_ASSERT_FALSE(g_rfSniffActive);
 }
 
+// The BLE console can send any AT command, so when it closes the HM-10 is
+// set up again for Tilt scanning
+static void test_ble_console_closing_restarts_the_module(void) {
+  handleBLESniffPoll(srv);
+  s_millis += 10000;
+  checkBLESniffTimeout();
+  TEST_ASSERT_EQUAL_INT(0, s_bleReinits);   // exactly 10 s - still open
+  s_millis += 1;
+  checkBLESniffTimeout();
+  TEST_ASSERT_FALSE(g_bleSniffActive);
+  TEST_ASSERT_EQUAL_INT(1, s_bleReinits);
+  checkBLESniffTimeout();
+  TEST_ASSERT_EQUAL_INT(1, s_bleReinits);   // only once
+}
+
 // ============================================================
 // RESTARTS GO THROUGH restartDevice() (0.4.14)
 //
@@ -2056,6 +2076,7 @@ int main(int, char**) {
   RUN_TEST(test_rf_sniffer_stays_on_while_the_page_keeps_polling);
   RUN_TEST(test_rf_sniffer_switches_the_receiver_off_10s_after_the_last_poll);
   RUN_TEST(test_rf_sniffer_page_alone_leaves_the_receiver_off);
+  RUN_TEST(test_ble_console_closing_restarts_the_module);
 
   // Restarts go through restartDevice() (0.4.14)
   RUN_TEST(test_reboot_restarts_through_restart_device);
