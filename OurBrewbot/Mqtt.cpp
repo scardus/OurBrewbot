@@ -814,6 +814,13 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
       restartDevice();
     } else if (strcmp(key, "all_off") == 0) {
       switchOffAll();
+      // switchOffAll() powers every fermenter off: save that, and show it on
+      // each fermenter's Power switch in HA straight away
+      g_mqttPendingSave   = true;
+      g_mqttPendingSaveAt = millis();
+      for (int i = 0; i < MAX_FERMENTERS; i++) {
+        publishFermenterField(i, "power");
+      }
     }
     return;
   }

@@ -191,7 +191,10 @@ void switchOffAll() {
   for (int p = 0; p < MAX_SMART_PLUGS; p++) {
     smartPlugForceOff(p);
   }
+  // Every fermenter is powered off too. If they were left on, the control
+  // loop would switch the plugs straight back on at its next pass (<= 10 s).
   for (int i = 0; i < MAX_FERMENTERS; i++) {
+    g_fermenters[i].power  = false;
     g_fermenters[i].status = STATUS_IDLE;
     goIdle(i);
   }

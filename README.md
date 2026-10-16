@@ -272,6 +272,8 @@ By default the device is read-only from HA's perspective. Enable **Allow HA Cont
 
 When enabled, the device subscribes to `<baseTopic>/+/+/set` and accepts commands for all writable entity types (switch, number, text, select, button). Commands are validated — out-of-range values are silently rejected and the HA entity reverts to the actual device state within ~60 seconds via the regular state publish.
 
+The **All Off** button switches every smart plug off and powers every fermenter off, so nothing comes back on until a fermenter's Power switch is turned on again.
+
 When disabled, all discovery entities are still advertised (so the dashboard YAML remains stable), but the device ignores any incoming commands.
 
 ### Dashboard

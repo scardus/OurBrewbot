@@ -47,7 +47,8 @@ float getCurrentSG(uint8_t index);
 // Get the source of the current SG reading ("Tilt", "iSpindel", or "Estimated")
 const char* getGravitySource(uint8_t index);
 
-// Emergency off — all smart plugs off
+// Emergency off — all smart plugs off and every fermenter powered off, so
+// nothing switches back on until a fermenter is powered on again
 void switchOffAll();
 
 // Get attenuation percentage

@@ -629,6 +629,25 @@ void test_switchOffAll_forces_off_plugs_with_no_role(void) {
   }
 }
 
+// Before 0.6.4 "all off" left every fermenter powered on, so the next control
+// pass (10 s later) switched the plugs straight back on.
+void test_switchOffAll_stays_off_at_the_next_control_pass(void) {
+  g_fermenters[F].floorTemp   = 18.0f;
+  g_fermenters[F].ceilingTemp = 22.0f;
+  g_smartPlugs[0].fermenter = F;
+  g_smartPlugs[0].function  = PLUG_FN_F1_HOT;
+  s_controlTemp = 17.0f;   // below the floor - would heat if allowed
+
+  switchOffAll();
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    TEST_ASSERT_FALSE(g_fermenters[i].power);
+  }
+
+  processFermenters();
+  TEST_ASSERT_EQUAL(0, lastPlugState(0));
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+}
+
 void test_switchOffAll_clears_latched_control_state(void) {
   // The internal state machine must be reset too, not just the plugs -
   // otherwise the next pass resumes HEATING from where it left off.
@@ -897,6 +916,7 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_switchOffAll_turns_off_every_plug);
   RUN_TEST(test_switchOffAll_forces_off_plugs_with_no_role);
+  RUN_TEST(test_switchOffAll_stays_off_at_the_next_control_pass);
   RUN_TEST(test_switchOffAll_clears_latched_control_state);
 
   RUN_TEST(test_setFermenterPower_off_forces_plugs_off_and_idle);
