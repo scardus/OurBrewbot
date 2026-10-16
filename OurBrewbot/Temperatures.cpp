@@ -242,8 +242,12 @@ void readTempResults() {
     } else {
       g_probes[i].failCount++;
       if (g_probes[i].failCount <= PROBE_FAIL_THRESHOLD) {
-        logMsgL(SYSLOG_WARNING, "[TEMP] Probe %s not responding (fail %d/%d)",
-          g_probes[i].address, g_probes[i].failCount, PROBE_FAIL_THRESHOLD);
+        logMsgL(SYSLOG_WARNING, "[TEMP] Probe %s not responding (fail %u/%d)",
+          g_probes[i].address, (unsigned)g_probes[i].failCount, PROBE_FAIL_THRESHOLD);
+      } else if (g_probes[i].failCount % PROBE_REMINDER_FAILS == 0) {
+        // One plain reminder an hour while the probe stays missing
+        logMsgL(SYSLOG_WARNING, "[TEMP] Probe %s still not responding (%u min)",
+          g_probes[i].address, (unsigned)(g_probes[i].failCount / 12));
       }
       if (g_probes[i].failCount >= PROBE_FAIL_THRESHOLD) {
         g_probes[i].temperature = TEMP_NONE;

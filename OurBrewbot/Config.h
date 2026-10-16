@@ -46,6 +46,7 @@
 #define MAX_TILT_SLOTS      4       // Configurable Tilt slots persisted in jsonTilt.txt
 #define PROBE_UNASSIGNED    99      // Sentinel value from original firmware
 #define PROBE_FAIL_THRESHOLD 6      // Consecutive failed reads before marking inactive (~30s at 5s poll)
+#define PROBE_REMINDER_FAILS 720    // Failed reads between "still not responding" reminders (~1 h at 5s poll)
 
 // Tilt iBeacon raw field bounds, checked on the major/minor values BEFORE they
 // are scaled to °C/SG. A corrupted BLE frame can still carry a valid-looking
@@ -303,7 +304,9 @@ struct ProbeConfig {
   float   rawTemperature;       // before adjustment
   float   tempAdjust;           // calibration offset
   float   sgAdjust;             // SG calibration offset
-  uint8_t failCount;            // consecutive failed reads (runtime only, not persisted)
+  uint32_t failCount;           // consecutive failed reads (runtime only, not persisted).
+                                // 32-bit so it never wraps: as a uint8_t it went back to 0
+                                // every ~21 min, repeating the warnings and blocking retry
   uint8_t busId;                // 1 or 2; set by scanBuses(), not persisted
 };
 
