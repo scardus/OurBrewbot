@@ -467,14 +467,18 @@ void handleFermenter(ESP8266WebServer& server) {
         // returned 400 having already moved the ceiling/floor/hysteresis — and
         // the control loop reads those from RAM, so a rejected save really did
         // change how the fermenter was driven until the next config load.
-        FermenterConfig fc = g_fermenters[idx];
+        // static, not on the loop stack: with the config save below on top
+        // of it this handler reached the build's deepest stack point (1,136 B
+        // left). Requests are handled one at a time, so sharing it is safe.
+        static FermenterConfig fc;
+        fc = g_fermenters[idx];
 
         // Validated numeric fields — validateFermenterField() owns single-
         // field ranges; CeilingTemp / FloorTemp / Hysteresis are validated
         // holistically below against the would-be combined state so a save
         // can correct an invalid in-memory config.
         const char* valErr;
-        char valJson[128];
+        static char valJson[128];   // static for the same reason as fc
         #define REJECT(msg) { \
             snprintf(valJson, sizeof(valJson), "{\"status\":\"error\",\"msg\":\"%s\"}", msg); \
             sendJsonResponse(server, valJson, 400); return; \
