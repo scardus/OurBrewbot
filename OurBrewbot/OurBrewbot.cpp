@@ -596,17 +596,12 @@ void onTenMinuteTimer() {
     logMsg("[TCP] Cleared %u closed connections from TIME_WAIT in the last 10 min", cleared);
   }
 
-  // Count profile hours for running profiles (6 calls × 10 min = 1 hour)
-  static uint8_t s_hourTick[MAX_FERMENTERS] = {0};
+  // Count profile time for running profiles (6 calls × 10 min = 1 hour). The
+  // part-hour is kept while a profile is paused or powered off, and is saved
+  // with the config just below, so it survives a reboot.
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     if (g_fermenters[i].profileRunning && g_fermenters[i].power && !g_fermenters[i].liveTest) {
-      s_hourTick[i]++;
-      if (s_hourTick[i] >= 6) {
-        s_hourTick[i] = 0;
-        profileAddHour(i);
-      }
-    } else {
-      s_hourTick[i] = 0;
+      profileAddTenMinutes(i);
     }
   }
 

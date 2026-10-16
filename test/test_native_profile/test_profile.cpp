@@ -525,6 +525,46 @@ void test_profile_hours_stop_at_the_top_of_their_range(void) {
   TEST_ASSERT_EQUAL_UINT16(0xFFFF, g_fermenters[F].profileHours);
 }
 
+// ---- hourTicks: the part-hour survives reboots and pauses (0.6.4) ----
+
+void test_six_ten_minute_ticks_make_an_hour(void) {
+  runProfile(F, 1, 0, /*hour=*/3);
+  for (int t = 0; t < 5; t++) profileAddTenMinutes(F);
+  TEST_ASSERT_EQUAL_UINT16(3, g_fermenters[F].currentHour);
+  TEST_ASSERT_EQUAL_UINT8(5,  g_fermenters[F].hourTicks);
+  profileAddTenMinutes(F);
+  TEST_ASSERT_EQUAL_UINT16(4, g_fermenters[F].currentHour);
+  TEST_ASSERT_EQUAL_UINT8(0,  g_fermenters[F].hourTicks);
+}
+
+// Pausing keeps the part-hour (it used to be thrown away)
+void test_ticks_are_kept_through_a_pause(void) {
+  runProfile(F, 1, 0, /*hour=*/3);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 2.0f, 0, 18.0f, 0);
+  profileAddTenMinutes(F);
+  profileAddTenMinutes(F);
+  pauseProfile(F);
+  resumeProfile(F);
+  TEST_ASSERT_EQUAL_UINT8(2, g_fermenters[F].hourTicks);
+}
+
+// A new step starts its hours from zero, part-hour included
+void test_ticks_reset_at_a_step_change(void) {
+  runProfile(F, 1, 0, /*hour=*/24);
+  g_fermenters[F].hourTicks = 4;
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);  // complete
+  g_profileSteps[flat(1, 1)] = makeStep(STEP_TIME_OVER_TEMP, 2.0f, 0, 20.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F].currentStep);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[F].hourTicks);
+}
+
+void test_ticks_reset_when_a_profile_starts(void) {
+  g_fermenters[F].hourTicks = 4;
+  startProfile(F, 1);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[F].hourTicks);
+}
+
 void test_advance_moves_to_next_step_and_resets_hour(void) {
   runProfile(F, 1, 0, /*hour=*/24);
   g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);  // complete
@@ -782,6 +822,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_profile_hours_survive_the_profile_finishing);
   RUN_TEST(test_profile_hours_reset_when_a_profile_starts);
   RUN_TEST(test_profile_hours_stop_at_the_top_of_their_range);
+  RUN_TEST(test_six_ten_minute_ticks_make_an_hour);
+  RUN_TEST(test_ticks_are_kept_through_a_pause);
+  RUN_TEST(test_ticks_reset_at_a_step_change);
+  RUN_TEST(test_ticks_reset_when_a_profile_starts);
   RUN_TEST(test_advance_band_widens_to_the_hysteresis);
   RUN_TEST(test_advance_band_stays_at_its_minimum_for_a_small_hysteresis);
   RUN_TEST(test_TempReached_uses_the_widened_band);

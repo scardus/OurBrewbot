@@ -809,6 +809,22 @@ void test_load_corrects_an_out_of_range_plug_bit_count(void) {
   TEST_ASSERT_EQUAL_UINT8(32, g_smartPlugs[3].bits);
 }
 
+// The profile part-hour is saved, so it survives a reboot (0.6.4)
+void test_hour_ticks_are_saved_and_loaded(void) {
+  g_fermenters[0].hourTicks = 4;
+  TEST_ASSERT_TRUE(saveFermenterConfig());
+  g_fermenters[0].hourTicks = 0;
+  TEST_ASSERT_TRUE(loadFermenterConfig());
+  TEST_ASSERT_EQUAL_UINT8(4, g_fermenters[0].hourTicks);
+}
+
+void test_load_corrects_out_of_range_hour_ticks(void) {
+  fsTestWrite(FILE_FERMENTER, "{\"HourTicks\":[9,5,0,0]}");
+  TEST_ASSERT_TRUE(loadFermenterConfig());
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[0].hourTicks);
+  TEST_ASSERT_EQUAL_UINT8(5, g_fermenters[1].hourTicks);
+}
+
 void test_profile_steps_load_returns_false_without_touching_state(void) {
   // loadProfileSteps has no default initialiser - a missing file must leave the
   // in-memory steps alone rather than half-clearing them.
@@ -1056,6 +1072,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_load_stops_a_profile_that_does_not_exist);
   RUN_TEST(test_load_corrects_an_out_of_range_profile_step);
   RUN_TEST(test_load_corrects_an_out_of_range_plug_bit_count);
+  RUN_TEST(test_hour_ticks_are_saved_and_loaded);
+  RUN_TEST(test_load_corrects_out_of_range_hour_ticks);
   RUN_TEST(test_profile_steps_load_returns_false_without_touching_state);
   RUN_TEST(test_profile_steps_round_trip_across_all_slots);
 

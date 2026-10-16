@@ -52,6 +52,7 @@ static void finishProfile(uint8_t i) {
   g_fermenters[i].profileNo      = 0;
   g_fermenters[i].currentStep    = 0;
   g_fermenters[i].currentHour    = 0;
+  g_fermenters[i].hourTicks      = 0;
 }
 
 // Check if a step is empty (unused slot). Declared in Profile.h because the
@@ -112,6 +113,7 @@ void advanceProfileStep(uint8_t i) {
       i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep, g_fermenters[i].currentStep + 1);
     g_fermenters[i].currentStep++;
     g_fermenters[i].currentHour = 0;
+    g_fermenters[i].hourTicks   = 0;
 
     // Check for profile end
     if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
@@ -229,6 +231,7 @@ void startProfile(uint8_t i, uint8_t profileIndex) {
   g_fermenters[i].profileNo      = profileIndex;  // 1-4
   g_fermenters[i].currentStep    = 0;
   g_fermenters[i].currentHour    = 0;
+  g_fermenters[i].hourTicks      = 0;
   g_fermenters[i].profileHours   = 0;   // only reset here - see profileAddHour()
   g_fermenters[i].profileRunning = true;
   g_fermenters[i].profilePaused  = false;
@@ -245,6 +248,18 @@ void profileAddHour(uint8_t i) {
   if (g_fermenters[i].profileHours < 0xFFFF) g_fermenters[i].profileHours++;
 }
 
+// Called every 10 minutes for a running profile. The ticks are saved with the
+// fermenter config, so a reboot loses at most the last few minutes - before
+// 0.6.4 they were kept in memory only, and a reboot (or a pause, or power off)
+// lost up to 59 minutes of the step.
+void profileAddTenMinutes(uint8_t i) {
+  g_fermenters[i].hourTicks++;
+  if (g_fermenters[i].hourTicks >= 6) {
+    g_fermenters[i].hourTicks = 0;
+    profileAddHour(i);
+  }
+}
+
 void stopProfile(uint8_t i) {
   logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile stopped", i, g_fermenters[i].fermenterName);
   g_fermenters[i].profileRunning = false;
@@ -252,6 +267,7 @@ void stopProfile(uint8_t i) {
   g_fermenters[i].profileNo      = 0;
   g_fermenters[i].currentStep    = 0;
   g_fermenters[i].currentHour    = 0;
+  g_fermenters[i].hourTicks      = 0;
   saveFermenterConfig();
 }
 
@@ -285,6 +301,7 @@ bool nextProfileStep(uint8_t i) {
   }
   g_fermenters[i].currentStep++;
   g_fermenters[i].currentHour = 0;
+  g_fermenters[i].hourTicks   = 0;
   logMsg("[PROF] F%d (%s): Manual advance to step %d", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
   saveFermenterConfig();
   return true;
@@ -297,6 +314,7 @@ bool prevProfileStep(uint8_t i) {
 
   g_fermenters[i].currentStep--;
   g_fermenters[i].currentHour = 0;
+  g_fermenters[i].hourTicks   = 0;
   logMsg("[PROF] F%d (%s): Manual retreat to step %d", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
   saveFermenterConfig();
   return true;

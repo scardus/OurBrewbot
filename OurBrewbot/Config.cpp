@@ -308,6 +308,7 @@ static const CfgField kGlobalFields[] PROGMEM = { GLOBAL_CONFIG_FIELDS(CFG_ROW) 
   X("CurrentStep",          currentStep,     U8,    0)            \
   X("CurrentHour",          currentHour,     U16,   0)            \
   X("ProfileHours",         profileHours,    U16,   0)            \
+  X("HourTicks",            hourTicks,       U8,    0)            \
   X("LiveTest",             liveTest,        BOOL,  false)        \
   X("Status",               status,          U8,    0)            \
   X("ProfileRunning",       profileRunning,  BOOL,  false)        \
@@ -602,6 +603,11 @@ bool loadFermenterConfig() {
       logMsg("[CFG] Fermenter %d: profile step %u is out of range - back to step 1", i, f.currentStep);
       f.currentStep = 0;
       f.currentHour = 0;
+      f.hourTicks   = 0;
+      corrected = true;
+    }
+    if (f.hourTicks >= 6) {   // six 10-minute ticks make an hour
+      f.hourTicks = 0;
       corrected = true;
     }
   }

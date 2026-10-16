@@ -260,6 +260,7 @@ struct FermenterConfig {
   uint8_t currentStep;          // current step within profile (0-14)
   uint16_t currentHour;         // hours elapsed in current profile step
   uint16_t profileHours;        // hours since the profile started, across all its steps
+  uint8_t hourTicks;            // 10-minute ticks towards the next profile hour (0-5)
   bool    liveTest;             // live test mode (fast-forward 1hr per 10s)
   uint8_t status;               // current status: 0=idle,1=heating,2=cooling
   bool    profileRunning;       // profile is active

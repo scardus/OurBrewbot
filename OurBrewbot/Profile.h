@@ -37,6 +37,9 @@ void startProfile(uint8_t fermenterIndex, uint8_t profileIndex);
 // whole profile's (which the gravity estimate uses)
 void profileAddHour(uint8_t fermenterIndex);
 
+// Count 10 minutes of a running profile; every sixth call adds an hour
+void profileAddTenMinutes(uint8_t fermenterIndex);
+
 // Stop/pause/resume a profile
 void stopProfile(uint8_t fermenterIndex);
 void pauseProfile(uint8_t fermenterIndex);
