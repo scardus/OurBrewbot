@@ -32,6 +32,10 @@ extern bool g_rfSniffActive;
 // Transmit RF code to switch a plug on or off
 void smartPlugSwitch(uint8_t plugIndex, bool on);
 
+// Send a plug its OFF code whatever its role, even when it has none. Used
+// before a plug's settings change, and by the emergency switch-off.
+void smartPlugForceOff(uint8_t plugIndex);
+
 // Get current state of a plug (on/off)
 bool getPlugState(uint8_t plugIndex);
 

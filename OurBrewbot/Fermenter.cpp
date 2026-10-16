@@ -174,8 +174,9 @@ void setFermenterPlugs(uint8_t fermenterIndex, bool heat, bool cool) {
 
 void switchOffAll() {
   logMsg("[FERM] SwitchOffAll - emergency off");
+  // Forced, so a plug with no role is switched off too
   for (int p = 0; p < MAX_SMART_PLUGS; p++) {
-    smartPlugSwitch(p, false);
+    smartPlugForceOff(p);
   }
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     g_fermenters[i].status = STATUS_IDLE;

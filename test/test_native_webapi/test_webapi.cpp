@@ -112,6 +112,16 @@ void restartDevice(bool forgetWiFi) {
 }
 void smartPlugSwitch(uint8_t, bool) {}
 bool getPlugState(uint8_t) { return false; }
+
+// A forced OFF is recorded together with the plug's settings AT THE TIME of
+// the call, so a test can prove the OFF went out with the old code, not the
+// newly saved one.
+static int             s_forceOffs = 0;
+static SmartPlugConfig s_plugAtForceOff;
+void smartPlugForceOff(uint8_t plugIndex) {
+  s_forceOffs++;
+  s_plugAtForceOff = g_smartPlugs[plugIndex];
+}
 RCSwitch g_rcSwitch;
 
 // The main sketch owns the debug overrides, not Config.cpp.
@@ -165,6 +175,8 @@ void setUp(void) {
   clientTestSetConnected(true);
   s_millis      = 1000000;
   s_rfTransmits = 0;
+  s_forceOffs   = 0;
+  s_plugAtForceOff = SmartPlugConfig{};
   rcTestReset();
   g_rfSniffActive   = false;
   s_rfSniffLastPoll = 0;
@@ -1359,6 +1371,90 @@ static void test_smartplug_post_requires_a_valid_index(void) {
   TEST_ASSERT_TRUE(bodyContains("Invalid plug index"));
 }
 
+// ---- a plug is switched OFF before a change to how it is switched ----
+
+// A plug in use: Fermenter 1's heater, with learnt codes.
+static void configureHeaterPlug(uint8_t idx) {
+  g_smartPlugs[idx].function    = PLUG_FN_F1_HOT;
+  g_smartPlugs[idx].fermenter   = 0;
+  g_smartPlugs[idx].onCode      = 0x123456;
+  g_smartPlugs[idx].offCode     = 0xABCDEF;
+  g_smartPlugs[idx].protocol    = 1;
+  g_smartPlugs[idx].bits        = 24;
+  g_smartPlugs[idx].delayLength = 410;
+}
+
+// Unassigned while ON: the control loop never switches an unassigned plug, so
+// this OFF is the only one it will ever get.
+static void test_smartplug_post_switches_a_plug_off_before_unassigning_it(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"function\":99,\"fermenter\":99}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, s_forceOffs);
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_F1_HOT, s_plugAtForceOff.function);   // sent before the change
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_UNASSIGNED, g_smartPlugs[0].function);
+}
+
+static void test_smartplug_post_switches_a_plug_off_before_moving_it(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"function\":2,\"fermenter\":1}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_forceOffs);
+  TEST_ASSERT_EQUAL_UINT8(0, s_plugAtForceOff.fermenter);
+  TEST_ASSERT_EQUAL_UINT8(1, g_smartPlugs[0].fermenter);
+}
+
+// New codes: the plug only responds to the OLD ones, so the OFF must go out
+// with the old code and timing.
+static void test_smartplug_post_switches_a_plug_off_with_its_old_code(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"offCode\":1118481,\"delay\":350}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_forceOffs);
+  TEST_ASSERT_EQUAL_UINT32(0xABCDEF, s_plugAtForceOff.offCode);
+  TEST_ASSERT_EQUAL_UINT16(410,      s_plugAtForceOff.delayLength);
+  TEST_ASSERT_EQUAL_UINT32(1118481,  g_smartPlugs[0].offCode);
+}
+
+// Each RF setting on its own is enough to need the OFF first.
+static void test_smartplug_post_switches_off_for_any_rf_setting_change(void) {
+  const char* bodies[] = {
+    "{\"index\":0,\"onCode\":1}",
+    "{\"index\":0,\"protocol\":2}",
+    "{\"index\":0,\"bits\":12}",
+  };
+  for (const char* body : bodies) {
+    configureHeaterPlug(0);
+    s_forceOffs = 0;
+    httpRespReset();
+    postBody(body);
+    handleSmartPlugPost(srv);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, s_forceOffs, body);
+  }
+}
+
+// The WebUI sends every field on each save. A save that changes nothing about
+// switching - same values, or only the name - must not switch the plug off.
+static void test_smartplug_post_leaves_the_plug_alone_when_switching_is_unchanged(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"manufacturer\":\"Dial\",\"model\":\"D1\","
+           "\"onCode\":1193046,\"offCode\":11259375,\"protocol\":1,"
+           "\"bits\":24,\"delay\":410,\"codeset\":3,\"function\":0,\"fermenter\":0}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+  TEST_ASSERT_EQUAL_STRING("Dial", g_smartPlugs[0].manufacturer);
+}
+
+// A rejected value is not a change, so it must not switch the plug off either.
+static void test_smartplug_post_ignored_value_does_not_switch_the_plug_off(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"bits\":0}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+}
+
 static void test_smartplug_test_transmits_the_selected_code(void) {
   g_smartPlugs[0].onCode  = 0x123456;
   g_smartPlugs[0].offCode = 0xABCDEF;
@@ -1948,6 +2044,12 @@ int main(int, char**) {
   RUN_TEST(test_smartplug_post_updates_a_slot);
   RUN_TEST(test_smartplug_post_ignores_an_impossible_bit_count);
   RUN_TEST(test_smartplug_post_requires_a_valid_index);
+  RUN_TEST(test_smartplug_post_switches_a_plug_off_before_unassigning_it);
+  RUN_TEST(test_smartplug_post_switches_a_plug_off_before_moving_it);
+  RUN_TEST(test_smartplug_post_switches_a_plug_off_with_its_old_code);
+  RUN_TEST(test_smartplug_post_switches_off_for_any_rf_setting_change);
+  RUN_TEST(test_smartplug_post_leaves_the_plug_alone_when_switching_is_unchanged);
+  RUN_TEST(test_smartplug_post_ignored_value_does_not_switch_the_plug_off);
   RUN_TEST(test_smartplug_test_transmits_the_selected_code);
   RUN_TEST(test_smartplug_test_refuses_when_no_code_is_configured);
   RUN_TEST(test_rf_sniffer_poll_switches_the_receiver_on);

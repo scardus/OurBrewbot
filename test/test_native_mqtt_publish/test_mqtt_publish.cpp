@@ -72,6 +72,7 @@ const char* getTiltColourName(uint8_t colour) {
 
 // SmartPlugs.cpp - Fermenter.cpp drives the plugs; nothing here asserts on them.
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugForceOff(uint8_t) {}
 bool getPlugState(uint8_t) { return false; }
 
 // The main sketch owns the debug overrides and the reboot reason string.

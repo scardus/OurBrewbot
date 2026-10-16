@@ -68,6 +68,13 @@ static int      s_plugCallCount;
 void smartPlugSwitch(uint8_t plugIndex, bool on) {
   if (s_plugCallCount < 32) s_plugCalls[s_plugCallCount++] = {plugIndex, on};
 }
+// A forced OFF is recorded as an OFF, and also counted on its own so a test
+// can tell it apart from a normal switch (which skips plugs with no role).
+static int s_forceOffCount;
+void smartPlugForceOff(uint8_t plugIndex) {
+  s_forceOffCount++;
+  if (s_plugCallCount < 32) s_plugCalls[s_plugCallCount++] = {plugIndex, false};
+}
 // Last recorded on/off state for a given plug, or -1 if never called.
 static int lastPlugState(uint8_t plugIndex) {
   for (int i = s_plugCallCount - 1; i >= 0; i--) {
@@ -99,6 +106,7 @@ void setUp(void) {
   s_controlTemp   = TEMP_NONE;
   s_millis        = 0;
   s_plugCallCount = 0;
+  s_forceOffCount = 0;
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     s_state[i]            = STATUS_IDLE;
     s_lastCoolingStop[i]  = 0;
@@ -525,6 +533,18 @@ void test_switchOffAll_turns_off_every_plug(void) {
   }
 }
 
+// A plug with no role is skipped by smartPlugSwitch(), so the emergency off
+// must use the forced OFF - otherwise a plug that was unassigned while ON
+// would be the one plug "all off" can't reach.
+void test_switchOffAll_forces_off_plugs_with_no_role(void) {
+  // Every plug left at its default: no fermenter, no role
+  switchOffAll();
+  TEST_ASSERT_EQUAL(MAX_SMART_PLUGS, s_forceOffCount);
+  for (int p = 0; p < MAX_SMART_PLUGS; p++) {
+    TEST_ASSERT_EQUAL(0, lastPlugState(p));
+  }
+}
+
 void test_switchOffAll_clears_latched_control_state(void) {
   // The internal state machine must be reset too, not just the plugs -
   // otherwise the next pass resumes HEATING from where it left off.
@@ -786,6 +806,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_plug_mapping_for_third_and_fourth_fermenters);
 
   RUN_TEST(test_switchOffAll_turns_off_every_plug);
+  RUN_TEST(test_switchOffAll_forces_off_plugs_with_no_role);
   RUN_TEST(test_switchOffAll_clears_latched_control_state);
 
   RUN_TEST(test_setFermenterPower_off_forces_plugs_off_and_idle);

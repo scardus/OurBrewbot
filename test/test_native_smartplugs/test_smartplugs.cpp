@@ -225,6 +225,45 @@ static void test_slots_keep_independent_state(void) {
 }
 
 // ============================================================
+// FORCE OFF — reaches a plug whatever its role
+// ============================================================
+
+// The case smartPlugSwitch() deliberately ignores: a plug that was ON and then
+// lost its role must still be sent its OFF code, or it stays on for good.
+static void test_force_off_reaches_a_plug_with_no_role(void) {
+  configurePlug(P);
+  smartPlugSwitch(P, true);                       // on while it had a role
+  g_smartPlugs[P].function = PLUG_FN_UNASSIGNED;  // then unassigned
+  rcTestReset();
+
+  smartPlugForceOff(P);
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+  TEST_ASSERT_EQUAL_HEX32(0xABCDEF, g_rfTest.lastCode);
+  TEST_ASSERT_FALSE(getPlugState(P));
+}
+
+static void test_force_off_uses_the_plugs_rf_parameters(void) {
+  configurePlug(P);
+  smartPlugForceOff(P);
+  TEST_ASSERT_EQUAL_UINT32(24, g_rfTest.lastBits);
+  TEST_ASSERT_EQUAL_INT(427,   g_rfTest.lastPulseLength);
+  TEST_ASSERT_EQUAL_INT(2,     g_rfTest.lastProtocol);
+}
+
+static void test_force_off_sends_nothing_without_an_off_code(void) {
+  configurePlug(P);
+  g_smartPlugs[P].offCode = 0;
+  smartPlugForceOff(P);
+  TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
+}
+
+static void test_force_off_ignores_an_out_of_range_index(void) {
+  configurePlug(P);
+  smartPlugForceOff(MAX_SMART_PLUGS);
+  TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
+}
+
+// ============================================================
 
 int main(int, char**) {
   UNITY_BEGIN();
@@ -246,6 +285,11 @@ int main(int, char**) {
   RUN_TEST(test_state_is_unchanged_when_the_switch_was_dropped);
   RUN_TEST(test_state_query_for_an_out_of_range_index_is_off);
   RUN_TEST(test_slots_keep_independent_state);
+
+  RUN_TEST(test_force_off_reaches_a_plug_with_no_role);
+  RUN_TEST(test_force_off_uses_the_plugs_rf_parameters);
+  RUN_TEST(test_force_off_sends_nothing_without_an_off_code);
+  RUN_TEST(test_force_off_ignores_an_out_of_range_index);
 
   return UNITY_END();
 }

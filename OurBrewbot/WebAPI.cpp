@@ -1117,16 +1117,39 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
   if (!parseJsonBody(server, doc)) return;
   int idx = getValidIndex(server, doc, "index", MAX_SMART_PLUGS, F("Invalid plug index"));
   if (idx < 0) return;
-  if (!doc["function"].isNull())     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           g_smartPlugs[idx].function    = v; }
-  if (!doc["fermenter"].isNull())    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_smartPlugs[idx].fermenter   = v; }
-  if (doc["manufacturer"].is<const char*>()) copyText(g_smartPlugs[idx].manufacturer, doc["manufacturer"].as<const char*>(), sizeof(g_smartPlugs[0].manufacturer));
-  if (doc["model"].is<const char*>())        copyText(g_smartPlugs[idx].model,         doc["model"].as<const char*>(),         sizeof(g_smartPlugs[0].model));
-  if (!doc["onCode"].isNull())       g_smartPlugs[idx].onCode      = doc["onCode"];
-  if (!doc["offCode"].isNull())      g_smartPlugs[idx].offCode     = doc["offCode"];
-  if (!doc["protocol"].isNull())     { uint8_t v = doc["protocol"]; if (v >= 1)              g_smartPlugs[idx].protocol    = v; }
-  if (!doc["bits"].isNull())         { uint8_t v = doc["bits"];     if (v >= 1 && v <= 32)   g_smartPlugs[idx].bits        = v; }
-  if (!doc["delay"].isNull())        g_smartPlugs[idx].delayLength = doc["delay"];
-  if (!doc["codeset"].isNull())      g_smartPlugs[idx].codeset     = doc["codeset"];
+
+  // The changes go into a copy first, so they can be compared with the plug's
+  // current settings before anything is replaced (see below).
+  SmartPlugConfig plug = g_smartPlugs[idx];
+  if (!doc["function"].isNull())     { uint8_t v = doc["function"];  if (v <= 9 || v == PLUG_FN_UNASSIGNED)           plug.function    = v; }
+  if (!doc["fermenter"].isNull())    { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) plug.fermenter   = v; }
+  if (doc["manufacturer"].is<const char*>()) copyText(plug.manufacturer, doc["manufacturer"].as<const char*>(), sizeof(plug.manufacturer));
+  if (doc["model"].is<const char*>())        copyText(plug.model,         doc["model"].as<const char*>(),         sizeof(plug.model));
+  if (!doc["onCode"].isNull())       plug.onCode      = doc["onCode"];
+  if (!doc["offCode"].isNull())      plug.offCode     = doc["offCode"];
+  if (!doc["protocol"].isNull())     { uint8_t v = doc["protocol"]; if (v >= 1)              plug.protocol    = v; }
+  if (!doc["bits"].isNull())         { uint8_t v = doc["bits"];     if (v >= 1 && v <= 32)   plug.bits        = v; }
+  if (!doc["delay"].isNull())        plug.delayLength = doc["delay"];
+  if (!doc["codeset"].isNull())      plug.codeset     = doc["codeset"];
+
+  // If the change affects how, or whether, the plug is switched, send it OFF
+  // first while its old settings are still in place. Otherwise a plug that was
+  // ON would stay on for good: the control loop only switches a plug by its NEW
+  // role, and only the OLD code and timing are what the plug responds to.
+  // The WebUI sends every field on each save, so an unchanged save sends nothing.
+  const SmartPlugConfig& old = g_smartPlugs[idx];
+  bool switchingChanged = plug.function    != old.function    ||
+                          plug.fermenter   != old.fermenter   ||
+                          plug.onCode      != old.onCode      ||
+                          plug.offCode     != old.offCode     ||
+                          plug.protocol    != old.protocol    ||
+                          plug.bits        != old.bits        ||
+                          plug.delayLength != old.delayLength;
+  if (switchingChanged) {
+    smartPlugForceOff(idx);
+  }
+
+  g_smartPlugs[idx] = plug;
   saveSmartPlugConfig();
   sendOk(server, F("Plug updated"));
 }

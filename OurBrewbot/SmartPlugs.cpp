@@ -78,6 +78,28 @@ void smartPlugSwitch(uint8_t plugIndex, bool on) {
 }
 
 // ============================================================
+// FORCE OFF
+// ============================================================
+
+// smartPlugSwitch() ignores a plug with no role, which is right for the
+// control loop. But a plug that was ON when it lost its role, moved to another
+// fermenter or was given new codes would then never be sent an OFF, and would
+// stay on for good. This sends the OFF code whatever the plug's role.
+void smartPlugForceOff(uint8_t plugIndex) {
+  if (plugIndex >= MAX_SMART_PLUGS) return;
+
+  SmartPlugConfig& plug = g_smartPlugs[plugIndex];
+  if (plug.offCode == 0) return;   // no OFF code learnt - nothing to send
+
+  rfTransmit(plug.offCode, plug.bits, plug.delayLength, plug.protocol);
+
+  logMsg("[PLUG] Plug %d forced OFF (code 0x%06X, %d-bit, %dus)",
+    plugIndex, plug.offCode, plug.bits, plug.delayLength);
+
+  s_plugState[plugIndex] = false;
+}
+
+// ============================================================
 // PLUG STATE
 // ============================================================
 
