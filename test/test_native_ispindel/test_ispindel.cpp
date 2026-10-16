@@ -174,6 +174,28 @@ void test_registration_records_when_the_device_reported(void) {
   TEST_ASSERT_TRUE(iSpindelIsFresh(g_iSpindels[0]));
 }
 
+// ---- a new iSpindel registers unassigned ----
+
+// Before 0.6.4 a new device took the slot's defaults, and slot 0's linked it
+// straight to Fermenter 1's beer temperature. Simulate those old defaults.
+void test_new_ispindel_registers_unassigned(void) {
+  g_iSpindels[0].fermenter = 0;
+  g_iSpindels[0].function  = PROBE_FN_BEER;
+  handleiSpindelPost(makeBody("newspindel", "AABBCC", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_STRING("AABBCC", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[0].fermenter);
+  TEST_ASSERT_FALSE(g_iSpindels[0].collectData);
+}
+
+// A device already in a slot keeps its assignment when it reports
+void test_known_ispindel_keeps_its_assignment(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].fermenter = 2;
+  handleiSpindelPost(makeBody("ispindel-1", "C2A080", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_UINT8(2, g_iSpindels[0].fermenter);
+  TEST_ASSERT_TRUE(g_iSpindels[0].collectData);
+}
+
 // ---- validateiSpindelValues: gravity range ----
 
 void test_validate_keeps_sg_in_range(void) {
@@ -861,6 +883,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fresh_caps_a_huge_interval);
   RUN_TEST(test_post_records_when_and_how_often_the_device_reports);
   RUN_TEST(test_registration_records_when_the_device_reported);
+  RUN_TEST(test_new_ispindel_registers_unassigned);
+  RUN_TEST(test_known_ispindel_keeps_its_assignment);
 
   return UNITY_END();
 }

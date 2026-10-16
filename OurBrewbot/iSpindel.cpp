@@ -327,8 +327,14 @@ void handleiSpindelPost(const String& body) {
       strlcpy(g_iSpindels[i].gravityUnit, gravityUnit, sizeof(g_iSpindels[i].gravityUnit));
       g_iSpindels[i].lastSeen    = millis();
       g_iSpindels[i].interval    = interval;
-      g_iSpindels[i].collectData = true;
-      logMsg("[ISPINDEL] Registered %s (ID:%s) in slot %d as %s", name, id, i, gravityUnitName(unit));
+      // Registered unassigned - it is linked to a fermenter in the admin page.
+      // Before 0.6.4 it took the slot's defaults, which linked slot 0 straight
+      // to Fermenter 1's beer temperature, so any new iSpindel on the network
+      // (even a neighbour's) took over that fermenter's control.
+      g_iSpindels[i].fermenter   = PROBE_UNASSIGNED;
+      g_iSpindels[i].collectData = false;
+      logMsg("[ISPINDEL] Registered %s (ID:%s) in slot %d as %s - assign it to a fermenter in the admin page",
+        name, id, i, gravityUnitName(unit));
       saveiSpindelConfig();
       return;
     }

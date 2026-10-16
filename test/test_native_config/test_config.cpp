@@ -748,6 +748,15 @@ void test_ispindel_temperature_starts_as_no_reading(void) {
   }
 }
 
+// A fresh install no longer links slot 0 to Fermenter 1 (see iSpindel.cpp)
+void test_ispindel_defaults_are_all_unassigned(void) {
+  initDefaultiSpindelConfig();
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[i].fermenter);
+    TEST_ASSERT_FALSE(g_iSpindels[i].collectData);
+  }
+}
+
 void test_profile_steps_load_returns_false_without_touching_state(void) {
   // loadProfileSteps has no default initialiser - a missing file must leave the
   // in-memory steps alone rather than half-clearing them.
@@ -989,6 +998,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_ispindel_absent_function_defaults_to_beer_for_legacy_configs);
   RUN_TEST(test_ispindel_stored_ids_are_made_topic_safe_on_load);
   RUN_TEST(test_ispindel_temperature_starts_as_no_reading);
+  RUN_TEST(test_ispindel_defaults_are_all_unassigned);
   RUN_TEST(test_profile_steps_load_returns_false_without_touching_state);
   RUN_TEST(test_profile_steps_round_trip_across_all_slots);
 

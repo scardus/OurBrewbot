@@ -1039,7 +1039,7 @@ void initDefaultiSpindelConfig() {
     strlcpy(g_iSpindels[i].name, "None", sizeof(g_iSpindels[i].name));
     g_iSpindels[i].id[0]       = '\0';
     g_iSpindels[i].collectData = false;
-    g_iSpindels[i].fermenter   = (i == 0) ? 0 : PROBE_UNASSIGNED;
+    g_iSpindels[i].fermenter   = PROBE_UNASSIGNED;   // assigned in the admin page
     // Plato for every slot: it is what an iSpindel that declares no unit is
     // assumed to be sending. A device that does declare one overwrites this
     // when it registers (see iSpindel.h).
