@@ -1706,9 +1706,13 @@ void handleFermenterProfile(ESP8266WebServer& server) {
     resumeProfile(idx);
     sendOk(server, F("Profile resumed"));
   } else if (strcmp(action, "next") == 0) {
+    // Noted first: finishing the profile clears profileNo, so it can't be
+    // checked afterwards (it was, so "Profile complete" was never sent and a
+    // finished profile was reported as an error)
+    bool wasRunning = g_fermenters[idx].profileRunning;
     if (nextProfileStep(idx)) {
       sendOk(server, F("Advanced to next step"));
-    } else if (!g_fermenters[idx].profileRunning && g_fermenters[idx].profileNo > 0) {
+    } else if (wasRunning) {
       sendOk(server, F("Profile complete"));
     } else {
       sendErr(server, 400, F("Profile not running"));

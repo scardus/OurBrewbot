@@ -1040,6 +1040,18 @@ static void test_profile_next_advances_a_running_profile(void) {
   TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F0].currentStep);
 }
 
+// "next" on the last step finishes the profile - that's a success, not an
+// error (before 0.6.4 it returned 400 "Profile not running")
+static void test_profile_next_on_the_last_step_reports_complete(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  postBody("{\"Fermenter\":0,\"action\":\"next\"}");
+  handleFermenterProfile(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Profile complete"));
+  TEST_ASSERT_FALSE(g_fermenters[F0].profileRunning);
+}
+
 static void test_profile_next_on_a_stopped_profile_is_rejected(void) {
   g_fermenters[F0].profileRunning = false;
   g_fermenters[F0].profileNo      = 0;
@@ -2027,6 +2039,7 @@ int main(int, char**) {
   RUN_TEST(test_profile_resume_rejected_when_already_running);
   RUN_TEST(test_profile_next_advances_a_running_profile);
   RUN_TEST(test_profile_next_on_a_stopped_profile_is_rejected);
+  RUN_TEST(test_profile_next_on_the_last_step_reports_complete);
   RUN_TEST(test_profile_prev_on_the_first_step_reports_success);
   RUN_TEST(test_profile_unknown_action_is_rejected);
   RUN_TEST(test_profile_action_needs_a_valid_fermenter);
