@@ -1207,7 +1207,9 @@ static void publishIspindels() {
     if (strcmp(g_iSpindels[i].name, "None") == 0) continue;
     snprintf(base, sizeof(base), "%s/iSpindel/%s",
       g_mqttConfig.baseTopic, g_iSpindels[i].id);
-    publishFloat(base, "temperature",       toDisplayTemp(g_iSpindels[i].temperature));
+    // Preserve the -127 "no reading" sentinel, as for probes
+    float spindelTemp = g_iSpindels[i].temperature;
+    publishFloat(base, "temperature",       spindelTemp > TEMP_VALID_MIN ? toDisplayTemp(spindelTemp) : spindelTemp);
     publishFloat(base, "gravity",           g_iSpindels[i].sg, 4);
     publishFloat(base, "corrected_gravity", g_iSpindels[i].corrGravity, 4);
     publishFloat(base, "battery",           g_iSpindels[i].battery, 3);

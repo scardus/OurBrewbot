@@ -51,7 +51,8 @@ void handleiSpindelPost(const String& body);
 
 // One iSpindel POST, copied out of its JSON body. Text fields are cut to the
 // size of the matching iSpindelConfig field; a missing field reads as zero or
-// "". Values are exactly as the device sent them - no unit conversion yet.
+// "", except a missing temperature, which reads as TEMP_NONE (no reading).
+// Values are exactly as the device sent them - no unit conversion yet.
 struct iSpindelReading {
   char     name[24];          // same size as iSpindelConfig::name
   char     id[16];            // same size as iSpindelConfig::id
@@ -74,8 +75,8 @@ struct iSpindelReading {
 // and logged - see the comment on the function for why that matters.
 bool parseiSpindelBody(const String& body, iSpindelReading& out);
 
-// Clamp sg/temp to physically plausible ranges, zeroing (and logging) anything
-// outside them. Both MUST already be in the firmware's canonical units — temp
+// Reject (and log) an sg/temp outside physically plausible ranges: the gravity
+// becomes 0 and the temperature TEMP_NONE. Both MUST already be in the firmware's canonical units — temp
 // in Celsius and sg in Specific Gravity — because the ranges are expressed in
 // those units. name/id are only used for the log message. Extracted from
 // handleiSpindelPost so it can be unit tested directly.

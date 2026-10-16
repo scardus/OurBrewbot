@@ -932,7 +932,9 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["tempAdjust"]  = toDisplayTempDelta(g_iSpindels[i].tempAdjust);  // a calibration offset: span, not absolute
     s["sgAdjust"]    = g_iSpindels[i].sgAdjust;
     s["sg"]          = g_iSpindels[i].sg;
-    s["temperature"] = toDisplayTemp(g_iSpindels[i].temperature);
+    // TEMP_NONE (no reading) is passed through unconverted, like a probe's
+    float spindelTemp = g_iSpindels[i].temperature;
+    s["temperature"] = (spindelTemp > TEMP_VALID_MIN) ? toDisplayTemp(spindelTemp) : TEMP_NONE;
     s["battery"]     = g_iSpindels[i].battery;
     s["rssi"]        = g_iSpindels[i].rssi;
     s["angle"]       = g_iSpindels[i].angle;
@@ -972,7 +974,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     g_iSpindels[idx].tempAdjust  = 0.0f;
     g_iSpindels[idx].sgAdjust    = 0.0f;
     g_iSpindels[idx].sg             = 0.0f;
-    g_iSpindels[idx].temperature    = 0.0f;
+    g_iSpindels[idx].temperature    = TEMP_NONE;
     g_iSpindels[idx].battery        = 0.0f;
     g_iSpindels[idx].rssi           = 0;
     g_iSpindels[idx].angle          = 0.0f;

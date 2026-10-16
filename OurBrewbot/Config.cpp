@@ -685,6 +685,10 @@ bool loadiSpindelConfig() {
   }
   cfgLoadArray(doc, g_iSpindels, sizeof(iSpindelConfig), MAX_ISPINDELS,
                kiSpindelFields, CFG_COUNT(kiSpindelFields));
+  // No reading until each device reports (0 would be read as a real 0 C)
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    g_iSpindels[i].temperature = TEMP_NONE;
+  }
   // Migrate legacy values: only PROBE_FN_BEER means "provide beer temp" —
   // everything else collapses to Unassigned ("temperature reading not used").
   for (int i = 0; i < MAX_ISPINDELS; i++) {
@@ -1041,6 +1045,7 @@ void initDefaultiSpindelConfig() {
     // when it registers (see iSpindel.h).
     g_iSpindels[i].unit        = ISPINDEL_UNIT_PLATO;
     g_iSpindels[i].function    = PROBE_FN_BEER;
+    g_iSpindels[i].temperature = TEMP_NONE;   // no reading yet
   }
 }
 

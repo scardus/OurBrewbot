@@ -53,14 +53,17 @@ float iSpindelTempToCelsius(float temp, const char* units) {
 
 // Reject physically impossible values — guards against corrupted payloads or wrong unit config.
 // temp is expected in Celsius: convert with iSpindelTempToCelsius() before calling.
+// A rejected gravity becomes 0 ("not sent"); a rejected temperature becomes
+// TEMP_NONE ("no reading"), never 0 - 0 C is a real temperature, and storing it
+// for a bad reading made the controller heat as if the beer were at 0 C.
 void validateiSpindelValues(float& sg, float& temp, const char* name, const char* id) {
   if (sg != 0.0f && (sg < 0.900f || sg > 1.200f)) {
     logMsg("[ISPINDEL] %s (ID:%s): gravity %.4f out of range, ignoring", name, id, sg);
     sg = 0.0f;
   }
-  if (temp != 0.0f && (temp < -40.0f || temp > 80.0f)) {
+  if (temp > TEMP_VALID_MIN && (temp < -40.0f || temp > 80.0f)) {
     logMsg("[ISPINDEL] %s (ID:%s): temperature %.1f out of range, ignoring", name, id, temp);
-    temp = 0.0f;
+    temp = TEMP_NONE;
   }
 }
 
@@ -162,7 +165,9 @@ bool __attribute__((noinline)) parseiSpindelBody(const String& body, iSpindelRea
     strlcpy(out.id, doc["ID"].as<String>().c_str(), sizeof(out.id));
     makeIdTopicSafe(out.id);
   }
-  out.temperature        = doc["temperature"]  | 0.0f;
+  // A missing temperature is "no reading" (TEMP_NONE), not 0 C
+  JsonVariantConst temperature = doc["temperature"];
+  out.temperature        = temperature.is<float>() ? temperature.as<float>() : TEMP_NONE;
   copyText(out.tempUnits,   doc["temp_units"]   | "", sizeof(out.tempUnits));
   out.interval           = doc["interval"]     | 0;
   out.gravity            = doc["gravity"]      | 0.0f;
@@ -198,7 +203,9 @@ void handleiSpindelPost(const String& body) {
   // means the range check below, the tempAdjust offset (a Celsius delta) and
   // both storage paths further down all work in the same unit.
   float rawTemp = temp;                              // kept only for the log line
-  temp = iSpindelTempToCelsius(temp, tempUnits);
+  if (temp > TEMP_VALID_MIN) {                       // TEMP_NONE = no reading sent
+    temp = iSpindelTempToCelsius(temp, tempUnits);
+  }
 
   // Match by device ID first (primary key), then by name as fallback.
   // This happens before the gravity is validated because the slot carries the
@@ -258,7 +265,7 @@ void handleiSpindelPost(const String& body) {
   if (matched >= 0) {
     // Apply calibration offsets
     sg   += g_iSpindels[matched].sgAdjust;
-    temp += g_iSpindels[matched].tempAdjust;
+    if (temp > TEMP_VALID_MIN) temp += g_iSpindels[matched].tempAdjust;
     if (corrGravity > 0.0f) corrGravity += g_iSpindels[matched].sgAdjust;
 
     // Update runtime data

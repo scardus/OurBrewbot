@@ -156,16 +156,24 @@ void test_validate_keeps_temp_in_range(void) {
   TEST_ASSERT_EQUAL_FLOAT(20.0f, temp);
 }
 
-void test_validate_zeroes_temp_below_floor(void) {
+// A rejected temperature is "no reading" (TEMP_NONE). Before 0.6.4 it became
+// 0.0, which the controller took as a real 0 C and heated for.
+void test_validate_rejects_temp_below_floor_as_no_reading(void) {
   float sg = 1.050f, temp = -50.0f;
   validateiSpindelValues(sg, temp, "Test", "abc123");
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, temp);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, temp);
 }
 
-void test_validate_zeroes_temp_above_ceiling(void) {
+void test_validate_rejects_temp_above_ceiling_as_no_reading(void) {
   float sg = 1.050f, temp = 90.0f;
   validateiSpindelValues(sg, temp, "Test", "abc123");
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, temp);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, temp);
+}
+
+void test_validate_leaves_no_reading_alone(void) {
+  float sg = 1.050f, temp = TEMP_NONE;
+  validateiSpindelValues(sg, temp, "Test", "abc123");
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, temp);
 }
 
 void test_validate_keeps_temp_at_exact_boundaries(void) {
@@ -178,6 +186,7 @@ void test_validate_keeps_temp_at_exact_boundaries(void) {
   TEST_ASSERT_EQUAL_FLOAT(80.0f, temp);
 }
 
+// 0 C is a real (in-range) temperature, not "missing"
 void test_validate_leaves_zero_temp_alone(void) {
   float sg = 1.050f, temp = 0.0f;
   validateiSpindelValues(sg, temp, "Test", "abc123");
@@ -277,10 +286,33 @@ void test_post_warm_fahrenheit_survives_range_check(void) {
 
 void test_post_absurd_fahrenheit_still_rejected(void) {
   // The range check must still do its job after conversion: 250 F is 121 C,
-  // outside the plausible range, so it is zeroed.
+  // outside the plausible range, so it is stored as "no reading".
   seedSlot0("ispindel-1", "C2A080");
   handleiSpindelPost(makeBody("ispindel-1", "C2A080", 250.0f, "F"));
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].temperature);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_iSpindels[0].temperature);
+}
+
+// No temperature in the POST: stored as "no reading", and the calibration
+// offset is not added to it
+void test_post_without_temperature_stores_no_reading(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].tempAdjust = 1.0f;
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"gravity\":1.050}"));
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_iSpindels[0].temperature);
+}
+
+void test_post_with_a_non_numeric_temperature_stores_no_reading(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":\"warm\"}"));
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_iSpindels[0].temperature);
+}
+
+// A genuine 0 C reading is now kept (with its offset), not treated as missing
+void test_post_of_zero_celsius_is_a_real_reading(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].tempAdjust = 0.5f;
+  handleiSpindelPost(makeBody("ispindel-1", "C2A080", 0.0f, "C"));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f, g_iSpindels[0].temperature);
 }
 
 void test_post_temp_adjust_applied_as_celsius_delta(void) {
@@ -531,7 +563,7 @@ void test_parse_missing_fields_read_as_zero_or_empty(void) {
   TEST_ASSERT_EQUAL_STRING("", r.tempUnits);
   TEST_ASSERT_EQUAL_STRING("", r.gravityUnit);
   TEST_ASSERT_EQUAL_UINT32(0, r.interval);
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, r.temperature);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, r.temperature);   // no reading, not 0 C
   TEST_ASSERT_EQUAL_FLOAT(0.0f, r.gravity);
   TEST_ASSERT_EQUAL_FLOAT(0.0f, r.battery);
   TEST_ASSERT_EQUAL_INT(0, r.rssi);
@@ -696,8 +728,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_validate_leaves_zero_sg_alone);
 
   RUN_TEST(test_validate_keeps_temp_in_range);
-  RUN_TEST(test_validate_zeroes_temp_below_floor);
-  RUN_TEST(test_validate_zeroes_temp_above_ceiling);
+  RUN_TEST(test_validate_rejects_temp_below_floor_as_no_reading);
+  RUN_TEST(test_validate_rejects_temp_above_ceiling_as_no_reading);
+  RUN_TEST(test_validate_leaves_no_reading_alone);
   RUN_TEST(test_validate_keeps_temp_at_exact_boundaries);
   RUN_TEST(test_validate_leaves_zero_temp_alone);
 
@@ -720,6 +753,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_post_kelvin_stored_as_celsius);
   RUN_TEST(test_post_warm_fahrenheit_survives_range_check);
   RUN_TEST(test_post_absurd_fahrenheit_still_rejected);
+  RUN_TEST(test_post_without_temperature_stores_no_reading);
+  RUN_TEST(test_post_with_a_non_numeric_temperature_stores_no_reading);
+  RUN_TEST(test_post_of_zero_celsius_is_a_real_reading);
   RUN_TEST(test_post_temp_adjust_applied_as_celsius_delta);
   RUN_TEST(test_post_registration_path_stores_celsius);
   RUN_TEST(test_post_conversion_does_not_disturb_gravity);

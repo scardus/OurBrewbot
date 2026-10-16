@@ -734,6 +734,20 @@ void test_ispindel_stored_ids_are_made_topic_safe_on_load(void) {
   TEST_ASSERT_EQUAL_STRING("C2cc-7C_01", g_iSpindels[3].id);
 }
 
+// An iSpindel has no reading until it reports. Before 0.6.4 its temperature
+// started at 0.0, which the controller took as a real 0 C after every reboot.
+void test_ispindel_temperature_starts_as_no_reading(void) {
+  fsTestWrite(FILE_ISPINDEL, "{\"ID\":[\"9b5c5e\",\"\",\"\",\"\"]}");
+  TEST_ASSERT_TRUE(loadiSpindelConfig());
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_iSpindels[i].temperature);
+  }
+  initDefaultiSpindelConfig();
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_iSpindels[i].temperature);
+  }
+}
+
 void test_profile_steps_load_returns_false_without_touching_state(void) {
   // loadProfileSteps has no default initialiser - a missing file must leave the
   // in-memory steps alone rather than half-clearing them.
@@ -974,6 +988,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_ispindel_legacy_function_values_collapse_to_unassigned);
   RUN_TEST(test_ispindel_absent_function_defaults_to_beer_for_legacy_configs);
   RUN_TEST(test_ispindel_stored_ids_are_made_topic_safe_on_load);
+  RUN_TEST(test_ispindel_temperature_starts_as_no_reading);
   RUN_TEST(test_profile_steps_load_returns_false_without_touching_state);
   RUN_TEST(test_profile_steps_round_trip_across_all_slots);
 
