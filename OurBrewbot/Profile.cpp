@@ -44,8 +44,9 @@ static float profileBand(uint8_t i) {
   return (hysteresis > PROFILE_TEMP_BAND) ? hysteresis : PROFILE_TEMP_BAND;
 }
 
-// Helper: mark a profile as naturally finished and clear all state so saved
-// config matches stopProfile(). Called from all natural-finish paths.
+// Helper: mark a profile as finished and clear all its state. Called from all
+// natural-finish paths and from stopProfile(), so a stopped profile and a
+// finished one are saved the same way.
 static void finishProfile(uint8_t i) {
   g_fermenters[i].profileRunning = false;
   g_fermenters[i].profilePaused  = false;
@@ -262,12 +263,7 @@ void profileAddTenMinutes(uint8_t i) {
 
 void stopProfile(uint8_t i) {
   logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile stopped", i, g_fermenters[i].fermenterName);
-  g_fermenters[i].profileRunning = false;
-  g_fermenters[i].profilePaused  = false;
-  g_fermenters[i].profileNo      = 0;
-  g_fermenters[i].currentStep    = 0;
-  g_fermenters[i].currentHour    = 0;
-  g_fermenters[i].hourTicks      = 0;
+  finishProfile(i);   // the same clean state as a profile that ran to the end
   saveFermenterConfig();
 }
 

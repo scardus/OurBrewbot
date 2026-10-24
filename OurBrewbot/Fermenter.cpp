@@ -53,6 +53,15 @@ static void goIdle(uint8_t i) {
   s_state[i] = STATUS_IDLE;
 }
 
+// Stop heating and cooling: all of the fermenter's plugs off, and both its
+// reported status and its control state back to idle. Used when a fermenter
+// is powered off or its temperature control is paused.
+static void stopControlling(uint8_t i) {
+  setFermenterPlugs(i, false, false);
+  g_fermenters[i].status = STATUS_IDLE;
+  goIdle(i);
+}
+
 // ============================================================
 // MAIN PROCESSOR
 // ============================================================
@@ -61,17 +70,13 @@ void processFermenters() {
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     if (!g_fermenters[i].power) {
       // Fermenter off — ensure all its plugs are off
-      setFermenterPlugs(i, false, false);
-      g_fermenters[i].status = STATUS_IDLE;
-      goIdle(i);
+      stopControlling(i);
       checkFermenterAlarm(i);   // clears any alarm left from before
       continue;
     }
     if (!g_fermenters[i].tempControl) {
       // Temp control paused — plugs off but fermenter still watches for alarms
-      setFermenterPlugs(i, false, false);
-      g_fermenters[i].status = STATUS_IDLE;
-      goIdle(i);
+      stopControlling(i);
       checkFermenterAlarm(i);
       continue;
     }
@@ -371,9 +376,7 @@ void setFermenterPower(uint8_t index, bool on) {
   if (index >= MAX_FERMENTERS) return;
   g_fermenters[index].power = on;
   if (!on) {
-    setFermenterPlugs(index, false, false);
-    g_fermenters[index].status = STATUS_IDLE;
-    goIdle(index);
+    stopControlling(index);
     logMsg("[FERM] F%d (%s): powered off", index, g_fermenters[index].fermenterName);
   }
 }
