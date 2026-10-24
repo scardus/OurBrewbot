@@ -510,11 +510,7 @@ void handleFermenter(ESP8266WebServer& server) {
         float wbCeiling = doc["CeilingTemp"].isNull() ? fc.ceilingTemp : toCelsius((float)doc["CeilingTemp"]);
         float wbFloor   = doc["FloorTemp"].isNull()   ? fc.floorTemp   : toCelsius((float)doc["FloorTemp"]);
         float wbHyst    = doc["Hysteresis"].isNull()  ? fc.hysteresis  : toCelsiusTempDelta((float)doc["Hysteresis"]);
-        if (wbCeiling < -20.0f || wbCeiling > 50.0f)  REJECT("ceiling temperature out of range (-20 to 50)")
-        if (wbFloor   < -20.0f || wbFloor   > 50.0f)  REJECT("floor temperature out of range (-20 to 50)")
-        if (wbHyst    <   0.0f || wbHyst    > 10.0f)  REJECT("hysteresis out of range (0 to 10)")
-        if (wbFloor >= wbCeiling)                     REJECT("floor must be below ceiling")
-        if ((wbCeiling - wbFloor) <  2.0f * wbHyst)   REJECT("safe zone must be at least 2x hysteresis")
+        if (!checkTempBand(wbCeiling, wbFloor, wbHyst, &valErr)) REJECT(valErr)
         if (!doc["CeilingTemp"].isNull()) fc.ceilingTemp = wbCeiling;
         if (!doc["FloorTemp"].isNull())   fc.floorTemp   = wbFloor;
         if (!doc["Hysteresis"].isNull())  fc.hysteresis  = wbHyst;

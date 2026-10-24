@@ -250,6 +250,39 @@ struct FermenterConfig {
 };
 
 // ============================================================
+// TEMPERATURE BAND LIMITS
+// The one set of rules for a fermenter's ceiling, floor and hysteresis
+// (all Celsius). The WebUI save, the MQTT commands and the boot-time config
+// check all use checkTempBand(), so they can never disagree.
+// ============================================================
+#define TEMP_SETTING_MIN_C   -20.0f   // lowest ceiling or floor allowed
+#define TEMP_SETTING_MAX_C    50.0f   // highest ceiling or floor allowed
+#define HYSTERESIS_MAX_C      10.0f
+
+// Returns true if the three values can be used together. Otherwise returns
+// false and, if errMsg is given, points it at the reason. Defined here in the
+// header (inline) because its callers are in Config.cpp, Fermenter.cpp and
+// WebAPI.cpp, and the native test suites build those files in different
+// combinations - every one of them includes Config.h.
+inline bool checkTempBand(float ceiling, float floor, float hyst, const char** errMsg) {
+  const char* err = nullptr;
+  if (ceiling < TEMP_SETTING_MIN_C || ceiling > TEMP_SETTING_MAX_C) {
+    err = "ceiling temperature out of range (-20 to 50)";
+  } else if (floor < TEMP_SETTING_MIN_C || floor > TEMP_SETTING_MAX_C) {
+    err = "floor temperature out of range (-20 to 50)";
+  } else if (hyst < 0.0f || hyst > HYSTERESIS_MAX_C) {
+    err = "hysteresis out of range (0 to 10)";
+  } else if (floor >= ceiling) {
+    err = "floor must be below ceiling";
+  } else if ((ceiling - floor) < 2.0f * hyst) {
+    // heating and cooling bands would overlap
+    err = "safe zone must be at least 2x hysteresis";
+  }
+  if (errMsg) *errMsg = err;
+  return err == nullptr;
+}
+
+// ============================================================
 // STRUCT: FermenterDebugOverride
 // Runtime-only — never persisted, resets on reboot.
 // ============================================================

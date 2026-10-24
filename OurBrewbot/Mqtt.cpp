@@ -424,10 +424,10 @@ static const HaEntityDesc kFermenterEntities[] PROGMEM = {
   { HA_SENSOR, HAF_TEMP_UNIT, "ambient_temperature",     "Ambient Temperature",     "temperature", nullptr, nullptr, nullptr, "measurement" },
   // Setpoint numbers — always number entities; device ignores commands when allowControl is off,
   // and the 60s state publish corrects any HA UI changes within one interval
-  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "ceiling_temperature", "Ceiling Temperature", "temperature", nullptr, nullptr, nullptr, nullptr, -20.0f, 50.0f, 0.1f },
-  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "floor_temperature",   "Floor Temperature",   "temperature", nullptr, nullptr, nullptr, nullptr, -20.0f, 50.0f, 0.1f },
+  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "ceiling_temperature", "Ceiling Temperature", "temperature", nullptr, nullptr, nullptr, nullptr, TEMP_SETTING_MIN_C, TEMP_SETTING_MAX_C, 0.1f },
+  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "floor_temperature",   "Floor Temperature",   "temperature", nullptr, nullptr, nullptr, nullptr, TEMP_SETTING_MIN_C, TEMP_SETTING_MAX_C, 0.1f },
   { HA_SENSOR, 0,             "temperature_unit",        "Temperature Unit",        nullptr, nullptr, "mdi:thermometer", nullptr, nullptr },
-  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MAX_DELTA,   "hysteresis",          "Hysteresis",          nullptr, nullptr, nullptr, nullptr, nullptr, 0.0f, 10.0f, 0.1f },
+  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MAX_DELTA,   "hysteresis",          "Hysteresis",          nullptr, nullptr, nullptr, nullptr, nullptr, 0.0f, HYSTERESIS_MAX_C, 0.1f },
   { HA_NUMBER, 0,             "compressor_delay",        "Compressor Delay",        nullptr, "min", "mdi:timer-outline", nullptr, nullptr, 0.0f, 1440.0f, 1.0f },
   // Gravity — read-only sensors plus writable OG/TG numbers
   { HA_SENSOR, 0, "gravity",        "Gravity",        nullptr, "SG",    "mdi:test-tube",           nullptr, "measurement" },

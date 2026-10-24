@@ -397,31 +397,19 @@ const char* getFermenterStatusStr(uint8_t status) {
 bool validateFermenterField(uint8_t idx, const char* key, float value, const char** errMsg) {
   if (errMsg) *errMsg = nullptr;
 
+  // The ceiling, floor and hysteresis are checked as a set by checkTempBand()
+  // (Config.h): the new value together with the two stored ones.
   if (strcmp(key, "ceiling_temperature") == 0 || strcmp(key, "floor_temperature") == 0) {
-    if (value < -20.0f || value > 50.0f) {
+    // Checked here first so MQTT keeps its one message for either setting
+    if (value < TEMP_SETTING_MIN_C || value > TEMP_SETTING_MAX_C) {
       if (errMsg) *errMsg = "temperature out of range (-20 to 50)";
       return false;
     }
     float ceiling = (strcmp(key, "ceiling_temperature") == 0) ? value : g_fermenters[idx].ceilingTemp;
     float flr     = (strcmp(key, "floor_temperature")   == 0) ? value : g_fermenters[idx].floorTemp;
-    float hyst    = g_fermenters[idx].hysteresis;
-    if (flr >= ceiling) {
-      if (errMsg) *errMsg = "floor must be below ceiling";
-      return false;
-    }
-    if ((ceiling - flr) < 2.0f * hyst) {
-      if (errMsg) *errMsg = "safe zone must be at least 2x hysteresis";
-      return false;
-    }
+    if (!checkTempBand(ceiling, flr, g_fermenters[idx].hysteresis, errMsg)) return false;
   } else if (strcmp(key, "hysteresis") == 0) {
-    if (value < 0.0f || value > 10.0f) {
-      if (errMsg) *errMsg = "hysteresis out of range (0 to 10)";
-      return false;
-    }
-    if ((g_fermenters[idx].ceilingTemp - g_fermenters[idx].floorTemp) < 2.0f * value) {
-      if (errMsg) *errMsg = "safe zone must be at least 2x hysteresis";
-      return false;
-    }
+    if (!checkTempBand(g_fermenters[idx].ceilingTemp, g_fermenters[idx].floorTemp, value, errMsg)) return false;
   } else if (strcmp(key, "compressor_delay") == 0) {
     if (value < 0.0f || value > 1440.0f) {
       if (errMsg) *errMsg = "compressor delay out of range (0 to 1440 min)";
