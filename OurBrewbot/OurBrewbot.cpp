@@ -84,22 +84,8 @@
 #define WIFI_HOTSPOT_MS         300000  // hotspot stays up this long, then reconnecting resumes
 
 // ============================================================
-// CONTROLLER STATE MACHINE
-// ============================================================
-enum ControllerState {
-  WAIT_CONFIG,        // Unconfigured, hosting AP portal
-  CONFIGURING,        // Saving WiFi config
-  CONNECTING_NET,     // Attempting WiFi connection
-  RUNNING,            // Normal operation
-  OTA_UPGRADE,        // Performing OTA firmware update
-  RESET_CONFIG,       // Resetting all config to defaults
-  ERROR               // Error state
-};
-
-// ============================================================
 // GLOBAL STATE
 // ============================================================
-ControllerState g_state = WAIT_CONFIG;
 unsigned long g_lastTempTime    = 0;
 unsigned long g_lastFermTime    = 0;
 unsigned long g_lastCloudTime   = 0;
@@ -225,8 +211,7 @@ void setup() {
   // MQTT client setup
   initMqtt();
 
-  g_state = RUNNING;
-  logMsg("[INIT] Setup complete - entering RUNNING state");
+  logMsg("[INIT] Setup complete");
 }
 
 // ============================================================
@@ -269,129 +254,106 @@ void loop() {
     digitalWrite(PIN_LED, (now / 500) & 1);  // toggle every 500ms
   }
 
-  switch (g_state) {
-    case RUNNING:
-      // Temperature processing — async two-phase to avoid blocking the loop.
-      // Phase 1: fire conversion request and return immediately.
-      if (now - g_lastTempTime >= INTERVAL_TEMPS_MS) {
-        g_lastTempTime = now;
-        checkpoint(CP_TEMP_REQ);
-        requestTempConversion();
-        g_tempConversionPending = true;
-        g_tempRequestTime = now;
+  // Temperature processing — async two-phase to avoid blocking the loop.
+  // Phase 1: fire conversion request and return immediately.
+  if (now - g_lastTempTime >= INTERVAL_TEMPS_MS) {
+    g_lastTempTime = now;
+    checkpoint(CP_TEMP_REQ);
+    requestTempConversion();
+    g_tempConversionPending = true;
+    g_tempRequestTime = now;
+  }
+
+  // Phase 2: read results once the conversion time has elapsed.
+  // Resolution 9=94ms, 10=188ms, 11=375ms, 12=750ms
+  if (g_tempConversionPending &&
+      now - g_tempRequestTime >= (94u << (g_globalConfig.resolution - 9))) {
+    g_tempConversionPending = false;
+    checkpoint(CP_TEMP_READ);
+    readTempResults();
+
+    // Print probe temperatures to serial console
+    for (int i = 0; i < MAX_PROBES; i++) {
+      if (strlen(g_probes[i].address) == 0) continue;
+      logMsg("[TEMP] %s (%s): %.1fC (raw %.1f, adj %.1f)",
+        g_probes[i].probeName, g_probes[i].address,
+        g_probes[i].temperature, g_probes[i].rawTemperature,
+        g_probes[i].tempAdjust);
+    }
+  }
+
+  // Periodic probe scanning (hot-plug support).
+  // Guard: never run while a conversion is pending — scanBuses() calls begin()
+  // which sends a OneWire reset that cancels the in-progress conversion.
+  if (!g_tempConversionPending && now - g_lastProbeScanTime >= INTERVAL_PROBE_SCAN_MS) {
+    g_lastProbeScanTime = now;
+    checkpoint(CP_PROBE_SCAN);
+    periodicProbeScan();
+  }
+
+  // Tilt BLE scanning — the tick only STARTS a scan; serviceTilt() at the
+  // top of loop() drains it across passes (was a 4 s busy-wait here).
+  if (now - g_lastTiltTime >= INTERVAL_TILT_MS) {
+    g_lastTiltTime = now;
+    checkpoint(CP_TILT);
+    startTiltScan();
+  }
+
+  // Fermenter control loop
+  if (now - g_lastFermTime >= INTERVAL_FERMENTER_MS) {
+    g_lastFermTime = now;
+    checkpoint(CP_FERM);
+    // LiveTest mode: advance 1 hour per 10-second tick
+    for (int i = 0; i < MAX_FERMENTERS; i++) {
+      if (g_fermenters[i].liveTest && g_fermenters[i].profileRunning && g_fermenters[i].power) {
+        profileAddHour(i);
       }
+    }
+    processFermenters();
+    iSpindelCheckFreshness();   // logs an iSpindel going stale or coming back
+  }
 
-      // Phase 2: read results once the conversion time has elapsed.
-      // Resolution 9=94ms, 10=188ms, 11=375ms, 12=750ms
-      if (g_tempConversionPending &&
-          now - g_tempRequestTime >= (94u << (g_globalConfig.resolution - 9))) {
-        g_tempConversionPending = false;
-        checkpoint(CP_TEMP_READ);
-        readTempResults();
+  // Cloud / service reporting (HTTP services only). The 15-min tick only
+  // queues work; ONE report is POSTed per loop pass so the loop never stalls
+  // longer than a single 5 s HTTP timeout (was: up to services × fermenters
+  // × 5 s in one pass).
+  if (now - g_lastCloudTime >= INTERVAL_CLOUD_MS) {
+    g_lastCloudTime = now;
+    queueReports();
+  }
+  if (reportsPending()) {
+    checkpoint(CP_CLOUD);
+    processReportQueue();
+  }
 
-        // Print probe temperatures to serial console
-        for (int i = 0; i < MAX_PROBES; i++) {
-          if (strlen(g_probes[i].address) == 0) continue;
-          logMsg("[TEMP] %s (%s): %.1fC (raw %.1f, adj %.1f)",
-            g_probes[i].probeName, g_probes[i].address,
-            g_probes[i].temperature, g_probes[i].rawTemperature,
-            g_probes[i].tempAdjust);
-        }
-      }
+  // MQTT publish (separate timer, more frequent)
+  if (now - g_lastMqttTime >= INTERVAL_MQTT_MS) {
+    g_lastMqttTime = now;
+    checkpoint(CP_MQTT_PUB);
+    reportMqtt();
+  }
 
-      // Periodic probe scanning (hot-plug support).
-      // Guard: never run while a conversion is pending — scanBuses() calls begin()
-      // which sends a OneWire reset that cancels the in-progress conversion.
-      if (!g_tempConversionPending && now - g_lastProbeScanTime >= INTERVAL_PROBE_SCAN_MS) {
-        g_lastProbeScanTime = now;
-        checkpoint(CP_PROBE_SCAN);
-        periodicProbeScan();
-      }
+  // Ten-minute periodic tasks
+  if (now - g_lastTenMinTime >= INTERVAL_TEN_MIN_MS) {
+    g_lastTenMinTime = now;
+    checkpoint(CP_TEN_MIN);
+    onTenMinuteTimer();
+  }
 
-      // Tilt BLE scanning — the tick only STARTS a scan; serviceTilt() at the
-      // top of loop() drains it across passes (was a 4 s busy-wait here).
-      if (now - g_lastTiltTime >= INTERVAL_TILT_MS) {
-        g_lastTiltTime = now;
-        checkpoint(CP_TILT);
-        startTiltScan();
-      }
+  // Daily firmware update check - returns straight away until it's due
+  updateCheckLoop();
 
-      // Fermenter control loop
-      if (now - g_lastFermTime >= INTERVAL_FERMENTER_MS) {
-        g_lastFermTime = now;
-        checkpoint(CP_FERM);
-        // LiveTest mode: advance 1 hour per 10-second tick
-        for (int i = 0; i < MAX_FERMENTERS; i++) {
-          if (g_fermenters[i].liveTest && g_fermenters[i].profileRunning && g_fermenters[i].power) {
-            profileAddHour(i);
-          }
-        }
-        processFermenters();
-        iSpindelCheckFreshness();   // logs an iSpindel going stale or coming back
-      }
+  // Send the crash report once after a crash - does nothing otherwise
+  crashReportLoop();
 
-      // Cloud / service reporting (HTTP services only). The 15-min tick only
-      // queues work; ONE report is POSTed per loop pass so the loop never stalls
-      // longer than a single 5 s HTTP timeout (was: up to services × fermenters
-      // × 5 s in one pass).
-      if (now - g_lastCloudTime >= INTERVAL_CLOUD_MS) {
-        g_lastCloudTime = now;
-        queueReports();
-      }
-      if (reportsPending()) {
-        checkpoint(CP_CLOUD);
-        processReportQueue();
-      }
-
-      // MQTT publish (separate timer, more frequent)
-      if (now - g_lastMqttTime >= INTERVAL_MQTT_MS) {
-        g_lastMqttTime = now;
-        checkpoint(CP_MQTT_PUB);
-        reportMqtt();
-      }
-
-      // Ten-minute periodic tasks
-      if (now - g_lastTenMinTime >= INTERVAL_TEN_MIN_MS) {
-        g_lastTenMinTime = now;
-        checkpoint(CP_TEN_MIN);
-        onTenMinuteTimer();
-      }
-
-      // Daily firmware update check - returns straight away until it's due
-      updateCheckLoop();
-
-      // Send the crash report once after a crash - does nothing otherwise
-      crashReportLoop();
-
-      // Uptime in minutes, saved with the global config for the reboot log.
-      // Taken from the uptime clock rather than counted up here, so it can't
-      // drift when a loop pass runs long, and there's one uptime, not two.
-      if (now - g_lastUptimeTime >= INTERVAL_UPTIME_MS) {
-        g_lastUptimeTime = now;
-        g_globalConfig.lastUptime = uptimeSeconds() / 60;
-        // WiFi signal for the crash record (see crashNoteRssi in Crash.h)
-        crashNoteRssi(WiFi.isConnected() ? WiFi.RSSI() : 0);
-      }
-      break;
-
-    case RESET_CONFIG:
-      logMsgL(SYSLOG_NOTICE, "[SYS] Resetting all config...");
-      resetAllConfig();
-      g_state = WAIT_CONFIG;
-      restartDevice();
-      break;
-
-    case OTA_UPGRADE:
-      // Handled by web server POST /update handler
-      break;
-
-    case ERROR:
-      // Blink LED to indicate error
-      digitalWrite(PIN_LED, (millis() / 100) % 2);
-      break;
-
-    default:
-      break;
+  // Uptime in minutes, saved with the global config for the reboot log.
+  // Taken from the uptime clock rather than counted up here, so it can't
+  // drift when a loop pass runs long, and there's one uptime, not two.
+  if (now - g_lastUptimeTime >= INTERVAL_UPTIME_MS) {
+    g_lastUptimeTime = now;
+    g_globalConfig.lastUptime = uptimeSeconds() / 60;
+    // WiFi signal for the crash record (see crashNoteRssi in Crash.h)
+    crashNoteRssi(WiFi.isConnected() ? WiFi.RSSI() : 0);
   }
 }
 

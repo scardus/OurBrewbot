@@ -174,7 +174,7 @@ void crashLogPendingDeferred() {
   // Quiet only on hardware power-on / external reset. Soft restarts (code 4)
   // are included because the SDK uses that path for panic()/assert() failures
   // — they look like clean restarts but aren't. For intentional reboots
-  // (OTA, /reboot, RESET_CONFIG), the resulting `last=<subsystem>` line is
+  // (OTA, /reboot, factory reset), the resulting `last=<subsystem>` line is
   // mild noise but tells us which path initiated the restart, so it's worth
   // keeping uniform.
   const struct rst_info* ri = ESP.getResetInfoPtr();
