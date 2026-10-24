@@ -46,6 +46,11 @@
 // WiFi connects (or after syslog config is saved) to resolve the syslog host.
 void logInit();
 
+// Try the syslog host again if it couldn't be found when WiFi connected (e.g.
+// DNS still starting after a power cut). Call every 10 minutes. Does nothing
+// while syslog is working, switched off, or WiFi is down.
+void logRetrySyslog();
+
 // Implementation — do not call directly; use the logMsg()/logMsgL() macros
 // below, which move the format literal to flash via PSTR(). Format strings
 // were the largest block of .rodata held in DRAM (~160 call sites).

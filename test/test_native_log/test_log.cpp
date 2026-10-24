@@ -170,6 +170,72 @@ static void test_reinit_clears_a_previously_resolved_address(void) {
 }
 
 // ============================================================
+// logRetrySyslog() — a host that couldn't be found at boot
+// ============================================================
+
+// A failed lookup used to leave syslog off until the next reboot, without a word
+static void test_a_failed_lookup_says_so(void) {
+  g_syslogConfig.enabled = true;
+  snprintf(g_syslogConfig.host, sizeof(g_syslogConfig.host), "nas.local");
+  WiFi.resolveOk = false;
+  logInit();
+  TEST_ASSERT_NOT_NULL(strstr(Serial.buf,
+    "[LOG] Syslog host nas.local could not be found - trying again every 10 min"));
+}
+
+// The power-cut case: DNS isn't answering when WiFi connects, then starts to.
+// The 10-minute retry must find the host, and say that lines were missed.
+static void test_retry_finds_the_host_after_a_failed_lookup(void) {
+  g_syslogConfig.enabled = true;
+  snprintf(g_syslogConfig.host, sizeof(g_syslogConfig.host), "nas.local");
+  g_syslogConfig.port     = 514;
+  g_syslogConfig.minLevel = SYSLOG_DEBUG;
+  WiFi.resolveOk = false;
+  logInit();
+  TEST_ASSERT_FALSE(s_ipResolved);
+
+  WiFi.resolveOk = true;
+  WiFi.resolveTo = IPAddress(192, 168, 0, 60);
+  udpTestReset();
+  logRetrySyslog();
+  TEST_ASSERT_TRUE(s_ipResolved);
+  TEST_ASSERT_TRUE(s_syslogIP == IPAddress(192, 168, 0, 60));
+  TEST_ASSERT_NOT_NULL(strstr(udpTestLastPayload(),
+    "[LOG] Syslog host nas.local found - lines logged before this were not sent to syslog"));
+}
+
+// Once the host is found the retry must not look it up again: the address
+// stays as it is even though DNS would now give a different one
+static void test_retry_does_nothing_while_syslog_works(void) {
+  WiFi.resolveTo = IPAddress(10, 1, 2, 3);
+  enableSyslog();
+  WiFi.resolveTo = IPAddress(10, 9, 9, 9);
+  logRetrySyslog();
+  TEST_ASSERT_TRUE(s_syslogIP == IPAddress(10, 1, 2, 3));
+  TEST_ASSERT_EQUAL_INT(0, g_udpPacketCount);
+}
+
+static void test_retry_does_nothing_when_syslog_is_off_has_no_host_or_wifi_is_down(void) {
+  // Switched off
+  g_syslogConfig.enabled = false;
+  snprintf(g_syslogConfig.host, sizeof(g_syslogConfig.host), "nas.local");
+  logRetrySyslog();
+  TEST_ASSERT_FALSE(s_ipResolved);
+
+  // No host set
+  g_syslogConfig.enabled = true;
+  g_syslogConfig.host[0] = '\0';
+  logRetrySyslog();
+  TEST_ASSERT_FALSE(s_ipResolved);
+
+  // WiFi down - the lookup would only block for its 2 s timeout
+  snprintf(g_syslogConfig.host, sizeof(g_syslogConfig.host), "nas.local");
+  WiFi.connected = false;
+  logRetrySyslog();
+  TEST_ASSERT_FALSE(s_ipResolved);
+}
+
+// ============================================================
 // MINIMUM INTER-PACKET GAP
 // ============================================================
 
@@ -536,6 +602,10 @@ int main(int, char**) {
   RUN_TEST(test_successful_lookup_caches_the_address);
   RUN_TEST(test_failed_lookup_leaves_the_address_unresolved);
   RUN_TEST(test_reinit_clears_a_previously_resolved_address);
+  RUN_TEST(test_a_failed_lookup_says_so);
+  RUN_TEST(test_retry_finds_the_host_after_a_failed_lookup);
+  RUN_TEST(test_retry_does_nothing_while_syslog_works);
+  RUN_TEST(test_retry_does_nothing_when_syslog_is_off_has_no_host_or_wifi_is_down);
 
   RUN_TEST(test_successful_init_sends_one_warmup_packet);
   RUN_TEST(test_failed_init_sends_no_warmup_packet);

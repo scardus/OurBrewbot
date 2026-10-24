@@ -582,6 +582,10 @@ void wifiLoop() {
 // TEN MINUTE TIMER TASKS
 // ============================================================
 void onTenMinuteTimer() {
+  // First, so the health line below already reaches syslog if its host has
+  // only just become reachable
+  logRetrySyslog();
+
   // Health report. "Stack free" is the lowest amount of the 4 KB loop stack
   // that has been left unused since boot (a high-water mark). If it ever
   // reaches 0 the loop stack has overflowed into the WiFi SDK's stack below it.
