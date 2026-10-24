@@ -22,6 +22,7 @@
 #include "Config.h"
 #include "Mqtt.h"
 #include "StackProbe.h"
+#include "Uptime.h"
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <stdarg.h>
@@ -174,15 +175,21 @@ logMsgNested(uint8_t level, const char* ts, PGM_P fmt, va_list args) {
   sendLogLine(level, ts, buf);
 }
 
+// The size of the "[HHH:MM:SS] " timestamp buffer, including its NUL. The
+// widest it can be is uptimeSeconds() at its largest, 2^32-1 s:
+// "[1193046:28:15] " = 1 + 7 + 1 + 2 + 1 + 2 + 1 + 1 = 16 characters, plus
+// the NUL = 17. 20 leaves a little room.
+#define LOG_TS_SIZE 20
+
 static void vlogMsg(uint8_t level, PGM_P fmt, va_list args) {
-  // Timestamp: [HHH:MM:SS]
-  unsigned long ms = millis();
-  unsigned long totalSec = ms / 1000;
+  // Timestamp: [HHH:MM:SS] since boot. From the uptime clock rather than
+  // millis(), which went back to [000:00:00] after 49.7 days.
+  unsigned long totalSec = uptimeSeconds();
   unsigned long hours = totalSec / 3600;
   unsigned long mins  = (totalSec % 3600) / 60;
   unsigned long secs  = totalSec % 60;
 
-  char ts[16];
+  char ts[LOG_TS_SIZE];
   snprintf(ts, sizeof(ts), "[%03lu:%02lu:%02lu] ", hours, mins, secs);
   Serial.print(ts);
 

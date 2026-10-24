@@ -49,6 +49,12 @@ static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+// A test sets s_uptimeSec to stand in for an uptime past the 49.7-day wrap,
+// which the 32-bit millis() can't reach. 0 = follow millis().
+static uint32_t s_uptimeSec = 0;
+uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+
 // ---- MQTT mirror double: records what would have been published ----
 static int  s_mqttCalls = 0;
 static int  s_mqttLastLevel = -1;
@@ -97,6 +103,7 @@ void setUp(void) {
   g_syslogConfig = SyslogConfig{};
   g_mqttConfig   = MqttConfig{};
   s_millis       = 0;
+  s_uptimeSec    = 0;
   s_ipResolved   = false;
   s_syslogIP     = IPAddress(0, 0, 0, 0);
   s_lastSendMs   = 0;
@@ -475,16 +482,24 @@ static void test_timestamp_composes_hours_minutes_seconds(void) {
   TEST_ASSERT_EQUAL_STRING("[001:01:01] tick\r\n", Serial.buf);
 }
 
-// The %03lu hour field grows past three digits after ~41 days of uptime. That
-// is fine, but only because millis() wraps first: the largest value it can
-// ever hold is 2^32-1 ms = 1193h 02m 47s, which is 13 characters including the
-// trailing space - inside the 16-byte ts[] buffer with two to spare. Widening
-// the format, or moving to a 64-bit uptime, would overflow it.
+// The timestamp used to come from millis(), so it went back to [000:00:00]
+// after 49.7 days (2^32 ms = 4,294,967 s). From the uptime clock it carries on.
+static void test_timestamp_keeps_counting_past_the_millis_wrap(void) {
+  s_millis    = 60000;                 // what millis() reads 60 s past the wrap
+  s_uptimeSec = 4294967UL + 60UL;      // = 1193 h 3 min 47 s since boot
+  logMsg("past the wrap");
+  TEST_ASSERT_EQUAL_STRING("[1193:03:47] past the wrap\r\n", Serial.buf);
+}
+
+// The %03lu hour field grows past three digits after ~41 days. The widest
+// timestamp is uptimeSeconds() at its largest, 2^32-1 s = 1,193,046 h 28 min
+// 15 s: "[1193046:28:15] " is 16 characters plus the NUL. If LOG_TS_SIZE ever
+// shrank below that, snprintf() would cut the timestamp short and this fails.
 static void test_widest_possible_timestamp_still_fits_the_buffer(void) {
-  s_millis = 0xFFFFFFFFu;
-  logMsg("wrap");
-  TEST_ASSERT_EQUAL_STRING("[1193:02:47] wrap\r\n", Serial.buf);
-  TEST_ASSERT_LESS_THAN_UINT(16, strlen("[1193:02:47] ") + 1);
+  s_uptimeSec = 0xFFFFFFFFu;
+  logMsg("widest");
+  TEST_ASSERT_EQUAL_STRING("[1193046:28:15] widest\r\n", Serial.buf);
+  TEST_ASSERT_LESS_OR_EQUAL_UINT(LOG_TS_SIZE, strlen("[1193046:28:15] ") + 1);
 }
 
 static void test_format_arguments_are_expanded(void) {
@@ -634,6 +649,7 @@ int main(int, char**) {
   RUN_TEST(test_timestamp_at_zero_uptime);
   RUN_TEST(test_timestamp_composes_hours_minutes_seconds);
   RUN_TEST(test_widest_possible_timestamp_still_fits_the_buffer);
+  RUN_TEST(test_timestamp_keeps_counting_past_the_millis_wrap);
   RUN_TEST(test_format_arguments_are_expanded);
 
   RUN_TEST(test_mirror_is_silent_when_mqtt_is_disabled);
