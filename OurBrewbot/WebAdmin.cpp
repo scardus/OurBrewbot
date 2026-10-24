@@ -141,7 +141,6 @@ h2 {
 .badge-idle  { background: #333;    color: #888; }
 .badge-heat  { background: #e94560; color: #fff; }
 .badge-cool  { background: #0f3460; color: #53d8fb; }
-.badge-alarm { background: #ff0;    color: #000; }
 .badge-off   { background: #222;    color: #555; }
 .badge-prof  { background: #8b5cf6; color: #fff; }
 
@@ -638,12 +637,11 @@ function loadTab() {
   else if (activeTab == 7) loadSystemSettings();
 }
 
-// Render a coloured status badge for a fermenter (Idle/Heating/Cooling/Alarm/Off).
+// Render a coloured status badge for a fermenter (Idle/Heating/Cooling/Off).
 function statusBadge(s, pwr) {
   if (!pwr)   return '<span class="badge badge-off">OFF</span>';
   if (s == 1) return '<span class="badge badge-heat">Heating</span>';
   if (s == 2) return '<span class="badge badge-cool">Cooling</span>';
-  if (s == 3) return '<span class="badge badge-alarm">ALARM</span>';
   return '<span class="badge badge-idle">Idle</span>';
 }
 

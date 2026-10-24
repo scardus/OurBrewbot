@@ -1325,8 +1325,7 @@ void reportMqtt() {
     publishBool(base, "alarm", g_fermenters[i].alarm);
     uint8_t st = g_fermenters[i].status;
     const char* state = (st == STATUS_HEATING) ? "heating" :
-                        (st == STATUS_COOLING) ? "cooling" :
-                        (st == STATUS_ALARM)   ? "alarm"   : "idle";
+                        (st == STATUS_COOLING) ? "cooling" : "idle";
     publishValue(base, "status", state);
 
     // Info

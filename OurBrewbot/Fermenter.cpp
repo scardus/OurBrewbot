@@ -386,7 +386,6 @@ const char* getFermenterStatusStr(uint8_t status) {
   switch (status) {
     case STATUS_HEATING: return "Heating";
     case STATUS_COOLING: return "Cooling";
-    case STATUS_ALARM:   return "Alarm";
     default:             return "Idle";
   }
 }
