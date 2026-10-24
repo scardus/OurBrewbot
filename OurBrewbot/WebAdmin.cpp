@@ -1893,8 +1893,12 @@ function importConfig(input) {
     function postNext() {
       if (idx >= keys.length) {
         input.value = '';
-        alert('Import complete. Rebooting device...');
-        fetch('/reboot');
+        // Restart first: until then the device still runs on its old settings,
+        // and an alert left open used to let its 10-minute save write them back
+        // over the imported files
+        fetch('/reboot')
+          .then(function() { alert('Import complete. The device is restarting with the imported settings.'); })
+          .catch(function() { alert('Import complete, but the restart request failed - restart the device to use the imported settings.'); });
         return;
       }
       var key = keys[idx++];
@@ -1907,7 +1911,15 @@ function importConfig(input) {
           if (d.status !== 'ok') throw new Error(d.msg || 'Write failed');
           postNext();
         })
-        .catch(function(ex) { alert('Import failed on ' + fileMap[key] + ': ' + ex); input.value = ''; });
+        .catch(function(ex) {
+          input.value = '';
+          // Put the previous settings back over the files already imported, so
+          // the device can't restart on a mix of old and new settings
+          var msg = 'Import failed on ' + fileMap[key] + ': ' + ex;
+          fetch('/fs/import/abort', { method: 'POST' })
+            .then(function() { alert(msg + '\nYour previous settings have been put back.'); })
+            .catch(function() { alert(msg + '\nThe device will put its previous settings back within a few minutes.'); });
+        });
     }
     postNext();
   };
