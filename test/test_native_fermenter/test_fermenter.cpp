@@ -470,6 +470,25 @@ void test_alarm_fires_after_dwell_elapses(void) {
   TEST_ASSERT_TRUE(g_fermenters[F].alarm);
 }
 
+// A mild deviation that started just before the 49.7-day millis() wrap (2^32 ms
+// = 4,294,967 s) must still raise its alarm a dwell later, and keep it. As a
+// millis() stamp the time out of band read as small again after the wrap.
+void test_alarm_dwell_is_kept_across_the_millis_wrap(void) {
+  g_fermenters[F].floorTemp      = 18.0f;
+  g_fermenters[F].ceilingTemp    = 22.0f;
+  g_fermenters[F].alarmTolerance = 3.0f;
+  g_globalConfig.alarmDwellSec   = 600;
+  s_controlTemp = 23.0f;                  // mild deviation
+
+  s_uptimeSec = 4294967UL - 300UL;        // starts 5 min before the wrap
+  checkFermenterAlarm(F);
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
+
+  s_uptimeSec = 4294967UL + 300UL;        // 10 min later, past the wrap
+  checkFermenterAlarm(F);
+  TEST_ASSERT_TRUE(g_fermenters[F].alarm);
+}
+
 void test_alarm_dwell_resets_on_return_to_band(void) {
   g_fermenters[F].floorTemp      = 18.0f;
   g_fermenters[F].ceilingTemp    = 22.0f;
@@ -1015,6 +1034,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_alarm_does_not_fire_immediately_on_mild_deviation);
   RUN_TEST(test_alarm_fires_after_dwell_elapses);
   RUN_TEST(test_alarm_dwell_resets_on_return_to_band);
+  RUN_TEST(test_alarm_dwell_is_kept_across_the_millis_wrap);
 
   RUN_TEST(test_validate_ceiling_temp_in_range_accepted);
   RUN_TEST(test_validate_ceiling_temp_rejects_below_absolute_range);

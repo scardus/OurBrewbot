@@ -704,7 +704,7 @@ void buildUpdateStatusJson(JsonDocument& doc) {
   doc["UpdateCheckError"] = g_updateStatus.lastError;        // "" if the last check worked
   // Minutes since the last attempt, or -1 if there hasn't been one since boot
   doc["LastUpdateCheck"]  = g_updateStatus.attempted
-                              ? (int32_t)((millis() - g_updateStatus.lastCheckMs) / 60000UL)
+                              ? (int32_t)(uptimeSince(g_updateStatus.lastCheckSec) / 60)
                               : -1;
 }
 

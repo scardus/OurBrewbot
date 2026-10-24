@@ -25,6 +25,7 @@
 #include "Log.h"
 #include "Mqtt.h"
 #include "Crash.h"
+#include "Uptime.h"
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
@@ -127,7 +128,7 @@ static bool checkFailed(const char* reason) {
 
 bool runUpdateCheck() {
   g_updateStatus.attempted   = true;
-  g_updateStatus.lastCheckMs = millis();
+  g_updateStatus.lastCheckSec = uptimeSeconds();
 
   if (!WiFi.isConnected()) return checkFailed("WiFi not connected");
 

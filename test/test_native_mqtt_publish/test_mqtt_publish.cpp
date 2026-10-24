@@ -60,6 +60,7 @@ void test_setMillis(uint32_t ms) { s_millis = ms; }
 // which the 32-bit millis() can't reach. 0 = follow millis().
 static uint32_t s_uptimeSec = 0;
 uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
 uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
 
 // ---- doubles for the modules not compiled in ----

@@ -63,6 +63,7 @@ void test_setMillis(uint32_t ms) { s_millis = ms; }
 // which the 32-bit millis() can't reach. 0 = follow millis().
 static uint32_t s_uptimeSec = 0;
 uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
 uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
 
 // ---- no-op / recording doubles for the modules not compiled in ----
@@ -1920,6 +1921,18 @@ static void test_celsius_mode_leaves_temp_adjust_untouched(void) {
 // POST /update/check
 // ============================================================
 
+// "Last checked N min ago" must stay right past the 49.7-day millis() wrap, e.g.
+// when the daily check is switched off after one check
+static void test_controller_last_check_age_survives_the_millis_wrap(void) {
+  g_updateStatus.attempted    = true;
+  g_updateStatus.lastCheckSec = 4294967UL - 600UL;   // 10 min before the wrap
+  s_uptimeSec                 = 4294967UL + 1200UL;  // 30 min after it
+
+  JsonDocument doc;
+  buildControllerJson(doc);
+  TEST_ASSERT_EQUAL_INT(30, doc["LastUpdateCheck"].as<int>());
+}
+
 static void test_controller_reports_the_update_status(void) {
   g_globalConfig.updateCheck = true;
   g_updateStatus.checked = true;
@@ -1927,7 +1940,7 @@ static void test_controller_reports_the_update_status(void) {
   strlcpy(g_updateStatus.latestVersion, "0.4.17", sizeof(g_updateStatus.latestVersion));
   strlcpy(g_updateStatus.notesUrl, "https://example.com/notes", sizeof(g_updateStatus.notesUrl));
   g_updateStatus.attempted = true;
-  g_updateStatus.lastCheckMs = s_millis;
+  g_updateStatus.lastCheckSec = s_millis / 1000;   // uptime seconds
   s_millis += 5 * 60000UL;   // checked 5 minutes ago
 
   handleController(srv);
@@ -2150,6 +2163,7 @@ int main(int, char**) {
   RUN_TEST(test_celsius_mode_leaves_temp_adjust_untouched);
 
   RUN_TEST(test_controller_reports_the_update_status);
+  RUN_TEST(test_controller_last_check_age_survives_the_millis_wrap);
   RUN_TEST(test_controller_last_check_is_minus_one_before_any_attempt);
   RUN_TEST(test_controller_post_saves_the_update_check_switch);
   RUN_TEST(test_update_check_endpoint_runs_a_check_and_returns_the_result);

@@ -36,9 +36,10 @@ static uint32_t s_lastCoolingStop[MAX_FERMENTERS] = {0};
 // Per-fermenter control state for the hysteresis state machine
 static uint8_t s_state[MAX_FERMENTERS] = {STATUS_IDLE};  // STATUS_IDLE / STATUS_HEATING / STATUS_COOLING
 
-// millis() when this fermenter first went out-of-band (and stayed there).
+// uptimeStamp() when this fermenter first went out-of-band (and stayed there).
 // 0 means "currently in band". Resets the instant temp returns to band.
-// Runtime-only — fresh dwell on every boot.
+// Runtime-only — fresh dwell on every boot. Seconds since boot rather than
+// millis(), so a fermenter out of band for 49.7 days doesn't lose its alarm.
 static uint32_t s_outOfRangeSince[MAX_FERMENTERS] = {0};
 
 // Put a fermenter's control state back to IDLE. Every way out of cooling must
@@ -249,9 +250,8 @@ void checkFermenterAlarm(uint8_t i) {
       alarmActive = true;
     } else {
       // Mild — start (or continue) the dwell timer
-      if (s_outOfRangeSince[i] == 0) s_outOfRangeSince[i] = millis();
-      uint32_t dwellMs = (uint32_t)g_globalConfig.alarmDwellSec * 1000UL;
-      if ((millis() - s_outOfRangeSince[i]) >= dwellMs) {
+      if (s_outOfRangeSince[i] == 0) s_outOfRangeSince[i] = uptimeStamp();
+      if (uptimeSince(s_outOfRangeSince[i]) >= g_globalConfig.alarmDwellSec) {
         if (overTemp) {
           logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): over temperature threshold (dwell %us elapsed)! %.1f > %.1f",
             i, g_fermenters[i].fermenterName, g_globalConfig.alarmDwellSec, temp, ceiling);

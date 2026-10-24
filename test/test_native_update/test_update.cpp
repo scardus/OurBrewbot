@@ -39,6 +39,9 @@ GlobalConfig g_globalConfig;
 static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+uint32_t uptimeSeconds() { return s_millis / 1000; }
+
 // ---- log capture: counts per severity, plus the last line ----
 static int  s_logCount[8];
 static char s_lastLog[192];
