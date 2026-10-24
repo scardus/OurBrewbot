@@ -146,31 +146,6 @@ enum TiltColour {
 };
 
 // ============================================================
-// REBOOT REASONS
-// ============================================================
-enum RebootReason {
-  REBOOT_POWER_ON        = 0,  // "Power on"
-  REBOOT_HW_WATCHDOG     = 1,  // "Hardware Watchdog"
-  REBOOT_EXCEPTION       = 2,  // "Exception"
-  REBOOT_SW_WATCHDOG     = 3,  // "Software Watchdog"
-  REBOOT_SW_RESTART      = 4,  // "Software/System restart"
-  REBOOT_DOUBLE_RESET    = 5,  // "Double Reset"
-  REBOOT_OTA             = 6,  // "OTA_UPGRADE"
-  REBOOT_RESET_CONFIG    = 7,  // "Resetting configuration!"
-};
-
-// ============================================================
-// CONTROLLER HARDWARE VERSIONS
-// ============================================================
-enum ControllerVersion {
-  CTRL_VERSION_1   = 1,
-  CTRL_VERSION_2   = 2,
-  CTRL_VERSION_3   = 3,
-  CTRL_VERSION_4   = 4,
-  CTRL_NEXT_GEN    = 5,  // "Controller = Next Gen"
-};
-
-// ============================================================
 // LittleFS FILENAMES
 // All files have a backup copy
 // ============================================================
@@ -200,10 +175,7 @@ enum ControllerVersion {
 #define FILE_SYSLOG_BKP     "/jsonSyslogbkup.txt"
 #define FILE_REBOOT         "/jsonReBoot.txt"
 #define FILE_REBOOT_BKP     "/jsonReBootbkup.txt"
-#define FILE_CHART_SERIES   "/jsonchartSeries.txt"
-#define FILE_CHART_NAMES    "/jsonchartNames.txt"
 #define FILE_DRD            "/DRD.txt"
-#define FILE_NG_VERSION     "/NG_version.txt"
 
 // ============================================================
 // STRUCT: GlobalConfig

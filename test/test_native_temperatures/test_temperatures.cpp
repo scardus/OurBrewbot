@@ -26,7 +26,7 @@
 // The probe half of this file only became reachable once
 // test/stubs/DallasTemperature.h gained a scripted device table; before
 // that, getDeviceCount() was hardcoded to 0 and getTempC() to -127, so
-// scanBuses(), readTempResults(), periodicProbeScan() and getTempQuick()
+// scanBuses(), readTempResults() and periodicProbeScan()
 // compiled without ever executing a meaningful line. Everything they do -
 // registering probes, renaming them when they move bus, upgrading addresses
 // persisted in a truncated form, falling back to the other bus, retrying a
@@ -573,28 +573,6 @@ void test_periodicProbeScan_does_not_save_when_nothing_changed(void) {
 }
 
 // ============================================================
-// getTempQuick
-// ============================================================
-
-void test_getTempQuick_reads_from_bus1(void) {
-  g_sensors1.testAddDevice(ADDR_A, 20.5f);
-  TEST_ASSERT_EQUAL_FLOAT(20.5f, getTempQuick(ADDR_A));
-}
-
-void test_getTempQuick_falls_back_to_bus2(void) {
-  g_sensors2.testAddDevice(ADDR_C, 5.0f);
-  TEST_ASSERT_EQUAL_FLOAT(5.0f, getTempQuick(ADDR_C));
-}
-
-void test_getTempQuick_returns_none_for_an_absent_probe(void) {
-  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getTempQuick(ADDR_A));
-}
-
-void test_getTempQuick_returns_none_for_an_unparseable_address(void) {
-  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getTempQuick("nonsense"));
-}
-
-// ============================================================
 // cleanupDuplicateProbes
 // ============================================================
 
@@ -928,11 +906,6 @@ int main(int argc, char** argv) {
   RUN_TEST(test_periodicProbeScan_reapplies_the_resolution);
   RUN_TEST(test_periodicProbeScan_saves_when_a_probe_was_added);
   RUN_TEST(test_periodicProbeScan_does_not_save_when_nothing_changed);
-
-  RUN_TEST(test_getTempQuick_reads_from_bus1);
-  RUN_TEST(test_getTempQuick_falls_back_to_bus2);
-  RUN_TEST(test_getTempQuick_returns_none_for_an_absent_probe);
-  RUN_TEST(test_getTempQuick_returns_none_for_an_unparseable_address);
 
   RUN_TEST(test_cleanup_removes_an_exact_duplicate);
   RUN_TEST(test_cleanup_keeps_the_full_address_over_the_truncated_one);
