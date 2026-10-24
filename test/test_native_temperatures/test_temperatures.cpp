@@ -53,6 +53,10 @@ static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+uint32_t uptimeSeconds() { return s_millis / 1000; }
+uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
+
 // ---- no-op stubs ----
 // Warnings are counted so the probe-failure tests can check how often a
 // missing probe is reported
@@ -675,7 +679,7 @@ static void assignReportingIspindel(uint8_t slot, float tempC) {
   g_iSpindels[slot].fermenter   = F;
   g_iSpindels[slot].function    = PROBE_FN_BEER;
   g_iSpindels[slot].temperature = tempC;
-  g_iSpindels[slot].lastSeen    = 1000000;
+  g_iSpindels[slot].lastSeen    = 1000;   // uptime seconds - the clock reads 1000 s
   g_iSpindels[slot].interval    = 900;
 }
 
@@ -711,7 +715,7 @@ void test_getBeerTemp_probe_beats_ispindel(void) {
 // so the 60 min minimum applies) is no longer used
 void test_getBeerTemp_skips_a_stale_ispindel(void) {
   assignReportingIspindel(0, 19.5f);
-  test_setMillis(1000000 + 3600001);
+  test_setMillis(1000000 + 3601000);   // 60 min and 1 s later
   TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getBeerTemp(F));
   TEST_ASSERT_EQUAL_STRING("None", getBeerTempSource(F));
 }

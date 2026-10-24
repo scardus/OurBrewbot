@@ -58,6 +58,14 @@ static uint32_t s_millis = 1000000;   // large, so dwell-timer sentinels of 0 re
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+// A test sets s_uptimeSec to stand in for an uptime past the 49.7-day wrap,
+// which the 32-bit millis() can't reach. 0 = follow millis().
+static uint32_t s_uptimeSec = 0;
+uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
+uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
+
 // ---- no-op / recording doubles for the modules not compiled in ----
 void logMsgImpl(uint8_t, PGM_P, ...) {}
 void logInit() {}
@@ -176,6 +184,7 @@ void setUp(void) {
   espTestSetResetReason(REASON_DEFAULT_RST);
   clientTestSetConnected(true);
   s_millis      = 1000000;
+  s_uptimeSec   = 0;
   s_rfTransmits = 0;
   s_forceOffs   = 0;
   s_bleReinits  = 0;
@@ -769,6 +778,27 @@ static void test_fermenters_get_sends_worst_case_names_whole(void) {
     TEST_ASSERT_EQUAL_STRING(g_fermenters[i].yeastName,     doc[i]["YeastName"].as<const char*>());
     TEST_ASSERT_EQUAL_STRING(g_profiles[i].profileName,     doc[i]["ProfileName"].as<const char*>());
   }
+}
+
+// Uptime comes from the uptime clock, not millis() / 60000, which went back to
+// 0 after 49.7 days. 60 days = 86,400 minutes.
+static void test_uptime_is_reported_past_the_millis_wrap(void) {
+  s_uptimeSec = 60UL * 86400UL;
+
+  JsonDocument ctl;
+  buildControllerJson(ctl);
+  TEST_ASSERT_EQUAL_UINT32(86400, ctl["Uptime"].as<uint32_t>());
+
+  JsonDocument health;
+  handleHealth(srv);
+  parseResponse(health);
+  TEST_ASSERT_EQUAL_UINT32(86400, health["uptime"].as<uint32_t>());
+
+  httpRespReset();
+  JsonDocument status;
+  handleStatus(srv);
+  parseResponse(status);
+  TEST_ASSERT_EQUAL_UINT32(86400, status["uptime"].as<uint32_t>());
 }
 
 static void test_status_get_sends_worst_case_names_whole(void) {
@@ -1891,6 +1921,18 @@ static void test_celsius_mode_leaves_temp_adjust_untouched(void) {
 // POST /update/check
 // ============================================================
 
+// "Last checked N min ago" must stay right past the 49.7-day millis() wrap, e.g.
+// when the daily check is switched off after one check
+static void test_controller_last_check_age_survives_the_millis_wrap(void) {
+  g_updateStatus.attempted    = true;
+  g_updateStatus.lastCheckSec = 4294967UL - 600UL;   // 10 min before the wrap
+  s_uptimeSec                 = 4294967UL + 1200UL;  // 30 min after it
+
+  JsonDocument doc;
+  buildControllerJson(doc);
+  TEST_ASSERT_EQUAL_INT(30, doc["LastUpdateCheck"].as<int>());
+}
+
 static void test_controller_reports_the_update_status(void) {
   g_globalConfig.updateCheck = true;
   g_updateStatus.checked = true;
@@ -1898,7 +1940,7 @@ static void test_controller_reports_the_update_status(void) {
   strlcpy(g_updateStatus.latestVersion, "0.4.17", sizeof(g_updateStatus.latestVersion));
   strlcpy(g_updateStatus.notesUrl, "https://example.com/notes", sizeof(g_updateStatus.notesUrl));
   g_updateStatus.attempted = true;
-  g_updateStatus.lastCheckMs = s_millis;
+  g_updateStatus.lastCheckSec = s_millis / 1000;   // uptime seconds
   s_millis += 5 * 60000UL;   // checked 5 minutes ago
 
   handleController(srv);
@@ -2015,6 +2057,7 @@ int main(int, char**) {
   RUN_TEST(test_fermenter_payload_names_an_assigned_profile_and_counts_steps);
   RUN_TEST(test_controller_payload_carries_its_documented_keys);
   RUN_TEST(test_board_info_payload_carries_its_documented_keys);
+  RUN_TEST(test_uptime_is_reported_past_the_millis_wrap);
   RUN_TEST(test_profile_payload_lists_every_step_slot);
   RUN_TEST(test_profile_payload_reads_from_the_right_step_slot);
   RUN_TEST(test_fermenters_get_sends_worst_case_names_whole);
@@ -2120,6 +2163,7 @@ int main(int, char**) {
   RUN_TEST(test_celsius_mode_leaves_temp_adjust_untouched);
 
   RUN_TEST(test_controller_reports_the_update_status);
+  RUN_TEST(test_controller_last_check_age_survives_the_millis_wrap);
   RUN_TEST(test_controller_last_check_is_minus_one_before_any_attempt);
   RUN_TEST(test_controller_post_saves_the_update_check_switch);
   RUN_TEST(test_update_check_endpoint_runs_a_check_and_returns_the_result);

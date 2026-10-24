@@ -34,6 +34,7 @@
 #include "StackCheck.h"
 #include "StackProbe.h"
 #include "TextSafe.h"
+#include "Uptime.h"
 
 // Forward refs to global server (defined in .ino)
 extern ESP8266WebServer g_webServer;
@@ -635,7 +636,7 @@ void buildControllerJson(JsonDocument& doc) {
   buildUpdateStatusJson(doc);
   doc["ChipId"]        = String(ESP.getChipId(), HEX);
   doc["FreeHeap"]      = ESP.getFreeHeap();
-  doc["Uptime"]        = (uint32_t)(millis() / 60000UL);
+  doc["Uptime"]        = (uptimeSeconds() / 60);
   doc["WiFiSSID"]      = WiFi.SSID();
   doc["IP"]            = WiFi.localIP().toString();
   doc["RSSI"]          = WiFi.RSSI();
@@ -703,7 +704,7 @@ void buildUpdateStatusJson(JsonDocument& doc) {
   doc["UpdateCheckError"] = g_updateStatus.lastError;        // "" if the last check worked
   // Minutes since the last attempt, or -1 if there hasn't been one since boot
   doc["LastUpdateCheck"]  = g_updateStatus.attempted
-                              ? (int32_t)((millis() - g_updateStatus.lastCheckMs) / 60000UL)
+                              ? (int32_t)(uptimeSince(g_updateStatus.lastCheckSec) / 60)
                               : -1;
 }
 
@@ -764,7 +765,7 @@ void handleStatus(ESP8266WebServer& server) {
   }
   // 67 characters at most: two 10-digit numbers and a 15-character IP
   int n = snprintf(s_chunkBuf, sizeof(s_chunkBuf), "],\"uptime\":%u,\"freeHeap\":%u,\"ip\":\"%s\"}",
-                   (unsigned)(millis() / 60000UL), (unsigned)ESP.getFreeHeap(),
+                   (unsigned)(uptimeSeconds() / 60), (unsigned)ESP.getFreeHeap(),
                    WiFi.localIP().toString().c_str());
   server.sendContent(s_chunkBuf, n);
   server.sendContent("");  // end chunked transfer
@@ -799,7 +800,7 @@ void handleHealth(ESP8266WebServer& server) {
   JsonDocument doc;
   doc["freeHeap"]    = ESP.getFreeHeap();
   doc["freeStack"]   = ESP.getFreeContStack();  // lowest free loop stack since boot
-  doc["uptime"]      = (uint32_t)(millis() / 60000UL);
+  doc["uptime"]      = (uptimeSeconds() / 60);
   doc["rssi"]        = WiFi.RSSI();
   doc["ssid"]        = WiFi.SSID();
   doc["ip"]          = WiFi.localIP().toString();
@@ -949,7 +950,7 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["fresh"]        = iSpindelIsFresh(g_iSpindels[i]);   // readings in use
     s["minutesSince"] = g_iSpindels[i].lastSeen == 0
                           ? 0xFFFF
-                          : (uint32_t)(millis() - g_iSpindels[i].lastSeen) / 60000UL;
+                          : uptimeSince(g_iSpindels[i].lastSeen) / 60;
     size_t n = serializeJson(s, s_chunkBuf, sizeof(s_chunkBuf));
     server.sendContent(s_chunkBuf, n);
   }

@@ -41,6 +41,7 @@
 #include "Version.h"
 #include "Log.h"
 #include "UpdateCheck.h"
+#include "Uptime.h"
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <math.h>
@@ -1246,7 +1247,7 @@ static void publishDeviceReport() {
 
   publishInt(base, "rssi",      WiFi.RSSI());
   publishInt(base, "free_heap", ESP.getFreeHeap());
-  publishInt(base, "uptime",    (int)(millis() / 60000UL));
+  publishInt(base, "uptime",    (int)(uptimeSeconds() / 60));
 
   // Chip ID as lowercase hex
   char chipId[8];

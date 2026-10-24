@@ -42,6 +42,14 @@ static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+// A test sets s_uptimeSec to stand in for an uptime past the 49.7-day wrap,
+// which the 32-bit millis() can't reach. 0 = follow millis().
+static uint32_t s_uptimeSec = 0;
+uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
+uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
+
 // ---- no-op stubs ----
 bool saveFermenterConfig() { return true; }
 void logMsgImpl(uint8_t, PGM_P, ...) {}
@@ -105,6 +113,7 @@ void setUp(void) {
   for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenterDebugOverrides[i] = FermenterDebugOverride{};
   s_controlTemp   = TEMP_NONE;
   s_millis        = 0;
+  s_uptimeSec     = 0;
   s_plugCallCount = 0;
   s_forceOffCount = 0;
   for (int i = 0; i < MAX_FERMENTERS; i++) {
@@ -252,6 +261,59 @@ void test_stopping_while_heating_does_not_start_a_compressor_delay(void) {
 
   setFermenterPower(F, false);
   TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[F]);
+}
+
+// ---- the compressor delay and the uptime clock ----
+
+// The delay is counted from boot for a fridge that hasn't cooled since, which
+// protects a compressor that was running when the controller restarted. This
+// is intended, and moving to the uptime clock must keep it.
+void test_compressor_delay_holds_for_the_first_minutes_after_boot(void) {
+  g_fermenters[F].floorTemp       = 18.0f;
+  g_fermenters[F].ceilingTemp     = 22.0f;
+  g_fermenters[F].compressorDelay = 10;
+  s_controlTemp = 23.0f;
+
+  test_setMillis(300000);    // 5 min after boot
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+
+  test_setMillis(600000);    // 10 min after boot
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
+}
+
+// millis() wraps after 49.7 days (2^32 ms = 4,294,967 s). A fridge that hadn't
+// cooled since boot then looked as if it had just stopped, and waited out a
+// compressor delay it didn't need. 5 minutes past the wrap it must cool.
+void test_compressor_delay_does_not_hold_after_the_millis_wrap(void) {
+  g_fermenters[F].floorTemp       = 18.0f;
+  g_fermenters[F].ceilingTemp     = 22.0f;
+  g_fermenters[F].compressorDelay = 10;
+  s_controlTemp = 23.0f;
+
+  test_setMillis(300000);              // what millis() reads 5 min past the wrap
+  s_uptimeSec = 4294967UL + 300UL;     // ...and the uptime it really is
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
+}
+
+// A delay that started just before the wrap must still be kept in full after it
+void test_compressor_delay_is_kept_across_the_millis_wrap(void) {
+  startCooling();
+  s_uptimeSec = 4294967UL - 120UL;     // cooling stops 2 min before the wrap
+  s_controlTemp = 21.0f;               // at ceiling - hysteresis
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[F]);
+
+  s_controlTemp = 23.0f;
+  s_uptimeSec = 4294967UL + 300UL;     // 7 min after the stop
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+
+  s_uptimeSec = 4294967UL + 480UL;     // 10 min after the stop
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
 }
 
 void test_heating_to_idle_at_floor_plus_hysteresis(void) {
@@ -404,6 +466,25 @@ void test_alarm_fires_after_dwell_elapses(void) {
   TEST_ASSERT_FALSE(g_fermenters[F].alarm);
 
   test_setMillis(t + 60001);  // dwell elapsed
+  checkFermenterAlarm(F);
+  TEST_ASSERT_TRUE(g_fermenters[F].alarm);
+}
+
+// A mild deviation that started just before the 49.7-day millis() wrap (2^32 ms
+// = 4,294,967 s) must still raise its alarm a dwell later, and keep it. As a
+// millis() stamp the time out of band read as small again after the wrap.
+void test_alarm_dwell_is_kept_across_the_millis_wrap(void) {
+  g_fermenters[F].floorTemp      = 18.0f;
+  g_fermenters[F].ceilingTemp    = 22.0f;
+  g_fermenters[F].alarmTolerance = 3.0f;
+  g_globalConfig.alarmDwellSec   = 600;
+  s_controlTemp = 23.0f;                  // mild deviation
+
+  s_uptimeSec = 4294967UL - 300UL;        // starts 5 min before the wrap
+  checkFermenterAlarm(F);
+  TEST_ASSERT_FALSE(g_fermenters[F].alarm);
+
+  s_uptimeSec = 4294967UL + 300UL;        // 10 min later, past the wrap
   checkFermenterAlarm(F);
   TEST_ASSERT_TRUE(g_fermenters[F].alarm);
 }
@@ -779,7 +860,7 @@ void test_gravity_falls_back_to_estimate(void) {
 // An iSpindel that has just reported (iSpindelIsFresh() needs a report since boot)
 static void markIspindelReported(uint8_t slot) {
   test_setMillis(1000000);
-  g_iSpindels[slot].lastSeen = 1000000;
+  g_iSpindels[slot].lastSeen = 1000;   // uptime seconds - the clock reads 1000 s
   g_iSpindels[slot].interval = 900;
 }
 
@@ -809,7 +890,7 @@ void test_gravity_skips_a_stale_ispindel(void) {
   g_iSpindels[0].fermenter   = F;
   g_iSpindels[0].sg          = 1.040f;
   markIspindelReported(0);
-  test_setMillis(1000000 + 3600001);
+  test_setMillis(1000000 + 3601000);   // 60 min and 1 s later
   TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
 }
 
@@ -937,6 +1018,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_compressor_delay_holds_after_temp_control_off);
   RUN_TEST(test_compressor_delay_holds_after_switchOffAll);
   RUN_TEST(test_stopping_while_heating_does_not_start_a_compressor_delay);
+  RUN_TEST(test_compressor_delay_holds_for_the_first_minutes_after_boot);
+  RUN_TEST(test_compressor_delay_does_not_hold_after_the_millis_wrap);
+  RUN_TEST(test_compressor_delay_is_kept_across_the_millis_wrap);
   RUN_TEST(test_heating_to_idle_at_floor_plus_hysteresis);
   RUN_TEST(test_cooling_to_idle_at_ceiling_minus_hysteresis);
   RUN_TEST(test_no_reading_forces_plugs_off_and_idle);
@@ -950,6 +1034,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_alarm_does_not_fire_immediately_on_mild_deviation);
   RUN_TEST(test_alarm_fires_after_dwell_elapses);
   RUN_TEST(test_alarm_dwell_resets_on_return_to_band);
+  RUN_TEST(test_alarm_dwell_is_kept_across_the_millis_wrap);
 
   RUN_TEST(test_validate_ceiling_temp_in_range_accepted);
   RUN_TEST(test_validate_ceiling_temp_rejects_below_absolute_range);

@@ -278,7 +278,7 @@ void handleiSpindelPost(const String& body) {
     g_iSpindels[matched].corrGravity = corrGravity;
     g_iSpindels[matched].runTime     = runTime;
     strlcpy(g_iSpindels[matched].gravityUnit, gravityUnit, sizeof(g_iSpindels[matched].gravityUnit));
-    g_iSpindels[matched].lastSeen    = millis();
+    g_iSpindels[matched].lastSeen    = uptimeStamp();
     g_iSpindels[matched].interval    = interval;
 
     // Sync name/ID if changed
@@ -325,7 +325,7 @@ void handleiSpindelPost(const String& body) {
       g_iSpindels[i].corrGravity = corrGravity;
       g_iSpindels[i].runTime     = runTime;
       strlcpy(g_iSpindels[i].gravityUnit, gravityUnit, sizeof(g_iSpindels[i].gravityUnit));
-      g_iSpindels[i].lastSeen    = millis();
+      g_iSpindels[i].lastSeen    = uptimeStamp();
       g_iSpindels[i].interval    = interval;
       // Registered unassigned - it is linked to a fermenter in the admin page.
       // Before 0.6.4 it took the slot's defaults, which linked slot 0 straight
@@ -360,7 +360,7 @@ void iSpindelCheckFreshness() {
       logMsg("[ISPINDEL] Slot %d (%s): reporting again - its readings are used", i, g_iSpindels[i].name);
     } else {
       logMsg("[ISPINDEL] Slot %d (%s): no report for %u min - its readings are no longer used",
-        i, g_iSpindels[i].name, (unsigned)((millis() - g_iSpindels[i].lastSeen) / 60000UL));
+        i, g_iSpindels[i].name, (unsigned)(uptimeSince(g_iSpindels[i].lastSeen) / 60));
     }
   }
 }

@@ -41,7 +41,7 @@ struct UpdateStatus {
   char     latestVersion[16];  // e.g. "0.4.16" - empty until a check succeeds
   char     notesUrl[96];       // release notes link - may be empty
   bool     attempted;          // true once any check has been tried since boot
-  uint32_t lastCheckMs;        // millis() of the last attempt (valid when attempted)
+  uint32_t lastCheckSec;       // uptimeSeconds() of the last attempt (valid when attempted)
   char     lastError[40];      // why the last attempt failed - empty if it worked
 };
 

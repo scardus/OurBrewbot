@@ -23,16 +23,23 @@
 #include "Profile.h"
 #include "Log.h"
 #include "iSpindel.h"
+#include "Uptime.h"
 
-// Track compressor delay per fermenter (millis of last cooling stop)
-static unsigned long s_lastCoolingStop[MAX_FERMENTERS] = {0};
+// When each fermenter's cooling last stopped, in uptimeSeconds() - the
+// compressor delay is counted from here. 0 is boot, so the delay also holds
+// for the first few minutes after a reboot, which protects a compressor that
+// was running when the controller restarted. Seconds since boot rather than
+// millis(), which wraps after 49.7 days and then made a fridge that hadn't
+// cooled for that long wait out a delay it didn't need.
+static uint32_t s_lastCoolingStop[MAX_FERMENTERS] = {0};
 
 // Per-fermenter control state for the hysteresis state machine
 static uint8_t s_state[MAX_FERMENTERS] = {STATUS_IDLE};  // STATUS_IDLE / STATUS_HEATING / STATUS_COOLING
 
-// millis() when this fermenter first went out-of-band (and stayed there).
+// uptimeStamp() when this fermenter first went out-of-band (and stayed there).
 // 0 means "currently in band". Resets the instant temp returns to band.
-// Runtime-only — fresh dwell on every boot.
+// Runtime-only — fresh dwell on every boot. Seconds since boot rather than
+// millis(), so a fermenter out of band for 49.7 days doesn't lose its alarm.
 static uint32_t s_outOfRangeSince[MAX_FERMENTERS] = {0};
 
 // Put a fermenter's control state back to IDLE. Every way out of cooling must
@@ -41,7 +48,7 @@ static uint32_t s_outOfRangeSince[MAX_FERMENTERS] = {0};
 // leave the old stop time in place, so the compressor could restart at once.
 static void goIdle(uint8_t i) {
   if (s_state[i] == STATUS_COOLING) {
-    s_lastCoolingStop[i] = millis();
+    s_lastCoolingStop[i] = uptimeSeconds();
   }
   s_state[i] = STATUS_IDLE;
 }
@@ -115,13 +122,13 @@ void processSingleFermenter(uint8_t i) {
         s_state[i] = STATUS_HEATING;
       } else if (temp > ceiling) {
         // Enforce compressor delay — protects refrigeration compressor
-        unsigned long delayMs = (unsigned long)g_fermenters[i].compressorDelay * 60000UL;
-        unsigned long now = millis();
-        if ((now - s_lastCoolingStop[i]) >= delayMs) {
+        uint32_t delaySec  = (uint32_t)g_fermenters[i].compressorDelay * 60UL;
+        uint32_t sinceStop = uptimeSeconds() - s_lastCoolingStop[i];
+        if (sinceStop >= delaySec) {
           s_state[i] = STATUS_COOLING;
         } else {
-          logMsg("[FERM] F%d (%s): in compressor delay (%.0fs remaining)",
-            i, g_fermenters[i].fermenterName, (delayMs - (now - s_lastCoolingStop[i])) / 1000.0f);
+          logMsg("[FERM] F%d (%s): in compressor delay (%us remaining)",
+            i, g_fermenters[i].fermenterName, (unsigned)(delaySec - sinceStop));
         }
       }
       break;
@@ -243,9 +250,8 @@ void checkFermenterAlarm(uint8_t i) {
       alarmActive = true;
     } else {
       // Mild — start (or continue) the dwell timer
-      if (s_outOfRangeSince[i] == 0) s_outOfRangeSince[i] = millis();
-      uint32_t dwellMs = (uint32_t)g_globalConfig.alarmDwellSec * 1000UL;
-      if ((millis() - s_outOfRangeSince[i]) >= dwellMs) {
+      if (s_outOfRangeSince[i] == 0) s_outOfRangeSince[i] = uptimeStamp();
+      if (uptimeSince(s_outOfRangeSince[i]) >= g_globalConfig.alarmDwellSec) {
         if (overTemp) {
           logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): over temperature threshold (dwell %us elapsed)! %.1f > %.1f",
             i, g_fermenters[i].fermenterName, g_globalConfig.alarmDwellSec, temp, ceiling);
