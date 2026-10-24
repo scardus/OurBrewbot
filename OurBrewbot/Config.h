@@ -474,6 +474,19 @@ extern SyslogConfig      g_syslogConfig;
 void loadAllConfig();
 void saveAllConfig();
 
+// Config import (POST /fs/save) - see Config.cpp
+//   configImportBeforeWrite(): call before writing each imported file. The
+//     first call of an import saves the current settings to every file and
+//     its backup first, so the backups hold the settings from before it.
+//   configImportRestore(): put the previous settings back over a half-done
+//     import by writing out the settings in memory, then end the import.
+//   configPeriodicSave(): the 10-minute save. Saves as usual, holds off while
+//     an import is running, and puts the previous settings back if an import
+//     has been abandoned.
+void configImportBeforeWrite();
+void configImportRestore();
+void configPeriodicSave();
+
 // Individual file operations
 bool loadGlobalConfig();
 bool saveGlobalConfig();

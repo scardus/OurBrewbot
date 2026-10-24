@@ -185,6 +185,8 @@ void setUp(void) {
   clientTestSetConnected(true);
   s_millis      = 1000000;
   s_uptimeSec   = 0;
+  s_importActive    = false;   // Config.cpp's config-import state
+  s_importLastWrite = 0;
   s_rfTransmits = 0;
   s_forceOffs   = 0;
   s_bleReinits  = 0;
@@ -1280,6 +1282,44 @@ static void test_fs_save_writes_a_whitelisted_file(void) {
   TEST_ASSERT_EQUAL_STRING("{\"enabled\":true,\"port\":514}", fsTestRead("/jsonSyslog.txt"));
 }
 
+// "Back up before importing": the settings in use reach the backup before the
+// imported file replaces the main one, and the import never writes the backup
+static void test_fs_save_backs_up_before_writing_the_imported_file(void) {
+  g_syslogConfig.port = 1234;
+  srv.setArg("name", "/jsonSyslog.txt");
+  srv.setBody("{\"port\":999}");
+  handleFsFileSave(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("{\"port\":999}", fsTestRead(FILE_SYSLOG));
+  TEST_ASSERT_NOT_NULL(strstr(fsTestRead(FILE_SYSLOG_BKP), "\"port\":1234"));
+}
+
+// A refused request changes nothing and starts no import
+static void test_a_refused_fs_save_starts_no_import(void) {
+  srv.setArg("name", "/jsonSyslog.txt");
+  srv.setBody("{\"broken\":");
+  handleFsFileSave(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_SYSLOG_BKP));
+  TEST_ASSERT_FALSE(s_importActive);
+}
+
+// When a file of an import is refused, the WebUI calls /fs/import/abort and
+// the files already imported get the previous settings back
+static void test_import_abort_puts_the_previous_settings_back(void) {
+  g_syslogConfig.port = 1234;
+  srv.setArg("name", "/jsonSyslog.txt");
+  srv.setBody("{\"port\":999}");
+  handleFsFileSave(srv);
+
+  httpRespReset();
+  handleFsImportAbort(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Previous settings put back"));
+  TEST_ASSERT_NOT_NULL(strstr(fsTestRead(FILE_SYSLOG), "\"port\":1234"));
+  TEST_ASSERT_FALSE(s_importActive);
+}
+
 static void test_fs_save_reports_a_write_failure(void) {
   srv.setArg("name", "/jsonSyslog.txt");
   srv.setBody("{}");
@@ -2103,6 +2143,9 @@ int main(int, char**) {
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);
   RUN_TEST(test_fs_save_writes_a_whitelisted_file);
   RUN_TEST(test_fs_save_reports_a_write_failure);
+  RUN_TEST(test_fs_save_backs_up_before_writing_the_imported_file);
+  RUN_TEST(test_a_refused_fs_save_starts_no_import);
+  RUN_TEST(test_import_abort_puts_the_previous_settings_back);
 
   // debug overrides
   RUN_TEST(test_debug_post_sets_the_global_mode);

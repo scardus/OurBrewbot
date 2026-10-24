@@ -149,6 +149,7 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/fs/files",         HTTP_GET,  handleFsFiles,            true  },
   { "/fs/file",          HTTP_GET,  handleFsFile,             true  },
   { "/fs/save",          HTTP_POST, handleFsFileSave,         true  },
+  { "/fs/import/abort",  HTTP_POST, handleFsImportAbort,      true  },
 };
 
 static void dispatchApiRequest(ESP8266WebServer& server) {
@@ -312,6 +313,7 @@ static const char ROOT_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <li><span class='method'>GET</span><a href='/fs/files'>/fs/files</a><span class='desc'> &mdash; list LittleFS files</span></li>
     <li><span class='method'>GET</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/file?name=...</span><span class='desc'> &mdash; read file content</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/save</span><span class='desc'> &mdash; save config file to LittleFS</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/import/abort</span><span class='desc'> &mdash; cancel a config import, putting the previous settings back</span></li>
     <li><span class='method'>GET</span><a href='/health'>/health</a><span class='desc'> &mdash; system health</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/iSpindel</span><span class='desc'> &mdash; iSpindel gravity data</span></li>
     <li><span class='method'>GET</span><a href='/ispindels'>/ispindels</a><span class='desc'> &mdash; iSpindel config &amp; live data</span></li>
@@ -1805,11 +1807,27 @@ void handleFsFileSave(ESP8266WebServer& server) {
     }
   }
 
+  // Saves the current settings to every file and its backup before the first
+  // imported file replaces anything (see configImportBeforeWrite())
+  configImportBeforeWrite();
+
   File f = LittleFS.open(name, "w");
   if (!f) { server.send(500, "application/json", "{\"status\":\"error\",\"msg\":\"Write failed\"}"); return; }
   f.print(body);
   f.close();
   sendJsonResponse(server, "{\"status\":\"ok\"}");
+}
+
+// ============================================================
+// CONFIG IMPORT ABORT — POST /fs/import/abort
+// The WebUI calls this when a file of an import is refused, so the device
+// can't restart on a mix of old and new files: the settings still in use are
+// written back over the files already imported.
+// ============================================================
+
+void handleFsImportAbort(ESP8266WebServer& server) {
+  configImportRestore();
+  sendOk(server, F("Previous settings put back"));
 }
 
 // ============================================================
