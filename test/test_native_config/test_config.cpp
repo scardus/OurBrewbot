@@ -85,7 +85,6 @@ void setUp(void) {
   for (int i = 0; i < MAX_BREW_SERVICES; i++) g_brewServices[i] = BrewServiceConfig{};
   memset(&g_mqttConfig, 0, sizeof(g_mqttConfig));
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
-  memset(&g_wifiConfig, 0, sizeof(g_wifiConfig));
   s_importActive    = false;
   s_importLastWrite = 0;
   s_uptimeSec       = 1000;
@@ -503,6 +502,56 @@ void test_missing_fermenter_file_falls_back_to_defaults(void) {
   TEST_ASSERT_EQUAL_FLOAT(3.0f,   g_fermenters[0].alarmTolerance);
 }
 
+// ---- checkTempBand() (Config.h): the one set of rules the WebUI save, the
+// MQTT commands and the boot check above all use. The WebAPI and MQTT suites
+// check the same messages through their own entry points.
+
+void test_temp_band_accepts_a_normal_setting(void) {
+  const char* err = "not cleared";
+  TEST_ASSERT_TRUE(checkTempBand(22.0f, 18.0f, 0.5f, &err));
+  TEST_ASSERT_NULL(err);
+}
+
+void test_temp_band_accepts_the_exact_limits(void) {
+  TEST_ASSERT_TRUE(checkTempBand(TEMP_SETTING_MAX_C, TEMP_SETTING_MIN_C, HYSTERESIS_MAX_C, nullptr));
+  TEST_ASSERT_TRUE(checkTempBand(20.0f, 19.0f, 0.5f, nullptr));   // gap exactly 2x hysteresis
+  TEST_ASSERT_TRUE(checkTempBand(20.0f, 19.0f, 0.0f, nullptr));   // no hysteresis
+}
+
+void test_temp_band_rejects_a_ceiling_out_of_range(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(checkTempBand(50.1f, 18.0f, 0.5f, &err));
+  TEST_ASSERT_EQUAL_STRING("ceiling temperature out of range (-20 to 50)", err);
+  TEST_ASSERT_FALSE(checkTempBand(-20.1f, -25.0f, 0.5f, &err));
+  TEST_ASSERT_EQUAL_STRING("ceiling temperature out of range (-20 to 50)", err);
+}
+
+void test_temp_band_rejects_a_floor_out_of_range(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(checkTempBand(22.0f, -20.1f, 0.5f, &err));
+  TEST_ASSERT_EQUAL_STRING("floor temperature out of range (-20 to 50)", err);
+}
+
+void test_temp_band_rejects_a_hysteresis_out_of_range(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(checkTempBand(40.0f, 10.0f, 10.1f, &err));
+  TEST_ASSERT_EQUAL_STRING("hysteresis out of range (0 to 10)", err);
+  TEST_ASSERT_FALSE(checkTempBand(22.0f, 18.0f, -0.1f, &err));
+  TEST_ASSERT_EQUAL_STRING("hysteresis out of range (0 to 10)", err);
+}
+
+void test_temp_band_rejects_a_floor_not_below_the_ceiling(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(checkTempBand(20.0f, 20.0f, 0.0f, &err));
+  TEST_ASSERT_EQUAL_STRING("floor must be below ceiling", err);
+}
+
+void test_temp_band_rejects_a_safe_zone_under_twice_the_hysteresis(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(checkTempBand(20.0f, 19.0f, 0.6f, &err));
+  TEST_ASSERT_EQUAL_STRING("safe zone must be at least 2x hysteresis", err);
+}
+
 // ============================================================
 // Tilt config - slot-to-colour mapping (custom load/save)
 // ============================================================
@@ -904,14 +953,12 @@ void test_reset_wifi_config_clears_the_provisioning_artifacts(void) {
   fsTestWrite(FILE_CONFIG_BKP, "{\"ssid\":\"home\"}");
   fsTestWrite(FILE_DRD,        "x");
   fsTestWrite(FILE_MQTT,       "{\"port\":8883}");
-  g_wifiConfig.magic = 0x627B4DAB;
 
   resetWiFiConfig();
 
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG));
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG_BKP));
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_DRD));
-  TEST_ASSERT_EQUAL_UINT32(0, g_wifiConfig.magic);
   // Only the WiFi artifacts - the rest of the config is untouched.
   TEST_ASSERT_TRUE(LittleFS.exists(FILE_MQTT));
 }
@@ -1145,6 +1192,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_trio_correction_is_written_back_to_disk);
   RUN_TEST(test_a_valid_config_is_not_rewritten_on_load);
   RUN_TEST(test_missing_fermenter_file_falls_back_to_defaults);
+  RUN_TEST(test_temp_band_accepts_a_normal_setting);
+  RUN_TEST(test_temp_band_accepts_the_exact_limits);
+  RUN_TEST(test_temp_band_rejects_a_ceiling_out_of_range);
+  RUN_TEST(test_temp_band_rejects_a_floor_out_of_range);
+  RUN_TEST(test_temp_band_rejects_a_hysteresis_out_of_range);
+  RUN_TEST(test_temp_band_rejects_a_floor_not_below_the_ceiling);
+  RUN_TEST(test_temp_band_rejects_a_safe_zone_under_twice_the_hysteresis);
 
   // Tilt slot/colour mapping
   RUN_TEST(test_tilt_slots_load_into_colour_indexed_entries);

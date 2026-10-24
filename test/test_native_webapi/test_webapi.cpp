@@ -482,7 +482,7 @@ static void test_malformed_json_body_is_rejected(void) {
   postBody("{\"Fermenter\":0,");
   handleFermenter(srv);
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
-  TEST_ASSERT_TRUE(bodyContains("Configuration invalid"));
+  TEST_ASSERT_TRUE(bodyContains("Invalid JSON"));   // the same reply as every other handler
 }
 
 // ---- GET ----
@@ -1176,7 +1176,8 @@ static void test_fs_save_rejects_a_path_outside_the_whitelist(void) {
   srv.setBody("{}");
   handleFsFileSave(srv);
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
-  TEST_ASSERT_TRUE(bodyContains("Not allowed"));
+  // The exact body the WebUI import reads (d.status, d.msg)
+  TEST_ASSERT_TRUE(bodyContains("{\"status\":\"error\",\"msg\":\"Not allowed\"}"));
   TEST_ASSERT_FALSE(LittleFS.exists("/etc/passwd"));
 }
 
@@ -2076,6 +2077,15 @@ static void test_controller_post_saves_the_update_check_switch(void) {
   TEST_ASSERT_FALSE(g_globalConfig.updateCheck);
 }
 
+static void test_controller_post_rejects_malformed_json_and_changes_nothing(void) {
+  g_globalConfig.updateCheck = true;
+  postBody("{\"UpdateCheck\":false,");
+  handleController(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Invalid JSON"));
+  TEST_ASSERT_TRUE(g_globalConfig.updateCheck);
+}
+
 static void test_controller_saves_and_reports_the_crash_reports_switch(void) {
   g_globalConfig.crashReports = true;
   postBody("{\"CrashReports\":false}");
@@ -2274,6 +2284,7 @@ int main(int, char**) {
   RUN_TEST(test_controller_last_check_age_survives_the_millis_wrap);
   RUN_TEST(test_controller_last_check_is_minus_one_before_any_attempt);
   RUN_TEST(test_controller_post_saves_the_update_check_switch);
+  RUN_TEST(test_controller_post_rejects_malformed_json_and_changes_nothing);
   RUN_TEST(test_update_check_endpoint_runs_a_check_and_returns_the_result);
   RUN_TEST(test_controller_saves_and_reports_the_crash_reports_switch);
 

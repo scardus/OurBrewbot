@@ -46,7 +46,6 @@ ProfileConfig   g_profiles[MAX_PROFILES];
 ProfileStep     g_profileSteps[MAX_PROFILE_STEPS];
 TiltConfig      g_tilts[MAX_TILTS];
 iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
-WiFiConfig      g_wifiConfig;
 BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 MqttConfig        g_mqttConfig;
 SyslogConfig      g_syslogConfig;
@@ -574,12 +573,7 @@ bool loadFermenterConfig() {
     float c = g_fermenters[i].ceilingTemp;
     float f = g_fermenters[i].floorTemp;
     float h = g_fermenters[i].hysteresis;
-    bool invalid = (c < -20.0f || c > 50.0f) ||
-                   (f < -20.0f || f > 50.0f) ||
-                   (h <   0.0f || h > 10.0f) ||
-                   (f >= c) ||
-                   ((c - f) <  2.0f * h);
-    if (invalid) {
+    if (!checkTempBand(c, f, h, nullptr)) {
       logMsg("[CFG] Fermenter %d: invalid temp/hyst trio (c=%.2f f=%.2f h=%.2f); reset to defaults", i, c, f, h);
       g_fermenters[i].ceilingTemp = 22.0f;
       g_fermenters[i].floorTemp   = 18.0f;
@@ -1196,7 +1190,6 @@ static void clearWiFiProvisioningArtifacts() {
 
 void resetWiFiConfig() {
   logMsgL(SYSLOG_NOTICE, "[CFG] Resetting WiFi configuration");
-  memset(&g_wifiConfig, 0, sizeof(g_wifiConfig));
   clearWiFiProvisioningArtifacts();
   logMsg("[CFG] WiFi reset complete - restart required");
 }

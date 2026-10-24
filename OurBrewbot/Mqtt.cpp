@@ -58,7 +58,7 @@ static const char* probeFunctionName(uint8_t fn) {
   }
 }
 
-extern String g_rebootReason;  // captured at boot in OurBrewbot.ino
+extern String g_rebootReason;  // captured at boot in OurBrewbot.cpp
 
 static WiFiClient    g_mqttWifi;
 static PubSubClient  g_mqtt(g_mqttWifi);
@@ -424,10 +424,10 @@ static const HaEntityDesc kFermenterEntities[] PROGMEM = {
   { HA_SENSOR, HAF_TEMP_UNIT, "ambient_temperature",     "Ambient Temperature",     "temperature", nullptr, nullptr, nullptr, "measurement" },
   // Setpoint numbers — always number entities; device ignores commands when allowControl is off,
   // and the 60s state publish corrects any HA UI changes within one interval
-  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "ceiling_temperature", "Ceiling Temperature", "temperature", nullptr, nullptr, nullptr, nullptr, -20.0f, 50.0f, 0.1f },
-  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "floor_temperature",   "Floor Temperature",   "temperature", nullptr, nullptr, nullptr, nullptr, -20.0f, 50.0f, 0.1f },
+  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "ceiling_temperature", "Ceiling Temperature", "temperature", nullptr, nullptr, nullptr, nullptr, TEMP_SETTING_MIN_C, TEMP_SETTING_MAX_C, 0.1f },
+  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MINMAX_TEMP, "floor_temperature",   "Floor Temperature",   "temperature", nullptr, nullptr, nullptr, nullptr, TEMP_SETTING_MIN_C, TEMP_SETTING_MAX_C, 0.1f },
   { HA_SENSOR, 0,             "temperature_unit",        "Temperature Unit",        nullptr, nullptr, "mdi:thermometer", nullptr, nullptr },
-  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MAX_DELTA,   "hysteresis",          "Hysteresis",          nullptr, nullptr, nullptr, nullptr, nullptr, 0.0f, 10.0f, 0.1f },
+  { HA_NUMBER, HAF_TEMP_UNIT | HAF_MAX_DELTA,   "hysteresis",          "Hysteresis",          nullptr, nullptr, nullptr, nullptr, nullptr, 0.0f, HYSTERESIS_MAX_C, 0.1f },
   { HA_NUMBER, 0,             "compressor_delay",        "Compressor Delay",        nullptr, "min", "mdi:timer-outline", nullptr, nullptr, 0.0f, 1440.0f, 1.0f },
   // Gravity — read-only sensors plus writable OG/TG numbers
   { HA_SENSOR, 0, "gravity",        "Gravity",        nullptr, "SG",    "mdi:test-tube",           nullptr, "measurement" },
@@ -941,6 +941,16 @@ static void onMqttConnected() {
   }
 }
 
+// Point the client at the configured broker and set it up. Used by boot
+// (initMqtt), every reconnect attempt and the WebUI's MQTT test, so all three
+// connect the same way.
+static void setupMqttClient() {
+  g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
+  g_mqtt.setCallback(mqttMessageCallback);
+  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);  // see Mqtt.h for how it is sized
+  g_mqtt.setSocketTimeout(5);  // the default 15 s connect stall starves the loop when the broker is unreachable
+}
+
 static bool mqttConnect() {
   if (!g_mqttConfig.enabled) return false;
   if (strlen(g_mqttConfig.host) == 0) return false;
@@ -953,18 +963,15 @@ static bool mqttConnect() {
   }
   g_mqttLastAttempt = now;
 
-  g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
+  // Done before every attempt: initMqtt() skips it when MQTT was disabled at
+  // boot, and the host or port may have been changed since
+  setupMqttClient();
 
   char clientId[24];
   snprintf(clientId, sizeof(clientId), "ourbrewbot-%06X", ESP.getChipId());
 
   // Availability topic: broker publishes "offline" as LWT on unexpected disconnect
   snprintf(s_availTopic, sizeof(s_availTopic), "%s/availability", g_mqttConfig.baseTopic);
-
-  // Always set buffer and callback here (in case initMqtt() was skipped when MQTT was disabled at boot)
-  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);
-  g_mqtt.setSocketTimeout(5);  // default 15 s connect stall starves the loop when broker is unreachable
-  g_mqtt.setCallback(mqttMessageCallback);
 
   bool ok;
   if (strlen(g_mqttConfig.username) > 0) {
@@ -1146,10 +1153,7 @@ void mqttPublishLog(uint8_t level, const char* timestamp, const char* msg) {
 
 void initMqtt() {
   if (!g_mqttConfig.enabled) return;
-  g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
-  g_mqtt.setCallback(mqttMessageCallback);
-  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);  // see Mqtt.h for how it is sized
-  g_mqtt.setSocketTimeout(5);  // bound connect stalls (default 15 s)
+  setupMqttClient();
   logMsg("[MQTT] Configured: %s:%d base=%s ha_discovery=%s",
     g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.baseTopic,
     g_mqttConfig.haDiscovery ? "on" : "off");
@@ -1325,8 +1329,7 @@ void reportMqtt() {
     publishBool(base, "alarm", g_fermenters[i].alarm);
     uint8_t st = g_fermenters[i].status;
     const char* state = (st == STATUS_HEATING) ? "heating" :
-                        (st == STATUS_COOLING) ? "cooling" :
-                        (st == STATUS_ALARM)   ? "alarm"   : "idle";
+                        (st == STATUS_COOLING) ? "cooling" : "idle";
     publishValue(base, "status", state);
 
     // Info
@@ -1368,10 +1371,7 @@ bool testMqtt() {
   // connected, connect() would be a no-op anyway; just publish on the
   // existing connection.
   if (!g_mqtt.connected()) {
-    g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
-    g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);
-    g_mqtt.setSocketTimeout(5);  // bound the blocking connect (default 15 s)
-    g_mqtt.setCallback(mqttMessageCallback);
+    setupMqttClient();
 
     char clientId[24];
     snprintf(clientId, sizeof(clientId), "ourbrewbot-%06X", ESP.getChipId());

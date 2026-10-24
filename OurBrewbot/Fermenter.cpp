@@ -53,6 +53,15 @@ static void goIdle(uint8_t i) {
   s_state[i] = STATUS_IDLE;
 }
 
+// Stop heating and cooling: all of the fermenter's plugs off, and both its
+// reported status and its control state back to idle. Used when a fermenter
+// is powered off or its temperature control is paused.
+static void stopControlling(uint8_t i) {
+  setFermenterPlugs(i, false, false);
+  g_fermenters[i].status = STATUS_IDLE;
+  goIdle(i);
+}
+
 // ============================================================
 // MAIN PROCESSOR
 // ============================================================
@@ -61,17 +70,13 @@ void processFermenters() {
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     if (!g_fermenters[i].power) {
       // Fermenter off — ensure all its plugs are off
-      setFermenterPlugs(i, false, false);
-      g_fermenters[i].status = STATUS_IDLE;
-      goIdle(i);
+      stopControlling(i);
       checkFermenterAlarm(i);   // clears any alarm left from before
       continue;
     }
     if (!g_fermenters[i].tempControl) {
       // Temp control paused — plugs off but fermenter still watches for alarms
-      setFermenterPlugs(i, false, false);
-      g_fermenters[i].status = STATUS_IDLE;
-      goIdle(i);
+      stopControlling(i);
       checkFermenterAlarm(i);
       continue;
     }
@@ -161,7 +166,7 @@ void processSingleFermenter(uint8_t i) {
     if (sg > SG_VALID_MIN) {
       // SG reached target — could stop heating (e.g. diacetyl rest trigger)
       if (sg <= (g_fermenters[i].tg + 0.002f)) {
-        // Near or past target gravity — notify via serial
+        // Near or past target gravity — log it
         logMsg("[FERM] F%d (%s): SG %.4f near target %.4f",
           i, g_fermenters[i].fermenterName, sg, g_fermenters[i].tg);
       }
@@ -371,9 +376,7 @@ void setFermenterPower(uint8_t index, bool on) {
   if (index >= MAX_FERMENTERS) return;
   g_fermenters[index].power = on;
   if (!on) {
-    setFermenterPlugs(index, false, false);
-    g_fermenters[index].status = STATUS_IDLE;
-    goIdle(index);
+    stopControlling(index);
     logMsg("[FERM] F%d (%s): powered off", index, g_fermenters[index].fermenterName);
   }
 }
@@ -386,7 +389,6 @@ const char* getFermenterStatusStr(uint8_t status) {
   switch (status) {
     case STATUS_HEATING: return "Heating";
     case STATUS_COOLING: return "Cooling";
-    case STATUS_ALARM:   return "Alarm";
     default:             return "Idle";
   }
 }
@@ -398,31 +400,19 @@ const char* getFermenterStatusStr(uint8_t status) {
 bool validateFermenterField(uint8_t idx, const char* key, float value, const char** errMsg) {
   if (errMsg) *errMsg = nullptr;
 
+  // The ceiling, floor and hysteresis are checked as a set by checkTempBand()
+  // (Config.h): the new value together with the two stored ones.
   if (strcmp(key, "ceiling_temperature") == 0 || strcmp(key, "floor_temperature") == 0) {
-    if (value < -20.0f || value > 50.0f) {
+    // Checked here first so MQTT keeps its one message for either setting
+    if (value < TEMP_SETTING_MIN_C || value > TEMP_SETTING_MAX_C) {
       if (errMsg) *errMsg = "temperature out of range (-20 to 50)";
       return false;
     }
     float ceiling = (strcmp(key, "ceiling_temperature") == 0) ? value : g_fermenters[idx].ceilingTemp;
     float flr     = (strcmp(key, "floor_temperature")   == 0) ? value : g_fermenters[idx].floorTemp;
-    float hyst    = g_fermenters[idx].hysteresis;
-    if (flr >= ceiling) {
-      if (errMsg) *errMsg = "floor must be below ceiling";
-      return false;
-    }
-    if ((ceiling - flr) < 2.0f * hyst) {
-      if (errMsg) *errMsg = "safe zone must be at least 2x hysteresis";
-      return false;
-    }
+    if (!checkTempBand(ceiling, flr, g_fermenters[idx].hysteresis, errMsg)) return false;
   } else if (strcmp(key, "hysteresis") == 0) {
-    if (value < 0.0f || value > 10.0f) {
-      if (errMsg) *errMsg = "hysteresis out of range (0 to 10)";
-      return false;
-    }
-    if ((g_fermenters[idx].ceilingTemp - g_fermenters[idx].floorTemp) < 2.0f * value) {
-      if (errMsg) *errMsg = "safe zone must be at least 2x hysteresis";
-      return false;
-    }
+    if (!checkTempBand(g_fermenters[idx].ceilingTemp, g_fermenters[idx].floorTemp, value, errMsg)) return false;
   } else if (strcmp(key, "compressor_delay") == 0) {
     if (value < 0.0f || value > 1440.0f) {
       if (errMsg) *errMsg = "compressor delay out of range (0 to 1440 min)";

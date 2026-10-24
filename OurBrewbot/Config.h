@@ -146,31 +146,6 @@ enum TiltColour {
 };
 
 // ============================================================
-// REBOOT REASONS
-// ============================================================
-enum RebootReason {
-  REBOOT_POWER_ON        = 0,  // "Power on"
-  REBOOT_HW_WATCHDOG     = 1,  // "Hardware Watchdog"
-  REBOOT_EXCEPTION       = 2,  // "Exception"
-  REBOOT_SW_WATCHDOG     = 3,  // "Software Watchdog"
-  REBOOT_SW_RESTART      = 4,  // "Software/System restart"
-  REBOOT_DOUBLE_RESET    = 5,  // "Double Reset"
-  REBOOT_OTA             = 6,  // "OTA_UPGRADE"
-  REBOOT_RESET_CONFIG    = 7,  // "Resetting configuration!"
-};
-
-// ============================================================
-// CONTROLLER HARDWARE VERSIONS
-// ============================================================
-enum ControllerVersion {
-  CTRL_VERSION_1   = 1,
-  CTRL_VERSION_2   = 2,
-  CTRL_VERSION_3   = 3,
-  CTRL_VERSION_4   = 4,
-  CTRL_NEXT_GEN    = 5,  // "Controller = Next Gen"
-};
-
-// ============================================================
 // LittleFS FILENAMES
 // All files have a backup copy
 // ============================================================
@@ -200,10 +175,7 @@ enum ControllerVersion {
 #define FILE_SYSLOG_BKP     "/jsonSyslogbkup.txt"
 #define FILE_REBOOT         "/jsonReBoot.txt"
 #define FILE_REBOOT_BKP     "/jsonReBootbkup.txt"
-#define FILE_CHART_SERIES   "/jsonchartSeries.txt"
-#define FILE_CHART_NAMES    "/jsonchartNames.txt"
 #define FILE_DRD            "/DRD.txt"
-#define FILE_NG_VERSION     "/NG_version.txt"
 
 // ============================================================
 // STRUCT: GlobalConfig
@@ -276,6 +248,39 @@ struct FermenterConfig {
   bool    mbbPsiCollect;        // MyBrewBuddy PSI collect
   uint32_t startMillis;         // profile start time in millis
 };
+
+// ============================================================
+// TEMPERATURE BAND LIMITS
+// The one set of rules for a fermenter's ceiling, floor and hysteresis
+// (all Celsius). The WebUI save, the MQTT commands and the boot-time config
+// check all use checkTempBand(), so they can never disagree.
+// ============================================================
+#define TEMP_SETTING_MIN_C   -20.0f   // lowest ceiling or floor allowed
+#define TEMP_SETTING_MAX_C    50.0f   // highest ceiling or floor allowed
+#define HYSTERESIS_MAX_C      10.0f
+
+// Returns true if the three values can be used together. Otherwise returns
+// false and, if errMsg is given, points it at the reason. Defined here in the
+// header (inline) because its callers are in Config.cpp, Fermenter.cpp and
+// WebAPI.cpp, and the native test suites build those files in different
+// combinations - every one of them includes Config.h.
+inline bool checkTempBand(float ceiling, float floor, float hyst, const char** errMsg) {
+  const char* err = nullptr;
+  if (ceiling < TEMP_SETTING_MIN_C || ceiling > TEMP_SETTING_MAX_C) {
+    err = "ceiling temperature out of range (-20 to 50)";
+  } else if (floor < TEMP_SETTING_MIN_C || floor > TEMP_SETTING_MAX_C) {
+    err = "floor temperature out of range (-20 to 50)";
+  } else if (hyst < 0.0f || hyst > HYSTERESIS_MAX_C) {
+    err = "hysteresis out of range (0 to 10)";
+  } else if (floor >= ceiling) {
+    err = "floor must be below ceiling";
+  } else if ((ceiling - floor) < 2.0f * hyst) {
+    // heating and cooling bands would overlap
+    err = "safe zone must be at least 2x hysteresis";
+  }
+  if (errMsg) *errMsg = err;
+  return err == nullptr;
+}
 
 // ============================================================
 // STRUCT: FermenterDebugOverride
@@ -396,24 +401,6 @@ struct iSpindelConfig {
 };
 
 // ============================================================
-// STRUCT: WiFiConfig
-// WiFi and cloud configuration — stored in non-volatile flash region
-// ============================================================
-struct WiFiConfig {
-  uint32_t magic;               // config validity marker (0x627B4DAB)
-  char     version[8];          // "1.0.1"
-  bool     flagConfig;          // config has been set
-  bool     flagApFail;          // AP mode failed flag
-  bool     flagSelfTest;        // self-test mode
-  char     wifiSSID[64];        // WiFi network name
-  char     wifiPass[64];        // WiFi password
-  char     cloudToken[48];      // legacy cloud auth token
-  char     cloudHost[64];       // legacy cloud host
-  uint16_t cloudPort;           // legacy cloud port
-  uint32_t checksum;            // config checksum
-};
-
-// ============================================================
 // STRUCT: BrewServiceConfig
 // 2 fixed service types indexed by (BREW_SERVICE_xxx - 1):
 //   [0] = Brewer's Friend, [1] = Brewfather
@@ -461,7 +448,6 @@ extern ProfileConfig   g_profiles[MAX_PROFILES];
 extern ProfileStep     g_profileSteps[MAX_PROFILE_STEPS];
 extern TiltConfig      g_tilts[MAX_TILTS];
 extern iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
-extern WiFiConfig      g_wifiConfig;
 extern BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 extern MqttConfig        g_mqttConfig;
 extern SyslogConfig      g_syslogConfig;

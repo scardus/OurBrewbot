@@ -36,7 +36,7 @@
 #include "TextSafe.h"
 #include "Uptime.h"
 
-// Forward refs to global server (defined in .ino)
+// Forward refs to global server (defined in OurBrewbot.cpp)
 extern ESP8266WebServer g_webServer;
 
 // Forward declarations for handlers defined later in this file
@@ -464,95 +464,88 @@ void handleFermenter(ESP8266WebServer& server) {
   if (server.method() == HTTP_POST) {
     // Update fermenter config from POST body
     JsonDocument doc;
-    if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
-      int idx = doc["Fermenter"] | -1;
-      if (idx >= 0 && idx < MAX_FERMENTERS) {
-        // Every field below is applied to this local copy, and the live config
-        // is only replaced once the entire body has passed validation. Writing
-        // fields straight into g_fermenters[idx] as they were read meant a body
-        // that failed a LATER check (OG, TG, CompressorDelay, AlarmTolerance)
-        // returned 400 having already moved the ceiling/floor/hysteresis — and
-        // the control loop reads those from RAM, so a rejected save really did
-        // change how the fermenter was driven until the next config load.
-        // static, not on the loop stack: with the config save below on top
-        // of it this handler reached the build's deepest stack point (1,136 B
-        // left). Requests are handled one at a time, so sharing it is safe.
-        static FermenterConfig fc;
-        fc = g_fermenters[idx];
+    if (!parseJsonBody(server, doc)) return;
+    int idx = getValidIndex(server, doc, "Fermenter", MAX_FERMENTERS, F("Configuration invalid"));
+    if (idx < 0) return;
 
-        // Validated numeric fields — validateFermenterField() owns single-
-        // field ranges; CeilingTemp / FloorTemp / Hysteresis are validated
-        // holistically below against the would-be combined state so a save
-        // can correct an invalid in-memory config.
-        const char* valErr;
-        static char valJson[128];   // static for the same reason as fc
-        #define REJECT(msg) { \
-            snprintf(valJson, sizeof(valJson), "{\"status\":\"error\",\"msg\":\"%s\"}", msg); \
-            sendJsonResponse(server, valJson, 400); return; \
-          }
-        // validateFermenterField() is passed idx, not fc, deliberately: it
-        // range-checks against the STORED config, which is the behaviour the
-        // MQTT command path shares. None of the three keys used below read the
-        // stored trio, so validating before the commit changes nothing.
-        #define VALIDATE_AND_SET(jsonKey, valKey, member, cast) \
-          if (!doc[#jsonKey].isNull()) { \
-            float v = doc[#jsonKey]; \
-            if (!validateFermenterField(idx, valKey, v, &valErr)) REJECT(valErr) \
-            fc.member = (cast)v; \
-          }
+    // Every field below is applied to this local copy, and the live config
+    // is only replaced once the entire body has passed validation. Writing
+    // fields straight into g_fermenters[idx] as they were read meant a body
+    // that failed a LATER check (OG, TG, CompressorDelay, AlarmTolerance)
+    // returned 400 having already moved the ceiling/floor/hysteresis — and
+    // the control loop reads those from RAM, so a rejected save really did
+    // change how the fermenter was driven until the next config load.
+    // static, not on the loop stack: with the config save below on top
+    // of it this handler reached the build's deepest stack point (1,136 B
+    // left). Requests are handled one at a time, so sharing it is safe.
+    static FermenterConfig fc;
+    fc = g_fermenters[idx];
 
-        // Holistic temp/hyst trio: take new value if present, else current.
-        // Incoming values are in the user's display unit, so convert BEFORE the
-        // range checks below - those limits are Celsius, and range-checking a
-        // Fahrenheit number against them would reject valid setpoints and
-        // accept invalid ones. Hysteresis is a span, so it uses the delta
-        // helper (no 32 offset). Stored config stays Celsius throughout.
-        float wbCeiling = doc["CeilingTemp"].isNull() ? fc.ceilingTemp : toCelsius((float)doc["CeilingTemp"]);
-        float wbFloor   = doc["FloorTemp"].isNull()   ? fc.floorTemp   : toCelsius((float)doc["FloorTemp"]);
-        float wbHyst    = doc["Hysteresis"].isNull()  ? fc.hysteresis  : toCelsiusTempDelta((float)doc["Hysteresis"]);
-        if (wbCeiling < -20.0f || wbCeiling > 50.0f)  REJECT("ceiling temperature out of range (-20 to 50)")
-        if (wbFloor   < -20.0f || wbFloor   > 50.0f)  REJECT("floor temperature out of range (-20 to 50)")
-        if (wbHyst    <   0.0f || wbHyst    > 10.0f)  REJECT("hysteresis out of range (0 to 10)")
-        if (wbFloor >= wbCeiling)                     REJECT("floor must be below ceiling")
-        if ((wbCeiling - wbFloor) <  2.0f * wbHyst)   REJECT("safe zone must be at least 2x hysteresis")
-        if (!doc["CeilingTemp"].isNull()) fc.ceilingTemp = wbCeiling;
-        if (!doc["FloorTemp"].isNull())   fc.floorTemp   = wbFloor;
-        if (!doc["Hysteresis"].isNull())  fc.hysteresis  = wbHyst;
+    // Validated numeric fields — validateFermenterField() owns single-
+    // field ranges; CeilingTemp / FloorTemp / Hysteresis are validated
+    // holistically below against the would-be combined state so a save
+    // can correct an invalid in-memory config.
+    const char* valErr;
+    static char valJson[128];   // static for the same reason as fc
+    #define REJECT(msg) { \
+        snprintf(valJson, sizeof(valJson), "{\"status\":\"error\",\"msg\":\"%s\"}", msg); \
+        sendJsonResponse(server, valJson, 400); return; \
+      }
+    // validateFermenterField() is passed idx, not fc, deliberately: it
+    // range-checks against the STORED config, which is the behaviour the
+    // MQTT command path shares. None of the three keys used below read the
+    // stored trio, so validating before the commit changes nothing.
+    #define VALIDATE_AND_SET(jsonKey, valKey, member, cast) \
+      if (!doc[#jsonKey].isNull()) { \
+        float v = doc[#jsonKey]; \
+        if (!validateFermenterField(idx, valKey, v, &valErr)) REJECT(valErr) \
+        fc.member = (cast)v; \
+      }
 
-        VALIDATE_AND_SET(CompressorDelay, "compressor_delay",    compressorDelay, uint16_t)
-        VALIDATE_AND_SET(OG,              "og",                  og,              float)
-        VALIDATE_AND_SET(TG,              "tg",                  tg,              float)
-        #undef VALIDATE_AND_SET
-        #undef REJECT
+    // Holistic temp/hyst trio: take new value if present, else current.
+    // Incoming values are in the user's display unit, so convert BEFORE the
+    // range checks below - those limits are Celsius, and range-checking a
+    // Fahrenheit number against them would reject valid setpoints and
+    // accept invalid ones. Hysteresis is a span, so it uses the delta
+    // helper (no 32 offset). Stored config stays Celsius throughout.
+    float wbCeiling = doc["CeilingTemp"].isNull() ? fc.ceilingTemp : toCelsius((float)doc["CeilingTemp"]);
+    float wbFloor   = doc["FloorTemp"].isNull()   ? fc.floorTemp   : toCelsius((float)doc["FloorTemp"]);
+    float wbHyst    = doc["Hysteresis"].isNull()  ? fc.hysteresis  : toCelsiusTempDelta((float)doc["Hysteresis"]);
+    if (!checkTempBand(wbCeiling, wbFloor, wbHyst, &valErr)) REJECT(valErr)
+    if (!doc["CeilingTemp"].isNull()) fc.ceilingTemp = wbCeiling;
+    if (!doc["FloorTemp"].isNull())   fc.floorTemp   = wbFloor;
+    if (!doc["Hysteresis"].isNull())  fc.hysteresis  = wbHyst;
 
-        if (!doc["AlarmTolerance"].isNull()) {
-          float v = toCelsiusTempDelta((float)doc["AlarmTolerance"]);  // a span, and the range below is Celsius
-          if (v < 0.0f || v > 10.0f) {
-            sendErr(server, 400, F("alarm tolerance out of range (0 to 10)"));
-            return;
-          }
-          fc.alarmTolerance = v;
-        }
+    VALIDATE_AND_SET(CompressorDelay, "compressor_delay",    compressorDelay, uint16_t)
+    VALIDATE_AND_SET(OG,              "og",                  og,              float)
+    VALIDATE_AND_SET(TG,              "tg",                  tg,              float)
+    #undef VALIDATE_AND_SET
+    #undef REJECT
 
-        if (!doc["Power"].isNull())           fc.power           = doc["Power"];
-        if (!doc["TempControl"].isNull())     fc.tempControl     = doc["TempControl"];
-        if (doc["BeerName"].is<const char*>())      copyText(fc.beerName,      doc["BeerName"].as<const char*>(),      sizeof(fc.beerName));
-        if (doc["FermenterName"].is<const char*>()) copyText(fc.fermenterName, doc["FermenterName"].as<const char*>(), sizeof(fc.fermenterName));
-        if (doc["YeastName"].is<const char*>())     copyText(fc.yeastName,     doc["YeastName"].as<const char*>(),     sizeof(fc.yeastName));
-        if (!doc["BrewServices"].isNull())    fc.brewServices    = doc["BrewServices"];
-        if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"]; if (v >= 0 && v <= MAX_PROFILES) fc.profileNo = (uint8_t)v; }
-        if (!doc["LiveTest"].isNull())        fc.liveTest        = doc["LiveTest"];
-
-        // Single commit point: nothing above this line is visible to the
-        // control loop, so a rejected body leaves the fermenter untouched.
-        g_fermenters[idx] = fc;
-
-        saveFermenterConfig();
-        sendOk(server, F("Configuration saved"));
+    if (!doc["AlarmTolerance"].isNull()) {
+      float v = toCelsiusTempDelta((float)doc["AlarmTolerance"]);  // a span, and the range below is Celsius
+      if (v < 0.0f || v > 10.0f) {
+        sendErr(server, 400, F("alarm tolerance out of range (0 to 10)"));
         return;
       }
+      fc.alarmTolerance = v;
     }
-    sendErr(server, 400, F("Configuration invalid"));
+
+    if (!doc["Power"].isNull())           fc.power           = doc["Power"];
+    if (!doc["TempControl"].isNull())     fc.tempControl     = doc["TempControl"];
+    if (doc["BeerName"].is<const char*>())      copyText(fc.beerName,      doc["BeerName"].as<const char*>(),      sizeof(fc.beerName));
+    if (doc["FermenterName"].is<const char*>()) copyText(fc.fermenterName, doc["FermenterName"].as<const char*>(), sizeof(fc.fermenterName));
+    if (doc["YeastName"].is<const char*>())     copyText(fc.yeastName,     doc["YeastName"].as<const char*>(),     sizeof(fc.yeastName));
+    if (!doc["BrewServices"].isNull())    fc.brewServices    = doc["BrewServices"];
+    if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"]; if (v >= 0 && v <= MAX_PROFILES) fc.profileNo = (uint8_t)v; }
+    if (!doc["LiveTest"].isNull())        fc.liveTest        = doc["LiveTest"];
+
+    // Single commit point: nothing above this line is visible to the
+    // control loop, so a rejected body leaves the fermenter untouched.
+    g_fermenters[idx] = fc;
+
+    saveFermenterConfig();
+    sendOk(server, F("Configuration saved"));
     return;
   }
 
@@ -668,25 +661,22 @@ void buildControllerJson(JsonDocument& doc) {
 void handleController(ESP8266WebServer& server) {
   if (server.method() == HTTP_POST) {
     JsonDocument doc;
-    if (deserializeJson(doc, server.arg("plain")) == DeserializationError::Ok) {
-      uint8_t oldUnit = g_globalConfig.unit;
-      if (!doc["Unit"].isNull())       { uint8_t v = doc["Unit"];       if (v == UNIT_CELSIUS || v == UNIT_FAHRENHEIT) g_globalConfig.unit       = v; }
-      if (!doc["Resolution"].isNull()) { uint8_t v = doc["Resolution"]; if (v >= 9 && v <= 12)                        g_globalConfig.resolution = v; }
-      if (!doc["AlarmDwellSec"].isNull()) { uint32_t v = doc["AlarmDwellSec"]; if (v <= 3600) g_globalConfig.alarmDwellSec = (uint16_t)v; }
-      if (!doc["MdnsEnabled"].isNull())   g_globalConfig.mdnsEnabled   = doc["MdnsEnabled"];
-      if (!doc["UpdateCheck"].isNull())   g_globalConfig.updateCheck   = doc["UpdateCheck"];
-      if (!doc["CrashReports"].isNull())  g_globalConfig.crashReports  = doc["CrashReports"];
-      if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
-      if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
-      if (doc["BrewServiceId"].is<const char*>()) copyText(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
-      saveGlobalConfig();
-      // HA discovery advertises the temperature unit — republish so entities
-      // pick up the new unit (retained topics are overwritten in place).
-      if (g_globalConfig.unit != oldUnit) publishAllHaDiscovery();
-      sendOk(server, F("Configuration saved"));
-      return;
-    }
-    sendErr(server, 400, F("Configuration invalid"));
+    if (!parseJsonBody(server, doc)) return;
+    uint8_t oldUnit = g_globalConfig.unit;
+    if (!doc["Unit"].isNull())       { uint8_t v = doc["Unit"];       if (v == UNIT_CELSIUS || v == UNIT_FAHRENHEIT) g_globalConfig.unit       = v; }
+    if (!doc["Resolution"].isNull()) { uint8_t v = doc["Resolution"]; if (v >= 9 && v <= 12)                        g_globalConfig.resolution = v; }
+    if (!doc["AlarmDwellSec"].isNull()) { uint32_t v = doc["AlarmDwellSec"]; if (v <= 3600) g_globalConfig.alarmDwellSec = (uint16_t)v; }
+    if (!doc["MdnsEnabled"].isNull())   g_globalConfig.mdnsEnabled   = doc["MdnsEnabled"];
+    if (!doc["UpdateCheck"].isNull())   g_globalConfig.updateCheck   = doc["UpdateCheck"];
+    if (!doc["CrashReports"].isNull())  g_globalConfig.crashReports  = doc["CrashReports"];
+    if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
+    if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
+    if (doc["BrewServiceId"].is<const char*>()) copyText(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
+    saveGlobalConfig();
+    // HA discovery advertises the temperature unit — republish so entities
+    // pick up the new unit (retained topics are overwritten in place).
+    if (g_globalConfig.unit != oldUnit) publishAllHaDiscovery();
+    sendOk(server, F("Configuration saved"));
     return;
   }
   JsonDocument doc;
@@ -1211,7 +1201,6 @@ void handleSmartPlugTest(ESP8266WebServer& server) {
   logMsg("[PLUG] Test plug %d %s: code=%u (0x%06X), bits=%d, delay=%d, proto=%d",
     idx, on ? "ON" : "OFF", code, code, plug.bits, plug.delayLength, plug.protocol);
 
-  ESP.wdtFeed();  // RF transmit bit-bangs for ~1-2 s inside this handler
   rfTransmit(code, plug.bits, plug.delayLength, plug.protocol);
   sendOk(server, F("RF code sent"));
 }
@@ -1507,7 +1496,6 @@ void handleBrewServiceTest(ESP8266WebServer& server) {
     sendErr(server, 400, F("No service ID configured"));
     return;
   }
-  ESP.wdtFeed();  // synchronous outbound HTTP POST, bounded by the 5 s HTTP timeout
   int httpCode = testBrewService(idx);
   String resp = "{\"status\":";
   resp += (httpCode == 200) ? "\"ok\"" : "\"error\"";
@@ -1582,7 +1570,6 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
 }
 
 void handleMqttTest(ESP8266WebServer& server) {
-  ESP.wdtFeed();  // blocking broker connect, bounded by the 5 s socket timeout
   bool ok = testMqtt();
   if (ok) {
     sendOk(server, F("MQTT connected and test message published"));
@@ -1592,7 +1579,6 @@ void handleMqttTest(ESP8266WebServer& server) {
 }
 
 void handleMqttDiscover(ESP8266WebServer& server) {
-  ESP.wdtFeed();  // discovery burst takes ~2-4 s (yields per entity)
   if (forcePublishAllHaDiscovery()) {
     sendOk(server, F("HA discovery published"));
   } else {
@@ -1815,10 +1801,10 @@ void handleFsFileSave(ESP8266WebServer& server) {
   String name = server.arg("name");
   bool ok = false;
   for (const char* allow : ALLOWED) { if (name == allow) { ok = true; break; } }
-  if (!ok) { server.send(400, "application/json", "{\"status\":\"error\",\"msg\":\"Not allowed\"}"); return; }
+  if (!ok) { sendErr(server, 400, F("Not allowed")); return; }
 
   String body = server.arg("plain");
-  if (body.length() == 0) { server.send(400, "application/json", "{\"status\":\"error\",\"msg\":\"Empty body\"}"); return; }
+  if (body.length() == 0) { sendErr(server, 400, F("Empty body")); return; }
 
   // Validate JSON syntax before persisting — a corrupt file here is parsed at
   // next boot. The empty filter makes the parser walk the whole input without
@@ -1840,7 +1826,7 @@ void handleFsFileSave(ESP8266WebServer& server) {
   configImportBeforeWrite();
 
   File f = LittleFS.open(name, "w");
-  if (!f) { server.send(500, "application/json", "{\"status\":\"error\",\"msg\":\"Write failed\"}"); return; }
+  if (!f) { sendErr(server, 500, F("Write failed")); return; }
   f.print(body);
   f.close();
   sendJsonResponse(server, "{\"status\":\"ok\"}");

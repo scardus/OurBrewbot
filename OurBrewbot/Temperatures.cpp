@@ -277,19 +277,6 @@ void periodicProbeScan() {
 // TEMPERATURE GETTERS
 // ============================================================
 
-float getTempQuick(const char* addressStr) {
-  DeviceAddress addr;
-  if (!stringToAddress(addressStr, addr)) return TEMP_NONE;
-
-  float temp = g_sensors1.getTempC(addr);
-
-  if (temp == DEVICE_DISCONNECTED_C) {
-    temp = g_sensors2.getTempC(addr);
-  }
-
-  return (temp == DEVICE_DISCONNECTED_C) ? TEMP_NONE : temp;
-}
-
 // Single resolver behind getBeerTemp()/getBeerTempSource() — one priority
 // chain (Tilt > Probe > iSpindel) shared by both, so the value and its
 // source label cannot drift apart. Each source is used only while it has a

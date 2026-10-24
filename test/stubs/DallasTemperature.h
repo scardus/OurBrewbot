@@ -22,7 +22,7 @@
 // methods on them, so the signatures had to exist even though no native test
 // could reach the functions that used them. With getDeviceCount() hardcoded to
 // 0 and getTempC() hardcoded to -127, every probe-facing function in that file
-// (scanBuses, readTempResults, periodicProbeScan, getTempQuick) compiled but
+// (scanBuses, readTempResults, periodicProbeScan) compiled but
 // never executed a meaningful line.
 //
 // It now carries a per-instance device table instead - the same idea as the

@@ -27,7 +27,6 @@
 #define STATUS_IDLE      0
 #define STATUS_HEATING   1
 #define STATUS_COOLING   2
-#define STATUS_ALARM     3
 
 // Process all 4 fermenters — called from main loop
 void processFermenters();
