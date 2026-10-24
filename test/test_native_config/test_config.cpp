@@ -234,6 +234,8 @@ void test_array_round_trip_preserves_every_slot(void) {
     g_probes[i].tempAdjust  = 0.25f * (float)i;
   }
   TEST_ASSERT_TRUE(saveProbeConfig());
+  // The reading is still saved, so the file format is unchanged...
+  TEST_ASSERT_TRUE(fileHas(FILE_PROBE, "\"Temperature\":[10,11,12,"));
 
   for (int i = 0; i < MAX_PROBES; i++) g_probes[i] = ProbeConfig{};
   TEST_ASSERT_TRUE(loadProbeConfig());
@@ -246,7 +248,8 @@ void test_array_round_trip_preserves_every_slot(void) {
     TEST_ASSERT_EQUAL_STRING(addr, g_probes[i].address);
     TEST_ASSERT_EQUAL_UINT8((uint8_t)(PROBE_FN_BEER + (i % 3)), g_probes[i].function);
     TEST_ASSERT_EQUAL_UINT8((uint8_t)(i % MAX_FERMENTERS), g_probes[i].fermenter);
-    TEST_ASSERT_EQUAL_FLOAT(10.0f + (float)i, g_probes[i].temperature);
+    // ...but never loaded back as a reading (see the probe load tests below)
+    TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_probes[i].temperature);
     TEST_ASSERT_EQUAL_FLOAT(0.25f * (float)i, g_probes[i].tempAdjust);
   }
 }
@@ -764,11 +767,27 @@ void test_smartplug_stored_plugno_is_respected(void) {
   TEST_ASSERT_EQUAL_UINT8(0, g_smartPlugs[9].plugNo);
 }
 
-void test_probe_load_mirrors_temperature_into_the_raw_reading(void) {
-  fsTestWrite(FILE_PROBE, "{\"Temperature\":[19.5,0,0,0,0,0,0,0]}");
+// A saved reading can be hours old. Loading it as live meant a probe missing at
+// boot kept it for its first 6 failed reads (~30 s), and control and alarms
+// ran on it - e.g. a heater switched on for a beer that was never measured.
+void test_probe_load_starts_with_no_reading(void) {
+  fsTestWrite(FILE_PROBE, "{\"Address\":[\"28ff641f8b2c0011\"],\"Temperature\":[19.5,0,0,0,0,0,0,0]}");
   TEST_ASSERT_TRUE(loadProbeConfig());
-  TEST_ASSERT_EQUAL_FLOAT(19.5f, g_probes[0].temperature);
-  TEST_ASSERT_EQUAL_FLOAT(19.5f, g_probes[0].rawTemperature);
+  TEST_ASSERT_EQUAL_STRING("28ff641f8b2c0011", g_probes[0].address);   // the rest still loads
+  for (int i = 0; i < MAX_PROBES; i++) {
+    TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_probes[i].temperature);
+    TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_probes[i].rawTemperature);
+  }
+}
+
+// With no file the defaults apply, and a default slot has no reading either
+// (it used to be 0.0, which looks like a real 0 C)
+void test_probe_defaults_have_no_reading(void) {
+  TEST_ASSERT_FALSE(loadProbeConfig());
+  for (int i = 0; i < MAX_PROBES; i++) {
+    TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_probes[i].temperature);
+    TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_probes[i].rawTemperature);
+  }
 }
 
 void test_ispindel_legacy_function_values_collapse_to_unassigned(void) {
@@ -1220,7 +1239,8 @@ int main(int argc, char** argv) {
   // index-dependent and post-load defaults
   RUN_TEST(test_smartplug_plugno_defaults_to_the_slot_index);
   RUN_TEST(test_smartplug_stored_plugno_is_respected);
-  RUN_TEST(test_probe_load_mirrors_temperature_into_the_raw_reading);
+  RUN_TEST(test_probe_load_starts_with_no_reading);
+  RUN_TEST(test_probe_defaults_have_no_reading);
   RUN_TEST(test_ispindel_legacy_function_values_collapse_to_unassigned);
   RUN_TEST(test_ispindel_absent_function_defaults_to_beer_for_legacy_configs);
   RUN_TEST(test_ispindel_stored_ids_are_made_topic_safe_on_load);
