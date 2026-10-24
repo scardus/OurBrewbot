@@ -78,6 +78,11 @@ void smartPlugSwitch(uint8_t plugIndex, bool on) {
   if (plug.onCode == 0 && plug.offCode == 0) return;
   if (plug.function == PLUG_FN_UNASSIGNED) return;
 
+  // Never switch a plug on that can't be switched off again. A plug saved with
+  // only its ON code learnt was switched on at the first call for heat or
+  // cooling and then stayed on for good, as there was no OFF code to send.
+  if (on && plug.offCode == 0) return;
+
   uint32_t code = on ? plug.onCode : plug.offCode;
 
   if (code == 0) return;

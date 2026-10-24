@@ -17,7 +17,7 @@
 // Native (host) tests for the RF smart-plug switch path in
 // OurBrewbot/SmartPlugs.cpp.
 //
-// smartPlugSwitch() has four early-returns that are silent by design - a
+// smartPlugSwitch() has five early-returns that are silent by design - a
 // misconfigured plug simply doesn't transmit, with no error and no log line.
 // On real hardware that presents as a fridge or heat belt that never comes on,
 // which is exactly the failure this suite is meant to catch. The only
@@ -106,20 +106,23 @@ static void test_unassigned_function_never_transmits(void) {
   TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
 }
 
-// The one asymmetric guard: a plug can have a usable ON code and a missing OFF
-// code (or vice versa), so the check is on the *selected* code, not the pair.
-static void test_missing_off_code_blocks_only_the_off_direction(void) {
+// A plug with only its ON code learnt must never be switched on: there would
+// be no OFF code to switch it off again, so a heater or fridge would stay on
+// for good. Before the fix the ON was sent and the OFF silently dropped.
+static void test_a_plug_without_an_off_code_is_never_switched_on(void) {
   configurePlug(P);
   g_smartPlugs[P].offCode = 0;
 
   smartPlugSwitch(P, true);
-  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
-  TEST_ASSERT_EQUAL_HEX32(0x123456, g_rfTest.lastCode);
+  TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
+  TEST_ASSERT_FALSE(getPlugState(P));
 
   smartPlugSwitch(P, false);
-  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);   // still 1 - OFF was dropped
+  TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
 }
 
+// The guard is one-sided on purpose: sending OFF is always safe, so a plug
+// with only its OFF code learnt is still switched off.
 static void test_missing_on_code_blocks_only_the_on_direction(void) {
   configurePlug(P);
   g_smartPlugs[P].onCode = 0;
@@ -371,7 +374,7 @@ int main(int, char**) {
   RUN_TEST(test_index_beyond_the_last_slot_never_transmits);
   RUN_TEST(test_unconfigured_plug_with_both_codes_zero_never_transmits);
   RUN_TEST(test_unassigned_function_never_transmits);
-  RUN_TEST(test_missing_off_code_blocks_only_the_off_direction);
+  RUN_TEST(test_a_plug_without_an_off_code_is_never_switched_on);
   RUN_TEST(test_missing_on_code_blocks_only_the_on_direction);
 
   RUN_TEST(test_on_and_off_select_their_own_codes);
