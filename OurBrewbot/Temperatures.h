@@ -48,7 +48,8 @@ void periodicProbeScan();
 void cleanupDuplicateProbes();
 
 // Convert OneWire address bytes to the hex string format used in JSON
-// e.g. {0x28,0x80,0x55,0x55,0xa0,0x08,0x00} → "28805555a0080"
+// e.g. {0x28,0xff,0x64,0x1f,0x8b,0x2c,0x00,0x11} → "28ff641f8b2c0011"
+// (all 8 bytes, 2 lowercase hex digits each: always 16 characters)
 String addressToString(const DeviceAddress& addr);
 
 // Convert hex string back to DeviceAddress bytes

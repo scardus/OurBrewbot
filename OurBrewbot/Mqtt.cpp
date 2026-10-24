@@ -58,7 +58,7 @@ static const char* probeFunctionName(uint8_t fn) {
   }
 }
 
-extern String g_rebootReason;  // captured at boot in OurBrewbot.ino
+extern String g_rebootReason;  // captured at boot in OurBrewbot.cpp
 
 static WiFiClient    g_mqttWifi;
 static PubSubClient  g_mqtt(g_mqttWifi);

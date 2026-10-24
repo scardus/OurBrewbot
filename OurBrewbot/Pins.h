@@ -25,7 +25,7 @@
  *   "Black Jack" = secondary probe bus (Bus 2)
  *   "TxTr"       = RF transmitter for smart plugs
  *   "Onboard"    = internal temperature probe
- *   "BLE"        = Bluetooth (not available on ESP8266 without bridge)
+ *   "BLE"        = HM-10 Bluetooth module, for Tilt hydrometers (UART on D6/D7)
  *   "PSI"        = pressure sensor
  */
 

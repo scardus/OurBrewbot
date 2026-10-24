@@ -36,7 +36,7 @@
 #include "TextSafe.h"
 #include "Uptime.h"
 
-// Forward refs to global server (defined in .ino)
+// Forward refs to global server (defined in OurBrewbot.cpp)
 extern ESP8266WebServer g_webServer;
 
 // Forward declarations for handlers defined later in this file

@@ -18,19 +18,18 @@
  * OurBrewbot — ESP8266 fermentation controller firmware
  * Targets: NodeMCU / Wemos D1 Mini (ESP8266)
  *
- * Libraries required (install via Arduino Library Manager):
- *  - ESP8266WiFi          (bundled with ESP8266 Arduino core)
- *  - ESP8266WebServer     (bundled)
- *  - ESP8266HTTPClient    (bundled)
- *  - ESP8266httpUpdate    (bundled)
- *  - LittleFS             (bundled)
- *  - ArduinoJson          v7.x (search "ArduinoJson" by Benoit Blanchon)
- *  - DallasTemperature    (search "DallasTemperature" by Miles Burton)
- *  - OneWire              (search "OneWire" by Jim Studt)
- *  - WiFiManager          (search "WiFiManager" by tzapu)
- *  - SoftwareSerial       (bundled with ESP8266 Arduino core)
- *  - rc-switch            v2.6.4 (search "rc-switch" by sui77)
- *  - PubSubClient3        v3.x (search "PubSubClient3" by hmueller01)
+ * Built with PlatformIO. The libraries below are fetched automatically from
+ * lib_deps in platformio.ini, which holds the exact versions - nothing needs
+ * installing by hand.
+ *  - ESP8266WiFi, ESP8266WebServer, ESP8266HTTPClient, ESP8266httpUpdate,
+ *    LittleFS, SoftwareSerial   (bundled with the ESP8266 Arduino core)
+ *  - ArduinoJson         (Benoit Blanchon)
+ *  - DallasTemperature   (Miles Burton)
+ *  - OneWire             (Paul Stoffregen)
+ *  - WiFiManager         (tzapu)
+ *  - rc-switch           (sui77)
+ *  - PubSubClient3       (hmueller01)
+ *  - MicroMDNS           (scardus)
  */
 
 // ============================================================
@@ -189,7 +188,7 @@ void setup() {
   logMsg("[WEB] Server started on port 80");
 
   // Re-send boot messages via syslog now that WiFi (and syslog host) is available.
-  // Severity here mirrors the original pre-WiFi logMsgL calls so syslog/webhook
+  // Severity here mirrors the original pre-WiFi logMsgL calls so syslog
   // filtering treats them consistently. Skipped if WiFi was down at boot - there
   // is no syslog to send them to.
   if (g_syslogConfig.enabled && g_wifiConnected) {
