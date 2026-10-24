@@ -30,6 +30,33 @@ jobs:
             exit 1
           fi
 
+      # Every release needs a news post on ourbrewbot.com. It is written before
+      # the tag is pushed, as a draft (no date) in the website repo's news/
+      # folder - see "News posts" in that repo's README. Fail before anything is
+      # built if there isn't one. The website repo is private, so this needs
+      # WEBSITE_REBUILD_TOKEN, a fine-grained token with Contents: write on
+      # OurBrewbot-Website only. The clone is reused by "Publish the news post".
+      - name: Check there is a news post for this release
+        env:
+          WEBSITE_TOKEN: ${{ secrets.WEBSITE_REBUILD_TOKEN }}
+        run: |
+          if [ -z "$WEBSITE_TOKEN" ]; then
+            echo "::error::WEBSITE_REBUILD_TOKEN is not set, so the news post for $GITHUB_REF_NAME can't be checked"
+            exit 1
+          fi
+          git clone --depth 1 "https://x-access-token:${WEBSITE_TOKEN}@github.com/scardus/OurBrewbot-Website.git" "$RUNNER_TEMP/website"
+          cd "$RUNNER_TEMP/website"
+          POSTS=$(grep -l -E "^release:[[:space:]]*${GITHUB_REF_NAME}[[:space:]]*$" news/*.md || true)
+          if [ -z "$POSTS" ]; then
+            echo "::error::No news post for $GITHUB_REF_NAME - add one to the website repo's news/ folder, then delete and push the tag again"
+            exit 1
+          fi
+          if [ "$(echo "$POSTS" | wc -l)" -gt 1 ]; then
+            echo "::error::More than one news post is for $GITHUB_REF_NAME: $POSTS"
+            exit 1
+          fi
+          echo "News post: $POSTS"
+
       - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
@@ -108,21 +135,28 @@ jobs:
             OurBrewbot_${{ github.ref_name }}.bin
             OurBrewbot_${{ github.ref_name }}.elf
 
-      # Rebuild ourbrewbot.com so its installer and version.json pick up this
-      # release: an empty commit to the website repo starts its Cloudflare build.
-      # WEBSITE_REBUILD_TOKEN is a fine-grained token with Contents: write on
-      # OurBrewbot-Website only. Without it, this step just warns.
-      - name: Rebuild the website
-        env:
-          WEBSITE_TOKEN: ${{ secrets.WEBSITE_REBUILD_TOKEN }}
+      # Publish this release's news post by giving it a date (UTC). Pushing that
+      # to the website repo starts its Cloudflare build, which also picks up this
+      # release for the installer and version.json. If the post already has a
+      # date (a re-run release), it is left alone and an empty commit just
+      # rebuilds the site.
+      - name: Publish the news post
         run: |
-          if [ -z "$WEBSITE_TOKEN" ]; then
-            echo "::warning::WEBSITE_REBUILD_TOKEN is not set - rebuild ourbrewbot.com by hand"
-            exit 0
-          fi
-          git clone --depth 1 "https://x-access-token:${WEBSITE_TOKEN}@github.com/scardus/OurBrewbot-Website.git" website
-          cd website
+          cd "$RUNNER_TEMP/website"
+          # The post may have been edited while the firmware was building
+          git pull --ff-only
+          POST=$(grep -l -E "^release:[[:space:]]*${GITHUB_REF_NAME}[[:space:]]*$" news/*.md)
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "Rebuild to publish firmware ${GITHUB_REF_NAME}"
-          git push
+          if grep -q -E "^date:[[:space:]]*[0-9]" "$POST"; then
+            git commit --allow-empty -m "Rebuild to publish firmware ${GITHUB_REF_NAME}"
+          else
+            # Drop an empty "date:" line if there is one, then add the date
+            # on the line after the title
+            sed -i -E '/^date:[[:space:]]*$/d' "$POST"
+            sed -i "/^title:/a date: $(date -u '+%Y-%m-%d %H:%M')" "$POST"
+            git add "$POST"
+            git commit -m "Publish the news post for firmware ${GITHUB_REF_NAME}"
+          fi
+          # Try once more if the website repo changed since the pull above
+          git push || (git pull --rebase && git push)
