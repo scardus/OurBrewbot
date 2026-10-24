@@ -42,6 +42,13 @@ static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+// A test sets s_uptimeSec to stand in for an uptime past the 49.7-day wrap,
+// which the 32-bit millis() can't reach. 0 = follow millis().
+static uint32_t s_uptimeSec = 0;
+uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
+
 // ---- no-op stubs ----
 bool saveFermenterConfig() { return true; }
 void logMsgImpl(uint8_t, PGM_P, ...) {}
@@ -105,6 +112,7 @@ void setUp(void) {
   for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenterDebugOverrides[i] = FermenterDebugOverride{};
   s_controlTemp   = TEMP_NONE;
   s_millis        = 0;
+  s_uptimeSec     = 0;
   s_plugCallCount = 0;
   s_forceOffCount = 0;
   for (int i = 0; i < MAX_FERMENTERS; i++) {
@@ -252,6 +260,59 @@ void test_stopping_while_heating_does_not_start_a_compressor_delay(void) {
 
   setFermenterPower(F, false);
   TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[F]);
+}
+
+// ---- the compressor delay and the uptime clock ----
+
+// The delay is counted from boot for a fridge that hasn't cooled since, which
+// protects a compressor that was running when the controller restarted. This
+// is intended, and moving to the uptime clock must keep it.
+void test_compressor_delay_holds_for_the_first_minutes_after_boot(void) {
+  g_fermenters[F].floorTemp       = 18.0f;
+  g_fermenters[F].ceilingTemp     = 22.0f;
+  g_fermenters[F].compressorDelay = 10;
+  s_controlTemp = 23.0f;
+
+  test_setMillis(300000);    // 5 min after boot
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+
+  test_setMillis(600000);    // 10 min after boot
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
+}
+
+// millis() wraps after 49.7 days (2^32 ms = 4,294,967 s). A fridge that hadn't
+// cooled since boot then looked as if it had just stopped, and waited out a
+// compressor delay it didn't need. 5 minutes past the wrap it must cool.
+void test_compressor_delay_does_not_hold_after_the_millis_wrap(void) {
+  g_fermenters[F].floorTemp       = 18.0f;
+  g_fermenters[F].ceilingTemp     = 22.0f;
+  g_fermenters[F].compressorDelay = 10;
+  s_controlTemp = 23.0f;
+
+  test_setMillis(300000);              // what millis() reads 5 min past the wrap
+  s_uptimeSec = 4294967UL + 300UL;     // ...and the uptime it really is
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
+}
+
+// A delay that started just before the wrap must still be kept in full after it
+void test_compressor_delay_is_kept_across_the_millis_wrap(void) {
+  startCooling();
+  s_uptimeSec = 4294967UL - 120UL;     // cooling stops 2 min before the wrap
+  s_controlTemp = 21.0f;               // at ceiling - hysteresis
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[F]);
+
+  s_controlTemp = 23.0f;
+  s_uptimeSec = 4294967UL + 300UL;     // 7 min after the stop
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, g_fermenters[F].status);
+
+  s_uptimeSec = 4294967UL + 480UL;     // 10 min after the stop
+  processSingleFermenter(F);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, g_fermenters[F].status);
 }
 
 void test_heating_to_idle_at_floor_plus_hysteresis(void) {
@@ -937,6 +998,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_compressor_delay_holds_after_temp_control_off);
   RUN_TEST(test_compressor_delay_holds_after_switchOffAll);
   RUN_TEST(test_stopping_while_heating_does_not_start_a_compressor_delay);
+  RUN_TEST(test_compressor_delay_holds_for_the_first_minutes_after_boot);
+  RUN_TEST(test_compressor_delay_does_not_hold_after_the_millis_wrap);
+  RUN_TEST(test_compressor_delay_is_kept_across_the_millis_wrap);
   RUN_TEST(test_heating_to_idle_at_floor_plus_hysteresis);
   RUN_TEST(test_cooling_to_idle_at_ceiling_minus_hysteresis);
   RUN_TEST(test_no_reading_forces_plugs_off_and_idle);

@@ -50,6 +50,10 @@ static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+uint32_t uptimeSeconds() { return s_millis / 1000; }
+uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
+
 // ---- no-op stubs ----
 void logMsgImpl(uint8_t, PGM_P, ...) {}
 bool saveFermenterConfig() { return true; }
