@@ -941,6 +941,16 @@ static void onMqttConnected() {
   }
 }
 
+// Point the client at the configured broker and set it up. Used by boot
+// (initMqtt), every reconnect attempt and the WebUI's MQTT test, so all three
+// connect the same way.
+static void setupMqttClient() {
+  g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
+  g_mqtt.setCallback(mqttMessageCallback);
+  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);  // see Mqtt.h for how it is sized
+  g_mqtt.setSocketTimeout(5);  // the default 15 s connect stall starves the loop when the broker is unreachable
+}
+
 static bool mqttConnect() {
   if (!g_mqttConfig.enabled) return false;
   if (strlen(g_mqttConfig.host) == 0) return false;
@@ -953,18 +963,15 @@ static bool mqttConnect() {
   }
   g_mqttLastAttempt = now;
 
-  g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
+  // Done before every attempt: initMqtt() skips it when MQTT was disabled at
+  // boot, and the host or port may have been changed since
+  setupMqttClient();
 
   char clientId[24];
   snprintf(clientId, sizeof(clientId), "ourbrewbot-%06X", ESP.getChipId());
 
   // Availability topic: broker publishes "offline" as LWT on unexpected disconnect
   snprintf(s_availTopic, sizeof(s_availTopic), "%s/availability", g_mqttConfig.baseTopic);
-
-  // Always set buffer and callback here (in case initMqtt() was skipped when MQTT was disabled at boot)
-  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);
-  g_mqtt.setSocketTimeout(5);  // default 15 s connect stall starves the loop when broker is unreachable
-  g_mqtt.setCallback(mqttMessageCallback);
 
   bool ok;
   if (strlen(g_mqttConfig.username) > 0) {
@@ -1146,10 +1153,7 @@ void mqttPublishLog(uint8_t level, const char* timestamp, const char* msg) {
 
 void initMqtt() {
   if (!g_mqttConfig.enabled) return;
-  g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
-  g_mqtt.setCallback(mqttMessageCallback);
-  g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);  // see Mqtt.h for how it is sized
-  g_mqtt.setSocketTimeout(5);  // bound connect stalls (default 15 s)
+  setupMqttClient();
   logMsg("[MQTT] Configured: %s:%d base=%s ha_discovery=%s",
     g_mqttConfig.host, g_mqttConfig.port, g_mqttConfig.baseTopic,
     g_mqttConfig.haDiscovery ? "on" : "off");
@@ -1367,10 +1371,7 @@ bool testMqtt() {
   // connected, connect() would be a no-op anyway; just publish on the
   // existing connection.
   if (!g_mqtt.connected()) {
-    g_mqtt.setServer(g_mqttConfig.host, g_mqttConfig.port);
-    g_mqtt.setBufferSize(MQTT_CLIENT_BUFFER_SIZE);
-    g_mqtt.setSocketTimeout(5);  // bound the blocking connect (default 15 s)
-    g_mqtt.setCallback(mqttMessageCallback);
+    setupMqttClient();
 
     char clientId[24];
     snprintf(clientId, sizeof(clientId), "ourbrewbot-%06X", ESP.getChipId());
