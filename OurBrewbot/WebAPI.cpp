@@ -107,8 +107,10 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/fermenter",        HTTP_GET,  handleFermenter,          true  },
   { "/fermenter",        HTTP_POST, handleFermenter,          true  },
   { "/board_info.json",  HTTP_GET,  handleBoardInfo,          true  },
-  { "/reset",            HTTP_GET,  handleReset,              true  },
-  { "/reboot",           HTTP_GET,  handleReboot,             true  },
+  { "/reset",            HTTP_GET,  handleReset,              true  },   // confirmation page
+  { "/reset",            HTTP_POST, handleReset,              true  },
+  { "/reboot",           HTTP_GET,  handleReboot,             true  },   // confirmation page
+  { "/reboot",           HTTP_POST, handleReboot,             true  },
   { "/update",           HTTP_GET,  handleOTAPage,            true  },
   { "/update/check",     HTTP_POST, handleUpdateCheck,        true  },
   { "/config",           HTTP_GET,  handleConfigPage,         true  },
@@ -326,8 +328,10 @@ static const char ROOT_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/probes</span><span class='desc'> &mdash; update probe config</span></li>
     <li><span class='method'>GET</span><a href='/profiles'>/profiles</a><span class='desc'> &mdash; fermentation profiles</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/profile</span><span class='desc'> &mdash; update profile</span></li>
-    <li><span class='method'>GET</span><a href='/reboot'>/reboot</a><span class='desc'> &mdash; reboot device</span></li>
-    <li><span class='method'>GET</span><a href='/reset'>/reset</a><span class='desc'> &mdash; reset configuration</span></li>
+    <li><span class='method'>GET</span><a href='/reboot'>/reboot</a><span class='desc'> &mdash; reboot device (asks for confirmation)</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/reboot</span><span class='desc'> &mdash; reboot device</span></li>
+    <li><span class='method'>GET</span><a href='/reset'>/reset</a><span class='desc'> &mdash; reset configuration (asks for confirmation)</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/reset?target=config</span><span class='desc'> &mdash; reset all configuration to defaults</span></li>
     <li><span class='method'>GET</span><a href='/rf/sniff'>/rf/sniff</a><span class='desc'> &mdash; RF sniff page</span></li>
     <li><span class='method'>GET</span><a href='/rf/sniff/poll'>/rf/sniff/poll</a><span class='desc'> &mdash; poll RF sniff results</span></li>
     <li><span class='method'>GET</span><a href='/smartplugs'>/smartplugs</a><span class='desc'> &mdash; smart plug config</span></li>
@@ -811,31 +815,55 @@ void handleHealth(ESP8266WebServer& server) {
 }
 
 // ============================================================
-// RESET — GET /reset
+// RESET AND REBOOT — POST acts, GET only asks for confirmation
+//
+// Browsers, chat-app link previews and prefetching all fetch GET links by
+// themselves, so a GET must never restart the controller or erase its
+// settings. A GET shows a page whose button sends the POST.
 // ============================================================
 
-void handleReset(ESP8266WebServer& server) {
-  String target = server.arg("target");
-  if (target == "config") {
-    server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Configuration reset\"}"));
-    delay(200);
-    resetAllConfig();
-    restartDevice();
-  } else {
-    // Show confirmation page
-    server.send(200, "text/html",
-      "<html><body><h3>Reset Configuration?</h3>"
-      "<p>This will erase all settings.</p>"
-      "<a href='/reset?target=config'>Confirm Reset</a> | <a href='/'>Cancel</a>"
-      "</body></html>");
-  }
+static const char RESET_PAGE[] PROGMEM =
+    "<html><body><h3>Reset Configuration?</h3>"
+    "<p>This will erase all settings.</p>"
+    "<form method='post' action='/reset'>"
+    "<input type='hidden' name='target' value='config'>"
+    "<button type='submit'>Confirm Reset</button>"
+    "</form>"
+    "<p><a href='/'>Cancel</a></p>"
+    "</body></html>";
+
+static const char REBOOT_PAGE[] PROGMEM =
+    "<html><body><h3>Restart OurBrewbot?</h3>"
+    "<p>The controller restarts and is back in about 20 seconds.</p>"
+    "<form method='post' action='/reboot'>"
+    "<button type='submit'>Restart</button>"
+    "</form>"
+    "<p><a href='/'>Cancel</a></p>"
+    "</body></html>";
+
+static void sendConfirmPage(ESP8266WebServer& server, PGM_P page) {
+  server.setContentLength(strlen_P(page));
+  server.send(200, "text/html", "");
+  server.sendContent_P(page);
 }
 
-// ============================================================
-// REBOOT — GET /reboot
-// ============================================================
+void handleReset(ESP8266WebServer& server) {
+  // target=config is required as well, so a bare POST erases nothing
+  if (server.method() != HTTP_POST || server.arg("target") != "config") {
+    sendConfirmPage(server, RESET_PAGE);
+    return;
+  }
+  server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Configuration reset\"}"));
+  delay(200);
+  resetAllConfig();
+  restartDevice();
+}
 
 void handleReboot(ESP8266WebServer& server) {
+  if (server.method() != HTTP_POST) {
+    sendConfirmPage(server, REBOOT_PAGE);
+    return;
+  }
   server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Rebooting\"}"));
   delay(500);
   restartDevice();
