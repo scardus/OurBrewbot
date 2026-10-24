@@ -37,6 +37,10 @@ void requestTempConversion();
 // (94 << (resolution-9)) ms after requestTempConversion()
 void readTempResults();
 
+// Request, wait and read in one go (blocks for the conversion time). Used once
+// in setup() so the first control pass has live readings.
+void readTemperaturesNow();
+
 // Scan OneWire buses, assign position-based names, register new probes.
 // Returns true if any probe config changed (new probe or name updated).
 bool scanBuses();

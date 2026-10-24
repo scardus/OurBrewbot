@@ -257,6 +257,16 @@ void readTempResults() {
   }
 }
 
+// One full read, blocking for the conversion time. setup() calls this once:
+// loop() starts its first conversion and its first control pass in the same
+// pass, so without it the first pass would run with no probe read yet (every
+// probe starts with no reading - see loadProbeConfig()).
+void readTemperaturesNow() {
+  requestTempConversion();
+  delay(94u << (g_globalConfig.resolution - 9));   // 9 bit = 94 ms ... 12 bit = 752 ms, as in loop()
+  readTempResults();
+}
+
 // ============================================================
 // PERIODIC PROBE SCAN — discover new probes, report inactive
 // ============================================================

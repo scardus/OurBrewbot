@@ -629,8 +629,12 @@ bool loadProbeConfig() {
   }
   cfgLoadArray(doc, g_probes, sizeof(ProbeConfig), MAX_PROBES,
                kProbeFields, CFG_COUNT(kProbeFields));
+  // No reading until each probe is read. The saved "Temperature" can be hours
+  // old, and a probe missing at boot used to keep it for its first 6 failed
+  // reads (~30 s), so control and alarms ran on it. The key stays in the file.
   for (int i = 0; i < MAX_PROBES; i++) {
-    g_probes[i].rawTemperature = g_probes[i].temperature;
+    g_probes[i].temperature    = TEMP_NONE;
+    g_probes[i].rawTemperature = TEMP_NONE;
   }
   return true;
 }
@@ -1093,7 +1097,8 @@ void initDefaultProbeConfig() {
     g_probes[i].address[0] = '\0';
     g_probes[i].function  = PROBE_UNASSIGNED;
     g_probes[i].fermenter = PROBE_UNASSIGNED;
-    g_probes[i].temperature = 0.0f;
+    g_probes[i].temperature    = TEMP_NONE;   // no reading yet (0 would look like a real 0 C)
+    g_probes[i].rawTemperature = TEMP_NONE;
     g_probes[i].mbb       = 0;
     g_probes[i].tempAdjust = 0.0f;
     g_probes[i].sgAdjust   = 0.0f;

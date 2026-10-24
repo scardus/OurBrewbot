@@ -94,6 +94,8 @@ static void resetProbesToDefaults() {
     g_probes[i].address[0] = '\0';
     g_probes[i].function   = PROBE_UNASSIGNED;
     g_probes[i].fermenter  = PROBE_UNASSIGNED;
+    g_probes[i].temperature    = TEMP_NONE;   // no reading until read
+    g_probes[i].rawTemperature = TEMP_NONE;
     g_probes[i].busId      = 0;   // 0 = never seen on a scan
     g_probes[i].failCount  = 0;
   }
@@ -573,6 +575,48 @@ void test_periodicProbeScan_does_not_save_when_nothing_changed(void) {
 }
 
 // ============================================================
+// readTemperaturesNow - the one read setup() does before the first control
+// pass. Every probe starts with no reading after a boot (loadProbeConfig).
+// ============================================================
+
+void test_read_now_gives_a_present_probe_its_reading(void) {
+  configureProbe(0, ADDR_A, "Beer", 1);
+  g_probes[0].tempAdjust = 0.5f;
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+
+  readTemperaturesNow();
+
+  TEST_ASSERT_EQUAL_FLOAT(21.0f, g_probes[0].temperature);
+  TEST_ASSERT_EQUAL_FLOAT(20.5f, g_probes[0].rawTemperature);
+  TEST_ASSERT_EQUAL_UINT32(0, g_probes[0].failCount);
+}
+
+// The point of B2: a probe missing at boot has no reading from the very first
+// pass, instead of the old saved value for its first 6 failed reads
+void test_read_now_leaves_a_missing_probe_with_no_reading(void) {
+  configureProbe(0, ADDR_A, "Beer", 1);   // registered, but not on the bus
+
+  readTemperaturesNow();
+
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_probes[0].temperature);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_probes[0].rawTemperature);
+  TEST_ASSERT_EQUAL_UINT32(1, g_probes[0].failCount);
+}
+
+// It waits the conversion time for the resolution before reading
+void test_read_now_waits_the_conversion_time(void) {
+  g_globalConfig.resolution = 12;
+  uint32_t before = delayTestTotal();
+  readTemperaturesNow();
+  TEST_ASSERT_EQUAL_UINT32(752, delayTestTotal() - before);   // 94 << 3, just over the datasheet's 750
+
+  g_globalConfig.resolution = 9;
+  before = delayTestTotal();
+  readTemperaturesNow();
+  TEST_ASSERT_EQUAL_UINT32(94, delayTestTotal() - before);
+}
+
+// ============================================================
 // cleanupDuplicateProbes
 // ============================================================
 
@@ -906,6 +950,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_periodicProbeScan_reapplies_the_resolution);
   RUN_TEST(test_periodicProbeScan_saves_when_a_probe_was_added);
   RUN_TEST(test_periodicProbeScan_does_not_save_when_nothing_changed);
+
+  RUN_TEST(test_read_now_gives_a_present_probe_its_reading);
+  RUN_TEST(test_read_now_leaves_a_missing_probe_with_no_reading);
+  RUN_TEST(test_read_now_waits_the_conversion_time);
 
   RUN_TEST(test_cleanup_removes_an_exact_duplicate);
   RUN_TEST(test_cleanup_keeps_the_full_address_over_the_truncated_one);
