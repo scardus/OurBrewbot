@@ -55,6 +55,12 @@ static uint32_t s_millis = 1000000;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+// A test sets s_uptimeSec to stand in for an uptime past the 49.7-day wrap,
+// which the 32-bit millis() can't reach. 0 = follow millis().
+static uint32_t s_uptimeSec = 0;
+uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+
 // ---- doubles for the modules not compiled in ----
 void logMsgImpl(uint8_t, PGM_P, ...) {}
 void logInit() {}
@@ -140,6 +146,7 @@ void setUp(void) {
   mqttTestReset();
   espTestSetResetReason(REASON_DEFAULT_RST);
   s_millis = 1000000;
+  s_uptimeSec = 0;
   memset(&g_updateStatus, 0, sizeof(g_updateStatus));   // no update check yet
 
   memset(&g_globalConfig, 0, sizeof(g_globalConfig));
@@ -1215,6 +1222,14 @@ void test_report_publishes_device_diagnostics(void) {
   assertPayload(BASE "/Device/uptime",           "16");
 }
 
+// The HA uptime sensor carried on counting after 49.7 days instead of going
+// back to 0 (it was millis() / 60000). 60 days = 86,400 minutes.
+void test_report_publishes_uptime_past_the_millis_wrap(void) {
+  s_uptimeSec = 60UL * 86400UL;
+  reportMqtt();
+  assertPayload(BASE "/Device/uptime", "86400");
+}
+
 void test_report_device_ids_differ_in_case_between_report_and_discovery(void) {
   // Not a typo in either place: the reported chip_id is lowercase (%06x) while
   // the discovery device id is uppercase (%06X). Anything correlating the two
@@ -1595,6 +1610,7 @@ int main(int, char**) {
   RUN_TEST(test_report_publishes_profile_progress_when_running);
   RUN_TEST(test_report_skips_fermenters_without_the_mqtt_service_bit);
   RUN_TEST(test_report_publishes_device_diagnostics);
+  RUN_TEST(test_report_publishes_uptime_past_the_millis_wrap);
   RUN_TEST(test_report_device_ids_differ_in_case_between_report_and_discovery);
   RUN_TEST(test_report_does_nothing_when_disabled_or_offline);
   RUN_TEST(test_report_values_are_retained);

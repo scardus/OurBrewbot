@@ -51,10 +51,13 @@
 #include "../../OurBrewbot/Crash.h"
 #include "../../OurBrewbot/Log.h"
 
-// ---- millis(), unused here but declared by the Arduino stub ----
+// ---- millis(), settable per test (the crash record takes its uptime from it) ----
 static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
+
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+uint32_t uptimeSeconds() { return s_millis / 1000; }
 
 // ---- log capture: the DEFERRED lines ARE the observable behaviour ----
 #define MAX_LOG_LINES 16

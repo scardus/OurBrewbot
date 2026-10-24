@@ -363,10 +363,12 @@ void loop() {
       // Send the crash report once after a crash - does nothing otherwise
       crashReportLoop();
 
-      // Uptime counter (incremented every minute, saved to global config)
+      // Uptime in minutes, saved with the global config for the reboot log.
+      // Taken from the uptime clock rather than counted up here, so it can't
+      // drift when a loop pass runs long, and there's one uptime, not two.
       if (now - g_lastUptimeTime >= INTERVAL_UPTIME_MS) {
         g_lastUptimeTime = now;
-        g_globalConfig.lastUptime++;
+        g_globalConfig.lastUptime = uptimeSeconds() / 60;
         // WiFi signal for the crash record (see crashNoteRssi in Crash.h)
         crashNoteRssi(WiFi.isConnected() ? WiFi.RSSI() : 0);
       }
@@ -571,8 +573,8 @@ void wifiLoop() {
   if (s_hotspot == nullptr && WiFi.isConnected()) {
     onWiFiConnected();
     s_wifiUpSinceBoot = true;
-    logMsgL(SYSLOG_NOTICE, "[WIFI] Connected %lu min after boot - the fermenters were controlled offline until then",
-      millis() / 60000UL);
+    logMsgL(SYSLOG_NOTICE, "[WIFI] Connected %u min after boot - the fermenters were controlled offline until then",
+      (unsigned)(uptimeSeconds() / 60));
   }
 }
 

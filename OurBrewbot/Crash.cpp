@@ -29,6 +29,7 @@
 #include "Crash.h"
 #include "Log.h"
 #include "StackCheck.h"
+#include "Uptime.h"
 #include <Arduino.h>
 #include <ctype.h>            // isalnum
 #include <string.h>           // memcpy, strchr, strlcpy
@@ -60,7 +61,7 @@ struct CrashRecord {
   uint32_t stackFree;                    // least loop stack left since boot (StackCheck.cpp)
   uint32_t stackModule;                  // the CP_* id that took it there, 0xFF = setup
   char     stackWhere[STACK_WHERE_LEN];  // e.g. the web URL, "" if none
-  uint32_t uptimeSec;                    // millis() / 1000 at the crash
+  uint32_t uptimeSec;                    // uptimeSeconds() at the crash
   uint32_t freeHeap;                     // ESP.getFreeHeap() at the crash
   int32_t  rssi;                         // last value passed to crashNoteRssi()
   uint32_t haveFirstFault;               // 1 if firstFault is filled in
@@ -336,7 +337,7 @@ extern "C" void custom_crash_callback(struct rst_info* info,
   strlcpy(rec.stackWhere, stackWhere, sizeof(rec.stackWhere));
 
   // Plain reads only - nothing here may call into the WiFi driver
-  rec.uptimeSec = millis() / 1000;
+  rec.uptimeSec = uptimeSeconds();
   rec.freeHeap  = ESP.getFreeHeap();
   rec.rssi      = s_lastRssi;
 

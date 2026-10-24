@@ -58,6 +58,12 @@ static uint32_t s_millis = 1000000;   // large, so dwell-timer sentinels of 0 re
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+// A test sets s_uptimeSec to stand in for an uptime past the 49.7-day wrap,
+// which the 32-bit millis() can't reach. 0 = follow millis().
+static uint32_t s_uptimeSec = 0;
+uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+
 // ---- no-op / recording doubles for the modules not compiled in ----
 void logMsgImpl(uint8_t, PGM_P, ...) {}
 void logInit() {}
@@ -176,6 +182,7 @@ void setUp(void) {
   espTestSetResetReason(REASON_DEFAULT_RST);
   clientTestSetConnected(true);
   s_millis      = 1000000;
+  s_uptimeSec   = 0;
   s_rfTransmits = 0;
   s_forceOffs   = 0;
   s_bleReinits  = 0;
@@ -769,6 +776,27 @@ static void test_fermenters_get_sends_worst_case_names_whole(void) {
     TEST_ASSERT_EQUAL_STRING(g_fermenters[i].yeastName,     doc[i]["YeastName"].as<const char*>());
     TEST_ASSERT_EQUAL_STRING(g_profiles[i].profileName,     doc[i]["ProfileName"].as<const char*>());
   }
+}
+
+// Uptime comes from the uptime clock, not millis() / 60000, which went back to
+// 0 after 49.7 days. 60 days = 86,400 minutes.
+static void test_uptime_is_reported_past_the_millis_wrap(void) {
+  s_uptimeSec = 60UL * 86400UL;
+
+  JsonDocument ctl;
+  buildControllerJson(ctl);
+  TEST_ASSERT_EQUAL_UINT32(86400, ctl["Uptime"].as<uint32_t>());
+
+  JsonDocument health;
+  handleHealth(srv);
+  parseResponse(health);
+  TEST_ASSERT_EQUAL_UINT32(86400, health["uptime"].as<uint32_t>());
+
+  httpRespReset();
+  JsonDocument status;
+  handleStatus(srv);
+  parseResponse(status);
+  TEST_ASSERT_EQUAL_UINT32(86400, status["uptime"].as<uint32_t>());
 }
 
 static void test_status_get_sends_worst_case_names_whole(void) {
@@ -2015,6 +2043,7 @@ int main(int, char**) {
   RUN_TEST(test_fermenter_payload_names_an_assigned_profile_and_counts_steps);
   RUN_TEST(test_controller_payload_carries_its_documented_keys);
   RUN_TEST(test_board_info_payload_carries_its_documented_keys);
+  RUN_TEST(test_uptime_is_reported_past_the_millis_wrap);
   RUN_TEST(test_profile_payload_lists_every_step_slot);
   RUN_TEST(test_profile_payload_reads_from_the_right_step_slot);
   RUN_TEST(test_fermenters_get_sends_worst_case_names_whole);
