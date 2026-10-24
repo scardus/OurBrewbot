@@ -85,7 +85,6 @@ void setUp(void) {
   for (int i = 0; i < MAX_BREW_SERVICES; i++) g_brewServices[i] = BrewServiceConfig{};
   memset(&g_mqttConfig, 0, sizeof(g_mqttConfig));
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
-  memset(&g_wifiConfig, 0, sizeof(g_wifiConfig));
   s_importActive    = false;
   s_importLastWrite = 0;
   s_uptimeSec       = 1000;
@@ -904,14 +903,12 @@ void test_reset_wifi_config_clears_the_provisioning_artifacts(void) {
   fsTestWrite(FILE_CONFIG_BKP, "{\"ssid\":\"home\"}");
   fsTestWrite(FILE_DRD,        "x");
   fsTestWrite(FILE_MQTT,       "{\"port\":8883}");
-  g_wifiConfig.magic = 0x627B4DAB;
 
   resetWiFiConfig();
 
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG));
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG_BKP));
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_DRD));
-  TEST_ASSERT_EQUAL_UINT32(0, g_wifiConfig.magic);
   // Only the WiFi artifacts - the rest of the config is untouched.
   TEST_ASSERT_TRUE(LittleFS.exists(FILE_MQTT));
 }

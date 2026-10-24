@@ -46,7 +46,6 @@ ProfileConfig   g_profiles[MAX_PROFILES];
 ProfileStep     g_profileSteps[MAX_PROFILE_STEPS];
 TiltConfig      g_tilts[MAX_TILTS];
 iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
-WiFiConfig      g_wifiConfig;
 BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 MqttConfig        g_mqttConfig;
 SyslogConfig      g_syslogConfig;
@@ -1196,7 +1195,6 @@ static void clearWiFiProvisioningArtifacts() {
 
 void resetWiFiConfig() {
   logMsgL(SYSLOG_NOTICE, "[CFG] Resetting WiFi configuration");
-  memset(&g_wifiConfig, 0, sizeof(g_wifiConfig));
   clearWiFiProvisioningArtifacts();
   logMsg("[CFG] WiFi reset complete - restart required");
 }

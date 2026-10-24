@@ -396,24 +396,6 @@ struct iSpindelConfig {
 };
 
 // ============================================================
-// STRUCT: WiFiConfig
-// WiFi and cloud configuration — stored in non-volatile flash region
-// ============================================================
-struct WiFiConfig {
-  uint32_t magic;               // config validity marker (0x627B4DAB)
-  char     version[8];          // "1.0.1"
-  bool     flagConfig;          // config has been set
-  bool     flagApFail;          // AP mode failed flag
-  bool     flagSelfTest;        // self-test mode
-  char     wifiSSID[64];        // WiFi network name
-  char     wifiPass[64];        // WiFi password
-  char     cloudToken[48];      // legacy cloud auth token
-  char     cloudHost[64];       // legacy cloud host
-  uint16_t cloudPort;           // legacy cloud port
-  uint32_t checksum;            // config checksum
-};
-
-// ============================================================
 // STRUCT: BrewServiceConfig
 // 2 fixed service types indexed by (BREW_SERVICE_xxx - 1):
 //   [0] = Brewer's Friend, [1] = Brewfather
@@ -461,7 +443,6 @@ extern ProfileConfig   g_profiles[MAX_PROFILES];
 extern ProfileStep     g_profileSteps[MAX_PROFILE_STEPS];
 extern TiltConfig      g_tilts[MAX_TILTS];
 extern iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
-extern WiFiConfig      g_wifiConfig;
 extern BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 extern MqttConfig        g_mqttConfig;
 extern SyslogConfig      g_syslogConfig;
