@@ -1623,10 +1623,70 @@ static void test_ble_console_closing_restarts_the_module(void) {
 // ============================================================
 
 static void test_reboot_restarts_through_restart_device(void) {
+  srv.setMethod(HTTP_POST);
   handleReboot(srv);
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
   TEST_ASSERT_EQUAL_INT(1, s_restarts);
   TEST_ASSERT_FALSE(s_lastForgetWiFi);
+}
+
+// ============================================================
+// /reboot AND /reset: a GET only asks for confirmation, a POST acts
+//
+// Browsers, link previews and prefetching fetch GET links by themselves, so a
+// GET must never restart the controller or erase its settings. These go
+// through the real router, the way a request from a browser arrives.
+// ============================================================
+
+static void request(HTTPMethod method, const char* uri) {
+  srv.setMethod(method);
+  srv.setUri(uri);
+  dispatchApiRequest(srv);
+}
+
+static void test_get_reboot_asks_for_confirmation_and_does_not_restart(void) {
+  request(HTTP_GET, "/reboot");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("<form method='post' action='/reboot'>"));
+  TEST_ASSERT_EQUAL_INT(0, s_restarts);
+}
+
+static void test_post_reboot_restarts(void) {
+  request(HTTP_POST, "/reboot");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Rebooting"));
+  TEST_ASSERT_EQUAL_INT(1, s_restarts);
+}
+
+// The scenario being fixed: a link preview of /reset?target=config used to
+// erase every setting - which powers every fermenter off - and restart
+static void test_get_reset_with_target_erases_nothing(void) {
+  g_fermenters[0].power = true;
+  srv.setArg("target", "config");
+  request(HTTP_GET, "/reset");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("<form method='post' action='/reset'>"));
+  TEST_ASSERT_TRUE(g_fermenters[0].power);
+  TEST_ASSERT_EQUAL_INT(0, s_restarts);
+}
+
+static void test_post_reset_with_target_erases_and_restarts(void) {
+  g_fermenters[0].power = true;
+  srv.setArg("target", "config");
+  request(HTTP_POST, "/reset");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Configuration reset"));
+  TEST_ASSERT_FALSE(g_fermenters[0].power);   // back to the default
+  TEST_ASSERT_EQUAL_INT(1, s_restarts);
+}
+
+// target=config is required as well, so a bare POST erases nothing
+static void test_post_reset_without_target_only_asks(void) {
+  g_fermenters[0].power = true;
+  request(HTTP_POST, "/reset");
+  TEST_ASSERT_TRUE(bodyContains("Confirm Reset"));
+  TEST_ASSERT_TRUE(g_fermenters[0].power);
+  TEST_ASSERT_EQUAL_INT(0, s_restarts);
 }
 
 // The goodbye needs a working connection, so forgetting WiFi has to be left to
@@ -2179,6 +2239,11 @@ int main(int, char**) {
 
   // Restarts go through restartDevice() (0.4.14)
   RUN_TEST(test_reboot_restarts_through_restart_device);
+  RUN_TEST(test_get_reboot_asks_for_confirmation_and_does_not_restart);
+  RUN_TEST(test_post_reboot_restarts);
+  RUN_TEST(test_get_reset_with_target_erases_nothing);
+  RUN_TEST(test_post_reset_with_target_erases_and_restarts);
+  RUN_TEST(test_post_reset_without_target_only_asks);
   RUN_TEST(test_wifi_reset_leaves_forgetting_wifi_until_after_the_goodbye);
 
   // display units across the REST boundary

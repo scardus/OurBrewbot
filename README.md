@@ -225,8 +225,10 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 | POST   | /probes            | Update probe config           |
 | POST   | /profile           | Update fermentation profile   |
 | GET    | /profiles          | Fermentation profile config   |
-| GET    | /reboot            | Reboot device                 |
-| GET    | /reset             | Reset all config to defaults  |
+| GET    | /reboot            | Asks to confirm a reboot (page with a button) |
+| POST   | /reboot            | Reboot device                 |
+| GET    | /reset             | Asks to confirm a factory reset (page with a button) |
+| POST   | /reset?target=config | Reset all config to defaults |
 | GET    | /rf/sniff          | RF sniff page                 |
 | GET    | /rf/sniff/poll     | Poll RF sniff results         |
 | POST   | /smartplug         | Update smart plug config      |

@@ -1452,8 +1452,8 @@ function loadSystemSettings() {
     html += '<div class="r"><span>Chip ID</span><span class="v">' + escHtml(d.ChipId) + '</span></div>';
     html += '</div>';
     html += '<div class="card"><h3>Actions</h3>';
-    html += '<button class="danger" onclick="if(confirm(\'Reboot device?\'))fetch(\'/reboot\').then(function(){alert(\'Rebooting...\')})">Reboot</button>';
-    html += '<button class="danger" onclick="if(confirm(\'Reset ALL configuration to defaults?\'))fetch(\'/reset?target=config\').then(function(){alert(\'Resetting...\')})">Factory Reset</button>';
+    html += '<button class="danger" onclick="if(confirm(\'Reboot device?\'))fetch(\'/reboot\',{method:\'POST\'}).then(function(){alert(\'Rebooting...\')})">Reboot</button>';
+    html += '<button class="danger" onclick="if(confirm(\'Reset ALL configuration to defaults?\'))fetch(\'/reset?target=config\',{method:\'POST\'}).then(function(){alert(\'Resetting...\')})">Factory Reset</button>';
     html += '<button class="danger" onclick="window.location.href=\'/update\'">Firmware Update</button>';
     html += '<button class="danger" onclick="resetWiFiSettings()">Reset WiFi Settings</button>';
     html += '<button class="danger" onclick="window.location.href=\'/rf/sniff\'">RF Sniffer</button>';
@@ -1896,7 +1896,7 @@ function importConfig(input) {
         // Restart first: until then the device still runs on its old settings,
         // and an alert left open used to let its 10-minute save write them back
         // over the imported files
-        fetch('/reboot')
+        fetch('/reboot', { method: 'POST' })
           .then(function() { alert('Import complete. The device is restarting with the imported settings.'); })
           .catch(function() { alert('Import complete, but the restart request failed - restart the device to use the imported settings.'); });
         return;
