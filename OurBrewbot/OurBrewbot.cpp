@@ -63,6 +63,7 @@
 #include "CrashReport.h"
 #include "TcpCleanup.h"
 #include "StackCheck.h"
+#include "Uptime.h"
 #include <MicroMDNS.h>
 
 // ============================================================
@@ -232,6 +233,7 @@ void setup() {
 // MAIN LOOP
 // ============================================================
 void loop() {
+  uptimeTick();   // first, every pass - keeps uptimeSeconds() counting past the millis() wrap
   unsigned long now = millis();
 
   // Handle web server requests, BLE sniff mode timeout, mDNS, and MQTT client loop.
