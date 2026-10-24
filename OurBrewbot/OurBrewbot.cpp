@@ -174,6 +174,9 @@ void setup() {
 
   // Clean up any duplicate probes from old truncated addresses
   cleanupDuplicateProbes();
+
+  // Read every probe once now, so the first control pass uses live readings
+  readTemperaturesNow();
   saveProbeConfig();
 
   // BLE module setup (KeyeStudio BT 4.0 v2 / HM-10)
