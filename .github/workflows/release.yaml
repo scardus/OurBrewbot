@@ -119,6 +119,9 @@ jobs:
           generate_release_notes: true
           body: |
             ## OurBrewbot ${{ github.ref_name }}
+
+            An overview of this release can be found on [the ourbrewbot.com website](https://ourbrewbot.com/news).
+            
             See the [README](https://github.com/scardus/OurBrewbot/blob/main/README.md) for more information.
 
             Flash `OurBrewbot_${{ github.ref_name }}.bin` over OTA. The `.elf` is only
