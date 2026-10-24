@@ -30,6 +30,7 @@
 #include "Config.h"
 #include "Log.h"
 #include "TextSafe.h"
+#include "Uptime.h"
 #include <user_interface.h>     // rst_info struct, REASON_EXCEPTION_RST
 #include <cstddef>              // offsetof
 #include <type_traits>
@@ -987,6 +988,68 @@ void saveAllConfig() {
   ok &= saveSyslogConfig();
   if (!ok)
     logMsgL(SYSLOG_ERR, "[CFG] One or more config saves failed");
+}
+
+// ============================================================
+// CONFIG IMPORT
+//
+// POST /fs/save writes imported config files straight to flash. They only
+// take effect at the next restart, so until then the settings in memory are
+// the ones in use. Two things follow:
+//  - the 10-minute save must not write memory back over the imported files
+//    (it used to, when the WebUI's "Import complete" message was left open,
+//    and the device then restarted on its old settings);
+//  - if an import fails or is abandoned, writing memory back is exactly what
+//    puts the previous settings back, so the device can't restart on a mix
+//    of old and new files.
+// An import never writes the backup copies itself: its first file saves the
+// current settings to every file and its backup before anything is replaced.
+// ============================================================
+
+// How long an import may go without a new file before it counts as abandoned:
+// far longer than the slowest upload (a few seconds), and short enough that
+// the next 10-minute save puts things right.
+#define CONFIG_IMPORT_IDLE_S 120
+
+static bool     s_importActive    = false;
+static uint32_t s_importLastWrite = 0;   // uptimeStamp() of the last imported file
+
+// Write the settings in memory to every config file and its backup.
+// saveAllConfig() leaves out the Tilt file, which is otherwise saved whenever a
+// Tilt setting changes, but an import can include it.
+static void saveSettingsInUse() {
+  saveAllConfig();
+  saveTiltConfig();
+}
+
+void configImportBeforeWrite() {
+  if (!s_importActive) {
+    logMsg("[CFG] Config import started - saving the current settings first");
+    saveSettingsInUse();
+    s_importActive = true;
+  }
+  s_importLastWrite = uptimeStamp();
+}
+
+void configImportRestore() {
+  saveSettingsInUse();
+  s_importActive = false;
+  logMsgL(SYSLOG_NOTICE, "[CFG] Config import cancelled - the previous settings have been put back");
+}
+
+void configPeriodicSave() {
+  if (!s_importActive) {
+    saveAllConfig();
+    return;
+  }
+  if (uptimeSince(s_importLastWrite) < CONFIG_IMPORT_IDLE_S) {
+    logMsg("[CFG] Config import in progress - not saving over the imported files");
+    return;
+  }
+  // No file for 2 minutes and no restart: the import was abandoned part way
+  saveSettingsInUse();
+  s_importActive = false;
+  logMsgL(SYSLOG_WARNING, "[CFG] A config import was not finished - the previous settings have been put back");
 }
 
 // ============================================================

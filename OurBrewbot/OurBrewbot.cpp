@@ -613,6 +613,7 @@ void onTenMinuteTimer() {
     }
   }
 
-  // Save all config as periodic backup
-  saveAllConfig();
+  // Save all config as periodic backup - held off while a config import is
+  // part way through (see configPeriodicSave() in Config.cpp)
+  configPeriodicSave();
 }

@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <cstdarg>
 
 #include "../../OurBrewbot/Config.h"
 
@@ -43,8 +44,20 @@ static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
-// ---- no-op stubs ----
-void logMsgImpl(uint8_t, PGM_P, ...) {}
+// ---- the uptime clock (Uptime.cpp), set directly by the config import tests ----
+static uint32_t s_uptimeSec = 0;
+uint32_t uptimeSeconds() { return s_uptimeSec; }
+uint32_t uptimeStamp()   { return s_uptimeSec ? s_uptimeSec : 1; }
+uint32_t uptimeSince(uint32_t stamp) { return (s_uptimeSec > stamp) ? s_uptimeSec - stamp : 0; }
+
+// ---- log capture: the last line, for the config import messages ----
+static char s_lastLog[192];
+void logMsgImpl(uint8_t, PGM_P fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(s_lastLog, sizeof(s_lastLog), fmt, args);
+  va_end(args);
+}
 
 // The code under test.
 #include "../../OurBrewbot/TextSafe.cpp"
@@ -73,6 +86,10 @@ void setUp(void) {
   memset(&g_mqttConfig, 0, sizeof(g_mqttConfig));
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
   memset(&g_wifiConfig, 0, sizeof(g_wifiConfig));
+  s_importActive    = false;
+  s_importLastWrite = 0;
+  s_uptimeSec       = 1000;
+  s_lastLog[0]      = '\0';
 }
 
 void tearDown(void) {}
@@ -997,6 +1014,94 @@ void test_reboot_log_recovers_from_a_corrupt_log_file(void) {
   TEST_ASSERT_EQUAL_INT(1, countOf(fsTestRead(FILE_REBOOT), "\"reason\""));
 }
 
+// ============================================================
+// CONFIG IMPORT - back up first, hold off the 10-minute save, put back on failure
+// ============================================================
+
+static void setName(const char* name) {
+  strlcpy(g_fermenters[0].fermenterName, name, sizeof(g_fermenters[0].fermenterName));
+}
+
+// What a POST /fs/save of the fermenter file puts on flash
+static void writeImportedFermenterFile() {
+  fsTestWrite(FILE_FERMENTER, "{\"FermenterName\":[\"Imported\"]}");
+}
+
+// "Back up before importing": the first imported file saves the settings in
+// use to every file AND its backup before anything is replaced
+static void test_an_import_backs_up_the_current_settings_first(void) {
+  setName("Before");
+  configImportBeforeWrite();
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER,     "\"Before\""));
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER_BKP, "\"Before\""));
+  // ...including the Tilt file, which saveAllConfig() leaves out
+  TEST_ASSERT_TRUE(LittleFS.exists(FILE_TILT_BKP));
+}
+
+// Only the first file: later ones must not save memory over the files already
+// imported, and the backups keep the settings from before the import
+static void test_only_the_first_file_of_an_import_backs_up(void) {
+  setName("Before");
+  configImportBeforeWrite();
+  writeImportedFermenterFile();
+  setName("Changed");
+  configImportBeforeWrite();
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER,     "\"Imported\""));
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER_BKP, "\"Before\""));
+}
+
+// The bug: the 10-minute save wrote memory back over the imported files while
+// the WebUI's "Import complete" message was open, so the device restarted on
+// its old settings
+static void test_the_periodic_save_is_held_off_during_an_import(void) {
+  setName("Before");
+  configImportBeforeWrite();
+  writeImportedFermenterFile();
+  s_uptimeSec += 60;
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"Imported\""));
+}
+
+// No file for 2 minutes and no restart: the import was abandoned, so the next
+// 10-minute save puts the previous settings back, then saving is normal again
+static void test_an_abandoned_import_is_put_back(void) {
+  setName("Before");
+  configImportBeforeWrite();
+  writeImportedFermenterFile();
+  s_uptimeSec += 121;
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"Before\""));
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "was not finished - the previous settings have been put back"));
+
+  setName("Later");
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"Later\""));
+}
+
+// POST /fs/import/abort, when a file of the import was refused
+static void test_restore_puts_the_previous_settings_back_and_ends_the_import(void) {
+  setName("Before");
+  configImportBeforeWrite();
+  writeImportedFermenterFile();
+  configImportRestore();
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER,     "\"Before\""));
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER_BKP, "\"Before\""));
+
+  setName("Later");
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"Later\""));
+}
+
+// With no import, the 10-minute save is exactly saveAllConfig() - which
+// leaves the Tilt file alone
+static void test_the_periodic_save_is_unchanged_without_an_import(void) {
+  setName("Normal");
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER,     "\"Normal\""));
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER_BKP, "\"Normal\""));
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_TILT));
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -1092,6 +1197,14 @@ int main(int argc, char** argv) {
   RUN_TEST(test_reboot_log_is_trimmed_to_the_last_ten_entries);
   RUN_TEST(test_reboot_log_records_register_detail_only_for_exception_resets);
   RUN_TEST(test_reboot_log_recovers_from_a_corrupt_log_file);
+
+  // config import
+  RUN_TEST(test_an_import_backs_up_the_current_settings_first);
+  RUN_TEST(test_only_the_first_file_of_an_import_backs_up);
+  RUN_TEST(test_the_periodic_save_is_held_off_during_an_import);
+  RUN_TEST(test_an_abandoned_import_is_put_back);
+  RUN_TEST(test_restore_puts_the_previous_settings_back_and_ends_the_import);
+  RUN_TEST(test_the_periodic_save_is_unchanged_without_an_import);
 
   return UNITY_END();
 }

@@ -83,6 +83,7 @@ void handleFermenterProfile(ESP8266WebServer& server);
 void handleFsFiles(ESP8266WebServer& server);
 void handleFsFile(ESP8266WebServer& server);
 void handleFsFileSave(ESP8266WebServer& server);
+void handleFsImportAbort(ESP8266WebServer& server);
 
 // Tilt hydrometer config
 void handleTilts(ESP8266WebServer& server);
