@@ -31,9 +31,11 @@ jobs:
           fi
 
       # Every release needs a news post on ourbrewbot.com. It is written before
-      # the tag is pushed, as a draft (no date) in the website repo's news/
-      # folder - see "News posts" in that repo's README. Fail before anything is
-      # built if there isn't one. The website repo is private, so this needs
+      # the tag is pushed, as a draft (no date) called news/<tag>.md in the
+      # website repo - see "News posts" in that repo's README. The release notes
+      # below and the site's version.json link straight to it, which is why it
+      # must be named after the tag. Fail before anything is built if it's
+      # missing. The website repo is private, so this needs
       # WEBSITE_REBUILD_TOKEN, a fine-grained token with Contents: write on
       # OurBrewbot-Website only. The clone is reused by "Publish the news post".
       - name: Check there is a news post for this release
@@ -46,16 +48,16 @@ jobs:
           fi
           git clone --depth 1 "https://x-access-token:${WEBSITE_TOKEN}@github.com/scardus/OurBrewbot-Website.git" "$RUNNER_TEMP/website"
           cd "$RUNNER_TEMP/website"
-          POSTS=$(grep -l -E "^release:[[:space:]]*${GITHUB_REF_NAME}[[:space:]]*$" news/*.md || true)
-          if [ -z "$POSTS" ]; then
-            echo "::error::No news post for $GITHUB_REF_NAME - add one to the website repo's news/ folder, then delete and push the tag again"
+          POST="news/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$POST" ]; then
+            echo "::error::No news post for $GITHUB_REF_NAME - add $POST to the website repo, then delete and push the tag again"
             exit 1
           fi
-          if [ "$(echo "$POSTS" | wc -l)" -gt 1 ]; then
-            echo "::error::More than one news post is for $GITHUB_REF_NAME: $POSTS"
+          if ! grep -q -E "^release:[[:space:]]*${GITHUB_REF_NAME}[[:space:]]*$" "$POST"; then
+            echo "::error::$POST in the website repo has no \"release: $GITHUB_REF_NAME\" line"
             exit 1
           fi
-          echo "News post: $POSTS"
+          echo "News post: $POST"
 
       - uses: actions/setup-python@v7
         with:
@@ -148,7 +150,7 @@ jobs:
           cd "$RUNNER_TEMP/website"
           # The post may have been edited while the firmware was building
           git pull --ff-only
-          POST=$(grep -l -E "^release:[[:space:]]*${GITHUB_REF_NAME}[[:space:]]*$" news/*.md)
+          POST="news/${GITHUB_REF_NAME}.md"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if grep -q -E "^date:[[:space:]]*[0-9]" "$POST"; then
