@@ -950,7 +950,7 @@ void handleiSpindels(ESP8266WebServer& server) {
     s["fresh"]        = iSpindelIsFresh(g_iSpindels[i]);   // readings in use
     s["minutesSince"] = g_iSpindels[i].lastSeen == 0
                           ? 0xFFFF
-                          : (uint32_t)(millis() - g_iSpindels[i].lastSeen) / 60000UL;
+                          : uptimeSince(g_iSpindels[i].lastSeen) / 60;
     size_t n = serializeJson(s, s_chunkBuf, sizeof(s_chunkBuf));
     server.sendContent(s_chunkBuf, n);
   }

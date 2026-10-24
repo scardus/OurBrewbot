@@ -45,25 +45,28 @@
  */
 
 #include "Config.h"
+#include "Uptime.h"
 
 // Process an incoming iSpindel POST body (called from WebAPI)
 void handleiSpindelPost(const String& body);
 
 // How long an iSpindel's readings stay usable: 3 x its reporting interval, but
 // never less than 60 minutes (also the limit when it sends no interval).
-#define ISPINDEL_STALE_MIN_MS    3600000UL
+#define ISPINDEL_STALE_MIN_S     3600UL
 #define ISPINDEL_INTERVAL_MAX_S  86400UL   // caps the interval so 3 x it can't overflow
 
 // True while an iSpindel's readings can be used for control and gravity: it has
 // reported since boot, and recently enough (see above). A stale iSpindel is
 // skipped, so the next source with a reading is used instead. Before 0.6.4 an
 // iSpindel whose battery died kept controlling with its last reading forever.
+// lastSeen is in uptimeSeconds(): as a millis() stamp the age wrapped after
+// 49.7 days, and a device that had stopped reporting looked fresh again.
 inline bool iSpindelIsFresh(const iSpindelConfig& s) {
   if (s.lastSeen == 0) return false;   // not heard from since boot
   uint32_t intervalS = (s.interval < ISPINDEL_INTERVAL_MAX_S) ? s.interval : ISPINDEL_INTERVAL_MAX_S;
-  uint32_t limitMs   = 3UL * intervalS * 1000UL;
-  if (limitMs < ISPINDEL_STALE_MIN_MS) limitMs = ISPINDEL_STALE_MIN_MS;
-  return (millis() - s.lastSeen) <= limitMs;
+  uint32_t limitS    = 3UL * intervalS;
+  if (limitS < ISPINDEL_STALE_MIN_S) limitS = ISPINDEL_STALE_MIN_S;
+  return uptimeSince(s.lastSeen) <= limitS;
 }
 
 // Log when an iSpindel's readings stop being used (no recent report) and when

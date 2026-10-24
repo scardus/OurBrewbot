@@ -36,3 +36,9 @@ uint32_t uptimeSeconds();
 // iSpindel not heard from since boot, a fermenter in band): a stamp taken in
 // the very first second after boot would otherwise read as "never".
 uint32_t uptimeStamp();
+
+// Seconds since a stamp taken with uptimeStamp() or uptimeSeconds(). Use this
+// rather than subtracting: a stamp taken in the first second after boot is
+// rounded up to 1 while the clock still reads 0, and plain subtraction would
+// then wrap round to 136 years instead of giving 0.
+uint32_t uptimeSince(uint32_t stamp);

@@ -48,6 +48,7 @@ void test_setMillis(uint32_t ms) { s_millis = ms; }
 static uint32_t s_uptimeSec = 0;
 uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
 uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
+uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
 
 // ---- no-op stubs ----
 bool saveFermenterConfig() { return true; }
@@ -840,7 +841,7 @@ void test_gravity_falls_back_to_estimate(void) {
 // An iSpindel that has just reported (iSpindelIsFresh() needs a report since boot)
 static void markIspindelReported(uint8_t slot) {
   test_setMillis(1000000);
-  g_iSpindels[slot].lastSeen = 1000000;
+  g_iSpindels[slot].lastSeen = 1000;   // uptime seconds - the clock reads 1000 s
   g_iSpindels[slot].interval = 900;
 }
 
@@ -870,7 +871,7 @@ void test_gravity_skips_a_stale_ispindel(void) {
   g_iSpindels[0].fermenter   = F;
   g_iSpindels[0].sg          = 1.040f;
   markIspindelReported(0);
-  test_setMillis(1000000 + 3600001);
+  test_setMillis(1000000 + 3601000);   // 60 min and 1 s later
   TEST_ASSERT_EQUAL_STRING("Estimated", getGravitySource(F));
 }
 

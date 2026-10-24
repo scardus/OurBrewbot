@@ -55,6 +55,7 @@ void test_setMillis(uint32_t ms) { s_millis = ms; }
 // ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
 uint32_t uptimeSeconds() { return s_millis / 1000; }
 uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
+uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
 
 // ---- no-op stubs ----
 void logMsgImpl(uint8_t, PGM_P, ...) {}

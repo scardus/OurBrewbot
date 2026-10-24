@@ -41,10 +41,18 @@
 // ---- storage Config.h declares extern, normally defined in Config.cpp ----
 iSpindelConfig g_iSpindels[MAX_ISPINDELS];
 
-// ---- millis(), referenced (but never exercised) inside handleiSpindelPost ----
+// ---- millis(), settable per test ----
 static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
+
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+// A test sets s_uptimeSec to stand in for an uptime past the 49.7-day wrap,
+// which the 32-bit millis() can't reach. 0 = follow millis().
+static uint32_t s_uptimeSec = 0;
+uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
+uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
 
 // ---- no-op stubs ----
 void logMsgImpl(uint8_t, PGM_P, ...) {}
@@ -71,6 +79,8 @@ void setUp(void) {
     g_iSpindels[i].unit      = ISPINDEL_UNIT_SG;
   }
   s_saveCalls = 0;
+  s_millis    = 0;
+  s_uptimeSec = 0;
 }
 
 void tearDown(void) {}
@@ -111,66 +121,89 @@ static void seedSlot0(const char* name, const char* id) {
 }
 
 // ---- iSpindelIsFresh: how long readings stay usable ----
+// lastSeen and the clock are both in uptime seconds
 
-static iSpindelConfig reportedAt(uint32_t ms, uint32_t intervalS) {
+static void test_setUptime(uint32_t sec) { test_setMillis(sec * 1000UL); }
+
+static iSpindelConfig reportedAt(uint32_t sec, uint32_t intervalS) {
   iSpindelConfig s{};
-  s.lastSeen = ms;
+  s.lastSeen = sec;
   s.interval = intervalS;
   return s;
 }
 
 void test_fresh_is_false_until_the_device_reports(void) {
-  test_setMillis(1000000);
+  test_setUptime(1000);
   TEST_ASSERT_FALSE(iSpindelIsFresh(reportedAt(0, 900)));
 }
 
 // 3 x 15 min is 45 min, under the 60 min minimum, so 60 min applies
 void test_fresh_for_60_minutes_with_a_short_interval(void) {
-  iSpindelConfig s = reportedAt(1000000, 900);
-  test_setMillis(1000000 + 3600000);
+  iSpindelConfig s = reportedAt(1000, 900);
+  test_setUptime(1000 + 3600);
   TEST_ASSERT_TRUE(iSpindelIsFresh(s));
-  test_setMillis(1000000 + 3600001);
+  test_setUptime(1000 + 3601);
   TEST_ASSERT_FALSE(iSpindelIsFresh(s));
 }
 
 // 3 x 30 min = 90 min
 void test_fresh_for_3_intervals_with_a_long_interval(void) {
-  iSpindelConfig s = reportedAt(1000000, 1800);
-  test_setMillis(1000000 + 5400000);
+  iSpindelConfig s = reportedAt(1000, 1800);
+  test_setUptime(1000 + 5400);
   TEST_ASSERT_TRUE(iSpindelIsFresh(s));
-  test_setMillis(1000000 + 5400001);
+  test_setUptime(1000 + 5401);
   TEST_ASSERT_FALSE(iSpindelIsFresh(s));
 }
 
 void test_fresh_for_60_minutes_when_no_interval_was_sent(void) {
-  iSpindelConfig s = reportedAt(1000000, 0);
-  test_setMillis(1000000 + 3600001);
+  iSpindelConfig s = reportedAt(1000, 0);
+  test_setUptime(1000 + 3601);
   TEST_ASSERT_FALSE(iSpindelIsFresh(s));
 }
 
 // A silly interval is capped at a day (3 days fresh), so 3 x it can't overflow
 // into a tiny limit
 void test_fresh_caps_a_huge_interval(void) {
-  iSpindelConfig s = reportedAt(1000000, 4000000000UL);
-  test_setMillis(1000000 + 2UL * 86400000UL);
+  iSpindelConfig s = reportedAt(1000, 4000000000UL);
+  test_setUptime(1000 + 2UL * 86400UL);
   TEST_ASSERT_TRUE(iSpindelIsFresh(s));
+}
+
+// The 49.7-day wrap: millis() goes back to 0 after 2^32 ms (4,294,967 s). As a
+// millis() stamp, a device last heard from just before then looked as if it
+// had reported 10 minutes ago, and its weeks-old readings were used again.
+void test_a_device_that_stopped_stays_stale_past_the_millis_wrap(void) {
+  iSpindelConfig s = reportedAt(1000, 900);
+  test_setMillis(1600000);                    // what millis() reads then...
+  s_uptimeSec = 1000UL + 4294967UL + 600UL;   // ...49.7 days and 10 min later
+  TEST_ASSERT_FALSE(iSpindelIsFresh(s));
 }
 
 void test_post_records_when_and_how_often_the_device_reports(void) {
   seedSlot0("ispindel-1", "C2A080");
-  test_setMillis(5000000);
+  test_setUptime(5000);
   handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0,\"interval\":1800}"));
-  TEST_ASSERT_EQUAL_UINT32(5000000, g_iSpindels[0].lastSeen);
-  TEST_ASSERT_EQUAL_UINT32(1800,    g_iSpindels[0].interval);
+  TEST_ASSERT_EQUAL_UINT32(5000, g_iSpindels[0].lastSeen);
+  TEST_ASSERT_EQUAL_UINT32(1800, g_iSpindels[0].interval);
 }
 
 // A newly registered device counts as reporting straight away
 void test_registration_records_when_the_device_reported(void) {
-  test_setMillis(5000000);
+  test_setUptime(5000);
   handleiSpindelPost(String("{\"name\":\"new\",\"ID\":\"AABBCC\",\"temperature\":20.0,\"interval\":900}"));
   TEST_ASSERT_EQUAL_STRING("AABBCC", g_iSpindels[0].id);
-  TEST_ASSERT_EQUAL_UINT32(5000000, g_iSpindels[0].lastSeen);
-  TEST_ASSERT_EQUAL_UINT32(900,     g_iSpindels[0].interval);
+  TEST_ASSERT_EQUAL_UINT32(5000, g_iSpindels[0].lastSeen);
+  TEST_ASSERT_EQUAL_UINT32(900,  g_iSpindels[0].interval);
+  TEST_ASSERT_TRUE(iSpindelIsFresh(g_iSpindels[0]));
+}
+
+// 0 means "never reported", so a report in the first second after boot must
+// still be stamped as a report
+void test_a_report_in_the_first_second_after_boot_counts(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  test_setMillis(500);
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0,\"interval\":900}"));
+  TEST_ASSERT_NOT_EQUAL(0, g_iSpindels[0].lastSeen);
   TEST_ASSERT_TRUE(iSpindelIsFresh(g_iSpindels[0]));
 }
 
@@ -881,8 +914,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fresh_for_3_intervals_with_a_long_interval);
   RUN_TEST(test_fresh_for_60_minutes_when_no_interval_was_sent);
   RUN_TEST(test_fresh_caps_a_huge_interval);
+  RUN_TEST(test_a_device_that_stopped_stays_stale_past_the_millis_wrap);
   RUN_TEST(test_post_records_when_and_how_often_the_device_reports);
   RUN_TEST(test_registration_records_when_the_device_reported);
+  RUN_TEST(test_a_report_in_the_first_second_after_boot_counts);
   RUN_TEST(test_new_ispindel_registers_unassigned);
   RUN_TEST(test_known_ispindel_keeps_its_assignment);
 

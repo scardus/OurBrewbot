@@ -110,6 +110,41 @@ static void test_a_stamp_is_the_uptime_after_the_first_second(void) {
   TEST_ASSERT_EQUAL_UINT32(42, uptimeStamp());
 }
 
+static void test_since_counts_seconds_from_a_stamp(void) {
+  test_setMillis(100000);
+  uptimeTick();
+  uint32_t stamp = uptimeStamp();     // 100 s
+  test_setMillis(160000);
+  uptimeTick();
+  TEST_ASSERT_EQUAL_UINT32(60, uptimeSince(stamp));
+}
+
+// A stamp from the first second is rounded up to 1 while the clock still reads
+// 0. Plain subtraction would give 0 - 1 = 4,294,967,295 s - so a report that
+// had only just arrived would have looked 136 years old.
+static void test_since_a_first_second_stamp_is_zero_not_136_years(void) {
+  test_setMillis(500);
+  uptimeTick();
+  uint32_t stamp = uptimeStamp();     // 1
+  TEST_ASSERT_EQUAL_UINT32(0, uptimeSince(stamp));
+  test_setMillis(5000);
+  uptimeTick();
+  TEST_ASSERT_EQUAL_UINT32(4, uptimeSince(stamp));
+}
+
+static void test_since_keeps_counting_across_the_millis_wrap(void) {
+  for (uint32_t ms = ONE_DAY_MS; ms < 0xFFFFFFFFUL - ONE_DAY_MS; ms += ONE_DAY_MS) {
+    test_setMillis(ms);
+    uptimeTick();
+  }
+  test_setMillis(0xFFFFFFFFUL - 59999);   // 60 s before the wrap
+  uptimeTick();
+  uint32_t stamp = uptimeStamp();
+  test_setMillis(60000);                  // 2 min later, past the wrap
+  uptimeTick();
+  TEST_ASSERT_EQUAL_UINT32(120, uptimeSince(stamp));
+}
+
 // ============================================================
 
 int main(int, char**) {
@@ -122,6 +157,9 @@ int main(int, char**) {
   RUN_TEST(test_the_clock_keeps_counting_past_fifty_days);
   RUN_TEST(test_a_stamp_is_never_zero);
   RUN_TEST(test_a_stamp_is_the_uptime_after_the_first_second);
+  RUN_TEST(test_since_counts_seconds_from_a_stamp);
+  RUN_TEST(test_since_a_first_second_stamp_is_zero_not_136_years);
+  RUN_TEST(test_since_keeps_counting_across_the_millis_wrap);
 
   return UNITY_END();
 }

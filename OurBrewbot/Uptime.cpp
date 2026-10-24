@@ -50,3 +50,8 @@ uint32_t uptimeStamp() {
   uint32_t s = uptimeSeconds();
   return s ? s : 1;
 }
+
+uint32_t uptimeSince(uint32_t stamp) {
+  uint32_t now = uptimeSeconds();
+  return (now > stamp) ? now - stamp : 0;
+}
