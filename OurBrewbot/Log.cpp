@@ -78,7 +78,14 @@ void logInit() {
   // Try to resolve hostname. hostByName is synchronous; cap at 2 s to avoid
   // blocking setup/reconnect for an unreachable or misconfigured syslog host.
   IPAddress resolved;
-  if (!WiFi.hostByName(g_syslogConfig.host, resolved, 2000)) return;
+  if (!WiFi.hostByName(g_syslogConfig.host, resolved, 2000)) {
+    // Can't reach syslog, by definition, but serial and the MQTT log topic
+    // still show it. Before this, a failed lookup left syslog off until the
+    // next reboot without a word.
+    logMsgL(SYSLOG_WARNING, "[LOG] Syslog host %s could not be found - trying again every 10 min",
+            g_syslogConfig.host);
+    return;
+  }
 
   s_syslogIP   = resolved;
   s_ipResolved = true;
@@ -92,6 +99,19 @@ void logInit() {
   // processed during the wait; a busy loop would not work.
   sendSyslog(SYSLOG_INFO, "[LOG] Syslog ready");
   delay(SYSLOG_ARP_WARMUP_MS);
+}
+
+void logRetrySyslog() {
+  if (s_ipResolved) return;
+  if (!g_syslogConfig.enabled || g_syslogConfig.host[0] == '\0') return;
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  logInit();
+  if (s_ipResolved) {
+    // Marks the gap, so missing lines aren't read as "that code didn't run"
+    logMsgL(SYSLOG_NOTICE, "[LOG] Syslog host %s found - lines logged before this were not sent to syslog",
+            g_syslogConfig.host);
+  }
 }
 
 // Send one finished log line to every output: serial, syslog and the MQTT
