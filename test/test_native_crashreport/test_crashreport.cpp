@@ -15,13 +15,14 @@
  */
 
 // Native (host) tests for OurBrewbot/CrashReport.cpp: the JSON report built
-// from g_lastCrash, and the scheduler that sends it once, 2 minutes after
-// boot, with retries.
+// from g_lastCrash, the queue file it is saved to, and the scheduler that
+// sends the saved reports once WiFi has been up for 2 minutes, with retries.
 //
 // CrashReport.cpp is #included directly (not linked) so the real, unmodified
 // production source is what's under test, and its file-static scheduler state
 // is in scope for setUp() to reset. test/stubs/ESP8266HTTPClient.h records
-// the POST instead of sending it. The JSON checks mirror the website Worker's
+// the POST instead of sending it, and test/stubs/LittleFS.h keeps the queue
+// file in RAM. The JSON checks mirror the website Worker's
 // validation (worker/index.js in the OurBrewbot-Website repo), which rejects
 // anything that doesn't match.
 
@@ -92,21 +93,32 @@ static void stageWatchdog() {
   g_lastCrash.lastModule = CP_MDNS;
 }
 
-void setUp(void) {
+// A restart: CrashReport.cpp's RAM state goes back to how it is at boot, the
+// clock starts again and there is no new crash - but the queue file is kept,
+// as it is on flash
+static void reboot() {
+  s_started       = false;
+  s_queued        = 0;
+  s_failures      = 0;
+  s_lastAttemptMs = 0;
+  s_waitMs        = 0;
+  s_wifiWasUp     = true;
+  s_wifiUpSinceMs = 0;
+  s_finished      = false;
   s_millis = 0;
+  memset(&g_lastCrash, 0, sizeof(g_lastCrash));
+}
+
+void setUp(void) {
   s_lastLog[0] = '\0';
   s_lastCheckpoint = 0xFF;
   memset(&g_globalConfig, 0, sizeof(g_globalConfig));
   g_globalConfig.crashReports = true;
-  memset(&g_lastCrash, 0, sizeof(g_lastCrash));
   WiFi.connected = true;
   httpTestReset();
   g_httpTest.nextStatus = 204;
-
-  // CrashReport.cpp's state as it is at boot
-  s_attempts = 0;
-  s_lastAttemptMs = 0;
-  s_finished = false;
+  fsTestReset();
+  reboot();
 }
 
 void tearDown(void) {}
@@ -119,6 +131,16 @@ static bool loopAt(uint32_t ms) {
   return g_httpTest.postCount != before;
 }
 
+// Reports in the queue file (one per line)
+static int queuedLines() {
+  int lines = 0;
+  for (const char* p = fsTestRead(FILE_CRASH_QUEUE); *p; p++) {
+    if (*p == '\n') lines++;
+  }
+  return lines;
+}
+
+static const uint32_t SEC = 1000UL;
 static const uint32_t MIN = 60000UL;
 
 // ============================================================
@@ -245,35 +267,98 @@ static void test_report_that_does_not_fit_is_refused(void) {
 }
 
 // ============================================================
-// Sending
+// Saving to the queue
 // ============================================================
 
-static void test_nothing_is_sent_after_a_normal_boot(void) {
+static void test_nothing_is_saved_or_sent_after_a_normal_boot(void) {
   TEST_ASSERT_FALSE(loopAt(1 * MIN));
   TEST_ASSERT_FALSE(loopAt(60 * MIN));
   TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));
 }
+
+// Saved on the first loop pass, not 2 minutes later, so a crash loop that
+// never reaches 2 minutes of uptime still leaves its reports behind
+static void test_crash_is_saved_at_once(void) {
+  stageException();
+  TEST_ASSERT_FALSE(loopAt(0));
+  TEST_ASSERT_EQUAL_INT(1, queuedLines());
+  TEST_ASSERT_NOT_NULL(strstr(fsTestRead(FILE_CRASH_QUEUE), "\"last\":\"MQTT_PEND\""));
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "saved"));
+}
+
+// This boot's crash goes on the end, behind the ones still waiting
+static void test_new_crash_goes_after_the_waiting_ones(void) {
+  fsTestWrite(FILE_CRASH_QUEUE, "{\"n\":1}\n{\"n\":2}\n");
+  stageException();
+  loopAt(0);
+  TEST_ASSERT_EQUAL_INT(3, queuedLines());
+  const char* queue = fsTestRead(FILE_CRASH_QUEUE);
+  TEST_ASSERT_EQUAL_INT(0, strncmp(queue, "{\"n\":1}\n{\"n\":2}\n{\"id\":", 22));
+}
+
+static void test_a_sixth_report_deletes_the_oldest(void) {
+  fsTestWrite(FILE_CRASH_QUEUE, "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n{\"n\":4}\n{\"n\":5}\n");
+  stageException();
+  loopAt(0);
+  TEST_ASSERT_EQUAL_INT(5, queuedLines());
+  const char* queue = fsTestRead(FILE_CRASH_QUEUE);
+  TEST_ASSERT_EQUAL_INT(0, strncmp(queue, "{\"n\":2}\n", 8));            // 1 is gone
+  TEST_ASSERT_NOT_NULL(strstr(queue, "{\"n\":5}\n{\"id\":"));             // newest last
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE_TMP));               // temp file cleaned up
+}
+
+static void test_report_that_cannot_be_saved_is_logged(void) {
+  stageException();
+  fsTestSetFull(true);
+  loopAt(0);
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "Cannot save"));
+  TEST_ASSERT_FALSE(loopAt(2 * MIN));
+}
+
+// ============================================================
+// Sending
+// ============================================================
 
 static void test_report_is_sent_two_minutes_after_boot(void) {
   stageException();
+  loopAt(0);
   TEST_ASSERT_FALSE(loopAt(2 * MIN - 1));
   TEST_ASSERT_TRUE (loopAt(2 * MIN));
   TEST_ASSERT_EQUAL_STRING(CRASH_REPORT_URL, g_httpTest.url);
   TEST_ASSERT_NOT_NULL(strstr(g_httpTest.body, "\"last\":\"MQTT_PEND\""));
   TEST_ASSERT_EQUAL_UINT8(CP_CRASH_RPT, s_lastCheckpoint);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));   // sent, so off the queue
 }
 
 static void test_report_is_sent_only_once(void) {
   stageException();
+  loopAt(0);
   loopAt(2 * MIN);
   TEST_ASSERT_FALSE(loopAt(30 * MIN));
   TEST_ASSERT_FALSE(loopAt(24 * 60 * MIN));
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
 }
 
+static void test_saved_reports_are_sent_oldest_first_30_seconds_apart(void) {
+  fsTestWrite(FILE_CRASH_QUEUE, "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n");
+  loopAt(0);
+  TEST_ASSERT_TRUE(loopAt(2 * MIN));
+  TEST_ASSERT_EQUAL_STRING("{\"n\":1}", g_httpTest.body);
+  TEST_ASSERT_FALSE(loopAt(2 * MIN + 30 * SEC - 1));
+  TEST_ASSERT_TRUE(loopAt(2 * MIN + 30 * SEC));
+  TEST_ASSERT_EQUAL_STRING("{\"n\":2}", g_httpTest.body);
+  TEST_ASSERT_TRUE(loopAt(2 * MIN + 60 * SEC));
+  TEST_ASSERT_EQUAL_STRING("{\"n\":3}", g_httpTest.body);
+  TEST_ASSERT_FALSE(loopAt(2 * MIN + 90 * SEC));
+  TEST_ASSERT_EQUAL_INT(3, g_httpTest.postCount);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));
+}
+
 static void test_failed_send_is_retried_every_ten_minutes_up_to_four_tries(void) {
   stageException();
   g_httpTest.nextStatus = 503;
+  loopAt(0);
   uint32_t t = 2 * MIN;
   TEST_ASSERT_TRUE(loopAt(t));                  // try 1
   for (int i = 2; i <= 4; i++) {
@@ -281,14 +366,31 @@ static void test_failed_send_is_retried_every_ten_minutes_up_to_four_tries(void)
     t += 10 * MIN;
     TEST_ASSERT_TRUE(loopAt(t));                // tries 2, 3, 4
   }
-  TEST_ASSERT_FALSE(loopAt(t + 10 * MIN));      // gave up
+  TEST_ASSERT_FALSE(loopAt(t + 10 * MIN));      // stopped for this boot
   TEST_ASSERT_EQUAL_INT(4, g_httpTest.postCount);
-  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "giving up"));
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "next boot"));
+  TEST_ASSERT_EQUAL_INT(1, queuedLines());      // but still saved
+}
+
+// The point of the queue: a report that couldn't be sent survives a restart
+static void test_report_still_waiting_is_sent_after_the_next_boot(void) {
+  stageException();
+  g_httpTest.nextStatus = 503;
+  loopAt(0);
+  for (int i = 0; i < 4; i++) loopAt(2 * MIN + i * 10 * MIN);
+
+  reboot();                                     // a normal boot - no new crash
+  g_httpTest.nextStatus = 204;
+  loopAt(0);
+  TEST_ASSERT_TRUE(loopAt(2 * MIN));
+  TEST_ASSERT_NOT_NULL(strstr(g_httpTest.body, "\"last\":\"MQTT_PEND\""));
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));
 }
 
 static void test_retry_succeeds_then_stops(void) {
   stageException();
   g_httpTest.nextStatus = -1;                   // no connection
+  loopAt(0);
   loopAt(2 * MIN);
   g_httpTest.nextStatus = 204;
   TEST_ASSERT_TRUE (loopAt(12 * MIN));
@@ -296,34 +398,101 @@ static void test_retry_succeeds_then_stops(void) {
   TEST_ASSERT_EQUAL_INT(2, g_httpTest.postCount);
 }
 
-// 400 / 413 / 429 won't change by retrying
-static void test_refused_report_is_not_retried(void) {
-  const int codes[] = { 400, 413, 429 };
+// 400 / 413 won't change by retrying, so the report is deleted
+static void test_refused_report_is_deleted(void) {
+  const int codes[] = { 400, 413 };
   for (int code : codes) {
     setUp();
     stageException();
     g_httpTest.nextStatus = code;
+    loopAt(0);
     loopAt(2 * MIN);
     TEST_ASSERT_FALSE_MESSAGE(loopAt(12 * MIN), "retried a refused report");
     TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
+    TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));
   }
 }
 
-static void test_switched_off_sends_nothing(void) {
+// 429 = the website's daily limit for this controller - keep it, try in an hour
+static void test_daily_limit_is_retried_in_an_hour(void) {
   stageException();
-  g_globalConfig.crashReports = false;
+  g_httpTest.nextStatus = 429;
+  loopAt(0);
+  TEST_ASSERT_TRUE(loopAt(2 * MIN));
+  g_httpTest.nextStatus = 204;
+  TEST_ASSERT_FALSE(loopAt(62 * MIN - 1));
+  TEST_ASSERT_TRUE (loopAt(62 * MIN));
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));
+}
+
+// No WiFi doesn't use up the tries - the report waits for as long as it takes,
+// then goes 2 minutes after WiFi comes back
+static void test_no_wifi_waits_for_wifi_to_come_back(void) {
+  stageException();
+  WiFi.connected = false;
+  loopAt(0);
   TEST_ASSERT_FALSE(loopAt(2 * MIN));
   TEST_ASSERT_FALSE(loopAt(60 * MIN));
+  TEST_ASSERT_FALSE(loopAt(24 * 60 * MIN));
+  WiFi.connected = true;
+  const uint32_t back = 24 * 60 * MIN + 1 * MIN;
+  TEST_ASSERT_FALSE(loopAt(back));                 // connected, settling
+  TEST_ASSERT_FALSE(loopAt(back + 2 * MIN - 1));
+  TEST_ASSERT_TRUE (loopAt(back + 2 * MIN));
+}
+
+// A report cut short (power lost while saving it) is deleted unsent, and the
+// next one still goes
+static void test_damaged_report_is_deleted_unsent(void) {
+  fsTestWrite(FILE_CRASH_QUEUE, "{\"n\":1\n{\"n\":2}\n{\"n\":");
+  loopAt(0);
+  TEST_ASSERT_FALSE(loopAt(2 * MIN));           // the damaged one - not posted
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "damaged"));
+  TEST_ASSERT_TRUE(loopAt(2 * MIN + 30 * SEC));
+  TEST_ASSERT_EQUAL_STRING("{\"n\":2}", g_httpTest.body);
+  TEST_ASSERT_FALSE(loopAt(2 * MIN + 60 * SEC));  // the cut-short last one
+  TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));
+}
+
+// If a sent report can't be taken off the queue, stop - rather than send the
+// same report every 30 seconds
+static void test_queue_that_cannot_be_updated_stops_sending(void) {
+  fsTestWrite(FILE_CRASH_QUEUE, "{\"n\":1}\n{\"n\":2}\n");
+  fsTestSetFull(true);
+  loopAt(0);
+  TEST_ASSERT_TRUE(loopAt(2 * MIN));
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "next boot"));
+  TEST_ASSERT_FALSE(loopAt(2 * MIN + 30 * SEC));
+  TEST_ASSERT_FALSE(loopAt(60 * MIN));
+  TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
+}
+
+// ============================================================
+// Switched off
+// ============================================================
+
+static void test_switched_off_saves_and_sends_nothing(void) {
+  stageException();
+  g_globalConfig.crashReports = false;
+  TEST_ASSERT_FALSE(loopAt(0));
+  TEST_ASSERT_FALSE(loopAt(2 * MIN));
+  TEST_ASSERT_FALSE(loopAt(60 * MIN));
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));
   TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "switched off"));
 }
 
-static void test_no_wifi_counts_as_a_failed_try(void) {
-  stageException();
+// Switching off while reports are waiting deletes them
+static void test_switching_off_deletes_the_saved_reports(void) {
+  fsTestWrite(FILE_CRASH_QUEUE, "{\"n\":1}\n{\"n\":2}\n");
   WiFi.connected = false;
-  loopAt(2 * MIN);
-  TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
+  loopAt(0);
+  g_globalConfig.crashReports = false;
+  loopAt(1 * MIN);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "deleted 2 saved reports"));
   WiFi.connected = true;
-  TEST_ASSERT_TRUE(loopAt(12 * MIN));
+  TEST_ASSERT_FALSE(loopAt(10 * MIN));
 }
 
 int main(int argc, char** argv) {
@@ -337,14 +506,26 @@ int main(int argc, char** argv) {
   RUN_TEST(test_watchdog_report_has_no_registers_or_stack);
   RUN_TEST(test_report_that_does_not_fit_is_refused);
 
-  RUN_TEST(test_nothing_is_sent_after_a_normal_boot);
+  RUN_TEST(test_nothing_is_saved_or_sent_after_a_normal_boot);
+  RUN_TEST(test_crash_is_saved_at_once);
+  RUN_TEST(test_new_crash_goes_after_the_waiting_ones);
+  RUN_TEST(test_a_sixth_report_deletes_the_oldest);
+  RUN_TEST(test_report_that_cannot_be_saved_is_logged);
+
   RUN_TEST(test_report_is_sent_two_minutes_after_boot);
   RUN_TEST(test_report_is_sent_only_once);
+  RUN_TEST(test_saved_reports_are_sent_oldest_first_30_seconds_apart);
   RUN_TEST(test_failed_send_is_retried_every_ten_minutes_up_to_four_tries);
+  RUN_TEST(test_report_still_waiting_is_sent_after_the_next_boot);
   RUN_TEST(test_retry_succeeds_then_stops);
-  RUN_TEST(test_refused_report_is_not_retried);
-  RUN_TEST(test_switched_off_sends_nothing);
-  RUN_TEST(test_no_wifi_counts_as_a_failed_try);
+  RUN_TEST(test_refused_report_is_deleted);
+  RUN_TEST(test_daily_limit_is_retried_in_an_hour);
+  RUN_TEST(test_no_wifi_waits_for_wifi_to_come_back);
+  RUN_TEST(test_damaged_report_is_deleted_unsent);
+  RUN_TEST(test_queue_that_cannot_be_updated_stops_sending);
+
+  RUN_TEST(test_switched_off_saves_and_sends_nothing);
+  RUN_TEST(test_switching_off_deletes_the_saved_reports);
 
   return UNITY_END();
 }

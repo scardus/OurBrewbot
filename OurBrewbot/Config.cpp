@@ -1220,6 +1220,9 @@ void resetAllConfig() {
   // Remove WiFi config so WiFiManager re-runs the portal
   clearWiFiProvisioningArtifacts();
 
+  // ...and any crash reports still waiting to be sent
+  if (LittleFS.exists(FILE_CRASH_QUEUE)) LittleFS.remove(FILE_CRASH_QUEUE);
+
   logMsg("[CFG] Reset complete - restart required");
 }
 
