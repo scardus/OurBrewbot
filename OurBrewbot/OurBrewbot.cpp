@@ -499,12 +499,17 @@ static void openSetupHotspot() {
   g_webServer.stop();
   s_hotspot = new WiFiManager();
   configureWiFiManager(*s_hotspot);
+  s_hotspot->setConfigPortalTimeout(0);   // no library timeout - wifiLoop() closes it after 5 min
   s_hotspot->setConfigPortalBlocking(false);
   s_hotspot->startConfigPortal(apName.c_str());
 }
 
 static void closeSetupHotspot() {
-  s_hotspot->stopConfigPortal();
+  // The library closes the hotspot by itself once new WiFi details have been
+  // saved. Closing it a second time crashes (its web server is already gone).
+  if (s_hotspot->getConfigPortalActive()) {
+    s_hotspot->stopConfigPortal();
+  }
   delete s_hotspot;
   s_hotspot = nullptr;
   g_webServer.begin();
@@ -525,7 +530,8 @@ void wifiLoop() {
   unsigned long now = millis();
   if (s_hotspot != nullptr) {
     s_hotspot->process();            // serves the hotspot's pages
-    if (WiFi.isConnected() || now - s_wifiPhaseStart >= WIFI_HOTSPOT_MS) {
+    if (WiFi.isConnected() || !s_hotspot->getConfigPortalActive() ||
+        now - s_wifiPhaseStart >= WIFI_HOTSPOT_MS) {
       closeSetupHotspot();
       s_wifiPhaseStart = now;
     }
