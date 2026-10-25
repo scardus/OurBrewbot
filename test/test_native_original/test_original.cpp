@@ -325,6 +325,75 @@ void test_a_discovered_probe_becomes_unassigned(void) {
   TEST_ASSERT_EQUAL_STRING("28aabbccdd0011", g_probes[2].address);   // still registered
 }
 
+// ============================================================
+// Tilts
+// ============================================================
+
+// Red (original colour 1) on fermenter 1 and yellow (7) on fermenter 2
+static const char TILTS_RED_AND_YELLOW[] =
+  R"({"Address":[1,7,99,99],"Function":[2,2,99,99],"Fermenter":[0,1,99,99],"Temp_Adjust":[0.5,0,0,0],"SG_Adjust":[2,0,0,0],"MBB":[0,0,0,0]})";
+
+// Fermenter 1 controls on its Tilt (TempControl 2), the others on a probe
+static void stageTiltControlOnFermenter1() {
+  fsTestWrite("/jsonFermenter.txt",
+              edited(ORIG_FERMENTER, "\"TempControl\":[1,1,1,1]", "\"TempControl\":[2,1,1,1]").c_str());
+}
+
+void test_tilt_colours_are_renumbered_from_zero(void) {
+  stageOriginal();
+  fsTestWrite("/jsonTilt.txt", TILTS_RED_AND_YELLOW);
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(TILT_RED, g_tilts[TILT_RED].colour);
+  TEST_ASSERT_EQUAL_UINT8(TILT_YELLOW, g_tilts[TILT_YELLOW].colour);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_GREEN].colour);   // not original 1 + 1
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_PINK].colour);    // not original 7 + 1
+}
+
+void test_a_tilt_chosen_for_control_gets_the_beer_role(void) {
+  stageOriginal();
+  fsTestWrite("/jsonTilt.txt", TILTS_RED_AND_YELLOW);
+  stageTiltControlOnFermenter1();
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(0, g_tilts[TILT_RED].fermenter);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_tilts[TILT_RED].function);
+}
+
+void test_a_tilt_not_chosen_for_control_gives_gravity_only(void) {
+  stageOriginal();
+  fsTestWrite("/jsonTilt.txt", TILTS_RED_AND_YELLOW);
+  stageTiltControlOnFermenter1();
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(1, g_tilts[TILT_YELLOW].fermenter);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_YELLOW].function);
+  TEST_ASSERT_TRUE(reportHas("Tilt yellow: fermenter 2, gravity only"));
+}
+
+void test_an_unassigned_tilt_has_no_fermenter(void) {
+  stageOriginal();
+  fsTestWrite("/jsonTilt.txt",
+              R"({"Address":[3,99,99,99],"Function":[99,99,99,99],"Fermenter":[0,99,99,99],"Temp_Adjust":[0,0,0,0],"SG_Adjust":[0,0,0,0],"MBB":[0,0,0,0]})");
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(TILT_BLACK, g_tilts[TILT_BLACK].colour);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_BLACK].fermenter);
+}
+
+void test_tilt_calibration_changes_sign(void) {
+  // Original: shown = reading - adjust. OurBrewbot: shown = reading + adjust.
+  stageOriginal();
+  fsTestWrite("/jsonTilt.txt", TILTS_RED_AND_YELLOW);
+  loadAllConfig();
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.5f, g_tilts[TILT_RED].tempAdjust);
+  TEST_ASSERT_FLOAT_WITHIN(0.00001f, -0.002f, g_tilts[TILT_RED].sgAdjust);
+}
+
+void test_a_fahrenheit_tilt_calibration_becomes_celsius(void) {
+  stageOriginal();
+  fsTestWrite("/jsonGlobal.txt", edited(ORIG_GLOBAL, "\"unit\":1", "\"unit\":0").c_str());
+  fsTestWrite("/jsonTilt.txt", edited(TILTS_RED_AND_YELLOW, "\"Temp_Adjust\":[0.5", "\"Temp_Adjust\":[0.9").c_str());
+  loadAllConfig();
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.5f, g_tilts[TILT_RED].tempAdjust);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -354,6 +423,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_common_ambient_probe_becomes_ambient_for_its_fermenter);
   RUN_TEST(test_a_common_probe_without_a_fermenter_goes_to_fermenter_1);
   RUN_TEST(test_a_discovered_probe_becomes_unassigned);
+
+  RUN_TEST(test_tilt_colours_are_renumbered_from_zero);
+  RUN_TEST(test_a_tilt_chosen_for_control_gets_the_beer_role);
+  RUN_TEST(test_a_tilt_not_chosen_for_control_gives_gravity_only);
+  RUN_TEST(test_an_unassigned_tilt_has_no_fermenter);
+  RUN_TEST(test_tilt_calibration_changes_sign);
+  RUN_TEST(test_a_fahrenheit_tilt_calibration_becomes_celsius);
 
   return UNITY_END();
 }

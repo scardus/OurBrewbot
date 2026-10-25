@@ -251,6 +251,70 @@ static void convertProbes() {
 }
 
 // ============================================================
+// TILTS (jsonTilt.txt)
+// ============================================================
+
+// For the report. Same order as TiltColour in Config.h (Tilt.cpp has the
+// display names, but would bring the BLE code into the config tests).
+static const char* const kTiltColours[MAX_TILTS] = {
+  "red", "green", "black", "purple", "orange", "blue", "yellow", "pink"
+};
+
+static void convertTilts(const OriginalFacts& facts) {
+  JsonDocument doc;
+  if (!loadOriginal(doc, "jsonTilt")) return;
+
+  for (int i = 0; i < MAX_TILT_SLOTS; i++) {
+    // Original colours are 1-8 in the same order as OurBrewbot's 0-7
+    // (1 = red, 2 = green, ...)
+    uint8_t colour = doc["Address"][i] | PROBE_UNASSIGNED;
+    if (colour < 1 || colour > MAX_TILTS) {
+      doc["Address"][i]   = PROBE_UNASSIGNED;
+      doc["Function"][i]  = PROBE_UNASSIGNED;
+      doc["Fermenter"][i] = PROBE_UNASSIGNED;
+      continue;
+    }
+    colour -= 1;
+    doc["Address"][i] = colour;
+
+    // Original role 2 = assigned to its fermenter. Its temperature was only
+    // used for control when that fermenter's TempControl chose the Tilt (2);
+    // in OurBrewbot that is the Beer role. Without it the Tilt still gives
+    // the fermenter its SG.
+    uint8_t role      = doc["Function"][i]  | PROBE_UNASSIGNED;
+    uint8_t fermenter = doc["Fermenter"][i] | PROBE_UNASSIGNED;
+    if (role != 2 || fermenter >= MAX_FERMENTERS) {
+      fermenter = PROBE_UNASSIGNED;
+      role      = PROBE_UNASSIGNED;
+    } else {
+      role = (facts.tempControl[fermenter] == 2) ? PROBE_FN_BEER : PROBE_UNASSIGNED;
+    }
+    doc["Function"][i]  = role;
+    doc["Fermenter"][i] = fermenter;
+    if (fermenter != PROBE_UNASSIGNED) {
+      REPORT("Tilt %s: fermenter %u, %s", kTiltColours[colour], fermenter + 1,
+             role == PROBE_FN_BEER ? "beer temperature" : "gravity only");
+    }
+
+    // The original stored adjust = reading - true value and SUBTRACTED it;
+    // OurBrewbot adds its adjustment. The original's temperature adjustment
+    // is in the display unit, and its SG adjustment in thousandths.
+    float tempAdjust = doc["Temp_Adjust"][i] | 0.0f;
+    float sgAdjust   = doc["SG_Adjust"][i]   | 0.0f;
+    if (facts.fahrenheit) tempAdjust = tempAdjust * 5.0f / 9.0f;
+    tempAdjust = -tempAdjust;
+    sgAdjust   = -sgAdjust / 1000.0f;
+    doc["Temp_Adjust"][i] = tempAdjust;
+    doc["SG_Adjust"][i]   = sgAdjust;
+    if (tempAdjust != 0.0f || sgAdjust != 0.0f) {
+      REPORT("Tilt %s: calibration now %+.2f C, %+.4f SG", kTiltColours[colour], tempAdjust, sgAdjust);
+    }
+  }
+
+  saveJsonDocSafe(doc, FILE_TILT, FILE_TILT_BKP);
+}
+
+// ============================================================
 // FERMENTERS (jsonFermenter.txt) - written last
 // ============================================================
 
@@ -298,6 +362,7 @@ bool convertOriginalConfig() {
   readFacts(facts);
   convertGlobal(facts);
   convertProbes();
+  convertTilts(facts);
   convertFermenters(facts);   // last - see the top of this file
 
   LittleFS.remove(ORIG_IN_PROGRESS);
