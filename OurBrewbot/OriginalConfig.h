@@ -40,3 +40,7 @@ bool convertOriginalConfig();
 // True if this boot converted an original config (for the DEFERRED log line
 // sent once syslog is running).
 bool originalConfigConverted();
+
+// The 24-bit raw RF code the original sent for a "Dial" plug (group and
+// button 1-4); 0 if either is out of range.
+uint32_t dialPlugCode(uint8_t group, uint8_t button, bool on);

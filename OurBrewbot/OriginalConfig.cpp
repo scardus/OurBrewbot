@@ -376,6 +376,68 @@ static void convertiSpindels(const OriginalFacts& facts) {
 }
 
 // ============================================================
+// SMART PLUGS (jsonSmartPlugs.txt)
+// ============================================================
+
+// rc-switch's switchOn()/switchOff(group, button), which the original used for
+// "Dial" plugs: a 12-symbol tri-state word - 4 for the group, 4 for the
+// button, "FFF", then F for on or 0 for off. rc-switch sends each '0' as bits
+// 00 and each 'F' as 01, giving the 24-bit code OurBrewbot sends as a raw code.
+uint32_t dialPlugCode(uint8_t group, uint8_t button, bool on) {
+  if (group < 1 || group > 4 || button < 1 || button > 4) return 0;
+  uint32_t code = 0;
+  for (int i = 1; i <= 4; i++) code = (code << 2) | (i == group ? 0 : 1);
+  for (int i = 1; i <= 4; i++) code = (code << 2) | (i == button ? 0 : 1);
+  for (int i = 0; i < 3; i++)  code = (code << 2) | 1;
+  code = (code << 2) | (on ? 1 : 0);
+  return code;
+}
+
+static void convertSmartPlugs() {
+  JsonDocument doc;
+  if (!loadOriginal(doc, "jsonSmartPlugs")) return;
+
+  for (int i = 0; i < MAX_SMART_PLUGS; i++) {
+    uint32_t onCode  = doc["OnCode"][i]  | 0UL;
+    uint32_t offCode = doc["OffCode"][i] | 0UL;
+
+    // Type 1 ("Dial") saved the dial group (Codeset) and the button numbers,
+    // not the codes. Every other type saved the raw codes.
+    if ((doc["Type"][i] | 0) == 1 && onCode != 0 && offCode != 0) {
+      uint8_t group = doc["Codeset"][i] | 0;
+      onCode  = (onCode  <= 4) ? dialPlugCode(group, onCode,  true)  : 0;
+      offCode = (offCode <= 4) ? dialPlugCode(group, offCode, false) : 0;
+      if (onCode == 0 || offCode == 0) {
+        REPORT("Plug %d: Dial settings not recognised - set its codes again", i + 1);
+      } else {
+        doc["Bits"][i] = 24;
+        REPORT("Plug %d: Dial group %u -> codes %lu / %lu", i + 1, group,
+               (unsigned long)onCode, (unsigned long)offCode);
+      }
+      doc["OnCode"][i]  = onCode;
+      doc["OffCode"][i] = offCode;
+    }
+
+    // The original fixed each plug's job by its slot: 0 F1 heat, 1 F1 cool,
+    // ... 7 F4 cool, 8 and 9 Aux 1 and 2. OurBrewbot's PLUG_FN_ codes are the
+    // same numbers, but it reads them from Function, which the original left
+    // at 99. A slot without both codes did nothing in the original.
+    bool used = (onCode != 0 && offCode != 0);
+    doc["Function"][i]  = used ? i : PLUG_FN_UNASSIGNED;
+    doc["Fermenter"][i] = (used && i < 2 * MAX_FERMENTERS) ? i / 2 : PROBE_UNASSIGNED;
+    if (used) {
+      if (i < 2 * MAX_FERMENTERS) {
+        REPORT("Plug %d: fermenter %d %s", i + 1, i / 2 + 1, (i % 2 == 0) ? "heating" : "cooling");
+      } else {
+        REPORT("Plug %d: Aux %d", i + 1, i - 2 * MAX_FERMENTERS + 1);
+      }
+    }
+  }
+
+  saveJsonDocSafe(doc, FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP);
+}
+
+// ============================================================
 // PROFILE STEPS (jsonProfileSteps.txt)
 // ============================================================
 
@@ -528,6 +590,7 @@ bool convertOriginalConfig() {
   convertProbes();
   convertTilts(facts);
   convertiSpindels(facts);
+  convertSmartPlugs();
   convertProfileSteps(facts);
   convertBrewServices(facts);
   convertFermenters(facts);   // last - see the top of this file

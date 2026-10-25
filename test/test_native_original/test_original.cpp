@@ -626,6 +626,114 @@ void test_the_originals_default_service_id_is_not_a_service(void) {
   TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[0].brewServices);
 }
 
+// ============================================================
+// Smart plugs
+// ============================================================
+
+// rc-switch's own getCodeWordB() + sendTriState() (RCSwitch.cpp), written out
+// with strings, to check dialPlugCode() against
+static uint32_t rcSwitchTypeB(int group, int button, bool on) {
+  char word[13];
+  int pos = 0;
+  for (int i = 1; i <= 4; i++) word[pos++] = (group == i)  ? '0' : 'F';
+  for (int i = 1; i <= 4; i++) word[pos++] = (button == i) ? '0' : 'F';
+  word[pos++] = 'F';
+  word[pos++] = 'F';
+  word[pos++] = 'F';
+  word[pos++] = on ? 'F' : '0';
+  word[pos]   = '\0';
+  uint32_t code = 0;
+  for (const char* p = word; *p; p++) {
+    code <<= 2;
+    if (*p == 'F') code |= 1;
+    if (*p == '1') code |= 3;
+  }
+  return code;
+}
+
+void test_dial_codes_match_rc_switch_for_every_group_and_button(void) {
+  for (int group = 1; group <= 4; group++) {
+    for (int button = 1; button <= 4; button++) {
+      TEST_ASSERT_EQUAL_UINT32(rcSwitchTypeB(group, button, true),  dialPlugCode(group, button, true));
+      TEST_ASSERT_EQUAL_UINT32(rcSwitchTypeB(group, button, false), dialPlugCode(group, button, false));
+    }
+  }
+}
+
+void test_dial_codes_out_of_range_are_zero(void) {
+  TEST_ASSERT_EQUAL_UINT32(0, dialPlugCode(0, 1, true));
+  TEST_ASSERT_EQUAL_UINT32(0, dialPlugCode(5, 1, true));
+  TEST_ASSERT_EQUAL_UINT32(0, dialPlugCode(1, 0, true));
+  TEST_ASSERT_EQUAL_UINT32(0, dialPlugCode(1, 5, true));
+}
+
+void test_the_real_configs_dial_plugs_get_their_real_codes(void) {
+  // The same plugs, set up by hand on the same controller after the switch to
+  // OurBrewbot, switch with exactly these codes
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT32(5313877, g_smartPlugs[0].onCode);
+  TEST_ASSERT_EQUAL_UINT32(5313876, g_smartPlugs[0].offCode);
+  TEST_ASSERT_EQUAL_UINT32(5326165, g_smartPlugs[1].onCode);
+  TEST_ASSERT_EQUAL_UINT32(5326164, g_smartPlugs[1].offCode);
+  TEST_ASSERT_EQUAL_UINT8(24, g_smartPlugs[0].bits);
+  TEST_ASSERT_EQUAL_UINT16(427, g_smartPlugs[0].delayLength);
+}
+
+void test_the_real_configs_plugs_heat_and_cool_fermenter_1(void) {
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_F1_HOT, g_smartPlugs[0].function);
+  TEST_ASSERT_EQUAL_UINT8(0, g_smartPlugs[0].fermenter);
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_F1_COLD, g_smartPlugs[1].function);
+  TEST_ASSERT_EQUAL_UINT8(0, g_smartPlugs[1].fermenter);
+  TEST_ASSERT_TRUE(reportHas("Plug 2: fermenter 1 cooling"));
+}
+
+void test_a_slot_without_codes_has_no_role(void) {
+  stageOriginal();
+  loadAllConfig();
+  for (int i = 2; i < MAX_SMART_PLUGS; i++) {
+    TEST_ASSERT_EQUAL_UINT8(PLUG_FN_UNASSIGNED, g_smartPlugs[i].function);
+    TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_smartPlugs[i].fermenter);
+  }
+}
+
+void test_a_raw_code_plug_keeps_its_codes_and_gets_its_slots_role(void) {
+  // Slot 3 (fermenter 2 cooling), a learned plug (type 11) with raw codes
+  stageOriginal();
+  std::string plugs = edited(ORIG_SMARTPLUGS, "\"Type\":[1,1,1,1", "\"Type\":[1,1,1,11");
+  plugs = edited(plugs.c_str(), "\"OnCode\":[1,2,0,0", "\"OnCode\":[1,2,0,4542805");
+  plugs = edited(plugs.c_str(), "\"OffCode\":[1,2,0,0", "\"OffCode\":[1,2,0,4542804");
+  fsTestWrite("/jsonSmartPlugs.txt", plugs.c_str());
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT32(4542805, g_smartPlugs[3].onCode);
+  TEST_ASSERT_EQUAL_UINT32(4542804, g_smartPlugs[3].offCode);
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_F2_COLD, g_smartPlugs[3].function);
+  TEST_ASSERT_EQUAL_UINT8(1, g_smartPlugs[3].fermenter);
+}
+
+void test_an_aux_slot_becomes_an_aux_plug(void) {
+  stageOriginal();
+  std::string plugs = edited(ORIG_SMARTPLUGS, "\"Type\":[1,1,1,1,1,1,1,1,1,1]", "\"Type\":[1,1,1,1,1,1,1,1,10,1]");
+  plugs = edited(plugs.c_str(), "\"OnCode\":[1,2,0,0,0,0,0,0,0,0]", "\"OnCode\":[1,2,0,0,0,0,0,0,1234567,0]");
+  plugs = edited(plugs.c_str(), "\"OffCode\":[1,2,0,0,0,0,0,0,0,0]", "\"OffCode\":[1,2,0,0,0,0,0,0,1234566,0]");
+  fsTestWrite("/jsonSmartPlugs.txt", plugs.c_str());
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_AUX1, g_smartPlugs[8].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_smartPlugs[8].fermenter);
+  TEST_ASSERT_TRUE(reportHas("Plug 9: Aux 1"));
+}
+
+void test_a_dial_plug_with_an_unknown_group_is_reported(void) {
+  stageOriginal();
+  fsTestWrite("/jsonSmartPlugs.txt", edited(ORIG_SMARTPLUGS, "\"Codeset\":[3,3", "\"Codeset\":[7,3").c_str());
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT32(0, g_smartPlugs[0].onCode);
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_UNASSIGNED, g_smartPlugs[0].function);
+  TEST_ASSERT_TRUE(reportHas("Plug 1: Dial settings not recognised"));
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -684,6 +792,15 @@ int main(int argc, char** argv) {
   RUN_TEST(test_original_service_2_is_brewers_friend);
   RUN_TEST(test_monitor_beer_is_reported_and_not_converted);
   RUN_TEST(test_the_originals_default_service_id_is_not_a_service);
+
+  RUN_TEST(test_dial_codes_match_rc_switch_for_every_group_and_button);
+  RUN_TEST(test_dial_codes_out_of_range_are_zero);
+  RUN_TEST(test_the_real_configs_dial_plugs_get_their_real_codes);
+  RUN_TEST(test_the_real_configs_plugs_heat_and_cool_fermenter_1);
+  RUN_TEST(test_a_slot_without_codes_has_no_role);
+  RUN_TEST(test_a_raw_code_plug_keeps_its_codes_and_gets_its_slots_role);
+  RUN_TEST(test_an_aux_slot_becomes_an_aux_plug);
+  RUN_TEST(test_a_dial_plug_with_an_unknown_group_is_reported);
 
   return UNITY_END();
 }
