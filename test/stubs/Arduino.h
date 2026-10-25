@@ -44,6 +44,7 @@ typedef const char* PGM_P;
 #define memcpy_P    memcpy
 #define strlen_P    strlen
 #define strncpy_P   strncpy
+#define strcmp_P    strcmp
 #define snprintf_P  snprintf
 #define vsnprintf_P vsnprintf
 

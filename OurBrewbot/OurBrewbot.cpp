@@ -45,6 +45,7 @@
 #include "Pins.h"
 #include "Version.h"
 #include "Config.h"
+#include "OriginalConfig.h"
 #include "Log.h"
 #include "Fermenter.h"
 #include "Profile.h"
@@ -205,6 +206,9 @@ void setup() {
         ri->exccause, ri->epc1, ri->excvaddr);
     }
     crashLogPendingDeferred();
+    if (originalConfigConverted()) {
+      logMsgL(SYSLOG_NOTICE, "DEFERRED [CFG] Original MyBrewbot config converted - see %s", ORIG_REPORT_FILE);
+    }
     logMsgL(SYSLOG_NOTICE, "DEFERRED [WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
   } else {
     // No syslog, but still read (and clear) any crash record so the crash

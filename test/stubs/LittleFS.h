@@ -39,10 +39,11 @@
 
 // 4 KB per file covers the largest config this firmware writes (jsonFermenter
 // is 33 fields x 4 slots, jsonProfileSteps is 6 fields x 60 slots - both come
-// in under 2.5 KB). 32 slots covers every config file plus its backup (10 x 2
-// for a full saveAllConfig), the reboot log and the WiFi artifacts.
+// in under 2.5 KB). 64 slots covers every config file plus its backup (10 x 2
+// for a full saveAllConfig), the reboot log, the WiFi artifacts, and an
+// original MyBrewbot config with its copies in /orig/ (OriginalConfig.cpp).
 #define FS_FILE_CAPACITY 4096
-#define FS_MAX_FILES     32
+#define FS_MAX_FILES     64
 
 struct FsEntry {
   char   path[48];
@@ -128,6 +129,8 @@ public:
   String fileName() {
     return (idx_ >= 0 && idx_ < FS_MAX_FILES) ? String(g_fsEntries[idx_].path) : String("");
   }
+  // Folders are only part of a file's path here, so no entry is a folder
+  bool isDirectory() { return false; }
   size_t fileSize() {
     return (idx_ >= 0 && idx_ < FS_MAX_FILES) ? g_fsEntries[idx_].len : 0;
   }
@@ -183,6 +186,9 @@ public:
   bool exists(const String& path) { return exists(path.c_str()); }
 
   Dir openDir(const char* /*prefix*/) { return Dir(); }
+
+  // Directories are only part of the path here, so there is nothing to create
+  bool mkdir(const char* /*path*/) { return true; }
 
   File open(const char* path, const char* mode) {
     if (mode && mode[0] == 'r') {

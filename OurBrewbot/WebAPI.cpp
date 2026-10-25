@@ -1758,6 +1758,18 @@ void handleFsFiles(ESP8266WebServer& server) {
   JsonArray arr = doc["files"].to<JsonArray>();
   Dir dir = LittleFS.openDir("/");
   while (dir.next()) {
+    if (dir.isDirectory()) {
+      // One level down, listed as "<folder>/<file>" - e.g. /orig/, the files
+      // of an original MyBrewbot config kept by OriginalConfig.cpp
+      String folder = dir.fileName();
+      Dir inner = LittleFS.openDir(("/" + folder).c_str());
+      while (inner.next()) {
+        JsonObject f = arr.add<JsonObject>();
+        f["name"] = folder + "/" + inner.fileName();
+        f["size"] = (unsigned int)inner.fileSize();
+      }
+      continue;
+    }
     JsonObject f = arr.add<JsonObject>();
     f["name"] = dir.fileName();
     f["size"] = (unsigned int)dir.fileSize();

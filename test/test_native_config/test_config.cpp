@@ -62,6 +62,7 @@ void logMsgImpl(uint8_t, PGM_P fmt, ...) {
 // The code under test.
 #include "../../OurBrewbot/TextSafe.cpp"
 #include "../../OurBrewbot/Config.cpp"
+#include "../../OurBrewbot/OriginalConfig.cpp"
 
 // ---- test fixture ----
 
@@ -370,46 +371,9 @@ void test_legacy_integer_gravities_are_scaled_to_sg(void) {
   TEST_ASSERT_EQUAL_FLOAT(0.0020001f, g_fermenters[3].tg);
 }
 
-void test_legacy_brewservicesend_integer_migrates_to_the_bitmask(void) {
-  // Pre-bitmask configs had a single per-fermenter flag; it becomes bit 0.
-  // Stored as 0/1, the migration works.
-  fsTestWrite(FILE_FERMENTER, "{\"BrewServiceSend\":[1,0,1,0]}");
-  TEST_ASSERT_TRUE(loadFermenterConfig());
-  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[0].brewServices);
-  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[1].brewServices);
-  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[2].brewServices);
-  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[3].brewServices);
-}
-
-void test_legacy_brewservicesend_bool_migrates_to_the_bitmask(void) {
-  // Regression guard for the v0.4.4 fix. BrewServiceSend was a bool member, so
-  // it can also be on disk as a JSON boolean rather than 0/1. The original
-  // `(doc[...][i] | 0)` read it as an int, and ArduinoJson requires the stored
-  // type to BE an integer for that - a JSON boolean failed the check, took the
-  // 0 default, and migrated to "not subscribed", silently dropping the user's
-  // brew-service reporting on upgrade. Both encodings must give the same result.
-  fsTestWrite(FILE_FERMENTER, "{\"BrewServiceSend\":[true,false,true,false]}");
-  TEST_ASSERT_TRUE(loadFermenterConfig());
-  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[0].brewServices);
-  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[1].brewServices);
-  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[2].brewServices);
-  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[3].brewServices);
-}
-
-void test_legacy_brewservicesend_non_numeric_still_reads_as_unsubscribed(void) {
-  // The fix must not widen what counts as "subscribed": only booleans take the
-  // boolean path, so a hand-edited string keeps the original integer behaviour
-  // (fails the int check, falls back to 0). Guards against reaching for
-  // .as<bool>() alone, whose asBoolean() returns true for any non-null string.
-  fsTestWrite(FILE_FERMENTER, "{\"BrewServiceSend\":[\"1\",\"0\",\"yes\",\"\"]}");
-  TEST_ASSERT_TRUE(loadFermenterConfig());
-  for (int i = 0; i < MAX_FERMENTERS; i++) {
-    TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[i].brewServices);
-  }
-}
-
 void test_brewservices_bitmask_wins_when_the_key_is_present(void) {
-  // Both keys present: the new one must not be clobbered by the migration.
+  // BrewServiceSend is the original firmware's key. The loader ignores it:
+  // OriginalConfig.cpp converts it before any loader runs.
   fsTestWrite(FILE_FERMENTER,
               "{\"BrewServices\":[9,0,0,0],\"BrewServiceSend\":[false,true,true,true]}");
   TEST_ASSERT_TRUE(loadFermenterConfig());
@@ -709,43 +673,15 @@ void test_brewsvc_two_slot_config_loads_through_the_table(void) {
   TEST_ASSERT_EQUAL_STRING("Shed",      g_brewServices[1].deviceName);
 }
 
-void test_brewsvc_legacy_global_brewers_friend_migrates_to_slot_zero(void) {
-  g_globalConfig.brewService = BREW_SERVICE_BREWERS_FRIEND;   // 1
-  strlcpy(g_globalConfig.brewServiceId, "legacy-bf", sizeof(g_globalConfig.brewServiceId));
-  TEST_ASSERT_FALSE(loadBrewServiceConfig());
-  TEST_ASSERT_TRUE(g_brewServices[0].enabled);
-  TEST_ASSERT_EQUAL_STRING("legacy-bf", g_brewServices[0].serviceId);
-  TEST_ASSERT_FALSE(g_brewServices[1].enabled);
-  TEST_ASSERT_TRUE(LittleFS.exists(FILE_BREWSVC));   // migration was persisted
-}
-
-void test_brewsvc_legacy_global_brewfather_migrates_to_slot_one(void) {
-  g_globalConfig.brewService = 3;    // old "Brewfather" code, now index 1
-  strlcpy(g_globalConfig.brewServiceId, "legacy-bfather", sizeof(g_globalConfig.brewServiceId));
-  TEST_ASSERT_FALSE(loadBrewServiceConfig());
-  TEST_ASSERT_FALSE(g_brewServices[0].enabled);
-  TEST_ASSERT_TRUE(g_brewServices[1].enabled);
-  TEST_ASSERT_EQUAL_STRING("legacy-bfather", g_brewServices[1].serviceId);
-}
-
-void test_brewsvc_legacy_global_removed_service_migrates_nothing(void) {
-  g_globalConfig.brewService = 2;    // old "Monitor Beer", no new home
-  strlcpy(g_globalConfig.brewServiceId, "legacy-mb", sizeof(g_globalConfig.brewServiceId));
-  TEST_ASSERT_FALSE(loadBrewServiceConfig());
-  TEST_ASSERT_FALSE(g_brewServices[0].enabled);
-  TEST_ASSERT_FALSE(g_brewServices[1].enabled);
-  TEST_ASSERT_FALSE(LittleFS.exists(FILE_BREWSVC));
-}
-
-void test_brewsvc_legacy_migration_is_skipped_when_a_file_exists_but_is_corrupt(void) {
-  // The migration is first-boot-after-upgrade only. A parse failure with the
-  // file present means the user HAS a config - re-running the migration would
-  // resurrect a service they had since turned off.
-  fsTestWrite(FILE_BREWSVC, "{corrupt");
+void test_brewsvc_without_a_file_does_not_use_the_global_service(void) {
+  // The original's single global service is moved into this file by
+  // OriginalConfig.cpp; the loader itself only falls back to the defaults.
   g_globalConfig.brewService = BREW_SERVICE_BREWERS_FRIEND;
   strlcpy(g_globalConfig.brewServiceId, "legacy-bf", sizeof(g_globalConfig.brewServiceId));
   TEST_ASSERT_FALSE(loadBrewServiceConfig());
   TEST_ASSERT_FALSE(g_brewServices[0].enabled);
+  TEST_ASSERT_FALSE(g_brewServices[1].enabled);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_BREWSVC));
 }
 
 // ============================================================
@@ -1203,9 +1139,6 @@ int main(int argc, char** argv) {
 
   // fermenter migrations + trio validation
   RUN_TEST(test_legacy_integer_gravities_are_scaled_to_sg);
-  RUN_TEST(test_legacy_brewservicesend_integer_migrates_to_the_bitmask);
-  RUN_TEST(test_legacy_brewservicesend_bool_migrates_to_the_bitmask);
-  RUN_TEST(test_legacy_brewservicesend_non_numeric_still_reads_as_unsubscribed);
   RUN_TEST(test_brewservices_bitmask_wins_when_the_key_is_present);
   RUN_TEST(test_valid_temp_trio_is_preserved);
   RUN_TEST(test_trio_at_the_exact_two_hysteresis_boundary_is_kept);
@@ -1237,10 +1170,7 @@ int main(int argc, char** argv) {
   // brew service migrations
   RUN_TEST(test_brewsvc_three_slot_config_remaps_to_two);
   RUN_TEST(test_brewsvc_two_slot_config_loads_through_the_table);
-  RUN_TEST(test_brewsvc_legacy_global_brewers_friend_migrates_to_slot_zero);
-  RUN_TEST(test_brewsvc_legacy_global_brewfather_migrates_to_slot_one);
-  RUN_TEST(test_brewsvc_legacy_global_removed_service_migrates_nothing);
-  RUN_TEST(test_brewsvc_legacy_migration_is_skipped_when_a_file_exists_but_is_corrupt);
+  RUN_TEST(test_brewsvc_without_a_file_does_not_use_the_global_service);
 
   // index-dependent and post-load defaults
   RUN_TEST(test_smartplug_plugno_defaults_to_the_slot_index);

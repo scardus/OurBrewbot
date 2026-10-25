@@ -18,8 +18,9 @@
 /*
  * Config.h — All data structures and configuration constants
  *
- * JSON field names match the original firmware exactly so existing LittleFS
- * config files will load without migration.
+ * JSON field names match the original firmware exactly, so its LittleFS config
+ * files load as they are. Some of their values mean something different in
+ * OurBrewbot, so OriginalConfig.cpp converts them once at boot.
  */
 
 #include <Arduino.h>
