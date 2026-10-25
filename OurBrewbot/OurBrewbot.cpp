@@ -82,6 +82,7 @@
 #define WIFI_OFFLINE_MS         60000   // offline this long -> open the setup hotspot
 #define WIFI_HOTSPOT_MS         120000  // hotspot stays up this long, then reconnecting resumes
 #define WIFI_HOTSPOT_MAX_MS     300000  // ...or up to this long while a phone is joined to it
+#define WIFI_DROP_MS            300000  // WiFi lost after connecting: wait this long before the offline cycle
 
 // ============================================================
 // GLOBAL STATE
@@ -228,7 +229,7 @@ void loop() {
   // checkpoint() drops a one-byte breadcrumb to RTC so a hardware-watchdog reset
   // (which bypasses custom_crash_callback) still tells us which subsystem hung.
   checkpoint(CP_WEB);          g_webServer.handleClient();
-                               wifiLoop();   // only does anything if WiFi was down at boot
+                               wifiLoop();   // only does anything while WiFi is down
   tcpClearTimeWait();   // must run every pass - see TcpCleanup.cpp
   STACK_PROBE_IRQ_SAMPLE();   // diagnostic build only - see StackProbe.cpp
   checkpoint(CP_BLE);          checkBLESniffTimeout();
@@ -414,7 +415,8 @@ static void configureWiFiManager(WiFiManager& wifiManager) {
 
 // Everything that needs a WiFi connection, run the first time WiFi connects -
 // during setup() normally, or later from wifiLoop() if the device booted while
-// its network was down.
+// its network was down. wifiLoop() runs it again when WiFi comes back after a
+// long drop, so it must be safe to call more than once.
 static void onWiFiConnected() {
   // Modem sleep's periodic DTIM beacon wake/parse cycle is the known trigger
   // for a null-pointer crash inside the closed-source SDK's beacon parser
@@ -479,10 +481,10 @@ void setupWiFi() {
 // ============================================================
 // WIFI WHILE OFFLINE
 // ============================================================
-// Only used when the device booted without reaching its saved network. It
-// keeps trying in the background; if WiFi still isn't up after 1 minute it
-// also opens the setup hotspot, so new WiFi details can be entered from a
-// phone (e.g. after a WiFi password change).
+// Used when the device booted without reaching its saved network, or when
+// WiFi has been lost for 5 minutes after connecting (e.g. a new router, or a
+// WiFi password change). It keeps trying in the background, and takes turns
+// with the setup hotspot, so new WiFi details can be entered from a phone.
 //
 // The hotspot and reconnecting take turns: 1 minute reconnecting, then 2
 // minutes of hotspot - kept open for up to 5 minutes while a phone is joined
@@ -490,13 +492,16 @@ void setupWiFi() {
 // library switches reconnecting off when the hotspot opens (running both at
 // once makes the hotspot unreliable), but the device can still rejoin its
 // network while the hotspot is up - wifiLoop() then closes the hotspot at
-// once. Our web server is stopped while the hotspot is up, as both use port 80. Once WiFi has connected the SDK
-// reconnects by itself after any later drop, as it always has, and this does
-// nothing.
+// once. Our web server is stopped while the hotspot is up, as both use port 80.
+//
+// Drops shorter than 5 minutes (e.g. a router reboot) are left to the SDK,
+// which reconnects by itself.
 
-static bool          s_wifiUpSinceBoot = false;
 static WiFiManager*  s_hotspot         = nullptr;   // non-null while the hotspot is up
 static unsigned long s_wifiPhaseStart  = 0;         // when reconnecting / the hotspot started
+static bool          s_offlineCycle    = false;     // true while a long drop is running the offline cycle
+static bool          s_wifiDropped     = false;     // WiFi lost after connecting, not back yet
+static unsigned long s_wifiDroppedAt   = 0;         // when it was lost
 
 static void openSetupHotspot() {
   String apName = setupHotspotName();
@@ -535,14 +540,39 @@ static bool hotspotTimeIsUp(unsigned long now) {
   return upFor >= WIFI_HOTSPOT_MS;
 }
 
+// Called every pass once WiFi has connected, while the SDK looks after any
+// drop by itself. True once WiFi has been down for WIFI_DROP_MS, so the
+// offline cycle should start.
+static bool wifiDownTooLong(unsigned long now) {
+  if (WiFi.isConnected()) {
+    if (s_wifiDropped) {
+      logMsgL(SYSLOG_NOTICE, "[WIFI] Reconnected after %lu s", (now - s_wifiDroppedAt) / 1000);
+      s_wifiDropped = false;
+    }
+    return false;
+  }
+  if (!s_wifiDropped) {
+    s_wifiDropped   = true;
+    s_wifiDroppedAt = now;
+  }
+  return now - s_wifiDroppedAt >= WIFI_DROP_MS;
+}
+
 void wifiLoop() {
-  if (s_wifiUpSinceBoot) return;
-  if (g_wifiConnected) {             // connected during setup()
-    s_wifiUpSinceBoot = true;
+  unsigned long now = millis();
+
+  // Connected at some point since boot: short drops are left to the SDK. A
+  // long one starts the offline cycle, hotspot first - the SDK has already had
+  // 5 minutes to reconnect.
+  if (g_wifiConnected && !s_offlineCycle) {
+    if (!wifiDownTooLong(now)) return;
+    logMsgL(SYSLOG_WARNING, "[WIFI] Lost for %u min - starting the offline cycle", WIFI_DROP_MS / 60000);
+    s_offlineCycle = true;
+    openSetupHotspot();
+    s_wifiPhaseStart = now;
     return;
   }
 
-  unsigned long now = millis();
   if (s_hotspot != nullptr) {
     s_hotspot->process();            // serves the hotspot's pages
     if (WiFi.isConnected() || !s_hotspot->getConfigPortalActive() || hotspotTimeIsUp(now)) {
@@ -555,10 +585,19 @@ void wifiLoop() {
   }
 
   if (s_hotspot == nullptr && WiFi.isConnected()) {
+    // After a long drop this runs again: it finds the syslog host and restarts
+    // mDNS, in case the device is now on a new network
+    bool firstConnect = !g_wifiConnected;
     onWiFiConnected();
-    s_wifiUpSinceBoot = true;
-    logMsgL(SYSLOG_NOTICE, "[WIFI] Connected %u min after boot - the fermenters were controlled offline until then",
-      (unsigned)(uptimeSeconds() / 60));
+    if (firstConnect) {
+      logMsgL(SYSLOG_NOTICE, "[WIFI] Connected %u min after boot - the fermenters were controlled offline until then",
+        (unsigned)(uptimeSeconds() / 60));
+    } else {
+      logMsgL(SYSLOG_NOTICE, "[WIFI] Back after %lu min offline - the fermenters were controlled offline until then",
+        (now - s_wifiDroppedAt) / 60000);
+    }
+    s_offlineCycle = false;
+    s_wifiDropped  = false;
   }
 }
 
