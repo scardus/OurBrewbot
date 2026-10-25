@@ -13,7 +13,7 @@ This firmware keeps your hardware working:
 - Smart plug RF transmit preserved (same codes, same protocol)
 - Fermentation profile runner preserved
 - Brewfather / Brewer's Friend integrations with per-fermenter toggles
-- All JSON config files 100% compatible with original (same field names)
+- Reads the original's config files and converts them on first start - see [Restoring Your Original Config](#restoring-your-original-config)
 - iSpindel HTTP receiver
 - OTA firmware update via web browser
 - Tilt hydrometer support via HM-10 BLE module (standard and Tilt Pro)
@@ -171,7 +171,17 @@ If your WiFi is down when the device starts, it carries on controlling the ferme
 
 ## Restoring Your Original Config
 
-If you have the original device, its config files are stored in the LittleFS partition. These should be auto-detected and used if you flash this firmware to the same device.
+The original firmware keeps its settings in the LittleFS partition, and they survive flashing OurBrewbot as long as the flash isn't erased. OurBrewbot uses the same file names and field names, but several settings mean something different, so on its first start it converts them once:
+
+- **Fermenters** - the one(s) you were using are switched on and the rest off. Your floor and ceiling are widened by the hysteresis, so heating and cooling start at the same temperatures as before. The alarm tolerance is set to 3.0 °C (the original used a percentage). Settings saved in Fahrenheit are converted to Celsius.
+- **Smart plugs** - each plug gets the job its slot had in the original (slot 1 = Fermenter 1 heating, slot 2 = Fermenter 1 cooling, and so on, slots 9 and 10 = Aux). Plugs set up as "Dial" plugs get the codes the original sent for them.
+- **Probes, Tilts and iSpindels** - keep their fermenter and role. The one the original used for temperature control becomes that fermenter's beer temperature. Tilt calibrations are carried across.
+- **Profiles** - steps are converted to OurBrewbot's step types. A profile that was running is stopped - start it again on the Profiles tab.
+- **Brew service** - Brewfather or Brewer's Friend keeps its ID, and is switched on for the fermenters that sent to it. Press the service's **Test** button to check it still works.
+
+Not carried across: your probe names (OurBrewbot names probes by their position), Plaato, MyBrewBuddy, monitor.beer, and the Blynk token. The original's WiFi settings file, which held your WiFi password in plain text, is deleted. If the controller doesn't join your WiFi, set it up through the `OurBrewbot-XXXXXX` access point as described above.
+
+The untouched original files are kept in the `orig` folder, and `orig/conversion.txt` lists every change that was made. You can read both in the admin page's file browser on the **System Settings** tab. Check your plugs and fermenters there before you start a brew.
 
 ---
 
@@ -327,4 +337,4 @@ OurBrewbot is licensed under the [Apache License, Version 2.0](LICENSE). See [NO
 
 ---
 
-*All JSON field names, file paths, REST routes, and error strings are preserved verbatim from the original firmware for compatibility with existing device configs.*
+*JSON field names and file paths are kept from the original firmware, so its config files can be read and converted. The REST API is OurBrewbot's own and is not compatible with the original's.*
