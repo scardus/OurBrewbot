@@ -550,22 +550,6 @@ bool loadFermenterConfig() {
     if (g_fermenters[i].tg > 2.0f) g_fermenters[i].tg /= 1000.0f;
   }
 
-  // Backward compat: migrate old bool BrewServiceSend → bit 0 of new bitmask.
-  // The value has to be read as either a JSON number (0/1) or a JSON boolean
-  // (true/false): BrewServiceSend was a bool member, so depending on which
-  // firmware wrote the file it can be stored either way. A plain `| 0` reads it
-  // as an int, and ArduinoJson only accepts a stored integer for that - a
-  // stored `true` would fail the type check, fall back to the 0 default and
-  // silently migrate to "not subscribed". Anything that isn't a boolean keeps
-  // the original integer path, so a hand-edited string still reads as 0.
-  if (doc["BrewServices"].isNull()) {
-    for (int i = 0; i < MAX_FERMENTERS; i++) {
-      JsonVariantConst v = doc["BrewServiceSend"][i];
-      bool sends = v.is<bool>() ? v.as<bool>() : ((v | 0) != 0);
-      g_fermenters[i].brewServices = sends ? 1 : 0;
-    }
-  }
-
   // Validate temperature/hysteresis trio per fermenter; reset offending
   // fields to defaults so an invalid persisted config can't lock the user
   // out of the admin POST validation.
@@ -843,20 +827,9 @@ bool saveTiltConfig() {
 bool loadBrewServiceConfig() {
   JsonDocument doc;
   if (!loadJsonDocSafe(doc, FILE_BREWSVC, FILE_BREWSVC_BKP)) {
+    // An original MyBrewbot's single global service was moved into this file
+    // by OriginalConfig.cpp before this ran
     initDefaultBrewServiceConfig();
-    // Migrate from old single-service global config — only when both files are truly
-    // absent (first boot after upgrade), not on parse failure.
-    if (!LittleFS.exists(FILE_BREWSVC) && !LittleFS.exists(FILE_BREWSVC_BKP)) {
-      // Old service types: 1=BF, 2=Monitor Beer (removed), 3=Brewfather (now index 1)
-      int legacySvc = g_globalConfig.brewService;
-      int idx = (legacySvc == 1) ? 0 : (legacySvc == 3) ? 1 : -1;
-      if (idx >= 0) {
-        g_brewServices[idx].enabled = true;
-        strlcpy(g_brewServices[idx].serviceId, g_globalConfig.brewServiceId, sizeof(g_brewServices[idx].serviceId));
-        logMsg("[CFG] Migrated legacy brew service %d to slot %d", legacySvc, idx);
-        saveBrewServiceConfig();
-      }
-    }
     return false;
   }
 

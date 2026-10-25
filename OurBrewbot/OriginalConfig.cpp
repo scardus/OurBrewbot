@@ -63,6 +63,8 @@ bool originalConfigConverted() { return s_converted; }
 struct OriginalFacts {
   bool    fahrenheit;                  // original "unit" 0 - temperatures saved in F
   uint8_t tempControl[MAX_FERMENTERS]; // 1 beer probe, 2 Tilt, 3 ambient probe, 4 iSpindel
+  int8_t  brewServiceSlot;             // g_brewServices slot the original's service maps to, -1 none
+  bool    sendsToService[MAX_FERMENTERS];
 };
 
 // ============================================================
@@ -170,17 +172,31 @@ static void removeSecrets() {
 }
 
 static void readFacts(OriginalFacts& facts) {
-  facts.fahrenheit = false;
-  for (int i = 0; i < MAX_FERMENTERS; i++) facts.tempControl[i] = 1;
+  facts.fahrenheit      = false;
+  facts.brewServiceSlot = -1;
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    facts.tempControl[i]    = 1;
+    facts.sendsToService[i] = false;
+  }
 
   JsonDocument doc;
   if (loadOriginal(doc, "jsonGlobal")) {
     facts.fahrenheit = ((doc["unit"] | 1) == 0);
+
+    // One service for the whole controller: 2 Brewer's Friend, 3 Brewfather,
+    // 4 monitor.beer. "Brewservice" is the original's default (unset) ID.
+    int service    = doc["brewservice"] | 0;
+    const char* id = doc["brewserviceid"] | "";
+    bool hasId     = strlen(id) > 0 && strcmp(id, "Brewservice") != 0;
+    if (hasId && service == 2) facts.brewServiceSlot = BREW_SERVICE_BREWERS_FRIEND - 1;
+    if (hasId && service == 3) facts.brewServiceSlot = BREW_SERVICE_BREWFATHER - 1;
   }
   doc.clear();
   if (loadOriginal(doc, "jsonFermenter")) {
     for (int i = 0; i < MAX_FERMENTERS; i++) {
       facts.tempControl[i] = doc["TempControl"][i] | 1;
+      // Inverted like Power: 0 = send, 1 = don't
+      facts.sendsToService[i] = ((doc["BrewServiceSend"][i] | 1) == 0);
     }
   }
 }
@@ -422,11 +438,32 @@ static void convertProfileSteps(const OriginalFacts& facts) {
 }
 
 // ============================================================
+// BREW SERVICES (jsonBrewServices.txt - OurBrewbot's own file)
+// ============================================================
+
+static void convertBrewServices(const OriginalFacts& facts) {
+  JsonDocument doc;
+  if (!loadOriginal(doc, "jsonGlobal")) return;
+  int service = doc["brewservice"] | 0;
+
+  initDefaultBrewServiceConfig();
+  if (facts.brewServiceSlot >= 0) {
+    BrewServiceConfig& svc = g_brewServices[facts.brewServiceSlot];
+    svc.enabled = true;
+    strlcpy(svc.serviceId, doc["brewserviceid"] | "", sizeof(svc.serviceId));
+    REPORT("Brew service: %s, ID kept - press its Test button to check it",
+           service == 2 ? "Brewer's Friend" : "Brewfather");
+  } else if (service == 4) {
+    REPORT("Brew service: monitor.beer is not supported yet - not converted");
+  }
+  saveBrewServiceConfig();
+}
+
+// ============================================================
 // FERMENTERS (jsonFermenter.txt) - written last
 // ============================================================
 
 static void convertFermenters(const OriginalFacts& facts) {
-  (void)facts;
   JsonDocument doc;
   if (!loadOriginal(doc, "jsonFermenter")) return;
 
@@ -445,9 +482,14 @@ static void convertFermenters(const OriginalFacts& facts) {
     doc["CurrentHour"][i]    = 0;
   }
 
+  // Each fermenter's services are a bitmask in OurBrewbot (bit N = slot N)
   doc.remove("BrewServiceSend");
   JsonArray services = doc["BrewServices"].to<JsonArray>();
-  for (int i = 0; i < MAX_FERMENTERS; i++) services.add(0);
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    bool sends = (facts.brewServiceSlot >= 0 && facts.sendsToService[i]);
+    services.add(sends ? (1 << facts.brewServiceSlot) : 0);
+    if (sends) REPORT("Fermenter %d: sends to the brew service", i + 1);
+  }
 
   saveJsonDocSafe(doc, FILE_FERMENTER, FILE_FERMENTER_BKP);
 }
@@ -487,6 +529,7 @@ bool convertOriginalConfig() {
   convertTilts(facts);
   convertiSpindels(facts);
   convertProfileSteps(facts);
+  convertBrewServices(facts);
   convertFermenters(facts);   // last - see the top of this file
 
   LittleFS.remove(ORIG_IN_PROGRESS);

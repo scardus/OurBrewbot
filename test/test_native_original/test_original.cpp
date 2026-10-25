@@ -559,6 +559,73 @@ void test_a_running_profile_is_stopped(void) {
   TEST_ASSERT_TRUE(reportHas("Fermenter 1: profile 2 was running - stopped"));
 }
 
+// ============================================================
+// Brew services
+// ============================================================
+
+static void stageFermenter1Sends() {
+  fsTestWrite("/jsonFermenter.txt",
+              edited(ORIG_FERMENTER, "\"BrewServiceSend\":[1,1,1,1]", "\"BrewServiceSend\":[0,1,1,1]").c_str());
+}
+
+void test_the_real_configs_brewfather_service_is_kept(void) {
+  stageOriginal();
+  loadAllConfig();
+  const int slot = BREW_SERVICE_BREWFATHER - 1;
+  TEST_ASSERT_TRUE(g_brewServices[slot].enabled);
+  TEST_ASSERT_EQUAL_STRING("DummyBrewId123", g_brewServices[slot].serviceId);
+  TEST_ASSERT_FALSE(g_brewServices[BREW_SERVICE_BREWERS_FRIEND - 1].enabled);
+  TEST_ASSERT_TRUE(reportHas("Brew service: Brewfather, ID kept"));
+}
+
+void test_the_real_configs_fermenters_send_nothing(void) {
+  // Its BrewServiceSend is [1,1,1,1] - in the original, 1 means DON'T send
+  stageOriginal();
+  loadAllConfig();
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[i].brewServices);
+  }
+}
+
+void test_a_sending_fermenter_is_subscribed_to_brewfather(void) {
+  stageOriginal();
+  stageFermenter1Sends();
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(1 << (BREW_SERVICE_BREWFATHER - 1), g_fermenters[0].brewServices);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[1].brewServices);
+}
+
+void test_original_service_2_is_brewers_friend(void) {
+  stageOriginal();
+  stageFermenter1Sends();
+  fsTestWrite("/jsonGlobal.txt", edited(ORIG_GLOBAL, "\"brewservice\":3", "\"brewservice\":2").c_str());
+  loadAllConfig();
+  const int slot = BREW_SERVICE_BREWERS_FRIEND - 1;
+  TEST_ASSERT_TRUE(g_brewServices[slot].enabled);
+  TEST_ASSERT_EQUAL_STRING("DummyBrewId123", g_brewServices[slot].serviceId);
+  TEST_ASSERT_EQUAL_UINT8(1 << slot, g_fermenters[0].brewServices);
+}
+
+void test_monitor_beer_is_reported_and_not_converted(void) {
+  stageOriginal();
+  stageFermenter1Sends();
+  fsTestWrite("/jsonGlobal.txt", edited(ORIG_GLOBAL, "\"brewservice\":3", "\"brewservice\":4").c_str());
+  loadAllConfig();
+  TEST_ASSERT_FALSE(g_brewServices[0].enabled);
+  TEST_ASSERT_FALSE(g_brewServices[1].enabled);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[0].brewServices);
+  TEST_ASSERT_TRUE(reportHas("monitor.beer is not supported yet"));
+}
+
+void test_the_originals_default_service_id_is_not_a_service(void) {
+  stageOriginal();
+  stageFermenter1Sends();
+  fsTestWrite("/jsonGlobal.txt", edited(ORIG_GLOBAL, "\"DummyBrewId123\"", "\"Brewservice\"").c_str());
+  loadAllConfig();
+  TEST_ASSERT_FALSE(g_brewServices[BREW_SERVICE_BREWFATHER - 1].enabled);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[0].brewServices);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -610,6 +677,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_type_0_step_with_values_becomes_empty);
   RUN_TEST(test_fahrenheit_step_temperatures_become_celsius);
   RUN_TEST(test_a_running_profile_is_stopped);
+
+  RUN_TEST(test_the_real_configs_brewfather_service_is_kept);
+  RUN_TEST(test_the_real_configs_fermenters_send_nothing);
+  RUN_TEST(test_a_sending_fermenter_is_subscribed_to_brewfather);
+  RUN_TEST(test_original_service_2_is_brewers_friend);
+  RUN_TEST(test_monitor_beer_is_reported_and_not_converted);
+  RUN_TEST(test_the_originals_default_service_id_is_not_a_service);
 
   return UNITY_END();
 }
