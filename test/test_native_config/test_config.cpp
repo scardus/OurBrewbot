@@ -62,6 +62,7 @@ void logMsgImpl(uint8_t, PGM_P fmt, ...) {
 // The code under test.
 #include "../../OurBrewbot/TextSafe.cpp"
 #include "../../OurBrewbot/Config.cpp"
+#include "../../OurBrewbot/OriginalConfig.cpp"
 
 // ---- test fixture ----
 

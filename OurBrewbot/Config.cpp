@@ -29,6 +29,7 @@
 
 #include "Config.h"
 #include "Log.h"
+#include "OriginalConfig.h"
 #include "TextSafe.h"
 #include "Uptime.h"
 #include <user_interface.h>     // rst_info struct, REASON_EXCEPTION_RST
@@ -939,6 +940,9 @@ bool saveSyslogConfig() {
 
 void loadAllConfig() {
   logMsg("[CFG] Loading all configuration...");
+  // Before any loader: a loader that corrects a value saves the file at once,
+  // which would hide the signs of an original config (see OriginalConfig.cpp)
+  convertOriginalConfig();
   loadGlobalConfig();
   loadFermenterConfig();
   loadProbeConfig();

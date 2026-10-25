@@ -94,6 +94,7 @@ UpdateStatus g_updateStatus;
 
 // The code under test, plus the modules its payloads genuinely depend on.
 #include "../../OurBrewbot/Config.cpp"
+#include "../../OurBrewbot/OriginalConfig.cpp"
 #include "../../OurBrewbot/Temperatures.cpp"
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"

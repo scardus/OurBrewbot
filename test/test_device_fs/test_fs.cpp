@@ -53,6 +53,7 @@ void logMsgImpl(uint8_t, PGM_P, ...) {}
 // else has to.
 #include "../../OurBrewbot/TextSafe.cpp"
 #include "../../OurBrewbot/Config.cpp"
+#include "../../OurBrewbot/OriginalConfig.cpp"
 
 static const char* const PRIMARY = "/test_cfg.txt";
 static const char* const BACKUP  = "/test_cfgbkup.txt";
