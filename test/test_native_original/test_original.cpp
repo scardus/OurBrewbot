@@ -259,6 +259,72 @@ void test_the_report_starts_afresh_on_each_attempt(void) {
   TEST_ASSERT_NULL(strstr(first + 1, "Blynk token cleared"));
 }
 
+// ============================================================
+// Probes
+// ============================================================
+
+// The fixture's probe file with slot 2 given a role and fermenter
+static void stageProbeRole(const char* role, const char* fermenter) {
+  std::string probes = edited(ORIG_PROBE, "\"Function\":[2,3,99", (std::string("\"Function\":[2,3,") + role).c_str());
+  probes = edited(probes.c_str(), "\"Fermenter\":[0,0,99", (std::string("\"Fermenter\":[0,0,") + fermenter).c_str());
+  probes = edited(probes.c_str(), "\"Address\":[\"28805555a0080\",\"28ce2555a008b\",\"\"",
+                                  "\"Address\":[\"28805555a0080\",\"28ce2555a008b\",\"28aabbccdd0011\"");
+  fsTestWrite("/jsonProbe.txt", probes.c_str());
+}
+
+void test_beer_and_ambient_probes_keep_their_roles(void) {
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_probes[0].function);
+  TEST_ASSERT_EQUAL_UINT8(0, g_probes[0].fermenter);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AMBIENT, g_probes[1].function);
+  TEST_ASSERT_EQUAL_UINT8(0, g_probes[1].fermenter);
+  TEST_ASSERT_EQUAL_STRING("28805555a0080", g_probes[0].address);   // fixed at the first scan
+}
+
+void test_an_air_probe_becomes_air(void) {
+  stageOriginal();
+  stageProbeRole("4", "1");
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AIR, g_probes[2].function);
+  TEST_ASSERT_EQUAL_UINT8(1, g_probes[2].fermenter);
+  TEST_ASSERT_TRUE(reportHas("Probe 3 (28aabbccdd0011): role 4 -> 6"));
+}
+
+void test_a_common_air_probe_becomes_air(void) {
+  stageOriginal();
+  stageProbeRole("8", "2");
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AIR, g_probes[2].function);
+  TEST_ASSERT_EQUAL_UINT8(2, g_probes[2].fermenter);
+}
+
+void test_a_common_ambient_probe_becomes_ambient_for_its_fermenter(void) {
+  stageOriginal();
+  stageProbeRole("7", "3");
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AMBIENT, g_probes[2].function);
+  TEST_ASSERT_EQUAL_UINT8(3, g_probes[2].fermenter);
+  TEST_ASSERT_TRUE(reportHas("now for fermenter 4 only"));
+}
+
+void test_a_common_probe_without_a_fermenter_goes_to_fermenter_1(void) {
+  stageOriginal();
+  stageProbeRole("7", "99");
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AMBIENT, g_probes[2].function);
+  TEST_ASSERT_EQUAL_UINT8(0, g_probes[2].fermenter);
+}
+
+void test_a_discovered_probe_becomes_unassigned(void) {
+  stageOriginal();
+  stageProbeRole("1", "0");
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_probes[2].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_probes[2].fermenter);
+  TEST_ASSERT_EQUAL_STRING("28aabbccdd0011", g_probes[2].address);   // still registered
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -281,6 +347,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_celsius_stays_celsius);
   RUN_TEST(test_the_original_fahrenheit_code_is_converted);
   RUN_TEST(test_the_report_starts_afresh_on_each_attempt);
+
+  RUN_TEST(test_beer_and_ambient_probes_keep_their_roles);
+  RUN_TEST(test_an_air_probe_becomes_air);
+  RUN_TEST(test_a_common_air_probe_becomes_air);
+  RUN_TEST(test_a_common_ambient_probe_becomes_ambient_for_its_fermenter);
+  RUN_TEST(test_a_common_probe_without_a_fermenter_goes_to_fermenter_1);
+  RUN_TEST(test_a_discovered_probe_becomes_unassigned);
 
   return UNITY_END();
 }

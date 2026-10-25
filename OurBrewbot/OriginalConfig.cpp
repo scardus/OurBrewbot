@@ -206,6 +206,51 @@ static void convertGlobal(const OriginalFacts& facts) {
 }
 
 // ============================================================
+// PROBES (jsonProbe.txt)
+// ============================================================
+
+// Original probe roles: 1 Discovered (found, not assigned), 2 Beer, 3 Ambient,
+// 4 Air, 7 Common Ambient and 8 Common Air (both fed every fermenter). Only 2
+// and 3 mean the same in OurBrewbot, where 4 is Tilt and 7 is control.
+static uint8_t convertProbeRole(uint8_t role) {
+  switch (role) {
+    case 2:  return PROBE_FN_BEER;
+    case 3:  return PROBE_FN_AMBIENT;
+    case 4:  return PROBE_FN_AIR;
+    case 7:  return PROBE_FN_AMBIENT;   // OurBrewbot has no "every fermenter" role
+    case 8:  return PROBE_FN_AIR;
+    default: return PROBE_UNASSIGNED;
+  }
+}
+
+static void convertProbes() {
+  JsonDocument doc;
+  if (!loadOriginal(doc, "jsonProbe")) return;
+
+  for (int i = 0; i < MAX_PROBES; i++) {
+    uint8_t role      = doc["Function"][i]  | PROBE_UNASSIGNED;
+    uint8_t fermenter = doc["Fermenter"][i] | PROBE_UNASSIGNED;
+    uint8_t newRole   = convertProbeRole(role);
+    if (newRole == PROBE_UNASSIGNED) {
+      fermenter = PROBE_UNASSIGNED;
+    } else if (fermenter >= MAX_FERMENTERS) {
+      fermenter = 0;   // a "Common" probe saved without a fermenter
+    }
+    if (newRole != role) {
+      REPORT("Probe %d (%s): role %u -> %u", i + 1, doc["Address"][i] | "", role, newRole);
+      if (role == 7) {
+        REPORT("Probe %d: was the ambient probe for every fermenter - now for fermenter %u only",
+               i + 1, fermenter + 1);
+      }
+    }
+    doc["Function"][i]  = newRole;
+    doc["Fermenter"][i] = fermenter;
+  }
+
+  saveJsonDocSafe(doc, FILE_PROBE, FILE_PROBE_BKP);
+}
+
+// ============================================================
 // FERMENTERS (jsonFermenter.txt) - written last
 // ============================================================
 
@@ -252,6 +297,7 @@ bool convertOriginalConfig() {
   OriginalFacts facts;
   readFacts(facts);
   convertGlobal(facts);
+  convertProbes();
   convertFermenters(facts);   // last - see the top of this file
 
   LittleFS.remove(ORIG_IN_PROGRESS);
