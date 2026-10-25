@@ -59,6 +59,10 @@ String addressToString(const DeviceAddress& addr);
 // Convert hex string back to DeviceAddress bytes
 bool stringToAddress(const char* str, DeviceAddress& addr);
 
+// True when `stored` is `addr` as the original MyBrewbot firmware saved it:
+// each byte without its leading zero (e.g. "28805555a0080")
+bool isUnpaddedAddress(const char* stored, const DeviceAddress& addr);
+
 // Get beer temperature for a fermenter (returns -127 if no probe assigned)
 float getBeerTemp(uint8_t fermenterIndex);
 

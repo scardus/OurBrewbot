@@ -306,6 +306,48 @@ void test_scanBuses_does_not_register_a_second_copy_after_an_upgrade(void) {
   TEST_ASSERT_EQUAL_STRING("", g_probes[1].address);
 }
 
+// The desk controller's two probes, as the original MyBrewbot firmware saved
+// them (no leading zero on each byte) and as they really are
+static const char* const ORIG_ADDR_BEER    = "28805555a0080";
+static const char* const REAL_ADDR_BEER    = "288055550a000080";
+static const char* const ORIG_ADDR_AMBIENT = "28ce2555a008b";
+static const char* const REAL_ADDR_AMBIENT = "28ce25550a00008b";
+
+void test_isUnpaddedAddress_matches_the_original_firmwares_form(void) {
+  DeviceAddress addr;
+  stringToAddress(REAL_ADDR_BEER, addr);
+  TEST_ASSERT_TRUE(isUnpaddedAddress(ORIG_ADDR_BEER, addr));
+  stringToAddress(REAL_ADDR_AMBIENT, addr);
+  TEST_ASSERT_TRUE(isUnpaddedAddress(ORIG_ADDR_AMBIENT, addr));
+}
+
+void test_isUnpaddedAddress_rejects_another_probe(void) {
+  DeviceAddress addr;
+  stringToAddress(REAL_ADDR_AMBIENT, addr);
+  TEST_ASSERT_FALSE(isUnpaddedAddress(ORIG_ADDR_BEER, addr));
+}
+
+void test_isUnpaddedAddress_rejects_a_full_address(void) {
+  // A full address is matched as it is, not by this rule
+  DeviceAddress addr;
+  stringToAddress(ADDR_A, addr);
+  TEST_ASSERT_FALSE(isUnpaddedAddress(ADDR_A, addr));
+}
+
+void test_scanBuses_upgrades_an_original_firmware_address(void) {
+  // A zero byte before the end breaks the "starts with" rule above, which is
+  // why the original's probes used to be registered again as new probes
+  configureProbe(0, ORIG_ADDR_BEER, "Beer Temp", 1);
+  g_probes[0].function  = PROBE_FN_BEER;
+  g_probes[0].fermenter = 0;
+  g_sensors1.testAddDevice(REAL_ADDR_BEER, 20.0f);
+
+  TEST_ASSERT_TRUE(scanBuses());
+  TEST_ASSERT_EQUAL_STRING(REAL_ADDR_BEER, g_probes[0].address);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_probes[0].function);
+  TEST_ASSERT_EQUAL_STRING("", g_probes[1].address);   // not registered again
+}
+
 void test_scanBuses_ignores_probes_beyond_the_slot_limit(void) {
   // Every slot already taken by a probe that isn't on either bus, so the new
   // one has nowhere to go. It must be dropped, not written past the array.
@@ -923,6 +965,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_scanBuses_upgrades_a_truncated_address);
   RUN_TEST(test_scanBuses_upgrade_keeps_the_assignment);
   RUN_TEST(test_scanBuses_does_not_register_a_second_copy_after_an_upgrade);
+  RUN_TEST(test_isUnpaddedAddress_matches_the_original_firmwares_form);
+  RUN_TEST(test_isUnpaddedAddress_rejects_another_probe);
+  RUN_TEST(test_isUnpaddedAddress_rejects_a_full_address);
+  RUN_TEST(test_scanBuses_upgrades_an_original_firmware_address);
   RUN_TEST(test_scanBuses_ignores_probes_beyond_the_slot_limit);
 
   RUN_TEST(test_requestTempConversion_requests_on_both_buses);

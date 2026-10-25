@@ -44,6 +44,16 @@ String addressToString(const DeviceAddress& addr) {
   return String(buf);
 }
 
+// The original MyBrewbot firmware saved each address byte without its leading
+// zero, so 28-80-55-55-0a-00-00-80 is "28805555a0080" in its jsonProbe.txt.
+// True when `stored` is that form of `addr`.
+bool isUnpaddedAddress(const char* stored, const DeviceAddress& addr) {
+  char buf[17];   // 8 bytes of up to 2 hex digits + NUL
+  snprintf(buf, sizeof(buf), "%x%x%x%x%x%x%x%x",
+    addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7]);
+  return strlen(stored) < 16 && strcasecmp(buf, stored) == 0;
+}
+
 bool stringToAddress(const char* str, DeviceAddress& addr) {
   if (!str || strlen(str) < 16) return false;
   char buf[3] = {0};
@@ -136,7 +146,8 @@ bool scanBuses() {
 
         bool addrMatch  = addrStr.equalsIgnoreCase(g_probes[j].address);
         bool truncMatch = !addrMatch && strlen(g_probes[j].address) < 16 &&
-                          addrStr.startsWith(g_probes[j].address);
+                          (addrStr.startsWith(g_probes[j].address) ||
+                           isUnpaddedAddress(g_probes[j].address, addr));
 
         if (!addrMatch && !truncMatch) continue;
 
