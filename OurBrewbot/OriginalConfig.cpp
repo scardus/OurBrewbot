@@ -529,7 +529,48 @@ static void convertFermenters(const OriginalFacts& facts) {
   JsonDocument doc;
   if (!loadOriginal(doc, "jsonFermenter")) return;
 
+  REPORT("Alarm tolerance set to 3.0 C on every fermenter (the original's was a percentage)");
+
   for (int i = 0; i < MAX_FERMENTERS; i++) {
+    // Power is inverted: the original's 0 means running, 1 means off
+    bool running = ((doc["Power"][i] | 1) == 0);
+    doc["Power"][i] = running;
+
+    // TempControl and SGControl chose a SOURCE (1-4) in the original; there
+    // was no "off". The temperature source is expressed through the probe,
+    // Tilt and iSpindel roles instead. SGControl in OurBrewbot is an unused
+    // switch.
+    if (facts.tempControl[i] == 3) {
+      REPORT("Fermenter %d: controlled on its ambient probe before - OurBrewbot uses the beer "
+             "probe when there is one", i + 1);
+    }
+    doc["TempControl"][i] = true;
+    doc["SGControl"][i]   = false;
+
+    // A percentage of the setpoint in the original; degrees in OurBrewbot
+    doc["AlarmTolerance"][i] = 3.0f;
+
+    // The original moved the switch points OUTWARDS: heat below floor - H,
+    // cool above ceiling + H. OurBrewbot heats below its floor and cools above
+    // its ceiling, so widening the band by H keeps the same switch-on points.
+    // The original also allowed floor = ceiling, which OurBrewbot rejects.
+    float ceiling = doc["CeilingTemp"][i] | 22.0f;
+    float floorT  = doc["FloorTemp"][i]   | 18.0f;
+    float hyst    = doc["Hysteresis"][i]  | 0.0f;
+    if (facts.fahrenheit) {
+      ceiling = (ceiling - 32.0f) * 5.0f / 9.0f;
+      floorT  = (floorT  - 32.0f) * 5.0f / 9.0f;
+      hyst    = hyst * 5.0f / 9.0f;
+    }
+    float low  = (floorT < ceiling) ? floorT : ceiling;
+    float high = (floorT < ceiling) ? ceiling : floorT;
+    float widen = (hyst > 0.0f) ? hyst : ((high - low < 0.01f) ? 0.5f : 0.0f);
+    doc["FloorTemp"][i]   = low - widen;
+    doc["CeilingTemp"][i] = high + widen;
+    doc["Hysteresis"][i]  = hyst;
+    REPORT("Fermenter %d: %s, floor %.2f C, ceiling %.2f C, hysteresis %.2f C", i + 1,
+           running ? "on" : "off", low - widen, high + widen, hyst);
+
     // A running profile is stopped: the original's profile number, hour and
     // step don't carry across reliably. The user starts it again (and can
     // skip to the right step).

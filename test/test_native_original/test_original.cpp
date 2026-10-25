@@ -734,6 +734,85 @@ void test_a_dial_plug_with_an_unknown_group_is_reported(void) {
   TEST_ASSERT_TRUE(reportHas("Plug 1: Dial settings not recognised"));
 }
 
+// ============================================================
+// Fermenters
+// ============================================================
+
+void test_power_is_inverted(void) {
+  // The real config: [0,1,1,1] - only fermenter 1 was in use
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_TRUE(g_fermenters[0].power);
+  TEST_ASSERT_FALSE(g_fermenters[1].power);
+  TEST_ASSERT_FALSE(g_fermenters[2].power);
+  TEST_ASSERT_FALSE(g_fermenters[3].power);
+}
+
+void test_temperature_control_is_on_and_sg_control_off(void) {
+  stageOriginal();
+  loadAllConfig();
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    TEST_ASSERT_TRUE(g_fermenters[i].tempControl);
+    TEST_ASSERT_FALSE(g_fermenters[i].sgControl);
+  }
+}
+
+void test_a_percentage_alarm_tolerance_becomes_the_default(void) {
+  stageOriginal();
+  fsTestWrite("/jsonFermenter.txt",
+              edited(ORIG_FERMENTER, "\"AlarmTolerance\":[0,0,0,0]", "\"AlarmTolerance\":[5,10,0,0]").c_str());
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_FLOAT(3.0f, g_fermenters[0].alarmTolerance);
+  TEST_ASSERT_EQUAL_FLOAT(3.0f, g_fermenters[1].alarmTolerance);
+}
+
+void test_the_band_widens_by_the_hysteresis(void) {
+  // Fermenter 1: floor 1, ceiling 2, hysteresis 0.1. The original heated below
+  // 0.9 and cooled above 2.1, so those become the floor and ceiling.
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.9f, g_fermenters[0].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 2.1f, g_fermenters[0].ceilingTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.1f, g_fermenters[0].hysteresis);
+}
+
+void test_floor_equal_to_ceiling_is_kept_not_reset(void) {
+  // Fermenters 2-4: floor = ceiling = 20, no hysteresis. Unconverted,
+  // OurBrewbot's validation would reset them to 18-22.
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 19.5f, g_fermenters[1].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 20.5f, g_fermenters[1].ceilingTemp);
+}
+
+void test_fahrenheit_settings_become_celsius(void) {
+  stageOriginal();
+  fsTestWrite("/jsonGlobal.txt", edited(ORIG_GLOBAL, "\"unit\":1", "\"unit\":0").c_str());
+  std::string ferm = edited(ORIG_FERMENTER, "\"CeilingTemp\":[2,", "\"CeilingTemp\":[68,");
+  ferm = edited(ferm.c_str(), "\"FloorTemp\":[1,", "\"FloorTemp\":[59,");
+  ferm = edited(ferm.c_str(), "\"Hysteresis\":[0.1,", "\"Hysteresis\":[0.9,");
+  fsTestWrite("/jsonFermenter.txt", ferm.c_str());
+  loadAllConfig();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f,  g_fermenters[0].hysteresis);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 14.5f, g_fermenters[0].floorTemp);     // 15 C - 0.5
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 20.5f, g_fermenters[0].ceilingTemp);   // 20 C + 0.5
+}
+
+void test_control_on_the_ambient_probe_is_reported(void) {
+  stageOriginal();
+  fsTestWrite("/jsonFermenter.txt",
+              edited(ORIG_FERMENTER, "\"TempControl\":[1,1,1,1]", "\"TempControl\":[3,1,1,1]").c_str());
+  loadAllConfig();
+  TEST_ASSERT_TRUE(reportHas("Fermenter 1: controlled on its ambient probe before"));
+}
+
+void test_gravities_are_scaled_by_the_loader(void) {
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.047f, g_fermenters[0].og);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.010f, g_fermenters[0].tg);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -801,6 +880,15 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_raw_code_plug_keeps_its_codes_and_gets_its_slots_role);
   RUN_TEST(test_an_aux_slot_becomes_an_aux_plug);
   RUN_TEST(test_a_dial_plug_with_an_unknown_group_is_reported);
+
+  RUN_TEST(test_power_is_inverted);
+  RUN_TEST(test_temperature_control_is_on_and_sg_control_off);
+  RUN_TEST(test_a_percentage_alarm_tolerance_becomes_the_default);
+  RUN_TEST(test_the_band_widens_by_the_hysteresis);
+  RUN_TEST(test_floor_equal_to_ceiling_is_kept_not_reset);
+  RUN_TEST(test_fahrenheit_settings_become_celsius);
+  RUN_TEST(test_control_on_the_ambient_probe_is_reported);
+  RUN_TEST(test_gravities_are_scaled_by_the_loader);
 
   return UNITY_END();
 }
