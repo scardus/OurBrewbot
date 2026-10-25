@@ -329,8 +329,8 @@ void handleiSpindelPost(const String& body) {
       g_iSpindels[i].interval    = interval;
       // Registered unassigned - it is linked to a fermenter in the admin page.
       // Before 0.6.4 it took the slot's defaults, which linked slot 0 straight
-      // to Fermenter 1's beer temperature, so any new iSpindel on the network
-      // (even a neighbour's) took over that fermenter's control.
+      // to Fermenter 1's beer temperature, so any new iSpindel that reported
+      // to this controller took over that fermenter's control.
       g_iSpindels[i].fermenter   = PROBE_UNASSIGNED;
       g_iSpindels[i].collectData = false;
       logMsg("[ISPINDEL] Registered %s (ID:%s) in slot %d as %s - assign it to a fermenter in the admin page",
