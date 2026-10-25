@@ -451,6 +451,114 @@ void test_an_ispindel_chosen_for_control_gets_the_beer_role(void) {
   TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[0].function);
 }
 
+// ============================================================
+// Profiles
+// ============================================================
+
+// OurBrewbot's empty step (the same test as Profile.cpp's isStepEmpty())
+static bool stepIsEmpty(const ProfileStep& s) {
+  return s.stepType == 0 && s.days == 0 && s.startTemp == 0.0f && s.endTemp == 0.0f && s.sgTrigger == 0.0f;
+}
+
+struct OrigStep { int type; float start; float end; float sgTrigger; float days; };
+
+// An original jsonProfileSteps.txt (60 steps, 15 per profile) with the given
+// steps at the start of profile 1 and the rest empty
+static std::string origSteps(const OrigStep* steps, int n) {
+  const char* keys[] = { "StepNo", "StepType", "StartTemp", "EndTemp", "SGTrigger", "Days" };
+  std::string json = "{";
+  for (int k = 0; k < 6; k++) {
+    json += std::string(k ? "," : "") + "\"" + keys[k] + "\":[";
+    for (int i = 0; i < MAX_PROFILE_STEPS; i++) {
+      char v[24] = "0";
+      if (i < n) {
+        float values[] = { 0, (float)steps[i].type, steps[i].start, steps[i].end, steps[i].sgTrigger, steps[i].days };
+        snprintf(v, sizeof(v), "%g", values[k]);
+      }
+      json += std::string(i ? "," : "") + v;
+    }
+    json += "]";
+  }
+  return json + "}";
+}
+
+void test_the_real_configs_empty_profiles_stay_empty(void) {
+  stageOriginal();
+  loadAllConfig();
+  for (int k = 0; k < MAX_PROFILE_STEPS; k++) {
+    TEST_ASSERT_TRUE(stepIsEmpty(g_profileSteps[k]));
+  }
+}
+
+void test_step_types_are_renumbered(void) {
+  const OrigStep steps[] = {
+    {1, 18, 18, 0, 2}, {2, 18, 20, 0, 2}, {3, 18, 22, 0, 2}, {4, 20, 20, 1010, 2},
+    {5, 20, 20, 75, 2}, {6, 20, 22, 0, 1}, {7, 22, 22, 1012, 1}, {8, 22, 22, 80, 1}
+  };
+  stageOriginal();
+  fsTestWrite("/jsonProfileSteps.txt", origSteps(steps, 8).c_str());
+  loadAllConfig();
+  const uint8_t expected[] = { STEP_TIME_OVER_TEMP, STEP_TEMP_OVER_TIME, STEP_FREE_RISE,
+                               STEP_SPECIFIC_GRAVITY, STEP_ATTENUATION, STEP_TEMP_REACHED,
+                               STEP_SG_REACHED, STEP_ATTN_REACHED };
+  for (int k = 0; k < 8; k++) {
+    TEST_ASSERT_EQUAL_UINT8(expected[k], g_profileSteps[k].stepType);
+  }
+  TEST_ASSERT_TRUE(stepIsEmpty(g_profileSteps[8]));
+  TEST_ASSERT_TRUE(reportHas("Profile 1: 8 step(s) converted"));
+}
+
+void test_sg_targets_are_divided_by_1000(void) {
+  const OrigStep steps[] = { {4, 20, 20, 1010, 2}, {7, 22, 22, 1012, 1} };
+  stageOriginal();
+  fsTestWrite("/jsonProfileSteps.txt", origSteps(steps, 2).c_str());
+  loadAllConfig();
+  TEST_ASSERT_FLOAT_WITHIN(0.00001f, 1.010f, g_profileSteps[0].sgTrigger);
+  TEST_ASSERT_FLOAT_WITHIN(0.00001f, 1.012f, g_profileSteps[1].sgTrigger);
+}
+
+void test_attenuation_targets_stay_percentages(void) {
+  const OrigStep steps[] = { {5, 20, 20, 75, 2}, {8, 22, 22, 80, 1} };
+  stageOriginal();
+  fsTestWrite("/jsonProfileSteps.txt", origSteps(steps, 2).c_str());
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_FLOAT(75.0f, g_profileSteps[0].sgTrigger);
+  TEST_ASSERT_EQUAL_FLOAT(80.0f, g_profileSteps[1].sgTrigger);
+}
+
+void test_a_type_0_step_with_values_becomes_empty(void) {
+  // Type 0 ended the original's profile whatever else the step held
+  const OrigStep steps[] = { {1, 18, 18, 0, 2}, {0, 20, 20, 0, 3}, {1, 22, 22, 0, 1} };
+  stageOriginal();
+  fsTestWrite("/jsonProfileSteps.txt", origSteps(steps, 3).c_str());
+  loadAllConfig();
+  TEST_ASSERT_TRUE(stepIsEmpty(g_profileSteps[1]));
+}
+
+void test_fahrenheit_step_temperatures_become_celsius(void) {
+  const OrigStep steps[] = { {2, 68, 50, 0, 2} };
+  stageOriginal();
+  fsTestWrite("/jsonGlobal.txt", edited(ORIG_GLOBAL, "\"unit\":1", "\"unit\":0").c_str());
+  fsTestWrite("/jsonProfileSteps.txt", origSteps(steps, 1).c_str());
+  loadAllConfig();
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 20.0f, g_profileSteps[0].startTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 10.0f, g_profileSteps[0].endTemp);
+  TEST_ASSERT_TRUE(stepIsEmpty(g_profileSteps[1]));   // not -17.8 C
+}
+
+void test_a_running_profile_is_stopped(void) {
+  stageOriginal();
+  std::string ferm = edited(ORIG_FERMENTER, "\"ProfileRunning\":[0,0,0,0]", "\"ProfileRunning\":[1,0,0,0]");
+  ferm = edited(ferm.c_str(), "\"ProfileNo\":[0,0,0,0]", "\"ProfileNo\":[2,0,0,0]");
+  ferm = edited(ferm.c_str(), "\"CurrentHour\":[0,0,0,0]", "\"CurrentHour\":[30,0,0,0]");
+  fsTestWrite("/jsonFermenter.txt", ferm.c_str());
+  loadAllConfig();
+  TEST_ASSERT_FALSE(g_fermenters[0].profileRunning);
+  TEST_ASSERT_EQUAL_UINT8(0, g_fermenters[0].profileNo);
+  TEST_ASSERT_EQUAL_UINT16(0, g_fermenters[0].currentHour);
+  TEST_ASSERT_TRUE(reportHas("Fermenter 1: profile 2 was running - stopped"));
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -494,6 +602,14 @@ int main(int argc, char** argv) {
   RUN_TEST(test_original_ispindel_unit_2_is_plato);
   RUN_TEST(test_an_ispindel_not_chosen_for_control_gives_gravity_only);
   RUN_TEST(test_an_ispindel_chosen_for_control_gets_the_beer_role);
+
+  RUN_TEST(test_the_real_configs_empty_profiles_stay_empty);
+  RUN_TEST(test_step_types_are_renumbered);
+  RUN_TEST(test_sg_targets_are_divided_by_1000);
+  RUN_TEST(test_attenuation_targets_stay_percentages);
+  RUN_TEST(test_a_type_0_step_with_values_becomes_empty);
+  RUN_TEST(test_fahrenheit_step_temperatures_become_celsius);
+  RUN_TEST(test_a_running_profile_is_stopped);
 
   return UNITY_END();
 }

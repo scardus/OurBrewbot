@@ -360,6 +360,68 @@ static void convertiSpindels(const OriginalFacts& facts) {
 }
 
 // ============================================================
+// PROFILE STEPS (jsonProfileSteps.txt)
+// ============================================================
+
+#define STEP_EMPTY 0xFF
+
+// Original step types are numbered from 1 in a different order; 0 is an
+// empty step. 7 and 8 only existed in the app (the original never acted on
+// them), but they are what the user chose.
+static uint8_t convertStepType(uint8_t type) {
+  switch (type) {
+    case 1:  return STEP_TIME_OVER_TEMP;
+    case 2:  return STEP_TEMP_OVER_TIME;
+    case 3:  return STEP_FREE_RISE;
+    case 4:  return STEP_SPECIFIC_GRAVITY;
+    case 5:  return STEP_ATTENUATION;
+    case 6:  return STEP_TEMP_REACHED;
+    case 7:  return STEP_SG_REACHED;
+    case 8:  return STEP_ATTN_REACHED;
+    default: return STEP_EMPTY;
+  }
+}
+
+static void convertProfileSteps(const OriginalFacts& facts) {
+  JsonDocument doc;
+  if (!loadOriginal(doc, "jsonProfileSteps")) return;
+
+  int converted[MAX_PROFILES] = {0};
+  for (int k = 0; k < MAX_PROFILE_STEPS; k++) {
+    uint8_t type    = doc["StepType"][k] | 0;
+    uint8_t newType = convertStepType(type);
+    if (newType == STEP_EMPTY) {
+      // All zeros is OurBrewbot's empty step - and must not be converted
+      // from Fahrenheit (0 F would become -17.8 C)
+      doc["StepType"][k]  = 0;
+      doc["StartTemp"][k] = 0;
+      doc["EndTemp"][k]   = 0;
+      doc["SGTrigger"][k] = 0;
+      doc["Days"][k]      = 0;
+      continue;
+    }
+    doc["StepType"][k] = newType;
+
+    // SG targets were saved x1000 (1010). An attenuation target is a plain
+    // percentage in the same field, and stays as it is.
+    float sgTrigger = doc["SGTrigger"][k] | 0.0f;
+    if ((type == 4 || type == 7) && sgTrigger > 2.0f) sgTrigger /= 1000.0f;
+    doc["SGTrigger"][k] = sgTrigger;
+
+    if (facts.fahrenheit) {
+      doc["StartTemp"][k] = ((doc["StartTemp"][k] | 0.0f) - 32.0f) * 5.0f / 9.0f;
+      doc["EndTemp"][k]   = ((doc["EndTemp"][k]   | 0.0f) - 32.0f) * 5.0f / 9.0f;
+    }
+    converted[k / MAX_STEPS_PER_PROFILE]++;
+  }
+  for (int p = 0; p < MAX_PROFILES; p++) {
+    if (converted[p] > 0) REPORT("Profile %d: %d step(s) converted", p + 1, converted[p]);
+  }
+
+  saveJsonDocSafe(doc, FILE_STEPS, FILE_STEPS_BKP);
+}
+
+// ============================================================
 // FERMENTERS (jsonFermenter.txt) - written last
 // ============================================================
 
@@ -367,6 +429,21 @@ static void convertFermenters(const OriginalFacts& facts) {
   (void)facts;
   JsonDocument doc;
   if (!loadOriginal(doc, "jsonFermenter")) return;
+
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    // A running profile is stopped: the original's profile number, hour and
+    // step don't carry across reliably. The user starts it again (and can
+    // skip to the right step).
+    if ((doc["ProfileRunning"][i] | 0) != 0) {
+      REPORT("Fermenter %d: profile %u was running - stopped, start it again", i + 1,
+             (unsigned)(doc["ProfileNo"][i] | 0));
+    }
+    doc["ProfileRunning"][i] = false;
+    doc["ProfilePaused"][i]  = false;
+    doc["ProfileNo"][i]      = 0;
+    doc["CurrentStep"][i]    = 0;
+    doc["CurrentHour"][i]    = 0;
+  }
 
   doc.remove("BrewServiceSend");
   JsonArray services = doc["BrewServices"].to<JsonArray>();
@@ -409,6 +486,7 @@ bool convertOriginalConfig() {
   convertProbes();
   convertTilts(facts);
   convertiSpindels(facts);
+  convertProfileSteps(facts);
   convertFermenters(facts);   // last - see the top of this file
 
   LittleFS.remove(ORIG_IN_PROGRESS);
