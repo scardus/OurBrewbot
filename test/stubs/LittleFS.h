@@ -129,6 +129,8 @@ public:
   String fileName() {
     return (idx_ >= 0 && idx_ < FS_MAX_FILES) ? String(g_fsEntries[idx_].path) : String("");
   }
+  // Folders are only part of a file's path here, so no entry is a folder
+  bool isDirectory() { return false; }
   size_t fileSize() {
     return (idx_ >= 0 && idx_ < FS_MAX_FILES) ? g_fsEntries[idx_].len : 0;
   }
