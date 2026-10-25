@@ -165,7 +165,7 @@ Once the firmware is running, navigate to `http://ourbrewbot-XXXXXX.local/update
 4. The device reboots, connects to your network and registers its name in mDNS
 5. Open http://ourbrewbot-XXXXXX.local (the XXXXXX noted in step 1) in your browser.  If this does not work, find your device's IP from your router admin page, then open `http://DEVICEIP/` in a browser.
 
-If your WiFi is down when the device starts, it carries on controlling the fermenters without it and keeps trying to reconnect. After 5 minutes without WiFi it also opens the `OurBrewbot-XXXXXX` access point for 5 minutes at a time (taking turns with reconnecting), so you can enter new WiFi details if they have changed.
+If your WiFi is down when the device starts, it carries on controlling the fermenters without it and keeps trying to reconnect. After 1 minute without WiFi it also opens the `OurBrewbot-XXXXXX` access point for 2 minutes at a time, taking turns with 1 minute of reconnecting, so you can enter new WiFi details if they have changed. While your phone is connected to the access point it stays open for up to 5 minutes.
 
 ---
 
