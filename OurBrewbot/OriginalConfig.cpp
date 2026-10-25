@@ -315,6 +315,51 @@ static void convertTilts(const OriginalFacts& facts) {
 }
 
 // ============================================================
+// iSPINDELS (jsoniSpindel.txt)
+// ============================================================
+
+static void convertiSpindels(const OriginalFacts& facts) {
+  JsonDocument doc;
+  if (!loadOriginal(doc, "jsoniSpindel")) return;
+
+  for (int i = 0; i < MAX_ISPINDELS; i++) {
+    // The original saved the ID as a number, 0 for an empty slot. OurBrewbot
+    // saves it as text, and would read a number as no ID at all.
+    char id[16] = "";
+    JsonVariant idValue = doc["ID"][i];
+    if (idValue.is<const char*>()) {
+      strlcpy(id, idValue.as<const char*>(), sizeof(id));
+    } else if (idValue.is<long>() && idValue.as<long>() != 0) {
+      snprintf(id, sizeof(id), "%ld", idValue.as<long>());
+    }
+    doc["ID"][i] = id;
+
+    uint8_t fermenter = doc["iSpindelFermenter"][i] | PROBE_UNASSIGNED;
+    if (id[0] == '\0' || fermenter >= MAX_FERMENTERS) fermenter = PROBE_UNASSIGNED;
+    doc["iSpindelFermenter"][i]   = fermenter;
+    doc["iSpindelCollectData"][i] = (fermenter != PROBE_UNASSIGNED);
+
+    // Original unit 2 = Plato, anything else SG. OurBrewbot: 0 SG, 1 Plato.
+    uint8_t unit = doc["Unit"][i] | 0;
+    doc["Unit"][i] = (unit == 2) ? ISPINDEL_UNIT_PLATO : ISPINDEL_UNIT_SG;
+
+    // The original only used an iSpindel's temperature for control when its
+    // fermenter's TempControl chose the iSpindel (4). The file has no role
+    // key, and OurBrewbot's default would make every iSpindel a beer
+    // temperature source.
+    bool beer = (fermenter != PROBE_UNASSIGNED && facts.tempControl[fermenter] == 4);
+    doc["Function"][i] = beer ? PROBE_FN_BEER : PROBE_UNASSIGNED;
+
+    if (fermenter != PROBE_UNASSIGNED) {
+      REPORT("iSpindel %s (ID %s): fermenter %u, %s, %s", doc["iSpindelName"][i] | "", id, fermenter + 1,
+             unit == 2 ? "Plato" : "SG", beer ? "beer temperature" : "gravity only");
+    }
+  }
+
+  saveJsonDocSafe(doc, FILE_ISPINDEL, FILE_ISPINDEL_BKP);
+}
+
+// ============================================================
 // FERMENTERS (jsonFermenter.txt) - written last
 // ============================================================
 
@@ -363,6 +408,7 @@ bool convertOriginalConfig() {
   convertGlobal(facts);
   convertProbes();
   convertTilts(facts);
+  convertiSpindels(facts);
   convertFermenters(facts);   // last - see the top of this file
 
   LittleFS.remove(ORIG_IN_PROGRESS);

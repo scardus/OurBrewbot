@@ -394,6 +394,63 @@ void test_a_fahrenheit_tilt_calibration_becomes_celsius(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.5f, g_tilts[TILT_RED].tempAdjust);
 }
 
+// ============================================================
+// iSpindels
+// ============================================================
+
+// Slot 0: a real iSpindel on fermenter 1 (SG); slot 1: one on fermenter 2 (Plato)
+static const char ISPINDELS_TWO[] =
+  R"({"iSpindelName":["iSpindel001","iSpindel002","None","None"],"ID":[1234567,7654321,0,0],"iSpindelCollectData":[1,1,0,0],"iSpindelFermenter":[0,1,99,99],"Unit":[1,2,0,0]})";
+
+void test_the_empty_ispindel_slot_of_the_real_config_stays_empty(void) {
+  // The real file has slot 0 on fermenter 1 with ID 0 - an empty slot
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_STRING("", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[0].fermenter);
+  TEST_ASSERT_FALSE(g_iSpindels[0].collectData);
+}
+
+void test_the_real_configs_unit_1_is_sg_not_plato(void) {
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(ISPINDEL_UNIT_SG, g_iSpindels[0].unit);
+}
+
+void test_a_numeric_ispindel_id_is_kept_as_text(void) {
+  stageOriginal();
+  fsTestWrite("/jsoniSpindel.txt", ISPINDELS_TWO);
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_STRING("1234567", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_UINT8(0, g_iSpindels[0].fermenter);
+  TEST_ASSERT_TRUE(g_iSpindels[0].collectData);
+}
+
+void test_original_ispindel_unit_2_is_plato(void) {
+  stageOriginal();
+  fsTestWrite("/jsoniSpindel.txt", ISPINDELS_TWO);
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(ISPINDEL_UNIT_PLATO, g_iSpindels[1].unit);
+}
+
+void test_an_ispindel_not_chosen_for_control_gives_gravity_only(void) {
+  stageOriginal();
+  fsTestWrite("/jsoniSpindel.txt", ISPINDELS_TWO);
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[0].function);
+  TEST_ASSERT_TRUE(reportHas("iSpindel iSpindel001 (ID 1234567): fermenter 1, SG, gravity only"));
+}
+
+void test_an_ispindel_chosen_for_control_gets_the_beer_role(void) {
+  stageOriginal();
+  fsTestWrite("/jsoniSpindel.txt", ISPINDELS_TWO);
+  fsTestWrite("/jsonFermenter.txt",
+              edited(ORIG_FERMENTER, "\"TempControl\":[1,1,1,1]", "\"TempControl\":[1,4,1,1]").c_str());
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_iSpindels[1].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[0].function);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -430,6 +487,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_an_unassigned_tilt_has_no_fermenter);
   RUN_TEST(test_tilt_calibration_changes_sign);
   RUN_TEST(test_a_fahrenheit_tilt_calibration_becomes_celsius);
+
+  RUN_TEST(test_the_empty_ispindel_slot_of_the_real_config_stays_empty);
+  RUN_TEST(test_the_real_configs_unit_1_is_sg_not_plato);
+  RUN_TEST(test_a_numeric_ispindel_id_is_kept_as_text);
+  RUN_TEST(test_original_ispindel_unit_2_is_plato);
+  RUN_TEST(test_an_ispindel_not_chosen_for_control_gives_gravity_only);
+  RUN_TEST(test_an_ispindel_chosen_for_control_gets_the_beer_role);
 
   return UNITY_END();
 }
