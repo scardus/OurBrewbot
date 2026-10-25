@@ -176,6 +176,10 @@ enum TiltColour {
 #define FILE_REBOOT         "/jsonReBoot.txt"
 #define FILE_REBOOT_BKP     "/jsonReBootbkup.txt"
 #define FILE_DRD            "/DRD.txt"
+// Crash reports waiting to be sent, one JSON report per line (CrashReport.cpp).
+// No backup copy - a temp file is used while the queue is rewritten.
+#define FILE_CRASH_QUEUE     "/jsonCrashQueue.txt"
+#define FILE_CRASH_QUEUE_TMP "/jsonCrashQueue.tmp"
 
 // ============================================================
 // STRUCT: GlobalConfig

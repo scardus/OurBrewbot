@@ -167,6 +167,17 @@ public:
     return true;
   }
 
+  // Like LittleFS, renaming onto an existing file replaces it (CrashReport.cpp
+  // relies on that to swap in a rewritten queue file)
+  bool rename(const char* from, const char* to) {
+    FsEntry* e = find(from);
+    if (!e) return false;
+    remove(to);
+    strncpy(e->path, to, sizeof(e->path) - 1);
+    e->path[sizeof(e->path) - 1] = '\0';
+    return true;
+  }
+
   // WebAPI.cpp passes a String path (built from a request argument), so both
   // overloads are needed; Config.cpp uses the char* one throughout.
   bool exists(const String& path) { return exists(path.c_str()); }

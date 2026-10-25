@@ -972,8 +972,11 @@ void test_reset_wifi_config_clears_the_provisioning_artifacts(void) {
   fsTestWrite(FILE_CONFIG_BKP, "{\"ssid\":\"home\"}");
   fsTestWrite(FILE_DRD,        "x");
   fsTestWrite(FILE_MQTT,       "{\"port\":8883}");
+  fsTestWrite(FILE_CRASH_QUEUE, "{\"n\":1}\n");
 
   resetWiFiConfig();
+
+  TEST_ASSERT_TRUE(LittleFS.exists(FILE_CRASH_QUEUE));   // a WiFi reset keeps waiting crash reports
 
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG));
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG_BKP));
@@ -984,10 +987,13 @@ void test_reset_wifi_config_clears_the_provisioning_artifacts(void) {
 
 void test_reset_all_config_restores_defaults_and_writes_every_file(void) {
   fsTestWrite(FILE_CONFIG, "{\"ssid\":\"home\"}");
+  fsTestWrite(FILE_CRASH_QUEUE, "{\"n\":1}\n");
   g_fermenters[0].ceilingTemp = 40.0f;
   g_mqttConfig.enabled        = true;
 
   resetAllConfig();
+
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));   // crash reports waiting are deleted too
 
   TEST_ASSERT_EQUAL_FLOAT(22.0f, g_fermenters[0].ceilingTemp);
   TEST_ASSERT_FALSE(g_mqttConfig.enabled);
