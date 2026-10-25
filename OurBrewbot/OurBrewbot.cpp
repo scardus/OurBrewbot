@@ -79,8 +79,9 @@
 
 // WiFi at boot and while offline (see setupWiFi() and wifiLoop())
 #define WIFI_BOOT_WAIT_MS       10000   // wait this long for the saved network at boot
-#define WIFI_OFFLINE_MS         300000  // offline this long -> open the setup hotspot
-#define WIFI_HOTSPOT_MS         300000  // hotspot stays up this long, then reconnecting resumes
+#define WIFI_OFFLINE_MS         60000   // offline this long -> open the setup hotspot
+#define WIFI_HOTSPOT_MS         120000  // hotspot stays up this long, then reconnecting resumes
+#define WIFI_HOTSPOT_MAX_MS     300000  // ...or up to this long while a phone is joined to it
 
 // ============================================================
 // GLOBAL STATE
@@ -479,15 +480,19 @@ void setupWiFi() {
 // WIFI WHILE OFFLINE
 // ============================================================
 // Only used when the device booted without reaching its saved network. It
-// keeps trying in the background; if WiFi still isn't up after 5 minutes it
+// keeps trying in the background; if WiFi still isn't up after 1 minute it
 // also opens the setup hotspot, so new WiFi details can be entered from a
 // phone (e.g. after a WiFi password change).
 //
-// The hotspot and reconnecting take turns, 5 minutes each: while the hotspot
-// is up, the WiFi library switches reconnecting off (running both at once
-// makes the hotspot unreliable). Our web server is stopped while the hotspot
-// is up, as both use port 80. Once WiFi has connected the SDK reconnects by
-// itself after any later drop, as it always has, and this does nothing.
+// The hotspot and reconnecting take turns: 1 minute reconnecting, then 2
+// minutes of hotspot - kept open for up to 5 minutes while a phone is joined
+// to it, so nobody is cut off while typing in new WiFi details. The WiFi
+// library switches reconnecting off when the hotspot opens (running both at
+// once makes the hotspot unreliable), but the device can still rejoin its
+// network while the hotspot is up - wifiLoop() then closes the hotspot at
+// once. Our web server is stopped while the hotspot is up, as both use port 80. Once WiFi has connected the SDK
+// reconnects by itself after any later drop, as it always has, and this does
+// nothing.
 
 static bool          s_wifiUpSinceBoot = false;
 static WiFiManager*  s_hotspot         = nullptr;   // non-null while the hotspot is up
@@ -495,11 +500,11 @@ static unsigned long s_wifiPhaseStart  = 0;         // when reconnecting / the h
 
 static void openSetupHotspot() {
   String apName = setupHotspotName();
-  logMsgL(SYSLOG_WARNING, "[WIFI] Still not connected - opening setup hotspot %s for 5 min", apName.c_str());
+  logMsgL(SYSLOG_WARNING, "[WIFI] Still not connected - opening setup hotspot %s for 2 min", apName.c_str());
   g_webServer.stop();
   s_hotspot = new WiFiManager();
   configureWiFiManager(*s_hotspot);
-  s_hotspot->setConfigPortalTimeout(0);   // no library timeout - wifiLoop() closes it after 5 min
+  s_hotspot->setConfigPortalTimeout(0);   // no library timeout - wifiLoop() decides when to close it
   s_hotspot->setConfigPortalBlocking(false);
   s_hotspot->startConfigPortal(apName.c_str());
 }
@@ -520,6 +525,16 @@ static void closeSetupHotspot() {
   }
 }
 
+// The hotspot's turn is over after 2 minutes - or, while a phone is joined
+// to it, after 5 minutes (someone may be typing in new WiFi details).
+static bool hotspotTimeIsUp(unsigned long now) {
+  unsigned long upFor = now - s_wifiPhaseStart;
+  if (WiFi.softAPgetStationNum() > 0) {
+    return upFor >= WIFI_HOTSPOT_MAX_MS;
+  }
+  return upFor >= WIFI_HOTSPOT_MS;
+}
+
 void wifiLoop() {
   if (s_wifiUpSinceBoot) return;
   if (g_wifiConnected) {             // connected during setup()
@@ -530,8 +545,7 @@ void wifiLoop() {
   unsigned long now = millis();
   if (s_hotspot != nullptr) {
     s_hotspot->process();            // serves the hotspot's pages
-    if (WiFi.isConnected() || !s_hotspot->getConfigPortalActive() ||
-        now - s_wifiPhaseStart >= WIFI_HOTSPOT_MS) {
+    if (WiFi.isConnected() || !s_hotspot->getConfigPortalActive() || hotspotTimeIsUp(now)) {
       closeSetupHotspot();
       s_wifiPhaseStart = now;
     }
