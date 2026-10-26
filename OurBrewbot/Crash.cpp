@@ -19,7 +19,8 @@
  *
  * Two RTC slots:
  *   - CrashRecord at offset 0  (filled by custom_crash_callback on exception)
- *   - CheckpointRecord at offset 35 (updated by loop() via checkpoint())
+ *   - CheckpointRecord at offset 53 (updated by loop() via checkpoint())
+ * (DoubleReset.cpp keeps its marker at word 100, clear of both.)
  *
  * The crash record additionally carries the last checkpoint value, so an
  * exception dump is self-contained. The standalone CheckpointRecord covers

@@ -53,4 +53,4 @@
 // Pressure sensor (PSI) — analog input
 #define PIN_PRESSURE        A0    // A0 is defined on both generic and NodeMCU
 
-// Optional: double-reset detect uses a virtual "pin" via LittleFS flag
+// Double reset (clears the saved WiFi) uses the reset button, not a pin - see DoubleReset.cpp

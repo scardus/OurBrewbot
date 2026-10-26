@@ -64,6 +64,7 @@
 #include "TcpCleanup.h"
 #include "StackCheck.h"
 #include "Uptime.h"
+#include "DoubleReset.h"
 #include <MicroMDNS.h>
 
 // ============================================================
@@ -109,6 +110,10 @@ FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
 // Hardware objects
 ESP8266WebServer g_webServer(80);
 
+// Set when a double reset cleared the WiFi at start-up. Logged again once WiFi
+// is set up, because syslog can't be reached before then.
+static bool s_wifiClearedAtBoot = false;
+
 // Functions
 void setupWiFi();
 void wifiLoop();
@@ -137,6 +142,16 @@ void setup() {
       logMsgL(SYSLOG_ERR, "[SYS] Exception cause: %u, EPC1: 0x%08x, EXCVADDR: 0x%08x",
         ri->exccause, ri->epc1, ri->excvaddr);
     }
+  }
+
+  // Reset button pressed twice: clear the saved WiFi. Before the config is
+  // loaded, so WiFi details a converted original config brings are kept.
+  if (doubleResetDetected()) {
+    logMsgL(SYSLOG_NOTICE, "[WIFI] Reset button pressed twice - clearing the saved WiFi");
+    WiFi.persistent(true);
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true);
+    s_wifiClearedAtBoot = true;
   }
 
   // LED setup
@@ -228,6 +243,7 @@ void setup() {
 void loop() {
   uptimeTick();   // first, every pass - keeps uptimeSeconds() counting past the millis() wrap
   unsigned long now = millis();
+  doubleResetLoop();   // forgets a reset button press after 10 s
 
   // Handle web server requests, BLE sniff mode timeout, mDNS, and MQTT client loop.
   // checkpoint() drops a one-byte breadcrumb to RTC so a hardware-watchdog reset
@@ -440,6 +456,11 @@ static void onWiFiConnected() {
 
   // Re-initialise log system now that WiFi is up so syslog host can be resolved
   logInit();
+
+  if (s_wifiClearedAtBoot) {
+    logMsgL(SYSLOG_NOTICE, "DEFERRED [WIFI] The saved WiFi was cleared at start-up by two presses of the reset button");
+    s_wifiClearedAtBoot = false;
+  }
 
   // mDNS: register as ourbrewbot-CHIPID.local (only if enabled in settings)
   if (g_globalConfig.mdnsEnabled) {
