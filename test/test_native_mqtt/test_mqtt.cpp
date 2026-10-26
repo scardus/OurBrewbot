@@ -63,6 +63,7 @@ bool saveFermenterConfig() { return true; }
 bool saveProbeConfig()     { return true; }
 void smartPlugSwitch(uint8_t, bool) {}
 void smartPlugForceOff(uint8_t) {}
+void allPlugsForceOff() {}
 void processProfiles() {}
 
 // The real conversions, then the function under test.

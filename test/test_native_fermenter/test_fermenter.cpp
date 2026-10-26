@@ -83,6 +83,10 @@ void smartPlugForceOff(uint8_t plugIndex) {
   s_forceOffCount++;
   if (s_plugCallCount < 32) s_plugCalls[s_plugCallCount++] = {plugIndex, false};
 }
+// As in SmartPlugs.cpp: a forced OFF for every plug
+void allPlugsForceOff() {
+  for (int p = 0; p < MAX_SMART_PLUGS; p++) smartPlugForceOff(p);
+}
 // Last recorded on/off state for a given plug, or -1 if never called.
 static int lastPlugState(uint8_t plugIndex) {
   for (int i = s_plugCallCount - 1; i >= 0; i--) {

@@ -180,6 +180,7 @@ void setupWebServer(ESP8266WebServer& server) {
       logApiCall(server);
       server.sendHeader("Connection", "close");
       if (Update.hasError()) {
+        holdPlugsOff(false);   // no restart is coming: the control loop takes over again
         String err = "Update FAILED: ";
         err += Update.getError();
         server.send(500, "text/html", err);
@@ -902,6 +903,11 @@ void handleOTAUpload(ESP8266WebServer& server) {
 
   if (upload.status == UPLOAD_FILE_START) {
     logMsgL(SYSLOG_NOTICE, "[OTA] Update started: %s", upload.filename.c_str());
+    // Every plug off, and held off until the restart, so no heater or cooler
+    // is left running while the new firmware loads. A failed upload lets
+    // them go again (see the /update POST handler).
+    holdPlugsOff(true);
+    allPlugsForceOff();
     uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     if (!Update.begin(maxSketchSpace)) {
       Update.printError(Serial);
@@ -920,6 +926,10 @@ void handleOTAUpload(ESP8266WebServer& server) {
     } else {
       Update.printError(Serial);
     }
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    // The connection dropped mid-upload: no restart is coming
+    Update.end();
+    holdPlugsOff(false);
   }
 }
 

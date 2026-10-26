@@ -45,6 +45,16 @@ void smartPlugSwitch(uint8_t plugIndex, bool on);
 // before a plug's settings change, and by the emergency switch-off.
 void smartPlugForceOff(uint8_t plugIndex);
 
+// Send every plug its OFF code (smartPlugForceOff() for each). Used before a
+// firmware update, a restart or a config reset, so no heater or cooler is
+// left running while the controller isn't.
+void allPlugsForceOff();
+
+// Hold every plug off (true) or let the control loop switch them again
+// (false). While held, smartPlugSwitch() sends nothing. Set for a firmware
+// upload and cleared if the upload fails; a successful one ends in a restart.
+void holdPlugsOff(bool hold);
+
 // Get current state of a plug (on/off)
 bool getPlugState(uint8_t plugIndex);
 

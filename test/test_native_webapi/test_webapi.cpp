@@ -132,6 +132,16 @@ void smartPlugForceOff(uint8_t plugIndex) {
   s_forceOffs++;
   s_plugAtForceOff = g_smartPlugs[plugIndex];
 }
+// Every plug off: recorded with plug 0's OFF code at the time, so a test can
+// prove the OFF went out before a config reset erased the codes
+static int      s_allPlugsOffs        = 0;
+static uint32_t s_offCodeAtAllPlugsOff = 0;
+void allPlugsForceOff() {
+  s_allPlugsOffs++;
+  s_offCodeAtAllPlugsOff = g_smartPlugs[0].offCode;
+}
+static bool s_plugsHeldOff = false;
+void holdPlugsOff(bool hold) { s_plugsHeldOff = hold; }
 RCSwitch g_rcSwitch;
 
 // The main sketch owns the debug overrides, not Config.cpp.
@@ -190,6 +200,9 @@ void setUp(void) {
   s_importLastWrite = 0;
   s_rfTransmits = 0;
   s_forceOffs   = 0;
+  s_allPlugsOffs = 0;
+  s_offCodeAtAllPlugsOff = 0;
+  s_plugsHeldOff = false;
   s_bleReinits  = 0;
   g_bleSniffActive   = false;
   s_bleSniffLastPoll = 0;
@@ -1618,6 +1631,37 @@ static void test_ble_console_closing_restarts_the_module(void) {
 }
 
 // ============================================================
+// FIRMWARE UPLOAD: every plug off, and held off until the restart
+// ============================================================
+
+static void test_ota_upload_start_switches_every_plug_off_and_holds_them(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_allPlugsOffs);
+  TEST_ASSERT_TRUE(s_plugsHeldOff);
+}
+
+static void test_ota_upload_chunks_do_not_switch_the_plugs_again(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_WRITE;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_allPlugsOffs);
+  TEST_ASSERT_TRUE(s_plugsHeldOff);          // a successful upload ends in a restart
+}
+
+// The connection dropped: no restart is coming, so control takes over again
+static void test_an_aborted_ota_upload_releases_the_plugs(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_ABORTED;
+  handleOTAUpload(srv);
+  TEST_ASSERT_FALSE(s_plugsHeldOff);
+}
+
+// ============================================================
 // RESTARTS GO THROUGH restartDevice() (0.4.14)
 //
 // A bare ESP.restart() skips the mDNS goodbye, leaving phones and PCs holding
@@ -2250,6 +2294,9 @@ int main(int, char**) {
 
   // Restarts go through restartDevice() (0.4.14)
   RUN_TEST(test_reboot_restarts_through_restart_device);
+  RUN_TEST(test_ota_upload_start_switches_every_plug_off_and_holds_them);
+  RUN_TEST(test_ota_upload_chunks_do_not_switch_the_plugs_again);
+  RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
   RUN_TEST(test_get_reboot_asks_for_confirmation_and_does_not_restart);
   RUN_TEST(test_post_reboot_restarts);
   RUN_TEST(test_get_reset_with_target_erases_nothing);

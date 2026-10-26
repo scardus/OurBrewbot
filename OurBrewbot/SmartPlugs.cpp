@@ -39,6 +39,10 @@ static bool s_plugState[MAX_SMART_PLUGS] = {false};
 static bool     s_plugSent[MAX_SMART_PLUGS]   = {false};
 static uint32_t s_plugSentAt[MAX_SMART_PLUGS] = {0};
 
+// While true, smartPlugSwitch() sends nothing, so the control loop can't
+// switch a plug back on (set for a firmware upload - see holdPlugsOff()).
+static bool s_plugsHeldOff = false;
+
 // ============================================================
 // RF TRANSMISSION via RCSwitch
 // ============================================================
@@ -71,6 +75,7 @@ void rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol)
 
 void smartPlugSwitch(uint8_t plugIndex, bool on) {
   if (plugIndex >= MAX_SMART_PLUGS) return;
+  if (s_plugsHeldOff) return;
 
   SmartPlugConfig& plug = g_smartPlugs[plugIndex];
 
@@ -126,6 +131,18 @@ void smartPlugForceOff(uint8_t plugIndex) {
   // The plug's codes or role may be about to change, so have the control loop
   // send its wanted state on its next pass rather than waiting for the resend
   s_plugSent[plugIndex]  = false;
+}
+
+void allPlugsForceOff() {
+  for (int p = 0; p < MAX_SMART_PLUGS; p++) {
+    smartPlugForceOff(p);
+  }
+}
+
+void holdPlugsOff(bool hold) {
+  if (hold == s_plugsHeldOff) return;
+  s_plugsHeldOff = hold;
+  logMsg("[PLUG] Plugs %s", hold ? "held off" : "released");
 }
 
 // ============================================================
