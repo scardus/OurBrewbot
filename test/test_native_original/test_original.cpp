@@ -69,6 +69,7 @@ void setUp(void) {
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
   s_importActive = false;
   s_uptimeSec    = 1000;
+  WiFi = ESP8266WiFiStub{};
 }
 
 void tearDown(void) {}
@@ -218,6 +219,54 @@ void test_jsonConfig_is_deleted_and_not_copied(void) {
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG_BKP));
   TEST_ASSERT_FALSE(LittleFS.exists("/orig/jsonConfig.txt"));
   TEST_ASSERT_TRUE(reportHas("Deleted jsonConfig.txt"));
+}
+
+void test_the_wifi_details_are_copied_to_the_wifi_store(void) {
+  stageOriginal();
+  loadAllConfig();
+  TEST_ASSERT_TRUE(WiFi.persistentCalled);
+  TEST_ASSERT_EQUAL(WIFI_STA, WiFi.modeSet);
+  TEST_ASSERT_EQUAL_STRING("DummySSID", WiFi.savedSsid);
+  TEST_ASSERT_EQUAL_STRING("DummyWiFiPassword", WiFi.savedPassword);
+  TEST_ASSERT_TRUE(reportHas("Copied the WiFi details for DummySSID into the WiFi store"));
+  // Only the network name is reported, never the password
+  TEST_ASSERT_FALSE(reportHas("DummyWiFiPassword"));
+}
+
+void test_the_wifi_details_are_copied_from_the_backup_file(void) {
+  stageOriginal();
+  LittleFS.remove(FILE_CONFIG);
+  fsTestWrite(FILE_CONFIG_BKP, ORIG_CONFIG);
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_STRING("DummySSID", WiFi.savedSsid);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG_BKP));
+}
+
+void test_empty_wifi_details_are_not_copied(void) {
+  stageOriginal();
+  fsTestWrite(FILE_CONFIG, R"({"wifiSSID":"","wifiPass":""})");
+  loadAllConfig();
+  TEST_ASSERT_FALSE(WiFi.persistentCalled);
+  TEST_ASSERT_EQUAL_STRING("", WiFi.savedSsid);
+  TEST_ASSERT_TRUE(reportHas("No usable WiFi details in jsonConfig.txt"));
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG));
+}
+
+void test_a_network_name_too_long_for_the_wifi_store_is_not_copied(void) {
+  stageOriginal();
+  // 33 characters - one more than the WiFi store holds
+  fsTestWrite(FILE_CONFIG, R"({"wifiSSID":"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456","wifiPass":"secret"})");
+  loadAllConfig();
+  TEST_ASSERT_EQUAL_STRING("", WiFi.savedSsid);
+  TEST_ASSERT_TRUE(reportHas("No usable WiFi details in jsonConfig.txt"));
+}
+
+void test_no_jsonConfig_means_nothing_is_copied(void) {
+  stageOriginal();
+  LittleFS.remove(FILE_CONFIG);
+  loadAllConfig();
+  TEST_ASSERT_FALSE(WiFi.persistentCalled);
+  TEST_ASSERT_FALSE(reportHas("WiFi details"));
 }
 
 void test_the_blynk_token_is_cleared(void) {
@@ -830,6 +879,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_marker_left_by_a_power_cut_is_tidied_up);
 
   RUN_TEST(test_jsonConfig_is_deleted_and_not_copied);
+  RUN_TEST(test_the_wifi_details_are_copied_to_the_wifi_store);
+  RUN_TEST(test_the_wifi_details_are_copied_from_the_backup_file);
+  RUN_TEST(test_empty_wifi_details_are_not_copied);
+  RUN_TEST(test_a_network_name_too_long_for_the_wifi_store_is_not_copied);
+  RUN_TEST(test_no_jsonConfig_means_nothing_is_copied);
   RUN_TEST(test_the_blynk_token_is_cleared);
 
   RUN_TEST(test_celsius_stays_celsius);

@@ -25,7 +25,8 @@
  *      used to detect it.)
  *   2. Copy the untouched files to /orig/, once. jsonConfig.txt is not copied
  *      and is deleted: it holds the WiFi password and Blynk token in plain
- *      text, and anyone on the network can read files through /fs/file.
+ *      text, and anyone on the network can read files through /fs/file. Its
+ *      WiFi details are saved to the ESP8266's WiFi store first.
  *   3. Convert each file, reading from the copy in /orig/ and writing the live
  *      file. Reading from the copy means a conversion cut short by a power cut
  *      can simply run again: it starts from the same files and gets the same
@@ -41,6 +42,7 @@
 #include "OriginalConfig.h"
 #include "Config.h"
 #include "Log.h"
+#include <ESP8266WiFi.h>
 #include <stdarg.h>
 
 // A JSON key kept in flash. On the ESP8266 a plain string literal takes RAM for
@@ -174,8 +176,29 @@ static bool copyOriginalFiles() {
   return true;
 }
 
+// The original kept its WiFi details only in jsonConfig.txt, never in the
+// ESP8266's own WiFi store (checked in a flash dump), so without this a
+// converted controller would start with no WiFi saved. WiFi.begin() saves them
+// to the WiFi store, which setupWiFi() then connects with.
+static void copyWiFiDetails() {
+  JsonDocument doc;
+  if (!loadJsonDocSafe(doc, FILE_CONFIG, FILE_CONFIG_BKP)) return;
+  const char* ssid     = doc[KEY("wifiSSID")] | "";
+  const char* password = doc[KEY("wifiPass")] | "";
+  // The WiFi store holds a 32-character network name and a 64-character password
+  if (ssid[0] == '\0' || strlen(ssid) > 32 || strlen(password) > 64) {
+    REPORT("No usable WiFi details in jsonConfig.txt - set WiFi up through the setup hotspot");
+    return;
+  }
+  WiFi.persistent(true);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  REPORT("Copied the WiFi details for %s into the WiFi store", ssid);
+}
+
 static void removeSecrets() {
   if (LittleFS.exists(FILE_CONFIG) || LittleFS.exists(FILE_CONFIG_BKP)) {
+    copyWiFiDetails();
     LittleFS.remove(FILE_CONFIG);
     LittleFS.remove(FILE_CONFIG_BKP);
     REPORT("Deleted jsonConfig.txt (WiFi password and Blynk token in plain text)");
