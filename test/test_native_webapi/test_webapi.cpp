@@ -1260,6 +1260,56 @@ static void test_mqtt_post_rejected_port_changes_nothing(void) {
   assertMqttConfigUnchanged();
 }
 
+// ---- the broker password is never sent out ----
+
+static void test_mqtt_get_masks_a_saved_password(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  handleMqttConfig(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_STRING("********", doc["password"].as<const char*>());
+  TEST_ASSERT_FALSE(bodyContains("hunter2"));
+}
+
+static void test_mqtt_get_returns_an_empty_password_when_none_is_saved(void) {
+  handleMqttConfig(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_STRING("", doc["password"].as<const char*>());
+}
+
+// A client that saves back what it read must not replace the password with the mask
+static void test_mqtt_post_with_the_mask_keeps_the_saved_password(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  postBody("{\"password\":\"********\"}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("hunter2", g_mqttConfig.password);
+}
+
+// The WebUI leaves the password out when its field is left empty
+static void test_mqtt_post_without_a_password_keeps_the_saved_one(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  postBody("{\"host\":\"new.host\"}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_STRING("hunter2", g_mqttConfig.password);
+}
+
+static void test_mqtt_post_saves_a_new_password(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  postBody("{\"password\":\"correct horse\"}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_STRING("correct horse", g_mqttConfig.password);
+}
+
+// Through the API an empty string still clears it
+static void test_mqtt_post_with_an_empty_password_clears_it(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  postBody("{\"password\":\"\"}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_STRING("", g_mqttConfig.password);
+}
+
 static void test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces(void) {
   seedMqttConfig();
   postBody("{\"baseTopic\":\"home/brew bot/12345678901234567\"}");   // 31 bytes
@@ -2274,6 +2324,12 @@ int main(int, char**) {
   RUN_TEST(test_fs_save_rejects_a_lookalike_path);
   RUN_TEST(test_mqtt_post_rejects_an_unusable_base_topic_and_changes_nothing);
   RUN_TEST(test_mqtt_post_rejected_port_changes_nothing);
+  RUN_TEST(test_mqtt_get_masks_a_saved_password);
+  RUN_TEST(test_mqtt_get_returns_an_empty_password_when_none_is_saved);
+  RUN_TEST(test_mqtt_post_with_the_mask_keeps_the_saved_password);
+  RUN_TEST(test_mqtt_post_without_a_password_keeps_the_saved_one);
+  RUN_TEST(test_mqtt_post_saves_a_new_password);
+  RUN_TEST(test_mqtt_post_with_an_empty_password_clears_it);
   RUN_TEST(test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces);
   RUN_TEST(test_fs_save_rejects_an_empty_body);
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);

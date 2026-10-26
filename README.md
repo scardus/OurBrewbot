@@ -229,7 +229,7 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 | POST   | /iSpindel          | iSpindel gravity data         |
 | POST   | /ispindel/config   | Update iSpindel config (fermenter, collect data, clear) |
 | GET    | /ispindels         | iSpindel config + live data   |
-| GET    | /mqtt              | MQTT config (includes haDiscovery flag) |
+| GET    | /mqtt              | MQTT config (includes haDiscovery flag; password masked) |
 | POST   | /mqtt              | Update MQTT config (haDiscovery, LWT, discovery cleanup on disable) |
 | POST   | /mqtt/discover     | Trigger HA MQTT discovery     |
 | POST   | /mqtt/test         | Test MQTT connection          |
@@ -262,6 +262,8 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 ## Home Assistant MQTT Integration
 
 When MQTT is enabled and **HA Discovery** is turned on, the device publishes Home Assistant MQTT discovery payloads on connect and whenever HA restarts. No manual YAML configuration is needed — entities appear automatically in HA.
+
+The broker password is never shown once it is saved: `GET /mqtt` returns `********` in its place, and the admin page's Password field reads "unchanged" — leave it empty to keep the saved password. It is still stored in `jsonMqtt.txt`, so the file browser and **Export Config** files contain it; keep exported files private.
 
 ### Entity types
 

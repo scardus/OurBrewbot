@@ -1371,7 +1371,8 @@ function loadReporting() {
     mqBody += row('Broker Host',       textInput ('mqhost',  mq.host     || '',          220));
     mqBody += row('Port',              numInput  ('mqport',  mq.port     || 1883, null,   80));
     mqBody += row('Username',          textInput ('mquser',  mq.username || '',          180));
-    mqBody += '<div class="row"><label>Password</label><input type="password" id="mqpass" value="' + escHtml(mq.password) + '" style="width:180px"></div>';
+    // The device never sends the password back (see saveMqtt())
+    mqBody += '<div class="row"><label>Password</label><input type="password" id="mqpass" value="" placeholder="' + (mq.password ? 'unchanged' : 'not set') + '" style="width:180px"></div>';
     mqBody += row('Base Topic',        textInput ('mqtopic', mq.baseTopic || 'ourbrewbot', 180));
     mqBody += row('HA Discovery',      switchHtml('mqha',  mq.haDiscovery  || false));
     mqBody += row('Allow HA Control',  switchHtml('mqctl', mq.allowControl || false));
@@ -1563,12 +1564,14 @@ function saveMqtt() {
     host:         byId('mqhost').value,
     port:         parseInt(byId('mqport').value),
     username:     byId('mquser').value,
-    password:     byId('mqpass').value,
     baseTopic:    byId('mqtopic').value,
     haDiscovery:  byId('mqha').checked,
     allowControl: byId('mqctl').checked,
     logEnabled:   byId('mqlog').checked
   };
+  // GET /mqtt returns a mask, never the password, so the field starts empty.
+  // Left empty, no password is sent and the saved one is kept.
+  if (byId('mqpass').value !== '') body.password = byId('mqpass').value;
   fetch('/mqtt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
     .then(function (d) {

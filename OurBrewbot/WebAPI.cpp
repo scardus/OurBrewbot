@@ -1525,6 +1525,11 @@ void handleBrewServiceTest(ESP8266WebServer& server) {
 // MQTT CONFIG — GET/POST /mqtt, POST /mqtt/test
 // ============================================================
 
+// GET /mqtt never returns the broker password: when one is saved it returns
+// this instead, and a POST that sends it back leaves the saved one alone (so
+// a client that saves what it read doesn't overwrite the password with it).
+static const char MQTT_PASSWORD_MASK[] = "********";
+
 void handleMqttConfig(ESP8266WebServer& server) {
   JsonDocument doc;
   doc["enabled"]      = g_mqttConfig.enabled;
@@ -1534,7 +1539,7 @@ void handleMqttConfig(ESP8266WebServer& server) {
   doc["host"]         = g_mqttConfig.host;
   doc["port"]        = g_mqttConfig.port;
   doc["username"]    = g_mqttConfig.username;
-  doc["password"]    = g_mqttConfig.password;
+  doc["password"]    = (g_mqttConfig.password[0] != '\0') ? MQTT_PASSWORD_MASK : "";
   doc["baseTopic"]   = g_mqttConfig.baseTopic;
   sendJsonDoc(server, doc);
 }
@@ -1566,7 +1571,9 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
   if (doc["host"].is<const char*>())     copyText(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
   if (!doc["port"].isNull())             g_mqttConfig.port = (uint16_t)port;
   if (doc["username"].is<const char*>()) copyText(g_mqttConfig.username, doc["username"].as<const char*>(), sizeof(g_mqttConfig.username));
-  if (doc["password"].is<const char*>()) copyText(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
+  if (doc["password"].is<const char*>() && strcmp(doc["password"].as<const char*>(), MQTT_PASSWORD_MASK) != 0) {
+    copyText(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
+  }
   if (baseTopic != nullptr)              copyText(g_mqttConfig.baseTopic, baseTopic, sizeof(g_mqttConfig.baseTopic));
   if (!doc["haDiscovery"].isNull()) {
     bool newHa = doc["haDiscovery"];
