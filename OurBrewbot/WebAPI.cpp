@@ -623,7 +623,8 @@ void handleDebug(ESP8266WebServer& server) {
 // ============================================================
 
 void buildControllerJson(JsonDocument& doc) {
-  doc["AuthCode"]      = g_globalConfig.authCode;
+  // No AuthCode: nothing reads it, and on a unit converted from the original
+  // firmware it was the old app's account token
   doc["Unit"]          = g_globalConfig.unit;
   doc["BrewService"]   = g_globalConfig.brewService;
   doc["BrewServiceId"] = g_globalConfig.brewServiceId;

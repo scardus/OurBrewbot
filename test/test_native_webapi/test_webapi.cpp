@@ -2090,6 +2090,16 @@ static void test_controller_last_check_age_survives_the_millis_wrap(void) {
   TEST_ASSERT_EQUAL_INT(30, doc["LastUpdateCheck"].as<int>());
 }
 
+// The original firmware's app token is kept in the file but never sent out
+static void test_controller_does_not_return_the_auth_code(void) {
+  strlcpy(g_globalConfig.authCode, "secret-token", sizeof(g_globalConfig.authCode));
+  handleController(srv);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_FALSE(doc["AuthCode"].is<const char*>());
+  TEST_ASSERT_FALSE(bodyContains("secret-token"));
+}
+
 static void test_controller_reports_the_update_status(void) {
   g_globalConfig.updateCheck = true;
   g_updateStatus.checked = true;
@@ -2340,6 +2350,7 @@ int main(int, char**) {
   RUN_TEST(test_ispindel_config_post_converts_temp_adjust_from_fahrenheit);
   RUN_TEST(test_celsius_mode_leaves_temp_adjust_untouched);
 
+  RUN_TEST(test_controller_does_not_return_the_auth_code);
   RUN_TEST(test_controller_reports_the_update_status);
   RUN_TEST(test_controller_last_check_age_survives_the_millis_wrap);
   RUN_TEST(test_controller_last_check_is_minus_one_before_any_attempt);
