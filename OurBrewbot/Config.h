@@ -228,7 +228,7 @@ struct FermenterConfig {
   float   hysteresis;           // temp swing allowance (e.g. 0.1)
   uint16_t compressorDelay;     // minutes between cooling cycles (e.g. 10)
   bool    tempControl;          // temperature control active
-  bool    sgControl;            // gravity control active
+  bool    sgControl;            // unused: kept so the original's file format round-trips (the SG source is picked automatically)
   bool    power;                // fermenter powered
   float   alarmTolerance;       // alarm threshold
   float   ambientSG;            // ambient specific gravity

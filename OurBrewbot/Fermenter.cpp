@@ -159,19 +159,6 @@ void processSingleFermenter(uint8_t i) {
 
   // Operate the smart plugs
   setFermenterPlugs(i, shouldHeat, shouldCool);
-
-  // SG-based control (if enabled and gravity source available)
-  if (g_fermenters[i].sgControl) {
-    float sg = getCurrentSG(i);
-    if (sg > SG_VALID_MIN) {
-      // SG reached target — could stop heating (e.g. diacetyl rest trigger)
-      if (sg <= (g_fermenters[i].tg + 0.002f)) {
-        // Near or past target gravity — log it
-        logMsg("[FERM] F%d (%s): SG %.4f near target %.4f",
-          i, g_fermenters[i].fermenterName, sg, g_fermenters[i].tg);
-      }
-    }
-  }
 }
 
 // ============================================================

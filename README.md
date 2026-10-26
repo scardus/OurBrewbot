@@ -23,6 +23,7 @@ New/Updated Features:
 - Web-based admin page for configuring probes, fermenters, Tilts, iSpindels, plugs, and services
 - Full local REST API
 - mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
+- Gravity source picked automatically - a fermenter's Tilt, then a reporting iSpindel, then an estimate from the OG, target gravity and time since the profile started. This replaces the original's SG Control setting, which only chose the source; it is kept in the config file but does nothing
 - Tilt Pro support - auto-detected by broadcast value magnitude; gravity and temperature decoded with correct Pro precision (÷10000 / ÷10), labelled "Pro" in the admin UI
 - Brewfather integration uses the Custom Stream API
 - MQTT support for publishing fermenter data to any MQTT broker
@@ -38,7 +39,6 @@ The update check and crash reports can each be switched off — see [Contacting 
 Not yet implemented / tested:
 - Pressure sensor - __Untested - No hardware__
 - Aux 1 / Aux 2 smart plug roles - __Not implemented__ - from the original firmware; a plug can be given the role, but nothing switches it
-- SG Control - __Not implemented__ - from the original firmware; the setting is kept in the config file but does nothing. Use the gravity-based profile steps instead
 
 ---
 
