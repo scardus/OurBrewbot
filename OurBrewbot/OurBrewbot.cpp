@@ -409,12 +409,19 @@ static String setupHotspotName() {
   return apName;
 }
 
-// Settings shared by the boot-time and the offline setup hotspot
+// Settings for the setup hotspot
 static void configureWiFiManager(WiFiManager& wifiManager) {
   wifiManager.setConnectTimeout(20);
-  wifiManager.setConfigPortalTimeout(180);
   wifiManager.setTitle("OurBrewbot Setup");
   wifiManager.setCustomHeadElement(WM_PORTAL_CSS);
+}
+
+// True if WiFi details are saved in the ESP8266's WiFi store. A brand-new
+// device, or one whose WiFi was just cleared, has none.
+static bool wifiDetailsSaved() {
+  struct station_config saved;
+  wifi_station_get_config_default(&saved);
+  return saved.ssid[0] != '\0';
 }
 
 // Everything that needs a WiFi connection, run the first time WiFi connects -
@@ -447,32 +454,28 @@ static void onWiFiConnected() {
 }
 
 void setupWiFi() {
-  WiFiManager wifiManager;
-  configureWiFiManager(wifiManager);
-  String apName = setupHotspotName();
+  if (!wifiDetailsSaved()) {
+    // Brand new, or the WiFi was just cleared: wifiLoop() opens the setup
+    // hotspot on its first pass and keeps it open until WiFi is set up. The
+    // fermenters are controlled meanwhile - a converted original MyBrewbot
+    // starts this way with its fermenters and plugs already set up. (Before
+    // this, the device waited in the hotspot controlling nothing.)
+    logMsg("[WIFI] No WiFi saved - the setup hotspot %s stays open until WiFi is set up",
+      setupHotspotName().c_str());
+    return;
+  }
 
-  if (!wifiManager.getWiFiIsSaved()) {
-    // A brand-new device with no WiFi saved: the setup hotspot, waiting until
-    // it is set up, as before. There is nothing to control yet.
-    logMsg("[WIFI] No WiFi saved - starting setup hotspot %s", apName.c_str());
-    if (!wifiManager.autoConnect(apName.c_str())) {
-      logMsgL(SYSLOG_ERR, "[WIFI] Failed to connect - restarting");
-      delay(3000);
-      restartDevice();
-    }
-  } else {
-    // WiFi saved: give it a few seconds, then carry on either way. The
-    // fermenters are controlled whether WiFi is up or not - before 0.6.4 the
-    // device sat in the setup hotspot and restarted until WiFi came back,
-    // controlling nothing (and leaving the plugs as they were) all that time.
-    logMsg("[WIFI] Connecting to %s...", WiFi.SSID().c_str());
-    WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    WiFi.begin();
-    unsigned long start = millis();
-    while (!WiFi.isConnected() && millis() - start < WIFI_BOOT_WAIT_MS) {
-      delay(100);
-    }
+  // WiFi saved: give it a few seconds, then carry on either way. The
+  // fermenters are controlled whether WiFi is up or not - before 0.6.4 the
+  // device sat in the setup hotspot and restarted until WiFi came back,
+  // controlling nothing (and leaving the plugs as they were) all that time.
+  logMsg("[WIFI] Connecting to %s...", WiFi.SSID().c_str());
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin();
+  unsigned long start = millis();
+  while (!WiFi.isConnected() && millis() - start < WIFI_BOOT_WAIT_MS) {
+    delay(100);
   }
 
   if (WiFi.isConnected()) {
@@ -500,6 +503,10 @@ void setupWiFi() {
 //
 // Drops shorter than 5 minutes (e.g. a router reboot) are left to the SDK,
 // which reconnects by itself.
+//
+// With no WiFi saved at all (a brand-new device, or one whose WiFi was just
+// cleared) there is nothing to reconnect to, so the hotspot opens at once and
+// stays open until WiFi details are saved.
 
 static WiFiManager*  s_hotspot         = nullptr;   // non-null while the hotspot is up
 static unsigned long s_wifiPhaseStart  = 0;         // when reconnecting / the hotspot started
@@ -509,7 +516,11 @@ static unsigned long s_wifiDroppedAt   = 0;         // when it was lost
 
 static void openSetupHotspot() {
   String apName = setupHotspotName();
-  logMsgL(SYSLOG_WARNING, "[WIFI] Still not connected - opening setup hotspot %s for 2 min", apName.c_str());
+  if (wifiDetailsSaved()) {
+    logMsgL(SYSLOG_WARNING, "[WIFI] Still not connected - opening setup hotspot %s for 2 min", apName.c_str());
+  } else {
+    logMsgL(SYSLOG_WARNING, "[WIFI] Opening setup hotspot %s until WiFi is set up", apName.c_str());
+  }
   g_webServer.stop();
   s_hotspot = new WiFiManager();
   configureWiFiManager(*s_hotspot);
@@ -535,8 +546,10 @@ static void closeSetupHotspot() {
 }
 
 // The hotspot's turn is over after 2 minutes - or, while a phone is joined
-// to it, after 5 minutes (someone may be typing in new WiFi details).
+// to it, after 5 minutes (someone may be typing in new WiFi details). With no
+// WiFi saved it never is: there is nothing to reconnect to.
 static bool hotspotTimeIsUp(unsigned long now) {
+  if (!wifiDetailsSaved()) return false;
   unsigned long upFor = now - s_wifiPhaseStart;
   if (WiFi.softAPgetStationNum() > 0) {
     return upFor >= WIFI_HOTSPOT_MAX_MS;
@@ -583,7 +596,8 @@ void wifiLoop() {
       closeSetupHotspot();
       s_wifiPhaseStart = now;
     }
-  } else if (!WiFi.isConnected() && now - s_wifiPhaseStart >= WIFI_OFFLINE_MS) {
+  } else if (!WiFi.isConnected() &&
+             (now - s_wifiPhaseStart >= WIFI_OFFLINE_MS || !wifiDetailsSaved())) {
     openSetupHotspot();
     s_wifiPhaseStart = now;
   }
