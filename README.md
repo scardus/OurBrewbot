@@ -14,6 +14,7 @@ This firmware keeps your hardware working:
 - Fermentation profile runner preserved
 - Brewfather / Brewer's Friend integrations with per-fermenter toggles
 - Reads the original's config files and converts them on first start - see [Restoring Your Original Config](#restoring-your-original-config)
+- Pressing the reset button twice clears the saved WiFi, as on the original - see [First Run](#first-run)
 - iSpindel HTTP receiver
 - OTA firmware update via web browser
 - Tilt hydrometer support via HM-10 BLE module (standard and Tilt Pro)
@@ -161,13 +162,15 @@ Every smart plug is switched off when the upload starts and held off until the c
 
 ## First Run
 
-1. On first boot the device creates a WiFi access point named `OurBrewbot-XXXXXX` - __Make a note of this!__
+1. On first boot the device creates a WiFi access point named `OurBrewbot-XXXXXX` - __Make a note of this!__ It stays open until you have set up WiFi, and the fermenters are controlled meanwhile.
 2. Connect to it from your phone or laptop
 3. A configuration portal opens — enter your WiFi SSID and password
-4. The device reboots, connects to your network and registers its name in mDNS
+4. The device closes the access point, connects to your network and registers its name in mDNS
 5. Open http://ourbrewbot-XXXXXX.local (the XXXXXX noted in step 1) in your browser.  If this does not work, find your device's IP from your router admin page, then open `http://DEVICEIP/` in a browser.
 
 If your WiFi is down when the device starts, it carries on controlling the fermenters without it and keeps trying to reconnect. After 1 minute without WiFi it also opens the `OurBrewbot-XXXXXX` access point for 2 minutes at a time, taking turns with 1 minute of reconnecting, so you can enter new WiFi details if they have changed. While your phone is connected to the access point it stays open for up to 5 minutes.
+
+To clear the saved WiFi, for example to move the controller to a different network, press the reset button twice, the second press within 10 seconds of the first. The `OurBrewbot-XXXXXX` access point then opens and stays open until you enter new WiFi details, and the fermenters are controlled meanwhile. Only the reset button counts: a crash, a reboot or a power cut never clears the WiFi. The admin page's **Reset WiFi Settings** button does the same.
 
 ---
 
@@ -180,8 +183,9 @@ The original firmware keeps its settings in the LittleFS partition, and they sur
 - **Probes, Tilts and iSpindels** - keep their fermenter and role. The one the original used for temperature control becomes that fermenter's beer temperature. Tilt calibrations are carried across.
 - **Profiles** - steps are converted to OurBrewbot's step types. A profile that was running is stopped - start it again on the Profiles tab.
 - **Brew service** - Brewfather or Brewer's Friend keeps its ID, and is switched on for the fermenters that sent to it. Press the service's **Test** button to check it still works.
+- **WiFi** - your network name and password are moved into the controller's own WiFi store, so it joins your WiFi as before. The original's WiFi settings file, which held the password in plain text, is then deleted. If your WiFi has changed since, set it up through the `OurBrewbot-XXXXXX` access point as described above.
 
-Not carried across: your probe names (OurBrewbot names probes by their position), Plaato, MyBrewBuddy, monitor.beer, and the Blynk token. The original's WiFi settings file, which held your WiFi password in plain text, is deleted. If the controller doesn't join your WiFi, set it up through the `OurBrewbot-XXXXXX` access point as described above.
+Not carried across: your probe names (OurBrewbot names probes by their position), Plaato, MyBrewBuddy, monitor.beer, and the Blynk token.
 
 The untouched original files are kept in the `orig` folder, and `orig/conversion.txt` lists every change that was made. You can read both in the admin page's file browser on the **System Settings** tab. Check your plugs and fermenters there before you start a brew.
 
@@ -329,6 +333,8 @@ OurBrewbot/
   FirstFault.h/.cpp    Keeps the first CPU exception of a crash, in case the crash handling faults too
   CrashReport.h/.cpp   Sends the saved crash details to ourbrewbot.com
   UpdateCheck.h/.cpp   Daily check of ourbrewbot.com for a newer firmware release
+  OriginalConfig.h/.cpp  One-time conversion of an original MyBrewbot's settings
+  DoubleReset.h/.cpp   Two presses of the reset button clear the saved WiFi
   Pins.h               Hardware GPIO pin assignments
   Version.h            Firmware version constants and ourbrewbot.com URLs
 ```

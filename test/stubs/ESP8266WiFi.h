@@ -30,6 +30,9 @@
 #define WL_CONNECTED     3
 #define WL_DISCONNECTED  6
 
+// WiFiMode_t value from the real header
+#define WIFI_STA  1
+
 class ESP8266WiFiStub {
 public:
   bool    connected = true;
@@ -64,6 +67,17 @@ public:
   bool disconnectCalled = false;
   void persistent(bool) { persistentCalled = true; }
   void disconnect(bool = false) { disconnectCalled = true; connected = false; }
+
+  // Called by OriginalConfig.cpp to save the original's WiFi details. The
+  // details are recorded so a test can check what would have been saved.
+  int  modeSet = 0;
+  char savedSsid[40]     = "";
+  char savedPassword[72] = "";
+  void mode(int m) { modeSet = m; }
+  void begin(const char* ssidIn, const char* passwordIn) {
+    strncpy(savedSsid, ssidIn, sizeof(savedSsid) - 1);
+    strncpy(savedPassword, passwordIn, sizeof(savedPassword) - 1);
+  }
 };
 
 // One shared instance, mirroring the global `WiFi` the real header provides.
