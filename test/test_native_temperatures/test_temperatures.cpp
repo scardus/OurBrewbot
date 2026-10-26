@@ -587,6 +587,41 @@ void test_readTempResults_handles_every_configured_probe(void) {
   TEST_ASSERT_EQUAL_FLOAT(5.0f, g_probes[1].temperature);
 }
 
+// 85.0 C is the DS18B20's power-on value: the probe reset and has not
+// converted since, so it must never reach control as a beer temperature.
+void test_readTempResults_retries_a_power_on_reading_and_recovers(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+  g_sensors1.testSetPowerOnReads(ADDR_A, 1);
+  s_warnings = 0;
+
+  readTempResults();
+  TEST_ASSERT_EQUAL_FLOAT(20.5f, g_probes[0].temperature);
+  TEST_ASSERT_EQUAL_UINT8(0, g_probes[0].failCount);
+  TEST_ASSERT_EQUAL_INT(1, g_sensors1.testRequestCount());   // fresh conversion asked for
+  TEST_ASSERT_EQUAL_INT(1, s_warnings);                      // the 85.0 C is logged
+}
+
+void test_readTempResults_counts_a_repeated_power_on_reading_as_a_failure(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_probes[0].temperature = 19.0f;
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+  g_sensors1.testSetPowerOnReads(ADDR_A, 2);
+
+  readTempResults();
+  TEST_ASSERT_EQUAL_UINT8(1, g_probes[0].failCount);
+  TEST_ASSERT_EQUAL_FLOAT(19.0f, g_probes[0].temperature);   // last good reading kept
+}
+
+void test_readTempResults_accepts_a_reading_just_below_85(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_sensors1.testAddDevice(ADDR_A, 84.9375f);   // one 12-bit step below 85.0
+
+  readTempResults();
+  TEST_ASSERT_EQUAL_FLOAT(84.9375f, g_probes[0].temperature);
+  TEST_ASSERT_EQUAL_UINT8(0, g_probes[0].failCount);
+}
+
 // ============================================================
 // periodicProbeScan
 // ============================================================
@@ -992,6 +1027,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_readTempResults_marks_the_probe_inactive_at_the_threshold);
   RUN_TEST(test_readTempResults_clears_the_fail_count_on_recovery);
   RUN_TEST(test_readTempResults_handles_every_configured_probe);
+  RUN_TEST(test_readTempResults_retries_a_power_on_reading_and_recovers);
+  RUN_TEST(test_readTempResults_counts_a_repeated_power_on_reading_as_a_failure);
+  RUN_TEST(test_readTempResults_accepts_a_reading_just_below_85);
 
   RUN_TEST(test_periodicProbeScan_reapplies_the_resolution);
   RUN_TEST(test_periodicProbeScan_saves_when_a_probe_was_added);
