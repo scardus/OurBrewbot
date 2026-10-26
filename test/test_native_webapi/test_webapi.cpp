@@ -132,6 +132,16 @@ void smartPlugForceOff(uint8_t plugIndex) {
   s_forceOffs++;
   s_plugAtForceOff = g_smartPlugs[plugIndex];
 }
+// Every plug off: recorded with plug 0's OFF code at the time, so a test can
+// prove the OFF went out before a config reset erased the codes
+static int      s_allPlugsOffs        = 0;
+static uint32_t s_offCodeAtAllPlugsOff = 0;
+void allPlugsForceOff() {
+  s_allPlugsOffs++;
+  s_offCodeAtAllPlugsOff = g_smartPlugs[0].offCode;
+}
+static bool s_plugsHeldOff = false;
+void holdPlugsOff(bool hold) { s_plugsHeldOff = hold; }
 RCSwitch g_rcSwitch;
 
 // The main sketch owns the debug overrides, not Config.cpp.
@@ -190,6 +200,9 @@ void setUp(void) {
   s_importLastWrite = 0;
   s_rfTransmits = 0;
   s_forceOffs   = 0;
+  s_allPlugsOffs = 0;
+  s_offCodeAtAllPlugsOff = 0;
+  s_plugsHeldOff = false;
   s_bleReinits  = 0;
   g_bleSniffActive   = false;
   s_bleSniffLastPoll = 0;
@@ -1247,6 +1260,56 @@ static void test_mqtt_post_rejected_port_changes_nothing(void) {
   assertMqttConfigUnchanged();
 }
 
+// ---- the broker password is never sent out ----
+
+static void test_mqtt_get_masks_a_saved_password(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  handleMqttConfig(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_STRING("********", doc["password"].as<const char*>());
+  TEST_ASSERT_FALSE(bodyContains("hunter2"));
+}
+
+static void test_mqtt_get_returns_an_empty_password_when_none_is_saved(void) {
+  handleMqttConfig(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_STRING("", doc["password"].as<const char*>());
+}
+
+// A client that saves back what it read must not replace the password with the mask
+static void test_mqtt_post_with_the_mask_keeps_the_saved_password(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  postBody("{\"password\":\"********\"}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("hunter2", g_mqttConfig.password);
+}
+
+// The WebUI leaves the password out when its field is left empty
+static void test_mqtt_post_without_a_password_keeps_the_saved_one(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  postBody("{\"host\":\"new.host\"}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_STRING("hunter2", g_mqttConfig.password);
+}
+
+static void test_mqtt_post_saves_a_new_password(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  postBody("{\"password\":\"correct horse\"}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_STRING("correct horse", g_mqttConfig.password);
+}
+
+// Through the API an empty string still clears it
+static void test_mqtt_post_with_an_empty_password_clears_it(void) {
+  strlcpy(g_mqttConfig.password, "hunter2", sizeof(g_mqttConfig.password));
+  postBody("{\"password\":\"\"}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_STRING("", g_mqttConfig.password);
+}
+
 static void test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces(void) {
   seedMqttConfig();
   postBody("{\"baseTopic\":\"home/brew bot/12345678901234567\"}");   // 31 bytes
@@ -1618,6 +1681,37 @@ static void test_ble_console_closing_restarts_the_module(void) {
 }
 
 // ============================================================
+// FIRMWARE UPLOAD: every plug off, and held off until the restart
+// ============================================================
+
+static void test_ota_upload_start_switches_every_plug_off_and_holds_them(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_allPlugsOffs);
+  TEST_ASSERT_TRUE(s_plugsHeldOff);
+}
+
+static void test_ota_upload_chunks_do_not_switch_the_plugs_again(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_WRITE;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_allPlugsOffs);
+  TEST_ASSERT_TRUE(s_plugsHeldOff);          // a successful upload ends in a restart
+}
+
+// The connection dropped: no restart is coming, so control takes over again
+static void test_an_aborted_ota_upload_releases_the_plugs(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_ABORTED;
+  handleOTAUpload(srv);
+  TEST_ASSERT_FALSE(s_plugsHeldOff);
+}
+
+// ============================================================
 // RESTARTS GO THROUGH restartDevice() (0.4.14)
 //
 // A bare ESP.restart() skips the mDNS goodbye, leaving phones and PCs holding
@@ -1658,6 +1752,7 @@ static void test_post_reboot_restarts(void) {
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
   TEST_ASSERT_TRUE(bodyContains("Rebooting"));
   TEST_ASSERT_EQUAL_INT(1, s_restarts);
+  TEST_ASSERT_EQUAL_INT(1, s_allPlugsOffs);
 }
 
 // The scenario being fixed: a link preview of /reset?target=config used to
@@ -1682,6 +1777,15 @@ static void test_post_reset_with_target_erases_and_restarts(void) {
   TEST_ASSERT_EQUAL_INT(1, s_restarts);
 }
 
+// The OFF has to go out before the reset erases the plugs' codes
+static void test_post_reset_switches_the_plugs_off_before_erasing_them(void) {
+  g_smartPlugs[0].offCode = 0xABCDEF;
+  srv.setArg("target", "config");
+  request(HTTP_POST, "/reset");
+  TEST_ASSERT_EQUAL_INT(1, s_allPlugsOffs);
+  TEST_ASSERT_EQUAL_HEX32(0xABCDEF, s_offCodeAtAllPlugsOff);
+}
+
 // target=config is required as well, so a bare POST erases nothing
 static void test_post_reset_without_target_only_asks(void) {
   g_fermenters[0].power = true;
@@ -1689,6 +1793,7 @@ static void test_post_reset_without_target_only_asks(void) {
   TEST_ASSERT_TRUE(bodyContains("Confirm Reset"));
   TEST_ASSERT_TRUE(g_fermenters[0].power);
   TEST_ASSERT_EQUAL_INT(0, s_restarts);
+  TEST_ASSERT_EQUAL_INT(0, s_allPlugsOffs);
 }
 
 // The goodbye needs a working connection, so forgetting WiFi has to be left to
@@ -2035,6 +2140,16 @@ static void test_controller_last_check_age_survives_the_millis_wrap(void) {
   TEST_ASSERT_EQUAL_INT(30, doc["LastUpdateCheck"].as<int>());
 }
 
+// The original firmware's app token is kept in the file but never sent out
+static void test_controller_does_not_return_the_auth_code(void) {
+  strlcpy(g_globalConfig.authCode, "secret-token", sizeof(g_globalConfig.authCode));
+  handleController(srv);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_FALSE(doc["AuthCode"].is<const char*>());
+  TEST_ASSERT_FALSE(bodyContains("secret-token"));
+}
+
 static void test_controller_reports_the_update_status(void) {
   g_globalConfig.updateCheck = true;
   g_updateStatus.checked = true;
@@ -2209,6 +2324,12 @@ int main(int, char**) {
   RUN_TEST(test_fs_save_rejects_a_lookalike_path);
   RUN_TEST(test_mqtt_post_rejects_an_unusable_base_topic_and_changes_nothing);
   RUN_TEST(test_mqtt_post_rejected_port_changes_nothing);
+  RUN_TEST(test_mqtt_get_masks_a_saved_password);
+  RUN_TEST(test_mqtt_get_returns_an_empty_password_when_none_is_saved);
+  RUN_TEST(test_mqtt_post_with_the_mask_keeps_the_saved_password);
+  RUN_TEST(test_mqtt_post_without_a_password_keeps_the_saved_one);
+  RUN_TEST(test_mqtt_post_saves_a_new_password);
+  RUN_TEST(test_mqtt_post_with_an_empty_password_clears_it);
   RUN_TEST(test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces);
   RUN_TEST(test_fs_save_rejects_an_empty_body);
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);
@@ -2250,10 +2371,14 @@ int main(int, char**) {
 
   // Restarts go through restartDevice() (0.4.14)
   RUN_TEST(test_reboot_restarts_through_restart_device);
+  RUN_TEST(test_ota_upload_start_switches_every_plug_off_and_holds_them);
+  RUN_TEST(test_ota_upload_chunks_do_not_switch_the_plugs_again);
+  RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
   RUN_TEST(test_get_reboot_asks_for_confirmation_and_does_not_restart);
   RUN_TEST(test_post_reboot_restarts);
   RUN_TEST(test_get_reset_with_target_erases_nothing);
   RUN_TEST(test_post_reset_with_target_erases_and_restarts);
+  RUN_TEST(test_post_reset_switches_the_plugs_off_before_erasing_them);
   RUN_TEST(test_post_reset_without_target_only_asks);
   RUN_TEST(test_wifi_reset_leaves_forgetting_wifi_until_after_the_goodbye);
 
@@ -2281,6 +2406,7 @@ int main(int, char**) {
   RUN_TEST(test_ispindel_config_post_converts_temp_adjust_from_fahrenheit);
   RUN_TEST(test_celsius_mode_leaves_temp_adjust_untouched);
 
+  RUN_TEST(test_controller_does_not_return_the_auth_code);
   RUN_TEST(test_controller_reports_the_update_status);
   RUN_TEST(test_controller_last_check_age_survives_the_millis_wrap);
   RUN_TEST(test_controller_last_check_is_minus_one_before_any_attempt);

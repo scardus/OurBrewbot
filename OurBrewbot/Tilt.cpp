@@ -70,6 +70,7 @@ static int s_missedReads[MAX_TILTS] = {0};
 
 // BLE module state
 static bool s_bleReady = false;
+static bool s_otherBaudsTried = false;   // initBLE() has looked for the HM-10 at other baud rates
 bool g_bleSniffActive = false;           // set by BLE sniff page to pause Tilt scanning
 #define BLE_BUF_SIZE 320          // longest AT+DISI? response observed ~280 chars
 static char  s_bleBuf[BLE_BUF_SIZE];
@@ -162,13 +163,18 @@ static bool decodeTiltReading(const char* fields, int colour,
   return true;
 }
 
+// The baud rates the HM-10 supports, and the digit AT+BAUD<n> uses to select
+// each one. (It also does 115200 and 230400, but those don't fit in the
+// 16-bit setting.)
+static const uint16_t HM10_BAUDS[]      = { 1200, 2400, 4800, 9600, 19200, 38400, 57600 };
+static const char     HM10_BAUD_CODES[] = { '7',  '6',  '5',  '0',  '1',   '2',   '3'   };
+static const int      HM10_BAUD_COUNT   = sizeof(HM10_BAUDS) / sizeof(HM10_BAUDS[0]);
+
 // The baud rate to drive the HM-10 at. SoftwareSerial divides by it, so a 0
 // crashes with a divide by zero (seen in a v0.6.2 crash report), and any other
 // odd value leaves the module unreadable. A rate the HM-10 doesn't support
-// falls back to its factory 9600. (It also does 115200 and 230400, but those
-// don't fit in the 16-bit setting.)
+// falls back to its factory 9600.
 static uint32_t bleBaudToUse() {
-  static const uint16_t HM10_BAUDS[] = { 1200, 2400, 4800, 9600, 19200, 38400, 57600 };
   for (uint16_t baud : HM10_BAUDS) {
     if (g_globalConfig.bleBaud == baud) return baud;
   }
@@ -177,17 +183,23 @@ static uint32_t bleBaudToUse() {
   return 9600;
 }
 
-void initBLE() {
+// (Re)open the serial port to the HM-10. end() first: begin() replaces the
+// receive buffers, and it must not do that while the receive interrupt that
+// writes into them is still attached.
+static void openBleSerial(uint32_t baud) {
+  g_bleSerial.end();
   // Hold a full AT+DISI? response (<=320 B, see BLE_BUF_SIZE) even if a loop
   // pass stalls mid-scan. isrBufCapacity is passed EXPLICITLY: left at 0 the
   // library derives it as bufCapacity*10 uint32 entries, so bufCapacity=384
   // with default ISR sizing would cost ~15 KB; capping the edge buffer keeps
   // the total near ~2.4 KB (384 B byte queue + 512*4 B edge queue).
-  g_bleSerial.begin(bleBaudToUse(), SWSERIAL_8N1, PIN_BLE_RX, PIN_BLE_TX,
+  g_bleSerial.begin(baud, SWSERIAL_8N1, PIN_BLE_RX, PIN_BLE_TX,
                     false, /*bufCapacity=*/384, /*isrBufCapacity=*/512);
   delay(100);
+}
 
-  // Send AT to test module responsiveness
+// Send AT and report whether the module answered OK (~200 ms).
+static bool hm10Answers() {
   g_bleSerial.print("AT");
   delay(200);
 
@@ -197,8 +209,51 @@ void initBLE() {
     resp[rLen++] = (char)g_bleSerial.read();
   }
   resp[rLen] = '\0';
+  return strstr(resp, "OK") != nullptr;
+}
 
-  if (strstr(resp, "OK") != nullptr) {
+// The HM-10 keeps its baud rate through a power cycle, so a module that was
+// set to another rate never answers at ours. Try the other rates; when one
+// answers, switch the module to `wanted` (it takes effect after AT+RESET) and
+// reopen the port at that rate. Returns whether the module now answers.
+// Each rate tried costs ~300 ms, so this only runs at start-up.
+static bool findHm10AtAnotherBaud(uint32_t wanted) {
+  for (int i = 0; i < HM10_BAUD_COUNT; i++) {
+    if (HM10_BAUDS[i] == wanted) continue;
+    openBleSerial(HM10_BAUDS[i]);
+    if (!hm10Answers()) continue;
+
+    logMsg("[BLE] HM-10 answered at %u baud - setting it to %u",
+           HM10_BAUDS[i], (unsigned)wanted);
+    char cmd[] = "AT+BAUD0";
+    for (int j = 0; j < HM10_BAUD_COUNT; j++) {
+      if (HM10_BAUDS[j] == wanted) cmd[7] = HM10_BAUD_CODES[j];
+    }
+    g_bleSerial.print(cmd);
+    delay(200);
+    while (g_bleSerial.available()) g_bleSerial.read();
+    g_bleSerial.print("AT+RESET");
+    delay(1000);
+    openBleSerial(wanted);
+    return hm10Answers();
+  }
+  openBleSerial(wanted);   // no answer at any rate: leave the port at ours
+  return false;
+}
+
+void initBLE() {
+  uint32_t baud = bleBaudToUse();
+  openBleSerial(baud);
+
+  // The other baud rates are only tried once, at start-up: with no module
+  // fitted they would cost ~2 s on every 5-minute retry (see startTiltScan()).
+  bool answered = hm10Answers();
+  if (!answered && !s_otherBaudsTried) {
+    s_otherBaudsTried = true;
+    answered = findHm10AtAnotherBaud(baud);
+  }
+
+  if (answered) {
     s_bleReady = true;
     logMsg("[BLE] HM-10 module ready");
 

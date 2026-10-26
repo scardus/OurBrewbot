@@ -39,6 +39,9 @@
 //      retry that is otherwise unreachable - a probe that always works never
 //      enters it, and one that never works can't be told apart from one the
 //      retry failed to recover.
+//   3. testSetPowerOnReads() makes the next N reads of one address return
+//      85.0 C, the value a DS18B20 holds after a power-on reset until it has
+//      converted again.
 //
 // begin() deliberately clears the resolution. The real library resets its
 // internal resolution there, which is why periodicProbeScan() re-applies it
@@ -89,6 +92,10 @@ public:
       d->failsRemaining--;
       return DEVICE_DISCONNECTED_C;            // transient read error
     }
+    if (d->powerOnReadsRemaining > 0) {
+      d->powerOnReadsRemaining--;
+      return 85.0f;                            // reset, not converted since
+    }
     return d->temp;
   }
 
@@ -103,6 +110,7 @@ public:
     if (!parseAddr(addrHex, devices_[count_].addr)) return false;
     devices_[count_].temp           = tempC;
     devices_[count_].failsRemaining = 0;
+    devices_[count_].powerOnReadsRemaining = 0;
     count_++;
     return true;
   }
@@ -120,6 +128,14 @@ public:
     if (!parseAddr(addrHex, a)) return;
     Device* d = find(a);
     if (d) d->failsRemaining = n;
+  }
+
+  // Return the power-on value 85.0 C for the next `n` reads of this address.
+  void testSetPowerOnReads(const char* addrHex, int n) {
+    uint8_t a[8];
+    if (!parseAddr(addrHex, a)) return;
+    Device* d = find(a);
+    if (d) d->powerOnReadsRemaining = n;
   }
 
   // Drop every probe and all recorded activity - call from setUp().
@@ -145,6 +161,7 @@ private:
     uint8_t addr[8];
     float   temp;
     int     failsRemaining;
+    int     powerOnReadsRemaining;
   };
 
   Device  devices_[DS_TEST_MAX_DEVICES];

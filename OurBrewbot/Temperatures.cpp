@@ -208,6 +208,21 @@ void requestTempConversion() {
   g_sensors2.requestTemperatures();
 }
 
+// 85.0 C is the value a DS18B20 holds from power-on until its first
+// conversion, so reading it means the probe reset (e.g. a power glitch on the
+// cable) and has no real reading yet. Treat it as a failed read, as the
+// original firmware did - the retry below then asks for a fresh conversion.
+static const float DS18B20_POWER_ON_C = 85.0f;
+
+static float readProbeC(DallasTemperature& sensors, const DeviceAddress& addr, const char* address) {
+  float temp = sensors.getTempC(addr);
+  if (temp == DS18B20_POWER_ON_C) {
+    logMsgL(SYSLOG_WARNING, "[TEMP] Probe %s read 85.0 C (power-on value) - ignored", address);
+    return DEVICE_DISCONNECTED_C;
+  }
+  return temp;
+}
+
 // Phase 2: read completed conversion results from all registered probes.
 // Must be called only after the conversion time has elapsed.
 void readTempResults() {
@@ -219,9 +234,9 @@ void readTempResults() {
 
     // Use the bus recorded during the last scan; fall back to both if not yet scanned
     DallasTemperature* sensors = (g_probes[i].busId == 2) ? &g_sensors2 : &g_sensors1;
-    float temp = sensors->getTempC(addr);
+    float temp = readProbeC(*sensors, addr, g_probes[i].address);
     if (temp == DEVICE_DISCONNECTED_C && g_probes[i].busId == 0) {
-      temp = g_sensors2.getTempC(addr);
+      temp = readProbeC(g_sensors2, addr, g_probes[i].address);
       if (temp != DEVICE_DISCONNECTED_C) {
         // Remember the bus that served the read so the retry below (and the
         // next cycles until the scan updates it) target the right bus.
@@ -235,13 +250,13 @@ void readTempResults() {
     if (temp == DEVICE_DISCONNECTED_C && g_probes[i].failCount == 0) {
       sensors->setWaitForConversion(true);
       sensors->requestTemperatures();
-      temp = sensors->getTempC(addr);
+      temp = readProbeC(*sensors, addr, g_probes[i].address);
       sensors->setWaitForConversion(false);
       // Probe never seen on a scan (busId 0) and bus 1 retry failed: try bus 2 once.
       if (temp == DEVICE_DISCONNECTED_C && g_probes[i].busId == 0) {
         g_sensors2.setWaitForConversion(true);
         g_sensors2.requestTemperatures();
-        temp = g_sensors2.getTempC(addr);
+        temp = readProbeC(g_sensors2, addr, g_probes[i].address);
         g_sensors2.setWaitForConversion(false);
       }
     }
@@ -362,7 +377,10 @@ const char* getBeerTempSource(uint8_t fermenterIndex) {
     case BEER_SRC_TILT:     return "Tilt";
     case BEER_SRC_PROBE:    return "Probe";
     case BEER_SRC_ISPINDEL: return "iSpindel";
-    default:                return "None";
+    default:
+      // No beer reading: control falls back to the ambient probe (see
+      // getControlTemp()), so say so rather than "None"
+      return (getAmbientTemp(fermenterIndex) > TEMP_VALID_MIN) ? "Ambient" : "None";
   }
 }
 

@@ -180,6 +180,7 @@ void setupWebServer(ESP8266WebServer& server) {
       logApiCall(server);
       server.sendHeader("Connection", "close");
       if (Update.hasError()) {
+        holdPlugsOff(false);   // no restart is coming: the control loop takes over again
         String err = "Update FAILED: ";
         err += Update.getError();
         server.send(500, "text/html", err);
@@ -622,7 +623,8 @@ void handleDebug(ESP8266WebServer& server) {
 // ============================================================
 
 void buildControllerJson(JsonDocument& doc) {
-  doc["AuthCode"]      = g_globalConfig.authCode;
+  // No AuthCode: nothing reads it, and on a unit converted from the original
+  // firmware it was the old app's account token
   doc["Unit"]          = g_globalConfig.unit;
   doc["BrewService"]   = g_globalConfig.brewService;
   doc["BrewServiceId"] = g_globalConfig.brewServiceId;
@@ -845,6 +847,7 @@ void handleReset(ESP8266WebServer& server) {
   }
   server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Configuration reset\"}"));
   delay(200);
+  allPlugsForceOff();   // before the reset erases the plugs' OFF codes
   resetAllConfig();
   restartDevice();
 }
@@ -856,6 +859,7 @@ void handleReboot(ESP8266WebServer& server) {
   }
   server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Rebooting\"}"));
   delay(500);
+  allPlugsForceOff();   // nothing left running while the controller restarts
   restartDevice();
 }
 
@@ -902,6 +906,11 @@ void handleOTAUpload(ESP8266WebServer& server) {
 
   if (upload.status == UPLOAD_FILE_START) {
     logMsgL(SYSLOG_NOTICE, "[OTA] Update started: %s", upload.filename.c_str());
+    // Every plug off, and held off until the restart, so no heater or cooler
+    // is left running while the new firmware loads. A failed upload lets
+    // them go again (see the /update POST handler).
+    holdPlugsOff(true);
+    allPlugsForceOff();
     uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     if (!Update.begin(maxSketchSpace)) {
       Update.printError(Serial);
@@ -920,6 +929,10 @@ void handleOTAUpload(ESP8266WebServer& server) {
     } else {
       Update.printError(Serial);
     }
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    // The connection dropped mid-upload: no restart is coming
+    Update.end();
+    holdPlugsOff(false);
   }
 }
 
@@ -1512,6 +1525,11 @@ void handleBrewServiceTest(ESP8266WebServer& server) {
 // MQTT CONFIG — GET/POST /mqtt, POST /mqtt/test
 // ============================================================
 
+// GET /mqtt never returns the broker password: when one is saved it returns
+// this instead, and a POST that sends it back leaves the saved one alone (so
+// a client that saves what it read doesn't overwrite the password with it).
+static const char MQTT_PASSWORD_MASK[] = "********";
+
 void handleMqttConfig(ESP8266WebServer& server) {
   JsonDocument doc;
   doc["enabled"]      = g_mqttConfig.enabled;
@@ -1521,7 +1539,7 @@ void handleMqttConfig(ESP8266WebServer& server) {
   doc["host"]         = g_mqttConfig.host;
   doc["port"]        = g_mqttConfig.port;
   doc["username"]    = g_mqttConfig.username;
-  doc["password"]    = g_mqttConfig.password;
+  doc["password"]    = (g_mqttConfig.password[0] != '\0') ? MQTT_PASSWORD_MASK : "";
   doc["baseTopic"]   = g_mqttConfig.baseTopic;
   sendJsonDoc(server, doc);
 }
@@ -1553,7 +1571,9 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
   if (doc["host"].is<const char*>())     copyText(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
   if (!doc["port"].isNull())             g_mqttConfig.port = (uint16_t)port;
   if (doc["username"].is<const char*>()) copyText(g_mqttConfig.username, doc["username"].as<const char*>(), sizeof(g_mqttConfig.username));
-  if (doc["password"].is<const char*>()) copyText(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
+  if (doc["password"].is<const char*>() && strcmp(doc["password"].as<const char*>(), MQTT_PASSWORD_MASK) != 0) {
+    copyText(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
+  }
   if (baseTopic != nullptr)              copyText(g_mqttConfig.baseTopic, baseTopic, sizeof(g_mqttConfig.baseTopic));
   if (!doc["haDiscovery"].isNull()) {
     bool newHa = doc["haDiscovery"];

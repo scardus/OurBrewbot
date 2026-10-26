@@ -66,7 +66,9 @@ bool isUnpaddedAddress(const char* stored, const DeviceAddress& addr);
 // Get beer temperature for a fermenter (returns -127 if no probe assigned)
 float getBeerTemp(uint8_t fermenterIndex);
 
-// Get the source of the beer temperature reading ("Tilt", "Probe", "iSpindel", or "None")
+// Get the source of the temperature that controls the fermenter: "Tilt",
+// "Probe" or "iSpindel" for a beer reading, "Ambient" when there is none and
+// control falls back to the ambient probe, or "None" ("Debug" for an override)
 const char* getBeerTempSource(uint8_t fermenterIndex);
 
 // Get ambient/fridge temperature for a fermenter

@@ -23,6 +23,7 @@ New/Updated Features:
 - Web-based admin page for configuring probes, fermenters, Tilts, iSpindels, plugs, and services
 - Full local REST API
 - mDNS — device registers as `ourbrewbot-CHIPID.local` on the local network
+- Gravity source picked automatically - a fermenter's Tilt, then a reporting iSpindel, then an estimate from the OG, target gravity and time since the profile started. This replaces the original's SG Control setting, which only chose the source; it is kept in the config file but does nothing
 - Tilt Pro support - auto-detected by broadcast value magnitude; gravity and temperature decoded with correct Pro precision (÷10000 / ÷10), labelled "Pro" in the admin UI
 - Brewfather integration uses the Custom Stream API
 - MQTT support for publishing fermenter data to any MQTT broker
@@ -38,7 +39,6 @@ The update check and crash reports can each be switched off — see [Contacting 
 Not yet implemented / tested:
 - Pressure sensor - __Untested - No hardware__
 - Aux 1 / Aux 2 smart plug roles - __Not implemented__ - from the original firmware; a plug can be given the role, but nothing switches it
-- SG Control - __Not implemented__ - from the original firmware; the setting is kept in the config file but does nothing. Use the gravity-based profile steps instead
 
 ---
 
@@ -155,6 +155,8 @@ esptool.py --port COM7 --baud 115200 write_flash 0x0 OurBrewbot_vX.Y.Z.bin
 
 Once the firmware is running, navigate to `http://ourbrewbot-XXXXXX.local/update` in your browser and upload the `.bin` file directly.
 
+Every smart plug is switched off when the upload starts and held off until the controller restarts on the new firmware (if the upload fails, control carries on as before). Plugs are also switched off before a reboot or config reset.
+
 ---
 
 ## First Run
@@ -227,7 +229,7 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 | POST   | /iSpindel          | iSpindel gravity data         |
 | POST   | /ispindel/config   | Update iSpindel config (fermenter, collect data, clear) |
 | GET    | /ispindels         | iSpindel config + live data   |
-| GET    | /mqtt              | MQTT config (includes haDiscovery flag) |
+| GET    | /mqtt              | MQTT config (includes haDiscovery flag; password masked) |
 | POST   | /mqtt              | Update MQTT config (haDiscovery, LWT, discovery cleanup on disable) |
 | POST   | /mqtt/discover     | Trigger HA MQTT discovery     |
 | POST   | /mqtt/test         | Test MQTT connection          |
@@ -260,6 +262,8 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 ## Home Assistant MQTT Integration
 
 When MQTT is enabled and **HA Discovery** is turned on, the device publishes Home Assistant MQTT discovery payloads on connect and whenever HA restarts. No manual YAML configuration is needed — entities appear automatically in HA.
+
+The broker password is never shown once it is saved: `GET /mqtt` returns `********` in its place, and the admin page's Password field reads "unchanged" — leave it empty to keep the saved password. It is still stored in `jsonMqtt.txt`, so the file browser and **Export Config** files contain it; keep exported files private.
 
 ### Entity types
 

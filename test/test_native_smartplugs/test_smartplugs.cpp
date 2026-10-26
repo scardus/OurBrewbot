@@ -75,6 +75,7 @@ void setUp(void) {
   rcTestReset();
   test_setMillis(0);
   g_rfSniffActive = false;
+  s_plugsHeldOff  = false;
 }
 
 void tearDown(void) {}
@@ -328,6 +329,45 @@ static void test_the_next_ask_after_a_force_off_is_sent_at_once(void) {
 }
 
 // ============================================================
+// HELD OFF — for a firmware upload
+// ============================================================
+
+// The control loop keeps asking for heat or cooling; while held, nothing is sent
+static void test_a_held_plug_is_not_switched_on(void) {
+  configurePlug(P);
+  holdPlugsOff(true);
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
+  TEST_ASSERT_FALSE(getPlugState(P));
+}
+
+static void test_a_released_plug_is_switched_again(void) {
+  configurePlug(P);
+  holdPlugsOff(true);
+  holdPlugsOff(false);
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+  TEST_ASSERT_TRUE(getPlugState(P));
+}
+
+// A forced OFF still goes out while the plugs are held
+static void test_force_off_still_works_while_held(void) {
+  configurePlug(P);
+  holdPlugsOff(true);
+  smartPlugForceOff(P);
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+}
+
+static void test_all_plugs_force_off_reaches_every_plug_with_an_off_code(void) {
+  configurePlug(0);
+  configurePlug(3);
+  configurePlug(9);
+  g_smartPlugs[3].function = PLUG_FN_UNASSIGNED;   // a plug with no role too
+  allPlugsForceOff();
+  TEST_ASSERT_EQUAL_INT(3, g_rfTest.sendCount);
+}
+
+// ============================================================
 // FORCE OFF — reaches a plug whatever its role
 // ============================================================
 
@@ -401,6 +441,10 @@ int main(int, char**) {
   RUN_TEST(test_force_off_uses_the_plugs_rf_parameters);
   RUN_TEST(test_force_off_sends_nothing_without_an_off_code);
   RUN_TEST(test_force_off_ignores_an_out_of_range_index);
+  RUN_TEST(test_a_held_plug_is_not_switched_on);
+  RUN_TEST(test_a_released_plug_is_switched_again);
+  RUN_TEST(test_force_off_still_works_while_held);
+  RUN_TEST(test_all_plugs_force_off_reaches_every_plug_with_an_off_code);
 
   return UNITY_END();
 }

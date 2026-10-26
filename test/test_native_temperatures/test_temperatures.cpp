@@ -587,6 +587,41 @@ void test_readTempResults_handles_every_configured_probe(void) {
   TEST_ASSERT_EQUAL_FLOAT(5.0f, g_probes[1].temperature);
 }
 
+// 85.0 C is the DS18B20's power-on value: the probe reset and has not
+// converted since, so it must never reach control as a beer temperature.
+void test_readTempResults_retries_a_power_on_reading_and_recovers(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+  g_sensors1.testSetPowerOnReads(ADDR_A, 1);
+  s_warnings = 0;
+
+  readTempResults();
+  TEST_ASSERT_EQUAL_FLOAT(20.5f, g_probes[0].temperature);
+  TEST_ASSERT_EQUAL_UINT8(0, g_probes[0].failCount);
+  TEST_ASSERT_EQUAL_INT(1, g_sensors1.testRequestCount());   // fresh conversion asked for
+  TEST_ASSERT_EQUAL_INT(1, s_warnings);                      // the 85.0 C is logged
+}
+
+void test_readTempResults_counts_a_repeated_power_on_reading_as_a_failure(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_probes[0].temperature = 19.0f;
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+  g_sensors1.testSetPowerOnReads(ADDR_A, 2);
+
+  readTempResults();
+  TEST_ASSERT_EQUAL_UINT8(1, g_probes[0].failCount);
+  TEST_ASSERT_EQUAL_FLOAT(19.0f, g_probes[0].temperature);   // last good reading kept
+}
+
+void test_readTempResults_accepts_a_reading_just_below_85(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_sensors1.testAddDevice(ADDR_A, 84.9375f);   // one 12-bit step below 85.0
+
+  readTempResults();
+  TEST_ASSERT_EQUAL_FLOAT(84.9375f, g_probes[0].temperature);
+  TEST_ASSERT_EQUAL_UINT8(0, g_probes[0].failCount);
+}
+
 // ============================================================
 // periodicProbeScan
 // ============================================================
@@ -901,6 +936,38 @@ void test_getControlTemp_falls_back_to_ambient(void) {
   TEST_ASSERT_EQUAL_FLOAT(4.2f, getControlTemp(F));
 }
 
+// The source label follows control onto the ambient probe, instead of "None"
+void test_getBeerTempSource_says_ambient_when_control_falls_back_to_it(void) {
+  strlcpy(g_probes[0].address, "0000000000000002", sizeof(g_probes[0].address));
+  g_probes[0].fermenter   = F;
+  g_probes[0].function    = PROBE_FN_AMBIENT;
+  g_probes[0].temperature = 4.2f;
+  TEST_ASSERT_EQUAL_STRING("Ambient", getBeerTempSource(F));
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getBeerTemp(F));   // still no beer reading
+}
+
+// An ambient probe with no reading isn't controlling anything either
+void test_getBeerTempSource_says_none_when_the_ambient_probe_has_no_reading(void) {
+  strlcpy(g_probes[0].address, "0000000000000002", sizeof(g_probes[0].address));
+  g_probes[0].fermenter   = F;
+  g_probes[0].function    = PROBE_FN_AMBIENT;
+  g_probes[0].temperature = TEMP_NONE;
+  TEST_ASSERT_EQUAL_STRING("None", getBeerTempSource(F));
+}
+
+// A working beer probe is still named, ambient probe or not
+void test_getBeerTempSource_prefers_the_beer_probe_over_ambient(void) {
+  strlcpy(g_probes[0].address, "0000000000000002", sizeof(g_probes[0].address));
+  g_probes[0].fermenter   = F;
+  g_probes[0].function    = PROBE_FN_AMBIENT;
+  g_probes[0].temperature = 4.2f;
+  strlcpy(g_probes[1].address, "0000000000000001", sizeof(g_probes[1].address));
+  g_probes[1].fermenter   = F;
+  g_probes[1].function    = PROBE_FN_BEER;
+  g_probes[1].temperature = 20.1f;
+  TEST_ASSERT_EQUAL_STRING("Probe", getBeerTempSource(F));
+}
+
 // ---- unit conversions ----
 
 void test_toDisplayTemp_identity_in_celsius(void) {
@@ -992,6 +1059,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_readTempResults_marks_the_probe_inactive_at_the_threshold);
   RUN_TEST(test_readTempResults_clears_the_fail_count_on_recovery);
   RUN_TEST(test_readTempResults_handles_every_configured_probe);
+  RUN_TEST(test_readTempResults_retries_a_power_on_reading_and_recovers);
+  RUN_TEST(test_readTempResults_counts_a_repeated_power_on_reading_as_a_failure);
+  RUN_TEST(test_readTempResults_accepts_a_reading_just_below_85);
 
   RUN_TEST(test_periodicProbeScan_reapplies_the_resolution);
   RUN_TEST(test_periodicProbeScan_saves_when_a_probe_was_added);
@@ -1025,6 +1095,9 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_getControlTemp_prefers_beer_when_usable);
   RUN_TEST(test_getControlTemp_falls_back_to_ambient);
+  RUN_TEST(test_getBeerTempSource_says_ambient_when_control_falls_back_to_it);
+  RUN_TEST(test_getBeerTempSource_says_none_when_the_ambient_probe_has_no_reading);
+  RUN_TEST(test_getBeerTempSource_prefers_the_beer_probe_over_ambient);
 
   RUN_TEST(test_toDisplayTemp_identity_in_celsius);
   RUN_TEST(test_toDisplayTemp_scales_in_fahrenheit);

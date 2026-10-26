@@ -159,19 +159,6 @@ void processSingleFermenter(uint8_t i) {
 
   // Operate the smart plugs
   setFermenterPlugs(i, shouldHeat, shouldCool);
-
-  // SG-based control (if enabled and gravity source available)
-  if (g_fermenters[i].sgControl) {
-    float sg = getCurrentSG(i);
-    if (sg > SG_VALID_MIN) {
-      // SG reached target — could stop heating (e.g. diacetyl rest trigger)
-      if (sg <= (g_fermenters[i].tg + 0.002f)) {
-        // Near or past target gravity — log it
-        logMsg("[FERM] F%d (%s): SG %.4f near target %.4f",
-          i, g_fermenters[i].fermenterName, sg, g_fermenters[i].tg);
-      }
-    }
-  }
 }
 
 // ============================================================
@@ -202,9 +189,7 @@ void setFermenterPlugs(uint8_t fermenterIndex, bool heat, bool cool) {
 void switchOffAll() {
   logMsg("[FERM] SwitchOffAll - emergency off");
   // Forced, so a plug with no role is switched off too
-  for (int p = 0; p < MAX_SMART_PLUGS; p++) {
-    smartPlugForceOff(p);
-  }
+  allPlugsForceOff();
   // Every fermenter is powered off too. If they were left on, the control
   // loop would switch the plugs straight back on at its next pass (<= 10 s).
   for (int i = 0; i < MAX_FERMENTERS; i++) {

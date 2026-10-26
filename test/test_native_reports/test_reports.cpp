@@ -63,6 +63,7 @@ bool saveProbeConfig()     { return true; }
 // neither of which these tests call - the symbols still have to resolve.
 void smartPlugSwitch(uint8_t, bool) {}
 void smartPlugForceOff(uint8_t) {}
+void allPlugsForceOff() {}
 void processProfiles() {}
 
 // The code under test, plus the reading/conversion sources its payload uses.
