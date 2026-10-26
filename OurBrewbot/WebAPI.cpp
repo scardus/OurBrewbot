@@ -846,6 +846,7 @@ void handleReset(ESP8266WebServer& server) {
   }
   server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Configuration reset\"}"));
   delay(200);
+  allPlugsForceOff();   // before the reset erases the plugs' OFF codes
   resetAllConfig();
   restartDevice();
 }
@@ -857,6 +858,7 @@ void handleReboot(ESP8266WebServer& server) {
   }
   server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Rebooting\"}"));
   delay(500);
+  allPlugsForceOff();   // nothing left running while the controller restarts
   restartDevice();
 }
 

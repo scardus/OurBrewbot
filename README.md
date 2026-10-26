@@ -155,6 +155,8 @@ esptool.py --port COM7 --baud 115200 write_flash 0x0 OurBrewbot_vX.Y.Z.bin
 
 Once the firmware is running, navigate to `http://ourbrewbot-XXXXXX.local/update` in your browser and upload the `.bin` file directly.
 
+Every smart plug is switched off when the upload starts and held off until the controller restarts on the new firmware (if the upload fails, control carries on as before). Plugs are also switched off before a reboot or config reset.
+
 ---
 
 ## First Run

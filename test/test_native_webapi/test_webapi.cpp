@@ -1702,6 +1702,7 @@ static void test_post_reboot_restarts(void) {
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
   TEST_ASSERT_TRUE(bodyContains("Rebooting"));
   TEST_ASSERT_EQUAL_INT(1, s_restarts);
+  TEST_ASSERT_EQUAL_INT(1, s_allPlugsOffs);
 }
 
 // The scenario being fixed: a link preview of /reset?target=config used to
@@ -1726,6 +1727,15 @@ static void test_post_reset_with_target_erases_and_restarts(void) {
   TEST_ASSERT_EQUAL_INT(1, s_restarts);
 }
 
+// The OFF has to go out before the reset erases the plugs' codes
+static void test_post_reset_switches_the_plugs_off_before_erasing_them(void) {
+  g_smartPlugs[0].offCode = 0xABCDEF;
+  srv.setArg("target", "config");
+  request(HTTP_POST, "/reset");
+  TEST_ASSERT_EQUAL_INT(1, s_allPlugsOffs);
+  TEST_ASSERT_EQUAL_HEX32(0xABCDEF, s_offCodeAtAllPlugsOff);
+}
+
 // target=config is required as well, so a bare POST erases nothing
 static void test_post_reset_without_target_only_asks(void) {
   g_fermenters[0].power = true;
@@ -1733,6 +1743,7 @@ static void test_post_reset_without_target_only_asks(void) {
   TEST_ASSERT_TRUE(bodyContains("Confirm Reset"));
   TEST_ASSERT_TRUE(g_fermenters[0].power);
   TEST_ASSERT_EQUAL_INT(0, s_restarts);
+  TEST_ASSERT_EQUAL_INT(0, s_allPlugsOffs);
 }
 
 // The goodbye needs a working connection, so forgetting WiFi has to be left to
@@ -2301,6 +2312,7 @@ int main(int, char**) {
   RUN_TEST(test_post_reboot_restarts);
   RUN_TEST(test_get_reset_with_target_erases_nothing);
   RUN_TEST(test_post_reset_with_target_erases_and_restarts);
+  RUN_TEST(test_post_reset_switches_the_plugs_off_before_erasing_them);
   RUN_TEST(test_post_reset_without_target_only_asks);
   RUN_TEST(test_wifi_reset_leaves_forgetting_wifi_until_after_the_goodbye);
 

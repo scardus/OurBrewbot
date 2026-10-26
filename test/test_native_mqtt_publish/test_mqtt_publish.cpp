@@ -68,7 +68,14 @@ void logMsgImpl(uint8_t, PGM_P, ...) {}
 void logInit() {}
 
 // OurBrewbot.cpp - the MQTT "reboot" command calls this; nothing here restarts.
-void restartDevice(bool) {}
+// Recorded with how many all-plugs-off calls came before it.
+static int s_restarts = 0;
+static int s_allPlugsOffs = 0;
+static int s_allPlugsOffsAtRestart = 0;
+void restartDevice(bool) {
+  s_restarts++;
+  s_allPlugsOffsAtRestart = s_allPlugsOffs;
+}
 
 // Tilt.cpp - only the colour-name lookup is reachable from Mqtt.cpp.
 static const char* const TILT_COLOUR_NAMES[] = {
@@ -81,7 +88,7 @@ const char* getTiltColourName(uint8_t colour) {
 // SmartPlugs.cpp - Fermenter.cpp drives the plugs; nothing here asserts on them.
 void smartPlugSwitch(uint8_t, bool) {}
 void smartPlugForceOff(uint8_t) {}
-void allPlugsForceOff() {}
+void allPlugsForceOff() { s_allPlugsOffs++; }
 bool getPlugState(uint8_t) { return false; }
 
 // The main sketch owns the debug overrides and the reboot reason string.
@@ -151,6 +158,9 @@ void setUp(void) {
   espTestSetResetReason(REASON_DEFAULT_RST);
   s_millis = 1000000;
   s_uptimeSec = 0;
+  s_restarts = 0;
+  s_allPlugsOffs = 0;
+  s_allPlugsOffsAtRestart = 0;
   memset(&g_updateStatus, 0, sizeof(g_updateStatus));   // no update check yet
 
   memset(&g_globalConfig, 0, sizeof(g_globalConfig));
@@ -1381,6 +1391,16 @@ void test_inbound_name_is_stored_as_valid_utf8(void) {
   TEST_ASSERT_EQUAL_STRING("Ale ?", g_fermenters[F0].beerName);
 }
 
+// Nothing is left running while the controller restarts
+void test_inbound_reboot_switches_the_plugs_off_first(void) {
+  g_mqttConfig.allowControl = true;
+
+  mqttTestInject(BASE "/Device/reboot/set", "PRESS");
+
+  TEST_ASSERT_EQUAL_INT(1, s_restarts);
+  TEST_ASSERT_EQUAL_INT(1, s_allPlugsOffsAtRestart);
+}
+
 // "All Off" must stick: every fermenter is powered off (so the control loop
 // can't switch the plugs back on), the change is saved, and each fermenter's
 // Power switch in HA is updated straight away.
@@ -1633,6 +1653,7 @@ int main(int, char**) {
   RUN_TEST(test_inbound_rejected_value_is_not_stored);
   RUN_TEST(test_inbound_name_is_stored_as_valid_utf8);
   RUN_TEST(test_inbound_all_off_powers_every_fermenter_off);
+  RUN_TEST(test_inbound_reboot_switches_the_plugs_off_first);
   RUN_TEST(test_inbound_profile_on_leaves_a_running_profile_where_it_is);
   RUN_TEST(test_inbound_profile_off_pauses_and_keeps_progress);
   RUN_TEST(test_inbound_profile_off_then_on_resumes_where_it_was);
