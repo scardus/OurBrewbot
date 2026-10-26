@@ -731,7 +731,7 @@ function loadFermenters() {
     for (var i = 0; i < d.length; i++) {
       var f = d[i];
       html += '<div class="card"><h3>Fermenter ' + i + ' ' + statusBadge(f.Status, f.Power) + ' ' + (f.ProfileNo >= 1 ? '<span class="badge badge-prof">' + escHtml(f.ProfileName) + '</span>' : '<span class="badge badge-idle">Standard</span>') + '</h3>';
-      html += '<div class="live">Beer: ' + (f.BeerTemp > -100 ? f.BeerTemp.toFixed(1) + '&deg;' + f.TempUnit + (f.BeerTempSource && f.BeerTempSource != 'None' ? ' (' + escHtml(f.BeerTempSource) + ')' : '') : '--')
+      html += '<div class="live">Beer: ' + (f.BeerTemp > -100 ? f.BeerTemp.toFixed(1) + '&deg;' + f.TempUnit + (f.BeerTempSource && f.BeerTempSource != 'None' ? ' (' + escHtml(f.BeerTempSource) + ')' : '') : '--' + (f.BeerTempSource == 'Ambient' ? ' (controlling on Ambient)' : ''))
          + ' &nbsp; Ambient: ' + (f.AmbientTemp > -100 ? f.AmbientTemp.toFixed(1) + '&deg;' + f.TempUnit : '--')
          + ' &nbsp; SG: ' + (f.SG > 0 ? f.SG.toFixed(3) + (f.GravitySource ? ' (' + escHtml(f.GravitySource) + ')' : '') : '--')
          + (f.SG > 0 && f.Attenuation > 0 ? ' &nbsp; Att: ' + f.Attenuation.toFixed(1) + '%' : '')

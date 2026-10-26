@@ -377,7 +377,10 @@ const char* getBeerTempSource(uint8_t fermenterIndex) {
     case BEER_SRC_TILT:     return "Tilt";
     case BEER_SRC_PROBE:    return "Probe";
     case BEER_SRC_ISPINDEL: return "iSpindel";
-    default:                return "None";
+    default:
+      // No beer reading: control falls back to the ambient probe (see
+      // getControlTemp()), so say so rather than "None"
+      return (getAmbientTemp(fermenterIndex) > TEMP_VALID_MIN) ? "Ambient" : "None";
   }
 }
 

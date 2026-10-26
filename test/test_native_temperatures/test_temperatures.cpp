@@ -936,6 +936,38 @@ void test_getControlTemp_falls_back_to_ambient(void) {
   TEST_ASSERT_EQUAL_FLOAT(4.2f, getControlTemp(F));
 }
 
+// The source label follows control onto the ambient probe, instead of "None"
+void test_getBeerTempSource_says_ambient_when_control_falls_back_to_it(void) {
+  strlcpy(g_probes[0].address, "0000000000000002", sizeof(g_probes[0].address));
+  g_probes[0].fermenter   = F;
+  g_probes[0].function    = PROBE_FN_AMBIENT;
+  g_probes[0].temperature = 4.2f;
+  TEST_ASSERT_EQUAL_STRING("Ambient", getBeerTempSource(F));
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, getBeerTemp(F));   // still no beer reading
+}
+
+// An ambient probe with no reading isn't controlling anything either
+void test_getBeerTempSource_says_none_when_the_ambient_probe_has_no_reading(void) {
+  strlcpy(g_probes[0].address, "0000000000000002", sizeof(g_probes[0].address));
+  g_probes[0].fermenter   = F;
+  g_probes[0].function    = PROBE_FN_AMBIENT;
+  g_probes[0].temperature = TEMP_NONE;
+  TEST_ASSERT_EQUAL_STRING("None", getBeerTempSource(F));
+}
+
+// A working beer probe is still named, ambient probe or not
+void test_getBeerTempSource_prefers_the_beer_probe_over_ambient(void) {
+  strlcpy(g_probes[0].address, "0000000000000002", sizeof(g_probes[0].address));
+  g_probes[0].fermenter   = F;
+  g_probes[0].function    = PROBE_FN_AMBIENT;
+  g_probes[0].temperature = 4.2f;
+  strlcpy(g_probes[1].address, "0000000000000001", sizeof(g_probes[1].address));
+  g_probes[1].fermenter   = F;
+  g_probes[1].function    = PROBE_FN_BEER;
+  g_probes[1].temperature = 20.1f;
+  TEST_ASSERT_EQUAL_STRING("Probe", getBeerTempSource(F));
+}
+
 // ---- unit conversions ----
 
 void test_toDisplayTemp_identity_in_celsius(void) {
@@ -1063,6 +1095,9 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_getControlTemp_prefers_beer_when_usable);
   RUN_TEST(test_getControlTemp_falls_back_to_ambient);
+  RUN_TEST(test_getBeerTempSource_says_ambient_when_control_falls_back_to_it);
+  RUN_TEST(test_getBeerTempSource_says_none_when_the_ambient_probe_has_no_reading);
+  RUN_TEST(test_getBeerTempSource_prefers_the_beer_probe_over_ambient);
 
   RUN_TEST(test_toDisplayTemp_identity_in_celsius);
   RUN_TEST(test_toDisplayTemp_scales_in_fahrenheit);
