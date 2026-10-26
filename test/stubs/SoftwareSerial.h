@@ -33,17 +33,51 @@ class SoftwareSerial {
   int  rxLen_  = 0;   // bytes queued
   int  rxRead_ = 0;   // bytes already handed to read()
   char lastPrint_[64] = {0};
+  char prints_[256]   = {0};  // every command written, "|"-separated
   uint32_t baud_ = 0;  // what begin() was last given
+  bool open_            = false;  // begin() called and end() not since
+  bool beganWhileOpen_  = false;  // begin() without end() first
+  // A scripted HM-10 (see testModuleAt()): answers AT with OK only when the
+  // port is opened at the module's own rate, and changes that rate on
+  // AT+BAUD<n> followed by AT+RESET, as the real module does.
+  uint32_t moduleBaud_  = 0;      // 0 = no scripted module
+  uint32_t pendingBaud_ = 0;      // set by AT+BAUD<n>, applied by AT+RESET
+
+  static uint32_t baudForCode(char code) {
+    switch (code) {
+      case '0': return 9600;  case '1': return 19200; case '2': return 38400;
+      case '3': return 57600; case '5': return 4800;  case '6': return 2400;
+      case '7': return 1200;  default:  return 0;
+    }
+  }
 
 public:
   SoftwareSerial(int /*rxPin*/, int /*txPin*/) {}
   void begin(uint32_t baud, int /*config*/, int /*rxPin*/, int /*txPin*/,
              bool /*invert*/, unsigned int /*bufCapacity*/,
-             unsigned int /*isrBufCapacity*/) { baud_ = baud; }
+             unsigned int /*isrBufCapacity*/) {
+    if (open_) beganWhileOpen_ = true;
+    open_ = true;
+    baud_ = baud;
+  }
+
+  void end() { open_ = false; }
 
   void print(const char* s) {
-    strncpy(lastPrint_, s ? s : "", sizeof(lastPrint_) - 1);
+    if (!s) s = "";
+    strncpy(lastPrint_, s, sizeof(lastPrint_) - 1);
     lastPrint_[sizeof(lastPrint_) - 1] = '\0';
+    if (strlen(prints_) + strlen(s) + 2 < sizeof(prints_)) {
+      if (prints_[0]) strcat(prints_, "|");
+      strcat(prints_, s);
+    }
+    if (moduleBaud_ == 0 || baud_ != moduleBaud_) return;   // module can't hear us
+    if (strcmp(s, "AT") == 0) feed("OK");
+    else if (strncmp(s, "AT+BAUD", 7) == 0) pendingBaud_ = baudForCode(s[7]);
+    else if (strcmp(s, "AT+RESET") == 0 && pendingBaud_ != 0) {
+      moduleBaud_  = pendingBaud_;
+      pendingBaud_ = 0;
+    }
   }
 
   int available() { return rxLen_ - rxRead_; }
@@ -65,8 +99,21 @@ public:
   void reset() {
     rxLen_ = rxRead_ = 0;
     lastPrint_[0] = '\0';
+    prints_[0] = '\0';
     baud_ = 0;
+    open_ = beganWhileOpen_ = false;
+    moduleBaud_ = pendingBaud_ = 0;
   }
+
+  // Script an HM-10 that is running at `baud` (see moduleBaud_).
+  void testModuleAt(uint32_t baud) { moduleBaud_ = baud; }
+  uint32_t moduleBaud() const { return moduleBaud_; }
+
+  // Every command written since reset(), "|"-separated.
+  const char* prints() const { return prints_; }
+
+  // Whether begin() was ever called on a port that was still open.
+  bool beganWhileOpen() const { return beganWhileOpen_; }
 
   // The baud rate passed to the last begin(), so tests can check what the
   // module would actually be driven at.

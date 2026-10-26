@@ -76,6 +76,7 @@ void setUp(void) {
   s_bleBufLen         = 0;
   s_bleBuf[0]         = '\0';
   s_bleReady          = true;
+  s_otherBaudsTried   = false;
   s_lastBleInitRetry  = 0;
   s_scanAnswered      = false;
   s_silentScans       = 0;
@@ -491,6 +492,77 @@ void test_initBLE_falls_back_to_9600_when_stored_baud_is_unsupported(void) {
   TEST_ASSERT_EQUAL_UINT32(9600, g_bleSerial.baud());
 }
 
+// ---- initBLE: an HM-10 left at another baud rate ----
+
+// How many times `cmd` was written as a whole command
+static int countPrints(const char* cmd) {
+  int n = 0;
+  const char* p = g_bleSerial.prints();
+  size_t len = strlen(cmd);
+  while ((p = strstr(p, cmd)) != nullptr) {
+    bool startOk = (p == g_bleSerial.prints() || p[-1] == '|');
+    bool endOk   = (p[len] == '|' || p[len] == '\0');
+    if (startOk && endOk) n++;
+    p += len;
+  }
+  return n;
+}
+
+void test_initBLE_finds_a_module_at_another_baud_and_sets_it_to_ours(void) {
+  g_globalConfig.bleBaud = 9600;
+  g_bleSerial.testModuleAt(38400);
+  s_bleReady = false;
+
+  initBLE();
+  TEST_ASSERT_TRUE(s_bleReady);
+  TEST_ASSERT_EQUAL_INT(1, countPrints("AT+BAUD0"));
+  TEST_ASSERT_EQUAL_UINT32(9600, g_bleSerial.moduleBaud());
+  TEST_ASSERT_EQUAL_UINT32(9600, g_bleSerial.baud());
+}
+
+void test_initBLE_sets_a_found_module_to_the_stored_baud(void) {
+  g_globalConfig.bleBaud = 19200;
+  g_bleSerial.testModuleAt(9600);
+
+  initBLE();
+  TEST_ASSERT_TRUE(s_bleReady);
+  TEST_ASSERT_EQUAL_INT(1, countPrints("AT+BAUD1"));
+  TEST_ASSERT_EQUAL_UINT32(19200, g_bleSerial.moduleBaud());
+}
+
+// The normal case must not change: one AT, no baud commands
+void test_initBLE_leaves_a_module_at_our_baud_alone(void) {
+  g_globalConfig.bleBaud = 9600;
+  g_bleSerial.testModuleAt(9600);
+
+  initBLE();
+  TEST_ASSERT_TRUE(s_bleReady);
+  TEST_ASSERT_EQUAL_INT(1, countPrints("AT"));
+  TEST_ASSERT_NULL(strstr(g_bleSerial.prints(), "AT+BAUD"));
+}
+
+// With no module fitted, the other rates cost ~2 s - only worth it once
+void test_initBLE_tries_the_other_bauds_only_once(void) {
+  g_globalConfig.bleBaud = 9600;
+
+  initBLE();
+  TEST_ASSERT_FALSE(s_bleReady);
+  TEST_ASSERT_EQUAL_INT(HM10_BAUD_COUNT, countPrints("AT"));   // ours + 6 others
+  TEST_ASSERT_EQUAL_UINT32(9600, g_bleSerial.baud());         // left at ours
+
+  g_bleSerial.reset();
+  initBLE();                                                   // the 5-minute retry
+  TEST_ASSERT_EQUAL_INT(1, countPrints("AT"));
+}
+
+// begin() swaps the receive buffers - never while the port is still open
+void test_initBLE_closes_the_port_before_reopening_it(void) {
+  g_bleSerial.testModuleAt(38400);
+  initBLE();
+  initBLE();
+  TEST_ASSERT_FALSE(g_bleSerial.beganWhileOpen());
+}
+
 // ---- serviceTilt: draining an AT+DISI? response ----
 
 void test_serviceTilt_parses_two_records_in_one_response(void) {
@@ -674,6 +746,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_an_answered_scan_resets_the_silence_count);
   RUN_TEST(test_a_restart_requested_soon_after_boot_is_due_at_once);
   RUN_TEST(test_initBLE_falls_back_to_9600_when_stored_baud_is_unsupported);
+  RUN_TEST(test_initBLE_finds_a_module_at_another_baud_and_sets_it_to_ours);
+  RUN_TEST(test_initBLE_sets_a_found_module_to_the_stored_baud);
+  RUN_TEST(test_initBLE_leaves_a_module_at_our_baud_alone);
+  RUN_TEST(test_initBLE_tries_the_other_bauds_only_once);
+  RUN_TEST(test_initBLE_closes_the_port_before_reopening_it);
 
   RUN_TEST(test_serviceTilt_parses_two_records_in_one_response);
   RUN_TEST(test_serviceTilt_reassembles_a_record_split_across_passes);
