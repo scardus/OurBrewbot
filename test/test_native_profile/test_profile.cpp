@@ -39,6 +39,12 @@ void test_setMillis(uint32_t ms) { s_millis = ms; }
 // change; native tests never touch LittleFS) ----
 bool saveFermenterConfig() { return true; }
 
+// ---- records profile progress left for the 10-minute save ----
+static bool s_fermenterUnsaved = false;
+void configMarkUnsaved(ConfigFile file) {
+  if (file == CFG_FILE_FERMENTER) s_fermenterUnsaved = true;
+}
+
 // ---- no-op logging stub (real logMsgImpl writes to Serial/syslog) ----
 void logMsgImpl(uint8_t, PGM_P, ...) {}
 
@@ -67,6 +73,7 @@ void setUp(void) {
   s_currentSG    = 0.0f;
   s_attenuation  = 0.0f;
   s_millis       = 0;
+  s_fermenterUnsaved = false;
 }
 
 void tearDown(void) {}
@@ -537,6 +544,21 @@ void test_six_ten_minute_ticks_make_an_hour(void) {
   TEST_ASSERT_EQUAL_UINT8(0,  g_fermenters[F].hourTicks);
 }
 
+// The 10-minute save only writes files marked unsaved, so without the mark
+// the profile time would be lost at the next reboot
+void test_ten_minute_tick_is_left_for_the_ten_minute_save(void) {
+  runProfile(F, 1, 0, /*hour=*/3);
+  profileAddTenMinutes(F);
+  TEST_ASSERT_TRUE(s_fermenterUnsaved);
+}
+
+// LiveTest adds an hour every 10 s, without the ten-minute ticks
+void test_live_test_hour_is_left_for_the_ten_minute_save(void) {
+  runProfile(F, 1, 0, /*hour=*/3);
+  profileAddHour(F);
+  TEST_ASSERT_TRUE(s_fermenterUnsaved);
+}
+
 // Pausing keeps the part-hour (it used to be thrown away)
 void test_ticks_are_kept_through_a_pause(void) {
   runProfile(F, 1, 0, /*hour=*/3);
@@ -823,6 +845,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_profile_hours_reset_when_a_profile_starts);
   RUN_TEST(test_profile_hours_stop_at_the_top_of_their_range);
   RUN_TEST(test_six_ten_minute_ticks_make_an_hour);
+  RUN_TEST(test_ten_minute_tick_is_left_for_the_ten_minute_save);
+  RUN_TEST(test_live_test_hour_is_left_for_the_ten_minute_save);
   RUN_TEST(test_ticks_are_kept_through_a_pause);
   RUN_TEST(test_ticks_reset_at_a_step_change);
   RUN_TEST(test_ticks_reset_when_a_profile_starts);

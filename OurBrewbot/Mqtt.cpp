@@ -1054,9 +1054,10 @@ bool forcePublishAllHaDiscovery() {
 void mqttPendingSaveCheck() {
   if (!g_mqttPendingSave) return;
   if (millis() - g_mqttPendingSaveAt < 3000) return;
-  saveFermenterConfig();
+  // A failed save is not tried again here: the 10-minute save does that
+  bool saved = saveFermenterConfig();
   g_mqttPendingSave = false;
-  logMsg("[MQTT] Deferred config save complete");
+  if (saved) logMsg("[MQTT] Deferred config save complete");
 }
 
 // ============================================================

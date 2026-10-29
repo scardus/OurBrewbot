@@ -668,14 +668,21 @@ void onTenMinuteTimer() {
 
   // Count profile time for running profiles (6 calls × 10 min = 1 hour). The
   // part-hour is kept while a profile is paused or powered off, and is saved
-  // with the config just below, so it survives a reboot.
+  // with the config just below, so it survives a reboot. That save also keeps
+  // the temperature band a running profile has set since the last one.
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     if (g_fermenters[i].profileRunning && g_fermenters[i].power && !g_fermenters[i].liveTest) {
       profileAddTenMinutes(i);
     }
   }
 
-  // Save all config as periodic backup - held off while a config import is
-  // part way through (see configPeriodicSave() in Config.cpp)
+  // The uptime is saved for the reboot log, so after a power cut it can still
+  // say roughly how long the last run lasted. Updated here as well as in
+  // loop(), which runs the minute update after this.
+  g_globalConfig.lastUptime = uptimeSeconds() / 60;
+  configMarkUnsaved(CFG_FILE_GLOBAL);
+
+  // Save the files that have changed - held off while a config import is part
+  // way through (see configPeriodicSave() in Config.cpp)
   configPeriodicSave();
 }

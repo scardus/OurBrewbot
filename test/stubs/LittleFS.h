@@ -55,6 +55,7 @@ struct FsEntry {
 static FsEntry g_fsEntries[FS_MAX_FILES];
 static bool    g_fsFull        = false;   // open-for-write always fails
 static long    g_fsWriteLimit  = -1;      // bytes still accepted; -1 = unlimited
+static int     g_fsWriteCount  = 0;       // files opened for writing since the last reset
 
 class File {
   FsEntry* e_   = nullptr;
@@ -201,6 +202,7 @@ public:
     if (!e) e = create(path);
     if (!e) return File();
     if (mode && mode[0] == 'w') e->len = 0;   // truncate
+    g_fsWriteCount++;
     return File(e);
   }
   File open(const String& path, const char* mode) { return open(path.c_str(), mode); }
@@ -217,6 +219,7 @@ static void fsTestReset() {
   }
   g_fsFull       = false;
   g_fsWriteLimit = -1;
+  g_fsWriteCount = 0;
 }
 
 // Place a file directly, bypassing the config writers - this is how tests
@@ -242,3 +245,8 @@ static const char* fsTestRead(const char* path) {
 
 static void fsTestSetFull(bool full)      { g_fsFull = full; }
 static void fsTestSetWriteLimit(long n)   { g_fsWriteLimit = n; }
+
+// How many files have been opened for writing since fsTestReset() or the last
+// fsTestClearWriteCount(), so a test can check that nothing was rewritten.
+static int  fsTestWriteCount()            { return g_fsWriteCount; }
+static void fsTestClearWriteCount()       { g_fsWriteCount = 0; }

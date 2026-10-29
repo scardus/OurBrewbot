@@ -88,6 +88,7 @@ void setUp(void) {
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
   s_importActive    = false;
   s_importLastWrite = 0;
+  s_unsavedFiles    = 0;
   s_uptimeSec       = 1000;
   s_lastLog[0]      = '\0';
 }
@@ -193,6 +194,25 @@ void test_save_detects_a_truncated_write(void) {
   fsTestSetWriteLimit(-1);
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_SYSLOG));           // primary never attempted
   TEST_ASSERT_EQUAL_INT(10, (int)strlen(fsTestRead(FILE_SYSLOG_BKP)));
+}
+
+// Gives ArduinoJson no memory at all, so nothing can be added to a document
+struct NoMemoryAllocator : ArduinoJson::Allocator {
+  void* allocate(size_t) override { return nullptr; }
+  void  deallocate(void*) override {}
+  void* reallocate(void*, size_t) override { return nullptr; }
+};
+
+void test_save_refuses_a_document_that_ran_out_of_memory(void) {
+  // Part of the settings would be missing, so the copies on flash are kept
+  fsTestWrite(FILE_SYSLOG,     "{\"port\":1000}");
+  fsTestWrite(FILE_SYSLOG_BKP, "{\"port\":1000}");
+  NoMemoryAllocator noMemory;
+  JsonDocument doc(&noMemory);
+  doc["port"] = 1234;
+  TEST_ASSERT_FALSE(saveJsonDocSafe(doc, FILE_SYSLOG, FILE_SYSLOG_BKP));
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG,     "\"port\":1000"));
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG_BKP, "\"port\":1000"));
 }
 
 // ============================================================
@@ -1065,6 +1085,8 @@ static void test_the_periodic_save_is_held_off_during_an_import(void) {
   setName("Before");
   configImportBeforeWrite();
   writeImportedFermenterFile();
+  setName("Changed");
+  configMarkUnsaved(CFG_FILE_FERMENTER);
   s_uptimeSec += 60;
   configPeriodicSave();
   TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"Imported\""));
@@ -1082,6 +1104,7 @@ static void test_an_abandoned_import_is_put_back(void) {
   TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "was not finished - the previous settings have been put back"));
 
   setName("Later");
+  configMarkUnsaved(CFG_FILE_FERMENTER);
   configPeriodicSave();
   TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"Later\""));
 }
@@ -1096,18 +1119,169 @@ static void test_restore_puts_the_previous_settings_back_and_ends_the_import(voi
   TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER_BKP, "\"Before\""));
 
   setName("Later");
+  configMarkUnsaved(CFG_FILE_FERMENTER);
   configPeriodicSave();
   TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"Later\""));
 }
 
-// With no import, the 10-minute save is exactly saveAllConfig() - which
-// leaves the Tilt file alone
-static void test_the_periodic_save_is_unchanged_without_an_import(void) {
-  setName("Normal");
+// ============================================================
+// THE 10-MINUTE SAVE - only the files marked unsaved are written
+// ============================================================
+
+// It used to rewrite all ten files and their backups every time
+static void test_the_periodic_save_leaves_unchanged_files_alone(void) {
   configPeriodicSave();
-  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER,     "\"Normal\""));
-  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER_BKP, "\"Normal\""));
-  TEST_ASSERT_FALSE(LittleFS.exists(FILE_TILT));
+  TEST_ASSERT_EQUAL_INT(0, fsTestWriteCount());
+}
+
+static void test_the_periodic_save_writes_a_file_marked_unsaved(void) {
+  setName("Changed");
+  configMarkUnsaved(CFG_FILE_FERMENTER);
+  configPeriodicSave();
+  TEST_ASSERT_EQUAL_INT(2, fsTestWriteCount());   // the file and its backup, nothing else
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER,     "\"Changed\""));
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER_BKP, "\"Changed\""));
+
+  // Saved now, so the next 10-minute save has nothing to do
+  fsTestClearWriteCount();
+  configPeriodicSave();
+  TEST_ASSERT_EQUAL_INT(0, fsTestWriteCount());
+}
+
+// A WebUI change is saved straight away, so it isn't saved again
+static void test_a_file_saved_straight_away_is_not_saved_again(void) {
+  configMarkUnsaved(CFG_FILE_FERMENTER);
+  saveFermenterConfig();
+  fsTestClearWriteCount();
+  configPeriodicSave();
+  TEST_ASSERT_EQUAL_INT(0, fsTestWriteCount());
+}
+
+// Whoever made the save, a failure is tried again every 10 minutes until it works
+static void test_a_failed_save_is_tried_again_by_the_periodic_save(void) {
+  g_syslogConfig.port = 1234;
+  fsTestSetFull(true);
+  TEST_ASSERT_FALSE(saveSyslogConfig());
+  configPeriodicSave();
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "trying again in 10 minutes"));
+  fsTestSetFull(false);
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG,     "\"port\":1234"));
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG_BKP, "\"port\":1234"));
+}
+
+// The backup is written but the primary is cut short, so the two copies differ.
+// The file stays marked, and the next 10-minute save writes both again.
+static void test_a_save_that_fails_after_the_backup_is_tried_again(void) {
+  g_syslogConfig.port = 1234;
+  TEST_ASSERT_TRUE(saveSyslogConfig());
+  long backupLength = (long)strlen(fsTestRead(FILE_SYSLOG_BKP));
+
+  g_syslogConfig.port = 4321;   // same length, so the budget covers just the backup
+  fsTestSetWriteLimit(backupLength);
+  TEST_ASSERT_FALSE(saveSyslogConfig());
+  fsTestSetWriteLimit(-1);
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG_BKP, "\"port\":4321"));
+  TEST_ASSERT_FALSE(fileHas(FILE_SYSLOG, "\"port\":4321"));
+
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG,     "\"port\":4321"));
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG_BKP, "\"port\":4321"));
+}
+
+// saveAllConfig() leaves the Tilt file out, but a failed Tilt save is still tried again
+static void test_a_failed_tilt_save_is_tried_again_by_the_periodic_save(void) {
+  g_tilts[TILT_RED].colour = TILT_RED;
+  fsTestSetFull(true);
+  TEST_ASSERT_FALSE(saveTiltConfig());
+  fsTestSetFull(false);
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_TILT, "\"Address\":[0,"));
+}
+
+// ============================================================
+// LOADING - a missing or damaged copy is marked unsaved, so it is written again
+// ============================================================
+
+static void test_loading_a_good_pair_leaves_the_file_alone(void) {
+  fsTestWrite(FILE_SYSLOG,     "{\"port\":1000}");
+  fsTestWrite(FILE_SYSLOG_BKP, "{\"port\":1000}");
+  TEST_ASSERT_TRUE(loadSyslogConfig());
+  fsTestClearWriteCount();
+  configPeriodicSave();
+  TEST_ASSERT_EQUAL_INT(0, fsTestWriteCount());
+}
+
+static void test_a_missing_backup_is_saved_again(void) {
+  fsTestWrite(FILE_SYSLOG, "{\"port\":1000}");
+  TEST_ASSERT_TRUE(loadSyslogConfig());
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG_BKP, "\"port\":1000"));
+}
+
+static void test_a_damaged_backup_is_saved_again(void) {
+  fsTestWrite(FILE_SYSLOG,     "{\"port\":1000}");
+  fsTestWrite(FILE_SYSLOG_BKP, "{\"port\":10");
+  TEST_ASSERT_TRUE(loadSyslogConfig());
+  TEST_ASSERT_EQUAL_UINT16(1000, g_syslogConfig.port);
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG_BKP, "\"port\":1000"));
+}
+
+// The backup is read in full. A quicker check that skips over each value (an
+// ArduinoJson filter) would pass both of these, and they would only be found
+// when the primary failed and the backup was needed.
+static void test_a_backup_with_a_bad_number_or_escape_counts_as_damaged(void) {
+  const char* damaged[] = { "{\"port\":12.3.4}", "{\"host\":\"a\\qb\"}" };
+  for (const char* json : damaged) {
+    setUp();
+    fsTestWrite(FILE_SYSLOG,     "{\"port\":1000}");
+    fsTestWrite(FILE_SYSLOG_BKP, json);
+    TEST_ASSERT_TRUE(loadSyslogConfig());
+    configPeriodicSave();
+    TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG_BKP, "\"port\":1000"));
+  }
+}
+
+static void test_a_damaged_primary_is_saved_again_from_the_backup(void) {
+  fsTestWrite(FILE_SYSLOG,     "{\"port\":10");
+  fsTestWrite(FILE_SYSLOG_BKP, "{\"port\":2000}");
+  TEST_ASSERT_TRUE(loadSyslogConfig());
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG, "\"port\":2000"));
+}
+
+// First boot, or both copies lost: the defaults are saved, as they always were
+static void test_a_missing_file_is_saved_with_the_defaults(void) {
+  TEST_ASSERT_FALSE(loadSyslogConfig());
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG,     "\"port\":514"));
+  TEST_ASSERT_TRUE(fileHas(FILE_SYSLOG_BKP, "\"port\":514"));
+}
+
+// The MQTT base topic is repaired in memory only, and saved by the 10-minute save
+static void test_a_correction_made_while_loading_is_saved_by_the_periodic_save(void) {
+  fsTestWrite(FILE_MQTT,     "{\"baseTopic\":\"\"}");
+  fsTestWrite(FILE_MQTT_BKP, "{\"baseTopic\":\"\"}");
+  TEST_ASSERT_TRUE(loadMqttConfig());
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_MQTT,     "\"baseTopic\":\"ourbrewbot\""));
+  TEST_ASSERT_TRUE(fileHas(FILE_MQTT_BKP, "\"baseTopic\":\"ourbrewbot\""));
+}
+
+// A correction saved while loading that fails is not forgotten
+static void test_a_failed_correction_save_while_loading_is_tried_again(void) {
+  stageFermenterTrio(99.0f, 18.0f, 0.5f);   // ceiling out of range
+  char staged[256];
+  strlcpy(staged, fsTestRead(FILE_FERMENTER), sizeof(staged));
+  fsTestWrite(FILE_FERMENTER_BKP, staged);  // a good pair, so only the failed save marks it
+  fsTestSetFull(true);
+  TEST_ASSERT_TRUE(loadFermenterConfig());
+  fsTestSetFull(false);
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"CeilingTemp\":[99"));
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER,     "\"CeilingTemp\":[22,"));
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER_BKP, "\"CeilingTemp\":[22,"));
 }
 
 int main(int argc, char** argv) {
@@ -1122,6 +1296,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_save_writes_both_the_primary_and_the_backup);
   RUN_TEST(test_save_fails_and_leaves_the_primary_untouched_when_the_fs_cannot_open);
   RUN_TEST(test_save_detects_a_truncated_write);
+  RUN_TEST(test_save_refuses_a_document_that_ran_out_of_memory);
 
   // descriptor engine
   RUN_TEST(test_scalar_round_trip_preserves_every_field);
@@ -1214,7 +1389,24 @@ int main(int argc, char** argv) {
   RUN_TEST(test_the_periodic_save_is_held_off_during_an_import);
   RUN_TEST(test_an_abandoned_import_is_put_back);
   RUN_TEST(test_restore_puts_the_previous_settings_back_and_ends_the_import);
-  RUN_TEST(test_the_periodic_save_is_unchanged_without_an_import);
+
+  // the 10-minute save
+  RUN_TEST(test_the_periodic_save_leaves_unchanged_files_alone);
+  RUN_TEST(test_the_periodic_save_writes_a_file_marked_unsaved);
+  RUN_TEST(test_a_file_saved_straight_away_is_not_saved_again);
+  RUN_TEST(test_a_failed_save_is_tried_again_by_the_periodic_save);
+  RUN_TEST(test_a_save_that_fails_after_the_backup_is_tried_again);
+  RUN_TEST(test_a_failed_tilt_save_is_tried_again_by_the_periodic_save);
+
+  // missing or damaged copies at load
+  RUN_TEST(test_loading_a_good_pair_leaves_the_file_alone);
+  RUN_TEST(test_a_missing_backup_is_saved_again);
+  RUN_TEST(test_a_damaged_backup_is_saved_again);
+  RUN_TEST(test_a_backup_with_a_bad_number_or_escape_counts_as_damaged);
+  RUN_TEST(test_a_damaged_primary_is_saved_again_from_the_backup);
+  RUN_TEST(test_a_missing_file_is_saved_with_the_defaults);
+  RUN_TEST(test_a_correction_made_while_loading_is_saved_by_the_periodic_save);
+  RUN_TEST(test_a_failed_correction_save_while_loading_is_tried_again);
 
   return UNITY_END();
 }

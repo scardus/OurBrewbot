@@ -247,6 +247,7 @@ void startProfile(uint8_t i, uint8_t profileIndex) {
 void profileAddHour(uint8_t i) {
   g_fermenters[i].currentHour++;
   if (g_fermenters[i].profileHours < 0xFFFF) g_fermenters[i].profileHours++;
+  configMarkUnsaved(CFG_FILE_FERMENTER);
 }
 
 // Called every 10 minutes for a running profile. The ticks are saved with the
@@ -254,6 +255,7 @@ void profileAddHour(uint8_t i) {
 // 0.6.4 they were kept in memory only, and a reboot (or a pause, or power off)
 // lost up to 59 minutes of the step.
 void profileAddTenMinutes(uint8_t i) {
+  configMarkUnsaved(CFG_FILE_FERMENTER);
   g_fermenters[i].hourTicks++;
   if (g_fermenters[i].hourTicks >= 6) {
     g_fermenters[i].hourTicks = 0;
