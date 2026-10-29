@@ -911,6 +911,9 @@ void handleOTAUpload(ESP8266WebServer& server) {
     // them go again (see the /update POST handler).
     holdPlugsOff(true);
     allPlugsForceOff();
+    // If the upload fails, control resumes from idle, so a cooler switched
+    // off here waits out its compressor delay before it can run again
+    idleAllFermenters();
     uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     if (!Update.begin(maxSketchSpace)) {
       Update.printError(Serial);

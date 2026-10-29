@@ -1743,6 +1743,49 @@ static void test_ota_upload_chunks_do_not_switch_the_plugs_again(void) {
   TEST_ASSERT_TRUE(s_plugsHeldOff);          // a successful upload ends in a restart
 }
 
+// Fermenter 1 cooling: beer at 30 C over its 20 C ceiling, with its
+// 10-minute compressor delay long past
+static void startCoolingF0(void) {
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    s_state[i]           = STATUS_IDLE;
+    s_lastCoolingStop[i] = 0;
+  }
+  g_fermenterDebugMode = true;
+  g_fermenterDebugOverrides[F0].enabled  = true;
+  g_fermenterDebugOverrides[F0].beerTemp = 30.0f;
+  s_uptimeSec = 3600;
+  processFermenters();
+  TEST_ASSERT_EQUAL_UINT8(STATUS_COOLING, g_fermenters[F0].status);
+}
+
+// The upload switches the cooler off, so the controller must count the
+// compressor delay from then. It used to stay in its cooling state, and a
+// failed upload let the next control pass switch the cooler straight back on.
+static void test_ota_upload_start_puts_a_cooling_fermenter_back_to_idle(void) {
+  startCoolingF0();
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_UINT8(STATUS_IDLE, g_fermenters[F0].status);
+  TEST_ASSERT_EQUAL_UINT32(3600, s_lastCoolingStop[F0]);
+  TEST_ASSERT_TRUE(g_fermenters[F0].power);   // only the control state changes
+}
+
+static void test_a_failed_ota_upload_waits_out_the_compressor_delay(void) {
+  startCoolingF0();
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_ABORTED;
+  handleOTAUpload(srv);
+
+  s_uptimeSec += 30;                 // the next control pass after the failure
+  processFermenters();
+  TEST_ASSERT_EQUAL_UINT8(STATUS_IDLE, g_fermenters[F0].status);
+
+  s_uptimeSec += 10 * 60;            // the 10-minute delay has passed
+  processFermenters();
+  TEST_ASSERT_EQUAL_UINT8(STATUS_COOLING, g_fermenters[F0].status);
+}
+
 // The connection dropped: no restart is coming, so control takes over again
 static void test_an_aborted_ota_upload_releases_the_plugs(void) {
   srv.testUpload().status = UPLOAD_FILE_START;
@@ -2418,6 +2461,8 @@ int main(int, char**) {
   RUN_TEST(test_ota_upload_start_switches_every_plug_off_and_holds_them);
   RUN_TEST(test_ota_upload_chunks_do_not_switch_the_plugs_again);
   RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
+  RUN_TEST(test_ota_upload_start_puts_a_cooling_fermenter_back_to_idle);
+  RUN_TEST(test_a_failed_ota_upload_waits_out_the_compressor_delay);
   RUN_TEST(test_get_reboot_asks_for_confirmation_and_does_not_restart);
   RUN_TEST(test_post_reboot_restarts);
   RUN_TEST(test_get_reset_with_target_erases_nothing);

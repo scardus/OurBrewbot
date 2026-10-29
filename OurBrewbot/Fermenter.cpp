@@ -200,6 +200,22 @@ void switchOffAll() {
 }
 
 // ============================================================
+// IDLE ALL
+// ============================================================
+
+void idleAllFermenters() {
+  // Called just after every plug has been forced off. Without it a fermenter
+  // that was cooling stayed in its cooling state, so if a firmware upload
+  // failed the next control pass switched the compressor straight back on,
+  // inside its compressor delay. goIdle() records the stop, so the delay is
+  // counted from now. Power and settings are left as they are.
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    g_fermenters[i].status = STATUS_IDLE;
+    goIdle(i);
+  }
+}
+
+// ============================================================
 // ALARM CHECKING
 // ============================================================
 

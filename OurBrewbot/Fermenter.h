@@ -50,6 +50,12 @@ const char* getGravitySource(uint8_t index);
 // nothing switches back on until a fermenter is powered on again
 void switchOffAll();
 
+// Put every fermenter's control state back to idle, recording when cooling
+// stopped so the compressor delay holds. Call it after allPlugsForceOff()
+// when control will carry on afterwards (a firmware upload that may fail).
+// Unlike switchOffAll(), power and settings are left as they are.
+void idleAllFermenters();
+
 // Get attenuation percentage
 float getAttenuation(uint8_t index);
 
