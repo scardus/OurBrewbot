@@ -269,13 +269,17 @@ struct FermenterConfig {
 // header (inline) because its callers are in Config.cpp, Fermenter.cpp and
 // WebAPI.cpp, and the native test suites build those files in different
 // combinations - every one of them includes Config.h.
+//
+// The range tests are written "!(in range)" rather than "below or above",
+// so a NaN fails them: every comparison with NaN is false, which let a NaN
+// through "below or above" checks.
 inline bool checkTempBand(float ceiling, float floor, float hyst, const char** errMsg) {
   const char* err = nullptr;
-  if (ceiling < TEMP_SETTING_MIN_C || ceiling > TEMP_SETTING_MAX_C) {
+  if (!(ceiling >= TEMP_SETTING_MIN_C && ceiling <= TEMP_SETTING_MAX_C)) {
     err = "ceiling temperature out of range (-20 to 50)";
-  } else if (floor < TEMP_SETTING_MIN_C || floor > TEMP_SETTING_MAX_C) {
+  } else if (!(floor >= TEMP_SETTING_MIN_C && floor <= TEMP_SETTING_MAX_C)) {
     err = "floor temperature out of range (-20 to 50)";
-  } else if (hyst < 0.0f || hyst > HYSTERESIS_MAX_C) {
+  } else if (!(hyst >= 0.0f && hyst <= HYSTERESIS_MAX_C)) {
     err = "hysteresis out of range (0 to 10)";
   } else if (floor >= ceiling) {
     err = "floor must be below ceiling";

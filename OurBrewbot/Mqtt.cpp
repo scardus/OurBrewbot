@@ -867,8 +867,13 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
              strcmp(key, "tg")                  == 0) {
     // Payload is in the configured display unit; applyFermenterFieldFromDisplay()
     // owns the conversion to Celsius, the range check and the store.
+    float value;
+    if (!parseMqttNumber(pl, &value)) {
+      logMsg("[MQTT] cmd rejected (%s): not a number", key);
+      return;
+    }
     const char* errMsg = nullptr;
-    if (!applyFermenterFieldFromDisplay(idx, key, atof(pl), &errMsg)) {
+    if (!applyFermenterFieldFromDisplay(idx, key, value, &errMsg)) {
       logMsg("[MQTT] cmd rejected (%s): %s", key, errMsg ? errMsg : "unsupported field");
       return;
     }
@@ -879,9 +884,10 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
   } else if (strcmp(key, "yeast") == 0) {
     copyText(g_fermenters[idx].yeastName, pl, sizeof(g_fermenters[0].yeastName));
   } else if (strcmp(key, "profile_no") == 0) {
-    int pno = atoi(pl);
-    if (pno < 0 || pno > MAX_PROFILES) {
-      logMsg("[MQTT] cmd rejected: profile_no %d out of range (0-%d)", pno, MAX_PROFILES);
+    // The range is checked before the whole-number test, which casts to int
+    float pno;
+    if (!parseMqttNumber(pl, &pno) || pno < 0 || pno > MAX_PROFILES || pno != (int)pno) {
+      logMsg("[MQTT] cmd rejected: profile_no '%s' is not a whole number 0-%d", pl, MAX_PROFILES);
       return;
     }
     g_fermenters[idx].profileNo = (uint8_t)pno;

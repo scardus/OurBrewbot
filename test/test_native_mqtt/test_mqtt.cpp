@@ -34,6 +34,7 @@
 #include <unity.h>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 
 #include "../../OurBrewbot/MqttParse.cpp"
 
@@ -185,16 +186,60 @@ void test_index_rejects_wrong_case(void) {
   TEST_ASSERT_EQUAL_INT(-1, fermenterIndexFromScope("fermenter0"));
 }
 
-void test_index_nonnumeric_suffix_is_preexisting_atoi_quirk(void) {
-  // atoi() on a non-numeric string returns 0, not an error - this was true of
-  // the inline code before extraction too. Documenting current behaviour, not
-  // asserting it's correct: "FermenterX" is treated the same as "Fermenter0".
-  TEST_ASSERT_EQUAL_INT(0, fermenterIndexFromScope("FermenterX"));
+// atoi() used to read all of these as fermenter 0
+void test_index_rejects_a_non_numeric_suffix(void) {
+  TEST_ASSERT_EQUAL_INT(-1, fermenterIndexFromScope("FermenterX"));
 }
 
-void test_index_no_digits_is_preexisting_atoi_quirk(void) {
-  // Same quirk: atoi("") also returns 0.
-  TEST_ASSERT_EQUAL_INT(0, fermenterIndexFromScope("Fermenter"));
+void test_index_rejects_no_digits(void) {
+  TEST_ASSERT_EQUAL_INT(-1, fermenterIndexFromScope("Fermenter"));
+}
+
+void test_index_rejects_text_after_the_digit(void) {
+  TEST_ASSERT_EQUAL_INT(-1, fermenterIndexFromScope("Fermenter0abc"));
+  TEST_ASSERT_EQUAL_INT(-1, fermenterIndexFromScope("Fermenter-1"));
+}
+
+// ---- parseMqttNumber ----
+
+void test_number_accepts_ordinary_numbers(void) {
+  float v = 0;
+  TEST_ASSERT_TRUE(parseMqttNumber("18.5", &v));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 18.5f, v);
+  TEST_ASSERT_TRUE(parseMqttNumber("-2", &v));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, -2.0f, v);
+  TEST_ASSERT_TRUE(parseMqttNumber(" 0.5 ", &v));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, v);
+}
+
+// atof() read text as 0 and passed "nan" through
+void test_number_refuses_anything_else(void) {
+  const char* bad[] = { "", " ", "abc", "12abc", "18.5 C", "nan", "NaN", "inf", "-inf", "1e999" };
+  for (const char* text : bad) {
+    float v = 123.0f;
+    TEST_ASSERT_FALSE_MESSAGE(parseMqttNumber(text, &v), text);
+    TEST_ASSERT_EQUAL_FLOAT_MESSAGE(123.0f, v, text);   // left untouched
+  }
+}
+
+// A NaN floor, ceiling or hysteresis passed the old "below or above" range
+// checks, and then heating or cooling never stopped
+void test_apply_rejects_nan_for_every_field(void) {
+  const char* keys[] = { "ceiling_temperature", "floor_temperature", "hysteresis",
+                         "compressor_delay", "og", "tg" };
+  for (const char* key : keys) {
+    TEST_ASSERT_FALSE_MESSAGE(applyFermenterFieldFromDisplay(F, key, NAN, nullptr), key);
+  }
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 22.0f, g_fermenters[F].ceilingTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 18.0f, g_fermenters[F].floorTemp);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f,  g_fermenters[F].hysteresis);
+}
+
+void test_temp_band_rejects_nan(void) {
+  TEST_ASSERT_FALSE(checkTempBand(NAN, 18.0f, 0.5f, nullptr));
+  TEST_ASSERT_FALSE(checkTempBand(22.0f, NAN, 0.5f, nullptr));
+  TEST_ASSERT_FALSE(checkTempBand(22.0f, 18.0f, NAN, nullptr));
+  TEST_ASSERT_TRUE (checkTempBand(22.0f, 18.0f, 0.5f, nullptr));
 }
 
 // ---- applyFermenterFieldFromDisplay ----
@@ -293,8 +338,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_index_rejects_far_out_of_range);
   RUN_TEST(test_index_rejects_non_fermenter_scope);
   RUN_TEST(test_index_rejects_wrong_case);
-  RUN_TEST(test_index_nonnumeric_suffix_is_preexisting_atoi_quirk);
-  RUN_TEST(test_index_no_digits_is_preexisting_atoi_quirk);
+  RUN_TEST(test_index_rejects_a_non_numeric_suffix);
+  RUN_TEST(test_index_rejects_no_digits);
+  RUN_TEST(test_index_rejects_text_after_the_digit);
+  RUN_TEST(test_number_accepts_ordinary_numbers);
+  RUN_TEST(test_number_refuses_anything_else);
+  RUN_TEST(test_apply_rejects_nan_for_every_field);
+  RUN_TEST(test_temp_band_rejects_nan);
 
   RUN_TEST(test_apply_celsius_is_a_pass_through);
   RUN_TEST(test_apply_fahrenheit_converts_absolute_temperatures);
