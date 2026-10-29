@@ -161,13 +161,8 @@ void setup() {
   // RF transmitter setup via RCSwitch
   g_rcSwitch.enableTransmit(PIN_RF_TRANSMIT);
 
-  // Mount filesystem
-  if (!LittleFS.begin()) {
-    logMsg("[FS] LittleFS mount failed - formatting");
-    LittleFS.format();
-    LittleFS.begin();
-  }
-  logMsg("[FS] LittleFS mounted OK");
+  // Mount filesystem (Config.cpp)
+  mountFileSystem();
 
   // Load all config from flash
   loadAllConfig();
@@ -221,6 +216,7 @@ void setup() {
         ri->exccause, ri->epc1, ri->excvaddr);
     }
     crashLogPendingDeferred();
+    logFileSystemBootProblems();
     if (originalConfigConverted()) {
       logMsgL(SYSLOG_NOTICE, "DEFERRED [CFG] Original MyBrewbot config converted - see %s", ORIG_REPORT_FILE);
     }

@@ -988,6 +988,53 @@ bool saveSyslogConfig() {
 }
 
 // ============================================================
+// MOUNT THE FILESYSTEM
+// ============================================================
+
+#define FS_MOUNT_ATTEMPTS 3
+
+// What mountFileSystem() had to do at boot, for logFileSystemBootProblems()
+static uint8_t s_fsMountAttempts = 0;
+static bool    s_fsFormatted     = false;
+
+bool mountFileSystem() {
+  // LittleFS formats itself whenever a mount fails. One bad flash read at boot
+  // would then erase every setting, the plugs' RF codes included, so that is
+  // switched off and the mount is tried a few times first.
+  LittleFS.setConfig(LittleFSConfig(false));
+  for (uint8_t attempt = 1; attempt <= FS_MOUNT_ATTEMPTS; attempt++) {
+    s_fsMountAttempts = attempt;
+    if (LittleFS.begin()) {
+      logMsg("[FS] LittleFS mounted OK (attempt %u)", attempt);
+      return true;
+    }
+    logMsgL(SYSLOG_WARNING, "[FS] LittleFS mount failed (attempt %u of %u)",
+            attempt, FS_MOUNT_ATTEMPTS);
+    if (attempt < FS_MOUNT_ATTEMPTS) delay(100);
+  }
+
+  // Still can't be mounted: a new device with blank flash, or a damaged
+  // filesystem. Format it so the controller can save settings again.
+  s_fsFormatted = true;
+  logMsgL(SYSLOG_ERR, "[FS] LittleFS can't be mounted - formatting it, any saved settings are lost");
+  if (LittleFS.format() && LittleFS.begin()) {
+    logMsg("[FS] LittleFS formatted and mounted");
+    return true;
+  }
+  logMsgL(SYSLOG_ERR, "[FS] LittleFS unusable - running on defaults, nothing can be saved");
+  return false;
+}
+
+void logFileSystemBootProblems() {
+  if (s_fsFormatted) {
+    logMsgL(SYSLOG_ERR, "DEFERRED [FS] LittleFS couldn't be mounted at boot and was formatted - saved settings were lost");
+  } else if (s_fsMountAttempts > 1) {
+    logMsgL(SYSLOG_WARNING, "DEFERRED [FS] LittleFS mounted at boot on attempt %u of %u",
+            s_fsMountAttempts, FS_MOUNT_ATTEMPTS);
+  }
+}
+
+// ============================================================
 // LOAD ALL / SAVE ALL
 // ============================================================
 

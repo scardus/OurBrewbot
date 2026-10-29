@@ -520,6 +520,13 @@ extern SyslogConfig      g_syslogConfig;
 // FUNCTION DECLARATIONS
 // ============================================================
 
+// Mount LittleFS at boot. Tries a few times before formatting it, so one bad
+// flash read doesn't erase every setting. Returns false if it can't be used
+// at all (the controller then runs on default settings).
+bool mountFileSystem();
+// Logs a format or a retried mount at boot as DEFERRED lines, once syslog is up
+void logFileSystemBootProblems();
+
 // Load/save all config
 void loadAllConfig();
 void saveAllConfig();
