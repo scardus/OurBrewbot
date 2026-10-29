@@ -721,6 +721,19 @@ bool loadSmartPlugConfig() {
     }
   }
   if (corrected) saveSmartPlugConfig();
+  // RF timing that would trip the watchdog is only logged: rfTransmit() won't
+  // send it, and the file keeps the setting so it can be seen and corrected.
+  for (int i = 0; i < MAX_SMART_PLUGS; i++) {
+    const SmartPlugConfig& p = g_smartPlugs[i];
+    const char* rfErr = nullptr;
+    if ((p.onCode != 0 || p.offCode != 0) &&
+        !checkRfSettings(p.protocol, p.bits, p.delayLength, &rfErr)) {
+      char why[64];
+      strncpy_P(why, rfErr, sizeof(why) - 1);   // the reason is in flash
+      why[sizeof(why) - 1] = '\0';
+      logMsg("[CFG] Plug %d: %s - it won't be sent until this is corrected", i, why);
+    }
+  }
   return true;
 }
 

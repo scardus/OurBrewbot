@@ -43,11 +43,33 @@ static uint32_t s_plugSentAt[MAX_SMART_PLUGS] = {0};
 // switch a plug back on (set for a firmware upload - see holdPlugsOff()).
 static bool s_plugsHeldOff = false;
 
+// When rfTransmit() last logged a refused send. The control loop asks again
+// every 10 s, so the reason is logged at most once a minute.
+static bool     s_refusalLogged = false;
+static uint32_t s_refusalLoggedAt = 0;
+
 // ============================================================
 // RF TRANSMISSION via RCSwitch
 // ============================================================
 
-void rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol) {
+bool rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol) {
+  // A burst that would trip the watchdog is never sent (see checkRfSettings()
+  // in Config.h). This is the one place every send passes through: the control
+  // loop, a forced OFF and the WebUI's plug test.
+  const char* rfErr = nullptr;
+  if (!checkRfSettings(protocol, bits, delayUs, &rfErr)) {
+    if (!s_refusalLogged || millis() - s_refusalLoggedAt >= PLUG_RESEND_MS) {
+      char why[64];
+      strncpy_P(why, rfErr, sizeof(why) - 1);   // the reason is in flash
+      why[sizeof(why) - 1] = '\0';
+      logMsg("[PLUG] Not sent: %s (protocol %u, %u-bit, %uus)",
+        why, protocol, bits, delayUs);
+      s_refusalLogged   = true;
+      s_refusalLoggedAt = millis();
+    }
+    return false;
+  }
+
   // Let the WiFi task send anything already queued (e.g. the syslog line just
   // logged) first. The burst below busy-waits for ~0.5 s without yielding, and
   // a datagram queued just before it was lost - which is why no "Plug 0" line
@@ -59,7 +81,7 @@ void rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol)
   g_rcSwitch.enableTransmit(PIN_RF_TRANSMIT);
   g_rcSwitch.setProtocol(protocol);
   g_rcSwitch.setPulseLength(delayUs);
-  g_rcSwitch.setRepeatTransmit(10);
+  g_rcSwitch.setRepeatTransmit(RF_REPEATS);
   g_rcSwitch.send(code, bits);
   g_rcSwitch.disableTransmit();
   // Re-enable the receiver only if the RF sniffer is in use. Left on, an idle
@@ -67,6 +89,7 @@ void rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol)
   if (g_rfSniffActive) {
     g_rcSwitch.enableReceive(digitalPinToInterrupt(PIN_RF_RECEIVE));
   }
+  return true;
 }
 
 // ============================================================
@@ -98,7 +121,7 @@ void smartPlugSwitch(uint8_t plugIndex, bool on) {
   bool changed = !s_plugSent[plugIndex] || on != s_plugState[plugIndex];
   if (!changed && millis() - s_plugSentAt[plugIndex] < PLUG_RESEND_MS) return;
 
-  rfTransmit(code, plug.bits, plug.delayLength, plug.protocol);
+  if (!rfTransmit(code, plug.bits, plug.delayLength, plug.protocol)) return;
 
   logMsg("[PLUG] Plug %d %s (code 0x%06X, %d-bit, %dus)",
     plugIndex, on ? "ON" : "OFF", code, plug.bits, plug.delayLength);
@@ -122,7 +145,7 @@ void smartPlugForceOff(uint8_t plugIndex) {
   SmartPlugConfig& plug = g_smartPlugs[plugIndex];
   if (plug.offCode == 0) return;   // no OFF code learnt - nothing to send
 
-  rfTransmit(plug.offCode, plug.bits, plug.delayLength, plug.protocol);
+  if (!rfTransmit(plug.offCode, plug.bits, plug.delayLength, plug.protocol)) return;
 
   logMsg("[PLUG] Plug %d forced OFF (code 0x%06X, %d-bit, %dus)",
     plugIndex, plug.offCode, plug.bits, plug.delayLength);

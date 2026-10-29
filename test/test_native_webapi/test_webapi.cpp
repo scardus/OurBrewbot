@@ -109,7 +109,12 @@ void handleAdmin(ESP8266WebServer&) {}
 // SmartPlugs.cpp - the RF layer. rfTransmit is recorded so the plug-test
 // endpoint can be checked without an RCSwitch.
 static int s_rfTransmits = 0;
-void rfTransmit(uint32_t, uint8_t, uint16_t, uint8_t) { s_rfTransmits++; }
+static bool s_rfRefuses = false;   // true: act as if the RF settings were refused
+bool rfTransmit(uint32_t, uint8_t, uint16_t, uint8_t) {
+  if (s_rfRefuses) return false;
+  s_rfTransmits++;
+  return true;
+}
 bool g_rfSniffActive = false;
 
 // OurBrewbot.cpp - restartDevice() sends the mDNS goodbye, then restarts.
@@ -199,6 +204,7 @@ void setUp(void) {
   s_importActive    = false;   // Config.cpp's config-import state
   s_importLastWrite = 0;
   s_rfTransmits = 0;
+  s_rfRefuses   = false;
   s_forceOffs   = 0;
   s_allPlugsOffs = 0;
   s_offCodeAtAllPlugsOff = 0;
@@ -1504,7 +1510,9 @@ static void test_smartplug_post_updates_a_slot(void) {
 
 // Zero bits would make RCSwitch transmit nothing at all.
 static void test_smartplug_post_ignores_an_impossible_bit_count(void) {
-  g_smartPlugs[0].bits = 24;
+  g_smartPlugs[0].protocol    = 1;
+  g_smartPlugs[0].bits        = 24;
+  g_smartPlugs[0].delayLength = 410;
   postBody("{\"index\":0,\"bits\":0}");
   handleSmartPlugPost(srv);
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
@@ -1607,6 +1615,28 @@ static void test_smartplug_post_ignored_value_does_not_switch_the_plug_off(void)
   TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
 }
 
+// A pulse length long enough for one send to trip the watchdog (3500 us is
+// ~4.5 s with protocol 1) is refused before anything is stored or switched.
+static void test_smartplug_post_refuses_a_pulse_length_that_would_trip_the_watchdog(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"delay\":3500}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("pulse length too long"));
+  TEST_ASSERT_EQUAL_UINT16(410, g_smartPlugs[0].delayLength);
+  TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+}
+
+// rc-switch only knows protocols 1-12 (it quietly sent anything else as 1)
+static void test_smartplug_post_refuses_an_unknown_protocol(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"protocol\":13}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("protocol out of range"));
+  TEST_ASSERT_EQUAL_UINT8(1, g_smartPlugs[0].protocol);
+}
+
 static void test_smartplug_test_transmits_the_selected_code(void) {
   g_smartPlugs[0].onCode  = 0x123456;
   g_smartPlugs[0].offCode = 0xABCDEF;
@@ -1622,6 +1652,17 @@ static void test_smartplug_test_refuses_when_no_code_is_configured(void) {
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
   TEST_ASSERT_TRUE(bodyContains("No code configured"));
   TEST_ASSERT_EQUAL_INT(0, s_rfTransmits);
+}
+
+// A saved plug whose RF settings rfTransmit() refuses: the test says so
+// rather than reporting "RF code sent"
+static void test_smartplug_test_reports_refused_rf_settings(void) {
+  g_smartPlugs[0].onCode = 0x123456;
+  s_rfRefuses = true;
+  postBody("{\"index\":0,\"action\":\"on\"}");
+  handleSmartPlugTest(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("RF settings refused"));
 }
 
 // ============================================================
@@ -2361,8 +2402,11 @@ int main(int, char**) {
   RUN_TEST(test_smartplug_post_switches_off_for_any_rf_setting_change);
   RUN_TEST(test_smartplug_post_leaves_the_plug_alone_when_switching_is_unchanged);
   RUN_TEST(test_smartplug_post_ignored_value_does_not_switch_the_plug_off);
+  RUN_TEST(test_smartplug_post_refuses_a_pulse_length_that_would_trip_the_watchdog);
+  RUN_TEST(test_smartplug_post_refuses_an_unknown_protocol);
   RUN_TEST(test_smartplug_test_transmits_the_selected_code);
   RUN_TEST(test_smartplug_test_refuses_when_no_code_is_configured);
+  RUN_TEST(test_smartplug_test_reports_refused_rf_settings);
   RUN_TEST(test_rf_sniffer_poll_switches_the_receiver_on);
   RUN_TEST(test_rf_sniffer_stays_on_while_the_page_keeps_polling);
   RUN_TEST(test_rf_sniffer_switches_the_receiver_off_10s_after_the_last_poll);

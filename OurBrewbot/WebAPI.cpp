@@ -1173,6 +1173,15 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
   if (!doc["delay"].isNull())        plug.delayLength = doc["delay"];
   if (!doc["codeset"].isNull())      plug.codeset     = doc["codeset"];
 
+  // Refuse RF timing that would trip the watchdog on every send, before
+  // anything is stored or switched (see checkRfSettings() in Config.h)
+  const char* rfErr = nullptr;
+  if (!checkRfSettings(plug.protocol, plug.bits, plug.delayLength, &rfErr)) {
+    // The reason is a flash string, which sendErr() copies out for itself
+    sendErr(server, 400, reinterpret_cast<const __FlashStringHelper*>(rfErr));
+    return;
+  }
+
   // If the change affects how, or whether, the plug is switched, send it OFF
   // first while its old settings are still in place. Otherwise a plug that was
   // ON would stay on for good: the control loop only switches a plug by its NEW
@@ -1214,7 +1223,10 @@ void handleSmartPlugTest(ESP8266WebServer& server) {
   logMsg("[PLUG] Test plug %d %s: code=%u (0x%06X), bits=%d, delay=%d, proto=%d",
     idx, on ? "ON" : "OFF", code, code, plug.bits, plug.delayLength, plug.protocol);
 
-  rfTransmit(code, plug.bits, plug.delayLength, plug.protocol);
+  if (!rfTransmit(code, plug.bits, plug.delayLength, plug.protocol)) {
+    sendErr(server, 400, F("RF settings refused - check the protocol, bits and pulse length"));
+    return;
+  }
   sendOk(server, F("RF code sent"));
 }
 

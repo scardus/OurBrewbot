@@ -288,6 +288,65 @@ inline bool checkTempBand(float ceiling, float floor, float hyst, const char** e
 }
 
 // ============================================================
+// RF PLUG TIMING LIMITS
+// rc-switch sends a plug's code RF_REPEATS times and busy-waits through every
+// pulse without yielding, so nothing else runs until the burst is over. A
+// burst longer than ~3 s trips the watchdog and resets the controller - and it
+// would do so on every send. The WebUI save, the boot-time config check and
+// rfTransmit() all use checkRfSettings(), so a plug whose burst is too long is
+// never sent.
+// ============================================================
+#define RF_REPEATS          10     // copies of the code in each send (rfTransmit)
+#define RF_PROTOCOL_COUNT   12     // rc-switch 2.6.4 knows protocols 1-12
+#define RF_MAX_BURST_MS     2000   // well inside the ~3.2 s watchdog
+
+// How long one send of a plug's code takes, in ms (0 for an unknown protocol).
+// Each protocol builds a bit and the sync gap from a number of pulses, and
+// each pulse lasts the plug's pulse length (delayUs). The table is copied from
+// proto[] in rc-switch 2.6.4's RCSwitch.cpp: for each protocol, the pulses in
+// its longer bit (a 0 or a 1) and in its sync gap. Defined here (inline)
+// for the same reason as checkTempBand() above.
+inline uint32_t rfBurstMs(uint8_t protocol, uint8_t bits, uint16_t delayUs) {
+  static const uint8_t kPulses[RF_PROTOCOL_COUNT][2] PROGMEM = {
+    {  4,  32 },   // protocol 1
+    {  3,  11 },   // protocol 2
+    { 15, 101 },   // protocol 3
+    {  4,   7 },   // protocol 4
+    {  3,  20 },   // protocol 5
+    {  3,  24 },   // protocol 6
+    {  7,  64 },   // protocol 7
+    { 23, 133 },   // protocol 8
+    { 23, 137 },   // protocol 9
+    {  4,  19 },   // protocol 10
+    {  3,  37 },   // protocol 11
+    {  3,  37 },   // protocol 12
+  };
+  if (protocol < 1 || protocol > RF_PROTOCOL_COUNT) return 0;
+  uint8_t pulses[2];
+  memcpy_P(pulses, kPulses[protocol - 1], sizeof(pulses));
+  uint32_t pulsesPerSend = (uint32_t)bits * pulses[0] + pulses[1];
+  return RF_REPEATS * pulsesPerSend * delayUs / 1000;
+}
+
+// Returns true if a plug can be sent with these settings. Otherwise returns
+// false and, if errMsg is given, points it at the reason. The reasons are kept
+// in flash (PSTR) to save RAM, so copy one with strncpy_P() before printing it.
+inline bool checkRfSettings(uint8_t protocol, uint8_t bits, uint16_t delayUs, const char** errMsg) {
+  const char* err = nullptr;
+  if (protocol < 1 || protocol > RF_PROTOCOL_COUNT) {
+    err = PSTR("RF protocol out of range (1 to 12)");
+  } else if (bits < 1 || bits > 32) {
+    err = PSTR("RF bits out of range (1 to 32)");
+  } else if (delayUs == 0) {
+    err = PSTR("RF pulse length must be above 0");
+  } else if (rfBurstMs(protocol, bits, delayUs) > RF_MAX_BURST_MS) {
+    err = PSTR("RF pulse length too long - one send would take over 2 s");
+  }
+  if (errMsg) *errMsg = err;
+  return err == nullptr;
+}
+
+// ============================================================
 // STRUCT: FermenterDebugOverride
 // Runtime-only — never persisted, resets on reboot.
 // ============================================================
