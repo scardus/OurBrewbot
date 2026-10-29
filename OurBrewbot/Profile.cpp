@@ -56,6 +56,18 @@ static void finishProfile(uint8_t i) {
   g_fermenters[i].hourTicks      = 0;
 }
 
+// True for the step types that ramp from Start Temp to End Temp over Days -
+// the types whose WebUI row lets you enter a Start Temp (SFIELDS in
+// WebAdmin.cpp). Every other type holds End Temp. The WebUI greys out Start
+// Temp for those types but keeps its old value (usually 0), so before this
+// check a Specific Gravity step set to 20 C started at 0 C and took its Days
+// to climb to 20. Free Rise uses both temperatures as a band instead (see
+// advanceProfileStep()).
+static bool stepRamps(uint8_t stepType) {
+  return stepType == STEP_TEMP_OVER_TIME || stepType == STEP_TIME_OVER_TEMP ||
+         stepType == STEP_TIME_AND_SG    || stepType == STEP_TIME_AND_ATTN;
+}
+
 // Check if a step is empty (unused slot). Declared in Profile.h because the
 // REST layer needs the same test: an empty slot's 0.0 temperatures are a
 // sentinel, not a reading, so they must never be unit-converted.
@@ -221,7 +233,7 @@ float getProfileTargetTemp(uint8_t i) {
   ProfileStep& step = g_profileSteps[idx];
 
   // For ramp steps, interpolate between startTemp and endTemp
-  if (step.days > 0 && step.startTemp != step.endTemp) {
+  if (stepRamps(step.stepType) && step.days > 0 && step.startTemp != step.endTemp) {
     float progress = min(1.0f, (float)g_fermenters[i].currentHour / (step.days * 24.0f));
     return step.startTemp + (step.endTemp - step.startTemp) * progress;
   }

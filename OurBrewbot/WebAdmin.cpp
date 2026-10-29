@@ -872,7 +872,7 @@ var STEP_INFO = {
   0: { title: 'Temperature over Time',
        desc:  'Advances when the configured <b>Days</b> have elapsed <b>and</b> the current temp is within 0.5&deg;C of <b>End Temp</b>.' },
   1: { title: 'Time over Temperature',
-       desc:  'Advances after <b>Days</b> have elapsed. Temperature is held at <b>End Temp</b> but is not a gating condition.' },
+       desc:  'Advances after <b>Days</b> have elapsed. Temperature ramps from <b>Start Temp</b> to <b>End Temp</b> over the Days but is not a gating condition.' },
   2: { title: 'Free Rise',
        desc:  'Advances after <b>Days</b> have elapsed. Uses <b>Start Temp</b> as the floor and <b>End Temp</b> as the ceiling (no active heat/cool between them).' },
   3: { title: 'Specific Gravity',
@@ -886,9 +886,9 @@ var STEP_INFO = {
   7: { title: 'Attn% Reached',
        desc:  'Advances as soon as attenuation reaches <b>SG Trigger</b>% or higher. No time gate. Temperature held at <b>End Temp</b>.' },
   8: { title: 'Time and SG',
-       desc:  'Advances when <b>Days</b> have elapsed <b>and</b> SG falls to or below <b>SG Trigger</b>. Temperature held at <b>End Temp</b>.' },
+       desc:  'Advances when <b>Days</b> have elapsed <b>and</b> SG falls to or below <b>SG Trigger</b>. Temperature ramps from <b>Start Temp</b> to <b>End Temp</b> over the Days.' },
   9: { title: 'Time and Attn%',
-       desc:  'Advances when <b>Days</b> have elapsed <b>and</b> attenuation reaches <b>SG Trigger</b>% or higher. Temperature held at <b>End Temp</b>.' }
+       desc:  'Advances when <b>Days</b> have elapsed <b>and</b> attenuation reaches <b>SG Trigger</b>% or higher. Temperature ramps from <b>Start Temp</b> to <b>End Temp</b> over the Days.' }
 };
 
 var FIELD_LABELS = { s: 'Start Temp', e: 'End Temp', g: 'SG Trigger', d: 'Days' };
@@ -969,6 +969,8 @@ function deleteProfileStep(p, s) {
 
 // Add a new step to profile p — copies the last live step, or seeds Temp/Time
 // 7 days at 20°C. The seed is in the display unit, so it follows tempUnit.
+// Start Temp is seeded the same as End Temp, so the new step holds 20°C until
+// it is edited (a Start Temp of 0 made it ramp up from 0°C).
 function addProfileStep(p) {
   var steps = profileEdits[p].steps;
   var live = countLiveSteps(steps);
@@ -978,7 +980,8 @@ function addProfileStep(p) {
     var prev = steps[live - 1];
     seed = { stepType: prev.stepType, startTemp: prev.startTemp, endTemp: prev.endTemp, sgTrigger: prev.sgTrigger, days: prev.days };
   } else {
-    seed = { stepType: 0, startTemp: 0, endTemp: (tempUnit == 'F' ? 68 : 20), sgTrigger: 0, days: 7 };
+    var seedTemp = (tempUnit == 'F' ? 68 : 20);
+    seed = { stepType: 0, startTemp: seedTemp, endTemp: seedTemp, sgTrigger: 0, days: 7 };
   }
   steps[live] = seed;
   markDirty();
