@@ -154,9 +154,41 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/fs/import/abort",  HTTP_POST, handleFsImportAbort,      true  },
 };
 
+// ============================================================
+// REQUESTS FROM OTHER WEBSITES
+//
+// A web page from another site, open in a browser on the same network, can
+// make the browser send POSTs to the controller (a form, or fetch() in
+// "no-cors" mode) - to change settings, or to upload firmware. Browsers name
+// the page's site in an Origin header on every such POST. The WebUI's own
+// requests name the controller itself, and curl, scripts, Home Assistant and
+// the iSpindel send no Origin at all, so only a POST naming another site is
+// refused. This isn't a login: anything on the network can still send
+// requests directly.
+// ============================================================
+
+// Defined with the other response helpers below
+static void sendErr(ESP8266WebServer& server, int code, const __FlashStringHelper* msg);
+
+static bool isCrossSitePost(ESP8266WebServer& server) {
+  if (server.method() != HTTP_POST) return false;
+  const String& origin = server.header("Origin");
+  if (origin.length() == 0) return false;   // not sent by a web page
+  // A page served by the controller has the Origin "http://" followed by the
+  // address the browser used for it, which is the request's Host header
+  String ownOrigin = "http://";
+  ownOrigin += server.hostHeader();
+  return !origin.equalsIgnoreCase(ownOrigin);
+}
+
 static void dispatchApiRequest(ESP8266WebServer& server) {
   HTTPMethod method = server.method();
   String uri = server.uri();  // uri() returns by value — keep it alive for the loop
+  if (isCrossSitePost(server)) {
+    logMsg("[WEB] Refused POST %s from another website (%s)", uri.c_str(), server.header("Origin").c_str());
+    sendErr(server, 403, F("Cross-site request refused"));
+    return;
+  }
   for (size_t i = 0; i < sizeof(kRoutes) / sizeof(kRoutes[0]); i++) {
     ApiRoute r;
     memcpy_P(&r, &kRoutes[i], sizeof(r));
@@ -179,6 +211,11 @@ void setupWebServer(ESP8266WebServer& server) {
     [&server]() {
       logApiCall(server);
       server.sendHeader("Connection", "close");
+      if (isCrossSitePost(server)) {
+        // handleOTAUpload() ignored this upload, so nothing was written
+        sendErr(server, 403, F("Cross-site request refused"));
+        return;
+      }
       if (Update.hasError()) {
         holdPlugsOff(false);   // no restart is coming: the control loop takes over again
         String err = "Update FAILED: ";
@@ -196,27 +233,23 @@ void setupWebServer(ESP8266WebServer& server) {
   );
 
   server.onNotFound([&server]() { dispatchApiRequest(server); });
+
+  // The server only keeps the request headers it is asked for. Origin is
+  // needed by isCrossSitePost().
+  server.collectHeaders("Origin");
 }
 
 // ============================================================
 // HELPERS
 // ============================================================
 
-void sendCORSHeaders(ESP8266WebServer& server) {
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
-}
-
 void sendJsonResponse(ESP8266WebServer& server, const String& json, int code) {
-  sendCORSHeaders(server);
   server.send(code, "application/json", json);
 }
 
 // Stream a JsonDocument straight to the client — no intermediate String.
 // Uses measureJson + setContentLength so the response is not chunked.
 void sendJsonDoc(ESP8266WebServer& server, JsonDocument& doc, int code) {
-  sendCORSHeaders(server);
   server.setContentLength(measureJson(doc));
   server.send(code, "application/json", "");
   WiFiClient client = server.client();
@@ -444,7 +477,6 @@ void buildProfileJson(JsonDocument& doc, int p) {
 void handleFermenters(ESP8266WebServer& server) {
   // Send fermenter array using chunked transfer to avoid building
   // one large String in RAM (each fermenter JSON is ~500 bytes)
-  sendCORSHeaders(server);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
   server.sendContent("[");
@@ -569,7 +601,6 @@ void handleFermenter(ESP8266WebServer& server) {
 // ============================================================
 
 void handleDebug(ESP8266WebServer& server) {
-  sendCORSHeaders(server);
 
   if (server.method() == HTTP_POST) {
     JsonDocument doc;
@@ -594,7 +625,6 @@ void handleDebug(ESP8266WebServer& server) {
   }
 
   // GET — return current debug state, chunked per-fermenter (see handleFermenters)
-  sendCORSHeaders(server);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
   // 47 characters at most
@@ -740,7 +770,6 @@ void handleBoardInfo(ESP8266WebServer& server) {
 void handleStatus(ESP8266WebServer& server) {
   // Chunked per-fermenter streaming (same pattern as handleFermenters) —
   // avoids building the whole response in one elastic JsonDocument
-  sendCORSHeaders(server);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
   server.sendContent("{\"fermenters\":[");
@@ -904,6 +933,16 @@ void handleOTAPage(ESP8266WebServer& server) {
 void handleOTAUpload(ESP8266WebServer& server) {
   HTTPUpload& upload = server.upload();
 
+  // An upload from another website is ignored completely: no plugs switched,
+  // nothing written to flash. The /update handler then refuses it.
+  if (isCrossSitePost(server)) {
+    if (upload.status == UPLOAD_FILE_START) {
+      logMsgL(SYSLOG_WARNING, "[OTA] Refused an upload from another website (%s)",
+              server.header("Origin").c_str());
+    }
+    return;
+  }
+
   if (upload.status == UPLOAD_FILE_START) {
     logMsgL(SYSLOG_NOTICE, "[OTA] Update started: %s", upload.filename.c_str());
     // Every plug off, and held off until the restart, so no heater or cooler
@@ -956,7 +995,6 @@ void handleiSpindel(ESP8266WebServer& server) {
 
 void handleiSpindels(ESP8266WebServer& server) {
   // Chunked per-item streaming (same pattern as handleFermenters)
-  sendCORSHeaders(server);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
   server.sendContent("{\"ispindels\":[");
@@ -1126,7 +1164,6 @@ void handleProbePost(ESP8266WebServer& server) {
 
 void handleSmartPlugs(ESP8266WebServer& server) {
   // Chunked per-item streaming (same pattern as handleFermenters)
-  sendCORSHeaders(server);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
   server.sendContent("{\"plugs\":[");
@@ -1631,7 +1668,6 @@ void handleProfiles(ESP8266WebServer& server) {
   // so each chunk is one profile's opening or one of its steps: at most 83
   // bytes for a 31-char name with every char escaped, and 114 for a step
   // whose four floats all print at full length, plus its comma.
-  sendCORSHeaders(server);
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
   server.sendContent("{\"profiles\":[");
@@ -1832,7 +1868,6 @@ void handleFsFile(ESP8266WebServer& server) {
     server.send(500, "text/plain", "Open failed");
     return;
   }
-  sendCORSHeaders(server);
   // Stream straight from LittleFS — readString() held the whole file in heap twice
   server.streamFile(f, "text/plain");
   f.close();

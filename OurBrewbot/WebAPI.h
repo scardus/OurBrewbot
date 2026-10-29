@@ -97,7 +97,6 @@ void handleiSpindelConfigPost(ESP8266WebServer& server);
 void handleDebug(ESP8266WebServer& server);
 
 // Helpers
-void sendCORSHeaders(ESP8266WebServer& server);
 void sendJsonResponse(ESP8266WebServer& server, const String& json, int code = 200);
 void sendJsonDoc(ESP8266WebServer& server, JsonDocument& doc, int code = 200);
 void buildFermenterJson(JsonDocument& doc, uint8_t index);

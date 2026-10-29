@@ -156,7 +156,7 @@ esptool.py --port COM7 --baud 115200 write_flash 0x0 OurBrewbot_vX.Y.Z.bin
 
 Once the firmware is running, navigate to `http://ourbrewbot-XXXXXX.local/update` in your browser and upload the `.bin` file directly.
 
-Every smart plug is switched off when the upload starts and held off until the controller restarts on the new firmware (if the upload fails, control carries on as before). Plugs are also switched off before a reboot or config reset.
+Every smart plug is switched off when the upload starts and held off until the controller restarts on the new firmware. If the upload fails, control carries on as before, but a fridge that was cooling waits out its compressor delay before it runs again. Plugs are also switched off before a reboot or config reset.
 
 ---
 
@@ -260,6 +260,8 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 | POST   | /update/check      | Check ourbrewbot.com for a newer firmware now |
 | GET    | /WiFi              | WiFi config page (alias)      |
 | POST   | /wifi/reset        | Clear WiFi settings and reboot into the setup portal |
+
+The API has no login, so keep the controller on a network you trust. It does refuse a POST, firmware uploads included, that a web page from another website sends through your browser: a request whose `Origin` header names a different site gets a 403. The WebUI, curl, scripts, Home Assistant and iSpindels are not affected. The API also doesn't send an `Access-Control-Allow-Origin` header, so another website can't read its replies through your browser either.
 
 ---
 

@@ -241,6 +241,8 @@ void setUp(void) {
   srv.clearArgs();
   srv.setMethod(HTTP_GET);
   srv.setUri("/");
+  srv.setOrigin("");
+  srv.setHost("192.168.0.207");
 }
 
 void tearDown(void) {}
@@ -550,11 +552,17 @@ static void test_send_err_envelope_carries_the_code(void) {
   TEST_ASSERT_EQUAL_STRING("{\"status\":\"error\",\"msg\":\"Bad thing\"}", g_httpResp.body);
 }
 
-static void test_cors_headers_are_set(void) {
-  sendCORSHeaders(srv);
-  TEST_ASSERT_EQUAL_STRING("*", httpRespHeader("Access-Control-Allow-Origin"));
-  TEST_ASSERT_EQUAL_STRING("GET, POST, OPTIONS", httpRespHeader("Access-Control-Allow-Methods"));
-  TEST_ASSERT_EQUAL_STRING("Content-Type", httpRespHeader("Access-Control-Allow-Headers"));
+// "Access-Control-Allow-Origin: *" let any website read the API (the MQTT
+// password included, through /fs/file) from a browser on the same network.
+// The WebUI is served by the controller itself, so it never needed it.
+static void test_no_response_allows_other_websites_to_read_it(void) {
+  sendJsonResponse(srv, "{}", 200);
+  TEST_ASSERT_EQUAL_STRING("", httpRespHeader("Access-Control-Allow-Origin"));
+  httpRespReset();
+  JsonDocument doc;
+  doc["a"] = 1;
+  sendJsonDoc(srv, doc);
+  TEST_ASSERT_EQUAL_STRING("", httpRespHeader("Access-Control-Allow-Origin"));
 }
 
 static void test_parse_json_body_accepts_valid_json(void) {
@@ -1824,6 +1832,56 @@ static void request(HTTPMethod method, const char* uri) {
   dispatchApiRequest(srv);
 }
 
+// ---- POSTs from other websites are refused ----
+
+// A page on another site, open in a browser on the LAN, tried to reboot it
+static void test_a_post_from_another_website_is_refused(void) {
+  srv.setOrigin("http://example.com");
+  request(HTTP_POST, "/reboot");
+  TEST_ASSERT_EQUAL_INT(403, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Cross-site request refused"));
+  TEST_ASSERT_EQUAL_INT(0, s_restarts);
+}
+
+// The WebUI's own requests name the controller as their Origin, by its IP
+// address or its .local name - whichever the browser used
+static void test_a_post_from_the_webui_itself_is_accepted(void) {
+  srv.setOrigin("http://192.168.0.207");
+  request(HTTP_POST, "/reboot");
+  TEST_ASSERT_EQUAL_INT(1, s_restarts);
+
+  srv.setHost("ourbrewbot-3c71bf.local");
+  srv.setOrigin("http://OurBrewbot-3C71BF.local");
+  request(HTTP_POST, "/reboot");
+  TEST_ASSERT_EQUAL_INT(2, s_restarts);
+}
+
+// curl, scripts, Home Assistant and the iSpindel send no Origin
+static void test_a_post_with_no_origin_is_accepted(void) {
+  request(HTTP_POST, "/reboot");
+  TEST_ASSERT_EQUAL_INT(1, s_restarts);
+}
+
+// Reading needs no protection here: without the CORS header a browser won't
+// show another site the reply
+static void test_a_get_from_another_website_is_answered(void) {
+  srv.setOrigin("http://example.com");
+  request(HTTP_GET, "/reboot");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+}
+
+// A firmware upload from another website: no plugs switched, nothing written
+static void test_an_upload_from_another_website_is_ignored(void) {
+  srv.setMethod(HTTP_POST);
+  srv.setOrigin("http://example.com");
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_INT(0, s_allPlugsOffs);
+  TEST_ASSERT_FALSE(s_plugsHeldOff);
+}
+
 static void test_get_reboot_asks_for_confirmation_and_does_not_restart(void) {
   request(HTTP_GET, "/reboot");
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
@@ -2352,7 +2410,7 @@ int main(int, char**) {
   // helpers
   RUN_TEST(test_send_ok_envelope);
   RUN_TEST(test_send_err_envelope_carries_the_code);
-  RUN_TEST(test_cors_headers_are_set);
+  RUN_TEST(test_no_response_allows_other_websites_to_read_it);
   RUN_TEST(test_parse_json_body_accepts_valid_json);
   RUN_TEST(test_parse_json_body_rejects_garbage);
   RUN_TEST(test_get_valid_index_accepts_an_in_range_value);
@@ -2463,6 +2521,11 @@ int main(int, char**) {
   RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
   RUN_TEST(test_ota_upload_start_puts_a_cooling_fermenter_back_to_idle);
   RUN_TEST(test_a_failed_ota_upload_waits_out_the_compressor_delay);
+  RUN_TEST(test_a_post_from_another_website_is_refused);
+  RUN_TEST(test_a_post_from_the_webui_itself_is_accepted);
+  RUN_TEST(test_a_post_with_no_origin_is_accepted);
+  RUN_TEST(test_a_get_from_another_website_is_answered);
+  RUN_TEST(test_an_upload_from_another_website_is_ignored);
   RUN_TEST(test_get_reboot_asks_for_confirmation_and_does_not_restart);
   RUN_TEST(test_post_reboot_restarts);
   RUN_TEST(test_get_reset_with_target_erases_nothing);
