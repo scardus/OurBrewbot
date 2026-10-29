@@ -75,6 +75,12 @@ static bool saveJsonDocToFile(JsonDocument& doc, const char* path) {
 }
 
 bool saveJsonDocSafe(JsonDocument& doc, const char* primary, const char* backup) {
+  // Ran out of memory while the document was being filled in, so part of it
+  // is missing. Keep the files already on flash rather than replace them.
+  if (doc.overflowed()) {
+    logMsgL(SYSLOG_ERR, "[CFG] Out of memory - not saved: %s", primary);
+    return false;
+  }
   if (!saveJsonDocToFile(doc, backup)) return false;
   return saveJsonDocToFile(doc, primary);
 }
@@ -93,6 +99,62 @@ static bool loadJsonDocFromFile(JsonDocument& doc, const char* path) {
 bool loadJsonDocSafe(JsonDocument& doc, const char* primary, const char* backup) {
   if (loadJsonDocFromFile(doc, primary)) return true;
   doc.clear();
+  logMsgL(SYSLOG_WARNING, "[CFG] Falling back to backup: %s", backup);
+  return loadJsonDocFromFile(doc, backup);
+}
+
+// ============================================================
+// UNSAVED FILES
+//
+// The 10-minute save used to rewrite every config file and its backup, 2,880
+// file writes a day even when nothing had changed. Now it only writes the
+// files marked here. A file is marked when something in memory changes
+// without being saved straight away (profile progress, uptime, some of the
+// corrections made while loading), when a save fails, or when a copy on flash
+// was missing or damaged at boot.
+// ============================================================
+
+static uint16_t s_unsavedFiles = 0;   // one bit per ConfigFile
+
+void configMarkUnsaved(ConfigFile file) {
+  s_unsavedFiles |= (1u << file);
+}
+
+static bool isUnsaved(ConfigFile file) {
+  return (s_unsavedFiles & (1u << file)) != 0;
+}
+
+// saveJsonDocSafe() for a config file: the mark is cleared once both copies
+// are written, and set again if the save fails, so it is tried again later.
+static bool saveConfigDoc(ConfigFile file, JsonDocument& doc,
+                          const char* primary, const char* backup) {
+  if (!saveJsonDocSafe(doc, primary, backup)) {
+    configMarkUnsaved(file);
+    return false;
+  }
+  s_unsavedFiles &= ~(1u << file);
+  return true;
+}
+
+// loadJsonDocSafe() for a config file. The old 10-minute save also replaced a
+// missing or damaged copy without meaning to, so now that unchanged files are
+// left alone, a bad copy is marked unsaved here and the 10-minute save writes
+// it again. The backup is checked first, on its own, so two files are never
+// in memory at once.
+static bool loadConfigDoc(ConfigFile file, JsonDocument& doc,
+                          const char* primary, const char* backup) {
+  bool backupOk = loadJsonDocFromFile(doc, backup);
+  doc.clear();
+  if (loadJsonDocFromFile(doc, primary)) {
+    if (!backupOk) {
+      logMsgL(SYSLOG_WARNING, "[CFG] Backup missing or damaged - it will be saved again: %s", backup);
+      configMarkUnsaved(file);
+    }
+    return true;
+  }
+  doc.clear();
+  configMarkUnsaved(file);
+  if (!backupOk) return false;
   logMsgL(SYSLOG_WARNING, "[CFG] Falling back to backup: %s", backup);
   return loadJsonDocFromFile(doc, backup);
 }
@@ -504,7 +566,7 @@ static const CfgField kSyslogFields[] PROGMEM = { SYSLOG_CONFIG_FIELDS(CFG_ROW) 
 
 bool loadGlobalConfig() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_GLOBAL, FILE_GLOBAL_BKP)) {
+  if (!loadConfigDoc(CFG_FILE_GLOBAL, doc, FILE_GLOBAL, FILE_GLOBAL_BKP)) {
     logMsg("[CFG] Global config not found or invalid - using defaults");
     initDefaultGlobalConfig();
     return false;
@@ -526,7 +588,7 @@ bool loadGlobalConfig() {
 bool saveGlobalConfig() {
   JsonDocument doc;
   cfgSaveScalar(doc, &g_globalConfig, kGlobalFields, CFG_COUNT(kGlobalFields));
-  return saveJsonDocSafe(doc, FILE_GLOBAL, FILE_GLOBAL_BKP);
+  return saveConfigDoc(CFG_FILE_GLOBAL, doc, FILE_GLOBAL, FILE_GLOBAL_BKP);
 }
 
 // ============================================================
@@ -535,7 +597,7 @@ bool saveGlobalConfig() {
 
 bool loadFermenterConfig() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_FERMENTER, FILE_FERMENTER_BKP)) {
+  if (!loadConfigDoc(CFG_FILE_FERMENTER, doc, FILE_FERMENTER, FILE_FERMENTER_BKP)) {
     logMsg("[CFG] Fermenter config not found or invalid - using defaults");
     initDefaultFermenterConfig();
     return false;
@@ -546,6 +608,7 @@ bool loadFermenterConfig() {
 
   // Migrate old integer-format gravity values (e.g. 1050 → 1.050)
   for (int i = 0; i < MAX_FERMENTERS; i++) {
+    if (g_fermenters[i].og > 2.0f || g_fermenters[i].tg > 2.0f) configMarkUnsaved(CFG_FILE_FERMENTER);
     if (g_fermenters[i].og > 2.0f) g_fermenters[i].og /= 1000.0f;
     if (g_fermenters[i].tg > 2.0f) g_fermenters[i].tg /= 1000.0f;
   }
@@ -599,7 +662,7 @@ bool saveFermenterConfig() {
   JsonDocument doc;
   cfgSaveArray(doc, g_fermenters, sizeof(FermenterConfig), MAX_FERMENTERS,
                kFermenterFields, CFG_COUNT(kFermenterFields));
-  return saveJsonDocSafe(doc, FILE_FERMENTER, FILE_FERMENTER_BKP);
+  return saveConfigDoc(CFG_FILE_FERMENTER, doc, FILE_FERMENTER, FILE_FERMENTER_BKP);
 }
 
 // ============================================================
@@ -608,7 +671,7 @@ bool saveFermenterConfig() {
 
 bool loadProbeConfig() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_PROBE, FILE_PROBE_BKP)) {
+  if (!loadConfigDoc(CFG_FILE_PROBE, doc, FILE_PROBE, FILE_PROBE_BKP)) {
     initDefaultProbeConfig();
     return false;
   }
@@ -628,7 +691,7 @@ bool saveProbeConfig() {
   JsonDocument doc;
   cfgSaveArray(doc, g_probes, sizeof(ProbeConfig), MAX_PROBES,
                kProbeFields, CFG_COUNT(kProbeFields));
-  return saveJsonDocSafe(doc, FILE_PROBE, FILE_PROBE_BKP);
+  return saveConfigDoc(CFG_FILE_PROBE, doc, FILE_PROBE, FILE_PROBE_BKP);
 }
 
 // ============================================================
@@ -637,7 +700,7 @@ bool saveProbeConfig() {
 
 bool loadSmartPlugConfig() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP)) {
+  if (!loadConfigDoc(CFG_FILE_SMARTPLUGS, doc, FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP)) {
     initDefaultSmartPlugConfig();
     return false;
   }
@@ -665,7 +728,7 @@ bool saveSmartPlugConfig() {
   JsonDocument doc;
   cfgSaveArray(doc, g_smartPlugs, sizeof(SmartPlugConfig), MAX_SMART_PLUGS,
                kSmartPlugFields, CFG_COUNT(kSmartPlugFields));
-  return saveJsonDocSafe(doc, FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP);
+  return saveConfigDoc(CFG_FILE_SMARTPLUGS, doc, FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP);
 }
 
 // ============================================================
@@ -674,7 +737,7 @@ bool saveSmartPlugConfig() {
 
 bool loadProfileConfig() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_PROFILE, FILE_PROFILE_BKP)) {
+  if (!loadConfigDoc(CFG_FILE_PROFILE, doc, FILE_PROFILE, FILE_PROFILE_BKP)) {
     initDefaultProfileConfig();
     return false;
   }
@@ -687,12 +750,12 @@ bool saveProfileConfig() {
   JsonDocument doc;
   cfgSaveArray(doc, g_profiles, sizeof(ProfileConfig), MAX_PROFILES,
                kProfileFields, CFG_COUNT(kProfileFields));
-  return saveJsonDocSafe(doc, FILE_PROFILE, FILE_PROFILE_BKP);
+  return saveConfigDoc(CFG_FILE_PROFILE, doc, FILE_PROFILE, FILE_PROFILE_BKP);
 }
 
 bool loadProfileSteps() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_STEPS, FILE_STEPS_BKP)) return false;
+  if (!loadConfigDoc(CFG_FILE_STEPS, doc, FILE_STEPS, FILE_STEPS_BKP)) return false;
   cfgLoadArray(doc, g_profileSteps, sizeof(ProfileStep), MAX_PROFILE_STEPS,
                kProfileStepFields, CFG_COUNT(kProfileStepFields));
   return true;
@@ -702,7 +765,7 @@ bool saveProfileSteps() {
   JsonDocument doc;
   cfgSaveArray(doc, g_profileSteps, sizeof(ProfileStep), MAX_PROFILE_STEPS,
                kProfileStepFields, CFG_COUNT(kProfileStepFields));
-  return saveJsonDocSafe(doc, FILE_STEPS, FILE_STEPS_BKP);
+  return saveConfigDoc(CFG_FILE_STEPS, doc, FILE_STEPS, FILE_STEPS_BKP);
 }
 
 // ============================================================
@@ -711,7 +774,7 @@ bool saveProfileSteps() {
 
 bool loadiSpindelConfig() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_ISPINDEL, FILE_ISPINDEL_BKP)) {
+  if (!loadConfigDoc(CFG_FILE_ISPINDEL, doc, FILE_ISPINDEL, FILE_ISPINDEL_BKP)) {
     initDefaultiSpindelConfig();
     return false;
   }
@@ -724,8 +787,9 @@ bool loadiSpindelConfig() {
   // Migrate legacy values: only PROBE_FN_BEER means "provide beer temp" —
   // everything else collapses to Unassigned ("temperature reading not used").
   for (int i = 0; i < MAX_ISPINDELS; i++) {
-    if (g_iSpindels[i].function != PROBE_FN_BEER) {
+    if (g_iSpindels[i].function != PROBE_FN_BEER && g_iSpindels[i].function != PROBE_UNASSIGNED) {
       g_iSpindels[i].function = PROBE_UNASSIGNED;
+      configMarkUnsaved(CFG_FILE_ISPINDEL);
     }
   }
   // IDs from incoming readings have been made topic-safe since 0.5.1, but one
@@ -734,6 +798,7 @@ bool loadiSpindelConfig() {
   // device's next reading still matches its slot.
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     if (makeIdTopicSafe(g_iSpindels[i].id)) {
+      configMarkUnsaved(CFG_FILE_ISPINDEL);
       logMsg("[CFG] iSpindel slot %d: ID had characters MQTT cannot use - changed to %s", i, g_iSpindels[i].id);
     }
   }
@@ -744,7 +809,7 @@ bool saveiSpindelConfig() {
   JsonDocument doc;
   cfgSaveArray(doc, g_iSpindels, sizeof(iSpindelConfig), MAX_ISPINDELS,
                kiSpindelFields, CFG_COUNT(kiSpindelFields));
-  return saveJsonDocSafe(doc, FILE_ISPINDEL, FILE_ISPINDEL_BKP);
+  return saveConfigDoc(CFG_FILE_ISPINDEL, doc, FILE_ISPINDEL, FILE_ISPINDEL_BKP);
 }
 
 // ============================================================
@@ -817,7 +882,7 @@ bool saveTiltConfig() {
     mbbArr.add(0);
   }
 
-  return saveJsonDocSafe(doc, FILE_TILT, FILE_TILT_BKP);
+  return saveConfigDoc(CFG_FILE_TILT, doc, FILE_TILT, FILE_TILT_BKP);
 }
 
 // ============================================================
@@ -826,7 +891,7 @@ bool saveTiltConfig() {
 
 bool loadBrewServiceConfig() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_BREWSVC, FILE_BREWSVC_BKP)) {
+  if (!loadConfigDoc(CFG_FILE_BREWSVC, doc, FILE_BREWSVC, FILE_BREWSVC_BKP)) {
     // An original MyBrewbot's single global service was moved into this file
     // by OriginalConfig.cpp before this ran
     initDefaultBrewServiceConfig();
@@ -855,7 +920,7 @@ bool saveBrewServiceConfig() {
   JsonDocument doc;
   cfgSaveArray(doc, g_brewServices, sizeof(BrewServiceConfig), MAX_BREW_SERVICES,
                kBrewSvcFields, CFG_COUNT(kBrewSvcFields));
-  return saveJsonDocSafe(doc, FILE_BREWSVC, FILE_BREWSVC_BKP);
+  return saveConfigDoc(CFG_FILE_BREWSVC, doc, FILE_BREWSVC, FILE_BREWSVC_BKP);
 }
 
 // ============================================================
@@ -864,7 +929,7 @@ bool saveBrewServiceConfig() {
 
 bool loadMqttConfig() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_MQTT, FILE_MQTT_BKP)) {
+  if (!loadConfigDoc(CFG_FILE_MQTT, doc, FILE_MQTT, FILE_MQTT_BKP)) {
     initDefaultMqttConfig();
     return false;
   }
@@ -874,8 +939,10 @@ bool loadMqttConfig() {
   // it is repaired here as well.
   if (g_mqttConfig.baseTopic[0] == '\0') {
     strlcpy(g_mqttConfig.baseTopic, "ourbrewbot", sizeof(g_mqttConfig.baseTopic));
+    configMarkUnsaved(CFG_FILE_MQTT);
     logMsg("[CFG] MQTT base topic was empty - using ourbrewbot");
   } else if (makeBaseTopicSafe(g_mqttConfig.baseTopic)) {
+    configMarkUnsaved(CFG_FILE_MQTT);
     logMsg("[CFG] MQTT base topic had characters MQTT cannot use - changed to %s", g_mqttConfig.baseTopic);
   }
   return true;
@@ -884,7 +951,7 @@ bool loadMqttConfig() {
 bool saveMqttConfig() {
   JsonDocument doc;
   cfgSaveScalar(doc, &g_mqttConfig, kMqttFields, CFG_COUNT(kMqttFields));
-  return saveJsonDocSafe(doc, FILE_MQTT, FILE_MQTT_BKP);
+  return saveConfigDoc(CFG_FILE_MQTT, doc, FILE_MQTT, FILE_MQTT_BKP);
 }
 
 // ============================================================
@@ -893,7 +960,7 @@ bool saveMqttConfig() {
 
 bool loadSyslogConfig() {
   JsonDocument doc;
-  if (!loadJsonDocSafe(doc, FILE_SYSLOG, FILE_SYSLOG_BKP)) {
+  if (!loadConfigDoc(CFG_FILE_SYSLOG, doc, FILE_SYSLOG, FILE_SYSLOG_BKP)) {
     initDefaultSyslogConfig();
     return false;
   }
@@ -904,7 +971,7 @@ bool loadSyslogConfig() {
 bool saveSyslogConfig() {
   JsonDocument doc;
   cfgSaveScalar(doc, &g_syslogConfig, kSyslogFields, CFG_COUNT(kSyslogFields));
-  return saveJsonDocSafe(doc, FILE_SYSLOG, FILE_SYSLOG_BKP);
+  return saveConfigDoc(CFG_FILE_SYSLOG, doc, FILE_SYSLOG, FILE_SYSLOG_BKP);
 }
 
 // ============================================================
@@ -1012,9 +1079,28 @@ void configImportRestore() {
   logMsgL(SYSLOG_NOTICE, "[CFG] Config import cancelled - the previous settings have been put back");
 }
 
+// Write each file marked unsaved. Unlike saveAllConfig() this includes the
+// Tilt file, but only when a Tilt save has failed.
+static void saveUnsavedConfig() {
+  bool ok = true;
+  if (isUnsaved(CFG_FILE_GLOBAL))     ok &= saveGlobalConfig();
+  if (isUnsaved(CFG_FILE_FERMENTER))  ok &= saveFermenterConfig();
+  if (isUnsaved(CFG_FILE_PROBE))      ok &= saveProbeConfig();
+  if (isUnsaved(CFG_FILE_SMARTPLUGS)) ok &= saveSmartPlugConfig();
+  if (isUnsaved(CFG_FILE_PROFILE))    ok &= saveProfileConfig();
+  if (isUnsaved(CFG_FILE_STEPS))      ok &= saveProfileSteps();
+  if (isUnsaved(CFG_FILE_TILT))       ok &= saveTiltConfig();
+  if (isUnsaved(CFG_FILE_ISPINDEL))   ok &= saveiSpindelConfig();
+  if (isUnsaved(CFG_FILE_BREWSVC))    ok &= saveBrewServiceConfig();
+  if (isUnsaved(CFG_FILE_MQTT))       ok &= saveMqttConfig();
+  if (isUnsaved(CFG_FILE_SYSLOG))     ok &= saveSyslogConfig();
+  if (!ok)
+    logMsgL(SYSLOG_ERR, "[CFG] One or more config saves failed - trying again in 10 minutes");
+}
+
 void configPeriodicSave() {
   if (!s_importActive) {
-    saveAllConfig();
+    saveUnsavedConfig();
     return;
   }
   if (uptimeSince(s_importLastWrite) < CONFIG_IMPORT_IDLE_S) {

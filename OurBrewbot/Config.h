@@ -471,12 +471,24 @@ void saveAllConfig();
 //     its backup first, so the backups hold the settings from before it.
 //   configImportRestore(): put the previous settings back over a half-done
 //     import by writing out the settings in memory, then end the import.
-//   configPeriodicSave(): the 10-minute save. Saves as usual, holds off while
-//     an import is running, and puts the previous settings back if an import
-//     has been abandoned.
+//   configPeriodicSave(): the 10-minute save. Saves the files marked unsaved
+//     (see configMarkUnsaved() below), holds off while an import is running,
+//     and puts the previous settings back if an import has been abandoned.
 void configImportBeforeWrite();
 void configImportRestore();
 void configPeriodicSave();
+
+// The config files the 10-minute save looks after
+enum ConfigFile : uint8_t {
+  CFG_FILE_GLOBAL, CFG_FILE_FERMENTER, CFG_FILE_PROBE, CFG_FILE_SMARTPLUGS,
+  CFG_FILE_PROFILE, CFG_FILE_STEPS, CFG_FILE_TILT, CFG_FILE_ISPINDEL,
+  CFG_FILE_BREWSVC, CFG_FILE_MQTT, CFG_FILE_SYSLOG,
+};
+
+// Call after changing a setting in memory without saving it, such as profile
+// progress. The next 10-minute save writes that file. The save...Config()
+// functions call it themselves when a save fails, so it is tried again.
+void configMarkUnsaved(ConfigFile file);
 
 // Individual file operations
 bool loadGlobalConfig();
