@@ -2231,6 +2231,42 @@ static void test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit(void) {
   TEST_ASSERT_EQUAL_FLOAT(0.0f, g_tilts[0].tempAdjust);
 }
 
+// Four Tilts set up, so the settings file is full
+static void setUpFourTilts(void) {
+  for (int c = TILT_RED; c <= TILT_PURPLE; c++) {
+    g_tilts[c].colour    = (uint8_t)c;
+    g_tilts[c].fermenter = 0;
+  }
+}
+
+static void test_tilt_post_refuses_a_fifth_set_up_tilt(void) {
+  setUpFourTilts();
+  postBody("{\"colour\":7,\"fermenter\":1}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Only 4 Tilts"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_PINK].colour);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_PINK].fermenter);
+}
+
+static void test_tilt_post_still_edits_one_of_four_set_up_tilts(void) {
+  setUpFourTilts();
+  postBody("{\"colour\":2,\"fermenter\":3,\"sgAdjust\":0.001}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(3, g_tilts[TILT_BLACK].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.001f, g_tilts[TILT_BLACK].sgAdjust);
+}
+
+static void test_tilt_post_allows_a_fifth_tilt_left_unassigned(void) {
+  // Saving a Tilt with no role, fermenter or calibration doesn't use a slot
+  setUpFourTilts();
+  postBody("{\"colour\":7,\"function\":99,\"fermenter\":99,\"tempAdjust\":0,\"sgAdjust\":0}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+}
+
 static void test_ispindel_payload_converts_temp_adjust_as_a_span(void) {
   g_globalConfig.unit = UNIT_FAHRENHEIT;
   g_iSpindels[0].tempAdjust = 0.5f;
@@ -2554,6 +2590,9 @@ int main(int, char**) {
   RUN_TEST(test_tilt_payload_converts_temp_adjust_as_a_span);
   RUN_TEST(test_tilt_post_converts_temp_adjust_from_fahrenheit);
   RUN_TEST(test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit);
+  RUN_TEST(test_tilt_post_refuses_a_fifth_set_up_tilt);
+  RUN_TEST(test_tilt_post_still_edits_one_of_four_set_up_tilts);
+  RUN_TEST(test_tilt_post_allows_a_fifth_tilt_left_unassigned);
   RUN_TEST(test_ispindel_payload_converts_temp_adjust_as_a_span);
   RUN_TEST(test_ispindel_config_post_converts_temp_adjust_from_fahrenheit);
   RUN_TEST(test_celsius_mode_leaves_temp_adjust_untouched);

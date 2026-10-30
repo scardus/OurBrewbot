@@ -1977,12 +1977,24 @@ void handleTiltPost(ESP8266WebServer& server) {
     return;
   }
 
-  // Mark the slot as configured so saveTiltConfig() includes it
-  g_tilts[colour].colour = (uint8_t)colour;
-  if (!doc["function"].isNull())   g_tilts[colour].function   = doc["function"];
-  if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_tilts[colour].fermenter = v; }
-  if (!doc["tempAdjust"].isNull()) g_tilts[colour].tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
-  if (!doc["sgAdjust"].isNull())   g_tilts[colour].sgAdjust   = doc["sgAdjust"];
+  // The changes go on a copy first, so a refused save leaves the Tilt as it was.
+  // Marking the colour makes saveTiltConfig() include it.
+  TiltConfig tilt = g_tilts[colour];
+  tilt.colour = (uint8_t)colour;
+  if (!doc["function"].isNull())   tilt.function   = doc["function"];
+  if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) tilt.fermenter = v; }
+  if (!doc["tempAdjust"].isNull()) tilt.tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
+  if (!doc["sgAdjust"].isNull())   tilt.sgAdjust   = doc["sgAdjust"];
+
+  // Only MAX_TILT_SLOTS Tilts fit in the settings file. A fifth used to be
+  // dropped from the file without a word and lost at the next restart.
+  bool newlySetUp = tiltIsSetUp(tilt) &&
+                    !(g_tilts[colour].colour != PROBE_UNASSIGNED && tiltIsSetUp(g_tilts[colour]));
+  if (newlySetUp && countSetUpTilts() >= MAX_TILT_SLOTS) {
+    sendErr(server, 400, F("Only 4 Tilts can be set up - clear one first"));
+    return;
+  }
+  g_tilts[colour] = tilt;
   saveTiltConfig();
   sendOk(server, F("Tilt updated"));
 }

@@ -653,6 +653,33 @@ void test_tilt_save_stops_at_max_slots_when_more_colours_are_configured(void) {
   TEST_ASSERT_TRUE(fileHas(FILE_TILT, "\"Address\":[0,1,2,3]"));
 }
 
+void test_tilt_save_keeps_a_set_up_tilt_ahead_of_ones_only_heard(void) {
+  // Four lower colours heard nearby, never set up (processTiltReading() only
+  // marks the colour), and a Pink Tilt that is set up
+  for (int c = TILT_RED; c <= TILT_PURPLE; c++) g_tilts[c].colour = (uint8_t)c;
+  g_tilts[TILT_PINK].colour    = TILT_PINK;
+  g_tilts[TILT_PINK].fermenter = 0;
+  g_tilts[TILT_PINK].sgAdjust  = 0.002f;
+  TEST_ASSERT_TRUE(saveTiltConfig());
+
+  initDefaultTiltConfig();
+  TEST_ASSERT_TRUE(loadTiltConfig());
+  TEST_ASSERT_EQUAL_UINT8(TILT_PINK, g_tilts[TILT_PINK].colour);
+  TEST_ASSERT_EQUAL_UINT8(0, g_tilts[TILT_PINK].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.002f, g_tilts[TILT_PINK].sgAdjust);
+  // The three heard-only Tilts that still fit come after it
+  TEST_ASSERT_TRUE(fileHas(FILE_TILT, "\"Address\":[7,0,1,2]"));
+}
+
+void test_count_set_up_tilts_ignores_tilts_only_heard(void) {
+  g_tilts[TILT_RED].colour      = TILT_RED;      // heard only
+  g_tilts[TILT_GREEN].colour    = TILT_GREEN;
+  g_tilts[TILT_GREEN].function  = PROBE_FN_BEER;
+  g_tilts[TILT_BLUE].colour     = TILT_BLUE;
+  g_tilts[TILT_BLUE].tempAdjust = -0.5f;
+  TEST_ASSERT_EQUAL_UINT8(2, countSetUpTilts());
+}
+
 void test_tilt_load_starts_from_defaults_when_the_file_is_missing(void) {
   g_tilts[TILT_RED].colour = TILT_RED;    // stale in-memory state
   TEST_ASSERT_FALSE(loadTiltConfig());
@@ -1410,6 +1437,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_tilt_save_packs_configured_colours_first_and_pads_the_rest);
   RUN_TEST(test_tilt_round_trip_survives_the_slot_repacking);
   RUN_TEST(test_tilt_save_stops_at_max_slots_when_more_colours_are_configured);
+  RUN_TEST(test_tilt_save_keeps_a_set_up_tilt_ahead_of_ones_only_heard);
+  RUN_TEST(test_count_set_up_tilts_ignores_tilts_only_heard);
   RUN_TEST(test_tilt_load_starts_from_defaults_when_the_file_is_missing);
 
   // brew service migrations
