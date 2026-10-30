@@ -143,17 +143,32 @@ void advanceProfileStep(uint8_t i) {
   }
 }
 
+// Time is counted in 10-minute ticks (see profileAddTenMinutes()), 144 a day.
+// Comparing whole hours used to cut a step short: 0.1 days is 2 h 24 min, but
+// (uint16_t)(0.1 * 24) is 2 hours.
+
+// Ticks since the current step started
+static uint32_t stepTicks(uint8_t i) {
+  return (uint32_t)g_fermenters[i].currentHour * 6 + g_fermenters[i].hourTicks;
+}
+
+// A step's Days in ticks, to the nearest tick (0.1 days = 14.4 -> 14 ticks)
+static uint32_t daysToTicks(float days) {
+  if (days <= 0.0f) return 0;
+  return (uint32_t)lroundf(days * 144.0f);
+}
+
 bool isStepComplete(uint8_t i, const ProfileStep& step) {
   float temp = getControlTemp(i);
   float sg   = getCurrentSG(i);
   float attn = getAttenuation(i);
-  uint16_t hours = g_fermenters[i].currentHour;
-  uint16_t daysInHours = (uint16_t)(step.days * 24.0f);
+  uint32_t ticks       = stepTicks(i);
+  uint32_t daysInTicks = daysToTicks(step.days);
 
   switch (step.stepType) {
     case STEP_TEMP_OVER_TIME:
       // Days elapsed AND temp at target
-      if (hours < daysInHours) return false;
+      if (ticks < daysInTicks) return false;
       if (temp < TEMP_VALID_MIN) return false;
       if (fabs(temp - step.endTemp) > profileBand(i)) {
         logMsg("[PROF] Profile stalled on Temp/Time: %.1f != %.1f", temp, step.endTemp);
@@ -163,34 +178,34 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
 
     case STEP_TIME_OVER_TEMP:
       // Days elapsed
-      return hours >= daysInHours;
+      return ticks >= daysInTicks;
 
     case STEP_FREE_RISE:
       // Days elapsed (free rise — no temp target)
-      return hours >= daysInHours;
+      return ticks >= daysInTicks;
 
     case STEP_SPECIFIC_GRAVITY:
       // Minimum time must elapse, then SG at or below trigger
-      if (hours < daysInHours) return false;
+      if (ticks < daysInTicks) return false;
       if (sg <= SG_VALID_MIN) return false;
       if (sg <= step.sgTrigger) {
         logMsg("[PROF] SG Target reached: %.4f <= %.4f", sg, step.sgTrigger);
         return true;
       }
       // Check for stall
-      if (hours > daysInHours * 2) {
+      if (ticks > daysInTicks * 2) {
         logMsg("[PROF] Profile stalled on SG step");
       }
       return false;
 
     case STEP_ATTENUATION:
       // Minimum time must elapse, then attenuation at or above trigger
-      if (hours < daysInHours) return false;
+      if (ticks < daysInTicks) return false;
       if (attn >= step.sgTrigger) {
         logMsg("[PROF] Attenuation target reached: %.1f%% >= %.1f%%", attn, step.sgTrigger);
         return true;
       }
-      if (hours > daysInHours * 2) {
+      if (ticks > daysInTicks * 2) {
         logMsg("[PROF] Profile stalled on Attenuation step");
       }
       return false;
@@ -212,15 +227,15 @@ bool isStepComplete(uint8_t i, const ProfileStep& step) {
       return attn >= step.sgTrigger;
 
     case STEP_TIME_AND_SG:
-      if (hours < daysInHours) return false;
+      if (ticks < daysInTicks) return false;
       return (sg > SG_VALID_MIN && sg <= step.sgTrigger);
 
     case STEP_TIME_AND_ATTN:
-      if (hours < daysInHours) return false;
+      if (ticks < daysInTicks) return false;
       return attn >= step.sgTrigger;
 
     default:
-      return hours >= daysInHours;
+      return ticks >= daysInTicks;
   }
 }
 
@@ -234,7 +249,7 @@ float getProfileTargetTemp(uint8_t i) {
 
   // For ramp steps, interpolate between startTemp and endTemp
   if (stepRamps(step.stepType) && step.days > 0 && step.startTemp != step.endTemp) {
-    float progress = min(1.0f, (float)g_fermenters[i].currentHour / (step.days * 24.0f));
+    float progress = min(1.0f, (float)stepTicks(i) / (step.days * 144.0f));
     return step.startTemp + (step.endTemp - step.startTemp) * progress;
   }
   return step.endTemp;
