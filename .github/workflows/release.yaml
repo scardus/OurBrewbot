@@ -88,9 +88,9 @@ jobs:
       - name: Build firmware
         run: pio run
 
-      # lib_deps use caret ranges, so this runner can resolve a newer library
-      # than the locally built and flashed binary used. Recording what was
-      # actually linked keeps a released binary traceable after the fact.
+      # platformio.ini pins exact versions, so this should match the locally
+      # built and flashed binary. Recording what was actually linked keeps a
+      # released binary traceable after the fact.
       - name: Record resolved library versions
         run: |
           # Written to a file first, and never allowed to fail the job: this is
