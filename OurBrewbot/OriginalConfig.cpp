@@ -95,6 +95,7 @@ struct OrigRetryRecord {
 
 static uint32_t s_earlierFailures = 0;   // failed attempts before this boot's
 static bool     s_gaveUp          = false;
+static bool     s_copyFailed      = false;   // this boot couldn't copy the originals to /orig/
 
 bool originalConversionGaveUp() { return s_gaveUp; }
 
@@ -126,7 +127,12 @@ static void conversionFailed() {
 }
 
 void logOriginalConversionProblems() {
-  if (s_gaveUp) {
+  if (s_gaveUp && s_copyFailed) {
+    // The defaults have been saved over the live files, and there was no
+    // complete copy of them in /orig/
+    logMsgL(SYSLOG_ERR, "DEFERRED [CFG] Original MyBrewbot config could not be copied after %u tries - running on default settings, the original settings were not kept",
+            ORIG_MAX_ATTEMPTS);
+  } else if (s_gaveUp) {
     logMsgL(SYSLOG_ERR, "DEFERRED [CFG] Original MyBrewbot config could not be saved after %u tries - running on default settings, the originals are in %s",
             ORIG_MAX_ATTEMPTS, ORIG_DIR);
   } else if (s_converted && s_earlierFailures > 0) {
@@ -721,6 +727,7 @@ bool convertOriginalConfig() {
   if (!LittleFS.exists(ORIG_IN_PROGRESS)) {
     if (!copyOriginalFiles()) {
       logMsgL(SYSLOG_ERR, "[CFG] Original config NOT converted - could not keep a copy");
+      s_copyFailed = true;
       conversionFailed();
       return false;
     }
