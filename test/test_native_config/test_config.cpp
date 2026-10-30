@@ -959,11 +959,27 @@ void test_reset_all_config_restores_defaults_and_writes_every_file(void) {
   const char* files[] = {
     FILE_GLOBAL, FILE_FERMENTER, FILE_PROBE, FILE_SMARTPLUGS, FILE_PROFILE,
     FILE_STEPS, FILE_ISPINDEL, FILE_BREWSVC, FILE_MQTT, FILE_SYSLOG,
+    FILE_TILT,
   };
   for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
     TEST_ASSERT_TRUE_MESSAGE(LittleFS.exists(files[i]), files[i]);
   }
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG));   // portal re-runs on boot
+}
+
+void test_reset_all_config_clears_the_saved_tilt_settings(void) {
+  // A Tilt assigned and calibrated before the reset
+  g_tilts[TILT_PINK].colour    = TILT_PINK;
+  g_tilts[TILT_PINK].fermenter = 0;
+  g_tilts[TILT_PINK].sgAdjust  = 0.004f;
+  TEST_ASSERT_TRUE(saveTiltConfig());
+
+  resetAllConfig();
+  loadTiltConfig();   // what the restart after a reset does
+
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_PINK].colour);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_PINK].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_tilts[TILT_PINK].sgAdjust);
 }
 
 void test_reset_all_config_survives_a_read_only_filesystem(void) {
@@ -1428,6 +1444,7 @@ int main(int argc, char** argv) {
   // resets
   RUN_TEST(test_reset_wifi_config_clears_the_provisioning_artifacts);
   RUN_TEST(test_reset_all_config_restores_defaults_and_writes_every_file);
+  RUN_TEST(test_reset_all_config_clears_the_saved_tilt_settings);
   RUN_TEST(test_reset_all_config_survives_a_read_only_filesystem);
 
   // reboot log

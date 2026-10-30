@@ -1338,7 +1338,9 @@ void resetAllConfig() {
   initDefaultBrewServiceConfig();
   initDefaultMqttConfig();
   initDefaultSyslogConfig();
-  saveAllConfig();
+  // Not saveAllConfig(): it leaves out the Tilt file, so the old Tilt settings
+  // would be loaded again after the restart
+  saveSettingsInUse();
 
   // Remove WiFi config so WiFiManager re-runs the portal
   clearWiFiProvisioningArtifacts();
