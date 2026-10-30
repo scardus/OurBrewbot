@@ -72,6 +72,8 @@ void logInit() {}
 
 // Mqtt.cpp
 void mqttApplyControlSubscription() {}
+static int s_mqttSettingsChanges = 0;
+void mqttSettingsChanged() { s_mqttSettingsChanges++; }
 void publishAllHaDiscovery() {}
 bool forcePublishAllHaDiscovery() { return true; }
 void cleanupAllHaDiscovery() {}
@@ -1274,6 +1276,39 @@ static void test_mqtt_post_rejected_port_changes_nothing(void) {
   handleMqttConfigPost(srv);
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
   assertMqttConfigUnchanged();
+}
+
+// ---- a connection setting that changes closes the open connection ----
+
+static void test_mqtt_post_reconnects_when_a_connection_setting_changes(void) {
+  const char* bodies[] = {
+    "{\"host\":\"new.host\"}",
+    "{\"port\":1884}",
+    "{\"username\":\"brewer\"}",
+    "{\"password\":\"secret\"}",
+    "{\"baseTopic\":\"brewbot2\"}",
+    "{\"enabled\":true}",
+  };
+  for (size_t k = 0; k < sizeof(bodies) / sizeof(bodies[0]); k++) {
+    seedMqttConfig();
+    s_mqttSettingsChanges = 0;
+    postBody(bodies[k]);
+    handleMqttConfigPost(srv);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(200, g_httpResp.code, bodies[k]);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, s_mqttSettingsChanges, bodies[k]);
+  }
+}
+
+static void test_mqtt_post_with_the_same_settings_keeps_the_connection(void) {
+  // The WebUI sends every field on each save, and the masked password back
+  seedMqttConfig();
+  strlcpy(g_mqttConfig.password, "secret", sizeof(g_mqttConfig.password));
+  s_mqttSettingsChanges = 0;
+  postBody("{\"enabled\":false,\"host\":\"old.host\",\"port\":1883,\"username\":\"\","
+           "\"password\":\"********\",\"baseTopic\":\"ourbrewbot\",\"logEnabled\":true}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(0, s_mqttSettingsChanges);
 }
 
 // ---- the broker password is never sent out ----
@@ -2540,6 +2575,8 @@ int main(int, char**) {
   RUN_TEST(test_fs_save_rejects_a_lookalike_path);
   RUN_TEST(test_mqtt_post_rejects_an_unusable_base_topic_and_changes_nothing);
   RUN_TEST(test_mqtt_post_rejected_port_changes_nothing);
+  RUN_TEST(test_mqtt_post_reconnects_when_a_connection_setting_changes);
+  RUN_TEST(test_mqtt_post_with_the_same_settings_keeps_the_connection);
   RUN_TEST(test_mqtt_get_masks_a_saved_password);
   RUN_TEST(test_mqtt_get_returns_an_empty_password_when_none_is_saved);
   RUN_TEST(test_mqtt_post_with_the_mask_keeps_the_saved_password);

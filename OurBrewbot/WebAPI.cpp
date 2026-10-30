@@ -1643,6 +1643,18 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
     }
   }
 
+  // A change the open connection can't pick up: it is closed after the save
+  // and opened again with the new settings
+  bool passwordChanged = doc["password"].is<const char*>() &&
+                         strcmp(doc["password"].as<const char*>(), MQTT_PASSWORD_MASK) != 0 &&
+                         strcmp(doc["password"].as<const char*>(), g_mqttConfig.password) != 0;
+  bool reconnect = passwordChanged ||
+                   (!doc["enabled"].isNull() && doc["enabled"].as<bool>() != g_mqttConfig.enabled) ||
+                   (!doc["port"].isNull() && port != g_mqttConfig.port) ||
+                   (doc["host"].is<const char*>() && strcmp(doc["host"].as<const char*>(), g_mqttConfig.host) != 0) ||
+                   (doc["username"].is<const char*>() && strcmp(doc["username"].as<const char*>(), g_mqttConfig.username) != 0) ||
+                   (baseTopic != nullptr && strcmp(baseTopic, g_mqttConfig.baseTopic) != 0);
+
   if (!doc["enabled"].isNull())          g_mqttConfig.enabled = doc["enabled"];
   if (doc["host"].is<const char*>())     copyText(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
   if (!doc["port"].isNull())             g_mqttConfig.port = (uint16_t)port;
@@ -1662,6 +1674,7 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
   }
   if (!doc["logEnabled"].isNull()) g_mqttConfig.logEnabled = doc["logEnabled"];
   saveMqttConfig();
+  if (reconnect) mqttSettingsChanged();
   sendOk(server, F("MQTT config saved"));
 }
 
