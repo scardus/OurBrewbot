@@ -929,13 +929,22 @@ function countLiveSteps(steps) {
 }
 
 // onchange handler: keep state in sync with the DOM and re-render the row's disabled flags.
+// While Start Temp equals End Temp, editing End Temp moves Start Temp with it,
+// so a step that holds one temperature keeps holding it instead of becoming a
+// ramp from the old value. Once they differ, the two are edited separately.
 function onStepFieldChange(p, s) {
   var st = profileEdits[p].steps[s];
+  var wasHolding = (st.startTemp == st.endTemp);
+  var oldStart = st.startTemp;
   st.stepType  = parseInt  (byId('pst' + p + '_' + s).value) || 0;
   st.startTemp = parseFloat(byId('pss' + p + '_' + s).value) || 0;
   st.endTemp   = parseFloat(byId('pse' + p + '_' + s).value) || 0;
   st.sgTrigger = parseFloat(byId('psg' + p + '_' + s).value) || 0;
   st.days      = parseFloat(byId('psd' + p + '_' + s).value) || 0;
+  if (wasHolding && st.startTemp == oldStart && st.endTemp != oldStart) {
+    st.startTemp = st.endTemp;
+    byId('pss' + p + '_' + s).value = st.startTemp;
+  }
   var fl = stepFieldsEnabled(st.stepType);
   byId('pss' + p + '_' + s).disabled = !fl.s;
   byId('pse' + p + '_' + s).disabled = !fl.e;
