@@ -41,6 +41,13 @@ bool convertOriginalConfig();
 // sent once syslog is running).
 bool originalConfigConverted();
 
+// True if the conversion failed to save a file on its last try, so this boot
+// runs on default settings (see OriginalConfig.cpp).
+bool originalConversionGaveUp();
+
+// The DEFERRED log lines for a conversion that needed a restart or gave up
+void logOriginalConversionProblems();
+
 // The 24-bit raw RF code the original sent for a "Dial" plug (group and
 // button 1-4); 0 if either is out of range.
 uint32_t dialPlugCode(uint8_t group, uint8_t button, bool on);

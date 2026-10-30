@@ -67,6 +67,74 @@ static bool s_converted = false;
 
 bool originalConfigConverted() { return s_converted; }
 
+// ============================================================
+// RETRYING A FAILED CONVERSION
+//
+// If a file can't be saved, the device restarts and the conversion runs again
+// from the copies in /orig/, rather than this boot carrying on with some files
+// converted and some still in the original's meaning. After
+// ORIG_MAX_ATTEMPTS failures the controller gives up and starts on default
+// settings, like a new install.
+//
+// The failures are counted in RTC memory, which survives a restart but not a
+// power cut, and needs no flash write - the thing that is failing.
+// ============================================================
+
+#define ORIG_MAX_ATTEMPTS 3
+
+// RTC memory words 101-102. Crash.cpp uses words 0-54 and DoubleReset.cpp word 100.
+static const uint32_t ORIG_RETRY_OFFSET = 101;
+// Any other value - including whatever RTC memory holds after a power cut -
+// means no failed attempts yet
+static const uint32_t ORIG_RETRY_MAGIC  = 0xC0DE0F1A;
+
+struct OrigRetryRecord {
+  uint32_t magic;
+  uint32_t failures;   // attempts that have failed so far
+};
+
+static uint32_t s_earlierFailures = 0;   // failed attempts before this boot's
+static bool     s_gaveUp          = false;
+
+bool originalConversionGaveUp() { return s_gaveUp; }
+
+static uint32_t readFailedAttempts() {
+  OrigRetryRecord rec = {};
+  ESP.rtcUserMemoryRead(ORIG_RETRY_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
+  return (rec.magic == ORIG_RETRY_MAGIC) ? rec.failures : 0;
+}
+
+static void writeFailedAttempts(uint32_t failures) {
+  OrigRetryRecord rec = { ORIG_RETRY_MAGIC, failures };
+  ESP.rtcUserMemoryWrite(ORIG_RETRY_OFFSET, reinterpret_cast<uint32_t*>(&rec), sizeof(rec));
+}
+
+// A file couldn't be saved: restart and try again, or give up after the last try
+static void conversionFailed() {
+  uint32_t failures = s_earlierFailures + 1;
+  if (failures < ORIG_MAX_ATTEMPTS) {
+    writeFailedAttempts(failures);
+    logMsgL(SYSLOG_ERR, "[CFG] Original config conversion failed (attempt %u of %u) - restarting to try again",
+            (unsigned)failures, ORIG_MAX_ATTEMPTS);
+    ESP.restart();
+    return;   // only reached in the native tests - on the device restart() never returns
+  }
+  writeFailedAttempts(0);
+  s_gaveUp = true;
+  logMsgL(SYSLOG_ERR, "[CFG] Original config conversion failed %u times - starting on default settings",
+          ORIG_MAX_ATTEMPTS);
+}
+
+void logOriginalConversionProblems() {
+  if (s_gaveUp) {
+    logMsgL(SYSLOG_ERR, "DEFERRED [CFG] Original MyBrewbot config could not be saved after %u tries - running on default settings, the originals are in %s",
+            ORIG_MAX_ATTEMPTS, ORIG_DIR);
+  } else if (s_converted && s_earlierFailures > 0) {
+    logMsgL(SYSLOG_WARNING, "DEFERRED [CFG] Original MyBrewbot config converted on attempt %u of %u",
+            (unsigned)(s_earlierFailures + 1), ORIG_MAX_ATTEMPTS);
+  }
+}
+
 // Settings from one file that the conversion of another file needs
 struct OriginalFacts {
   bool    fahrenheit;                  // original "unit" 0 - temperatures saved in F
@@ -239,9 +307,9 @@ static void readFacts(OriginalFacts& facts) {
 // GLOBAL (jsonGlobal.txt)
 // ============================================================
 
-static void convertGlobal(const OriginalFacts& facts) {
+static bool convertGlobal(const OriginalFacts& facts) {
   JsonDocument doc;
-  if (!loadOriginal(doc, PSTR("jsonGlobal"))) return;
+  if (!loadOriginal(doc, PSTR("jsonGlobal"))) return true;   // nothing to convert
 
   // The Blynk token - nothing in OurBrewbot uses it
   if (strlen(doc[KEY("authcode")] | "") > 0) {
@@ -252,7 +320,7 @@ static void convertGlobal(const OriginalFacts& facts) {
   doc[KEY("unit")] = facts.fahrenheit ? UNIT_FAHRENHEIT : UNIT_CELSIUS;
   if (facts.fahrenheit) REPORT("Global: Fahrenheit (unit 0 -> %d)", UNIT_FAHRENHEIT);
 
-  saveJsonDocSafe(doc, FILE_GLOBAL, FILE_GLOBAL_BKP);
+  return saveJsonDocSafe(doc, FILE_GLOBAL, FILE_GLOBAL_BKP);
 }
 
 // ============================================================
@@ -273,9 +341,9 @@ static uint8_t convertProbeRole(uint8_t role) {
   }
 }
 
-static void convertProbes() {
+static bool convertProbes() {
   JsonDocument doc;
-  if (!loadOriginal(doc, PSTR("jsonProbe"))) return;
+  if (!loadOriginal(doc, PSTR("jsonProbe"))) return true;   // nothing to convert
 
   for (int i = 0; i < MAX_PROBES; i++) {
     uint8_t role      = doc[KEY("Function")][i]  | PROBE_UNASSIGNED;
@@ -297,7 +365,7 @@ static void convertProbes() {
     doc[KEY("Fermenter")][i] = fermenter;
   }
 
-  saveJsonDocSafe(doc, FILE_PROBE, FILE_PROBE_BKP);
+  return saveJsonDocSafe(doc, FILE_PROBE, FILE_PROBE_BKP);
 }
 
 // ============================================================
@@ -311,9 +379,9 @@ static const char kTiltColours[MAX_TILTS][7] PROGMEM = {
   "red", "green", "black", "purple", "orange", "blue", "yellow", "pink"
 };
 
-static void convertTilts(const OriginalFacts& facts) {
+static bool convertTilts(const OriginalFacts& facts) {
   JsonDocument doc;
-  if (!loadOriginal(doc, PSTR("jsonTilt"))) return;
+  if (!loadOriginal(doc, PSTR("jsonTilt"))) return true;   // nothing to convert
 
   for (int i = 0; i < MAX_TILT_SLOTS; i++) {
     // Original colours are 1-8 in the same order as OurBrewbot's 0-7
@@ -364,16 +432,16 @@ static void convertTilts(const OriginalFacts& facts) {
     }
   }
 
-  saveJsonDocSafe(doc, FILE_TILT, FILE_TILT_BKP);
+  return saveJsonDocSafe(doc, FILE_TILT, FILE_TILT_BKP);
 }
 
 // ============================================================
 // iSPINDELS (jsoniSpindel.txt)
 // ============================================================
 
-static void convertiSpindels(const OriginalFacts& facts) {
+static bool convertiSpindels(const OriginalFacts& facts) {
   JsonDocument doc;
-  if (!loadOriginal(doc, PSTR("jsoniSpindel"))) return;
+  if (!loadOriginal(doc, PSTR("jsoniSpindel"))) return true;   // nothing to convert
 
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     // The original saved the ID as a number, 0 for an empty slot. OurBrewbot
@@ -409,7 +477,7 @@ static void convertiSpindels(const OriginalFacts& facts) {
     }
   }
 
-  saveJsonDocSafe(doc, FILE_ISPINDEL, FILE_ISPINDEL_BKP);
+  return saveJsonDocSafe(doc, FILE_ISPINDEL, FILE_ISPINDEL_BKP);
 }
 
 // ============================================================
@@ -430,9 +498,9 @@ uint32_t dialPlugCode(uint8_t group, uint8_t button, bool on) {
   return code;
 }
 
-static void convertSmartPlugs() {
+static bool convertSmartPlugs() {
   JsonDocument doc;
-  if (!loadOriginal(doc, PSTR("jsonSmartPlugs"))) return;
+  if (!loadOriginal(doc, PSTR("jsonSmartPlugs"))) return true;   // nothing to convert
 
   for (int i = 0; i < MAX_SMART_PLUGS; i++) {
     uint32_t onCode  = doc[KEY("OnCode")][i]  | 0UL;
@@ -471,7 +539,7 @@ static void convertSmartPlugs() {
     }
   }
 
-  saveJsonDocSafe(doc, FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP);
+  return saveJsonDocSafe(doc, FILE_SMARTPLUGS, FILE_SMARTPLUGS_BKP);
 }
 
 // ============================================================
@@ -497,9 +565,9 @@ static uint8_t convertStepType(uint8_t type) {
   }
 }
 
-static void convertProfileSteps(const OriginalFacts& facts) {
+static bool convertProfileSteps(const OriginalFacts& facts) {
   JsonDocument doc;
-  if (!loadOriginal(doc, PSTR("jsonProfileSteps"))) return;
+  if (!loadOriginal(doc, PSTR("jsonProfileSteps"))) return true;   // nothing to convert
 
   int converted[MAX_PROFILES] = {0};
   for (int k = 0; k < MAX_PROFILE_STEPS; k++) {
@@ -533,16 +601,16 @@ static void convertProfileSteps(const OriginalFacts& facts) {
     if (converted[p] > 0) REPORT("Profile %d: %d step(s) converted", p + 1, converted[p]);
   }
 
-  saveJsonDocSafe(doc, FILE_STEPS, FILE_STEPS_BKP);
+  return saveJsonDocSafe(doc, FILE_STEPS, FILE_STEPS_BKP);
 }
 
 // ============================================================
 // BREW SERVICES (jsonBrewServices.txt - OurBrewbot's own file)
 // ============================================================
 
-static void convertBrewServices(const OriginalFacts& facts) {
+static bool convertBrewServices(const OriginalFacts& facts) {
   JsonDocument doc;
-  if (!loadOriginal(doc, PSTR("jsonGlobal"))) return;
+  if (!loadOriginal(doc, PSTR("jsonGlobal"))) return true;   // nothing to convert
   int service = doc[KEY("brewservice")] | 0;
 
   initDefaultBrewServiceConfig();
@@ -555,16 +623,16 @@ static void convertBrewServices(const OriginalFacts& facts) {
   } else if (service == 4) {
     REPORT("Brew service: monitor.beer is not supported yet - not converted");
   }
-  saveBrewServiceConfig();
+  return saveBrewServiceConfig();
 }
 
 // ============================================================
 // FERMENTERS (jsonFermenter.txt) - written last
 // ============================================================
 
-static void convertFermenters(const OriginalFacts& facts) {
+static bool convertFermenters(const OriginalFacts& facts) {
   JsonDocument doc;
-  if (!loadOriginal(doc, PSTR("jsonFermenter"))) return;
+  if (!loadOriginal(doc, PSTR("jsonFermenter"))) return true;   // nothing to convert
 
   REPORT("Alarm tolerance set to 3.0 C on every fermenter (the original's was a percentage)");
 
@@ -631,7 +699,7 @@ static void convertFermenters(const OriginalFacts& facts) {
     if (sends) REPORT("Fermenter %d: sends to the brew service", i + 1);
   }
 
-  saveJsonDocSafe(doc, FILE_FERMENTER, FILE_FERMENTER_BKP);
+  return saveJsonDocSafe(doc, FILE_FERMENTER, FILE_FERMENTER_BKP);
 }
 
 // ============================================================
@@ -646,12 +714,14 @@ bool convertOriginalConfig() {
     return false;
   }
   logMsgL(SYSLOG_NOTICE, "[CFG] Original MyBrewbot config found - converting it");
+  s_earlierFailures = readFailedAttempts();
 
   // Copy the untouched files only on the first attempt: after a power cut
   // some live files may already be converted.
   if (!LittleFS.exists(ORIG_IN_PROGRESS)) {
     if (!copyOriginalFiles()) {
       logMsgL(SYSLOG_ERR, "[CFG] Original config NOT converted - could not keep a copy");
+      conversionFailed();
       return false;
     }
     File marker = LittleFS.open(ORIG_IN_PROGRESS, "w");
@@ -664,16 +734,24 @@ bool convertOriginalConfig() {
 
   OriginalFacts facts;
   readFacts(facts);
-  convertGlobal(facts);
-  convertProbes();
-  convertTilts(facts);
-  convertiSpindels(facts);
-  convertSmartPlugs();
-  convertProfileSteps(facts);
-  convertBrewServices(facts);
-  convertFermenters(facts);   // last - see the top of this file
+  bool saved = true;
+  saved &= convertGlobal(facts);
+  saved &= convertProbes();
+  saved &= convertTilts(facts);
+  saved &= convertiSpindels(facts);
+  saved &= convertSmartPlugs();
+  saved &= convertProfileSteps(facts);
+  saved &= convertBrewServices(facts);
+  // The fermenter file is only written once every other file is saved: it is
+  // what marks the conversion as done (see the top of this file)
+  if (saved) saved = convertFermenters(facts);
+  if (!saved) {
+    conversionFailed();
+    return false;
+  }
 
   LittleFS.remove(ORIG_IN_PROGRESS);
+  if (s_earlierFailures > 0) writeFailedAttempts(0);
   s_converted = true;
   return true;
 }

@@ -1061,22 +1061,33 @@ void logFileSystemBootProblems() {
 // LOAD ALL / SAVE ALL
 // ============================================================
 
+static void initAllDefaultConfig();
+static void saveSettingsInUse();
+
 void loadAllConfig() {
   logMsg("[CFG] Loading all configuration...");
   // Before any loader: a loader that corrects a value saves the file at once,
   // which would hide the signs of an original config (see OriginalConfig.cpp)
   convertOriginalConfig();
-  loadGlobalConfig();
-  loadFermenterConfig();
-  loadProbeConfig();
-  loadSmartPlugConfig();
-  loadProfileConfig();
-  loadProfileSteps();
-  loadiSpindelConfig();
-  loadTiltConfig();
-  loadBrewServiceConfig();
-  loadMqttConfig();
-  loadSyslogConfig();
+  if (originalConversionGaveUp()) {
+    // An original config that couldn't be saved after three tries. Start like
+    // a new install rather than on a mix of converted and original files, and
+    // save the defaults so the next boot loads the same settings.
+    initAllDefaultConfig();
+    saveSettingsInUse();
+  } else {
+    loadGlobalConfig();
+    loadFermenterConfig();
+    loadProbeConfig();
+    loadSmartPlugConfig();
+    loadProfileConfig();
+    loadProfileSteps();
+    loadiSpindelConfig();
+    loadTiltConfig();
+    loadBrewServiceConfig();
+    loadMqttConfig();
+    loadSyslogConfig();
+  }
 
   // One-shot migration: bump any AlarmTolerance==0 to 3.0 (the new default
   // for the severe-deviation escape hatch). Old configs never exposed this
@@ -1349,8 +1360,8 @@ void resetWiFiConfig() {
 // FULL RESET
 // ============================================================
 
-void resetAllConfig() {
-  logMsgL(SYSLOG_NOTICE, "[CFG] Resetting all configuration to defaults");
+// Every setting back to its default, in memory only
+static void initAllDefaultConfig() {
   initDefaultGlobalConfig();
   initDefaultFermenterConfig();
   initDefaultProbeConfig();
@@ -1361,6 +1372,11 @@ void resetAllConfig() {
   initDefaultBrewServiceConfig();
   initDefaultMqttConfig();
   initDefaultSyslogConfig();
+}
+
+void resetAllConfig() {
+  logMsgL(SYSLOG_NOTICE, "[CFG] Resetting all configuration to defaults");
+  initAllDefaultConfig();
   // Not saveAllConfig(): it leaves out the Tilt file, so the old Tilt settings
   // would be loaded again after the restart
   saveSettingsInUse();

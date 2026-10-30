@@ -70,6 +70,9 @@ void setUp(void) {
   s_importActive = false;
   s_uptimeSec    = 1000;
   WiFi = ESP8266WiFiStub{};
+  espTestClearRtc();   // a cold boot: no failed conversion attempts counted
+  g_espRestarts  = 0;
+  s_gaveUp       = false;
 }
 
 void tearDown(void) {}
@@ -177,6 +180,108 @@ void test_nothing_is_converted_if_the_copy_fails(void) {
   TEST_ASSERT_FALSE(convertOriginalConfig());
   fsTestSetFull(false);
   TEST_ASSERT_EQUAL_STRING(ORIG_FERMENTER, fsTestRead(FILE_FERMENTER));
+  TEST_ASSERT_EQUAL_INT(1, g_espRestarts);   // restarts to try again
+}
+
+// ============================================================
+// A file that can't be saved
+// ============================================================
+
+// The copies are in /orig/ and the conversion has to run again: the state a
+// power cut part way through leaves. Every save then fails.
+static void stageConversionWithFailingSaves() {
+  stageOriginal();
+  TEST_ASSERT_TRUE(convertOriginalConfig());
+  fsTestWrite(FILE_FERMENTER, ORIG_FERMENTER);
+  fsTestWrite(ORIG_IN_PROGRESS, "");
+  fsTestSetFull(true);
+}
+
+void test_a_file_that_cant_be_saved_restarts_to_try_again(void) {
+  stageConversionWithFailingSaves();
+  TEST_ASSERT_FALSE(convertOriginalConfig());
+  fsTestSetFull(false);
+
+  TEST_ASSERT_EQUAL_INT(1, g_espRestarts);
+  TEST_ASSERT_FALSE(originalConversionGaveUp());
+  TEST_ASSERT_EQUAL_UINT32(1, readFailedAttempts());
+  // Not marked as done, so the next boot converts it again
+  TEST_ASSERT_EQUAL_STRING(ORIG_FERMENTER, fsTestRead(FILE_FERMENTER));
+  TEST_ASSERT_TRUE(LittleFS.exists(ORIG_IN_PROGRESS));
+}
+
+void test_the_fermenter_file_waits_for_every_other_file(void) {
+  // Only the brew services file fails. The fermenter file must stay original,
+  // or the next boot would think the conversion had finished.
+  stageOriginal();
+  fsTestFailWritesTo(FILE_BREWSVC);
+  TEST_ASSERT_FALSE(convertOriginalConfig());
+  fsTestFailWritesTo(nullptr);
+  TEST_ASSERT_EQUAL_STRING(ORIG_FERMENTER, fsTestRead(FILE_FERMENTER));
+  TEST_ASSERT_EQUAL_INT(1, g_espRestarts);
+}
+
+void test_the_conversion_gives_up_after_three_tries(void) {
+  stageConversionWithFailingSaves();
+  convertOriginalConfig();   // each call is one boot - RTC memory carries the count
+  convertOriginalConfig();
+  TEST_ASSERT_FALSE(originalConversionGaveUp());
+  convertOriginalConfig();
+  fsTestSetFull(false);
+
+  TEST_ASSERT_TRUE(originalConversionGaveUp());
+  TEST_ASSERT_EQUAL_INT(2, g_espRestarts);          // no restart after the last try
+  TEST_ASSERT_EQUAL_UINT32(0, readFailedAttempts()); // the next boot starts counting again
+}
+
+void test_giving_up_starts_on_default_settings(void) {
+  stageConversionWithFailingSaves();
+  convertOriginalConfig();
+  convertOriginalConfig();
+  g_fermenters[0].ceilingTemp = 40.0f;   // anything left from before
+  g_smartPlugs[0].function    = 0;
+  loadAllConfig();                       // the third try
+  fsTestSetFull(false);
+
+  TEST_ASSERT_TRUE(originalConversionGaveUp());
+  TEST_ASSERT_EQUAL_FLOAT(22.0f, g_fermenters[0].ceilingTemp);
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_UNASSIGNED, g_smartPlugs[0].function);
+}
+
+void test_giving_up_saves_the_default_settings(void) {
+  // Only the brew services file can't be saved, so the defaults reach every
+  // other file and the next boot loads the same settings
+  stageOriginal();
+  fsTestFailWritesTo(FILE_BREWSVC);
+  convertOriginalConfig();
+  convertOriginalConfig();
+  loadAllConfig();   // the third try
+  fsTestFailWritesTo(nullptr);
+
+  TEST_ASSERT_TRUE(originalConversionGaveUp());
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"BrewServices\""));   // no longer the original's
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"CeilingTemp\":[22,22,22,22]"));
+  TEST_ASSERT_FALSE(convertOriginalConfig());   // so it isn't converted again
+}
+
+void test_a_retry_that_works_clears_the_count(void) {
+  stageConversionWithFailingSaves();
+  convertOriginalConfig();
+  fsTestSetFull(false);
+  TEST_ASSERT_TRUE(convertOriginalConfig());
+  TEST_ASSERT_EQUAL_UINT32(0, readFailedAttempts());
+  TEST_ASSERT_FALSE(LittleFS.exists(ORIG_IN_PROGRESS));
+}
+
+void test_a_power_cut_starts_the_count_again(void) {
+  stageConversionWithFailingSaves();
+  convertOriginalConfig();
+  convertOriginalConfig();
+  espTestClearRtc();          // power cut: RTC memory is lost
+  convertOriginalConfig();
+  fsTestSetFull(false);
+  TEST_ASSERT_FALSE(originalConversionGaveUp());
+  TEST_ASSERT_EQUAL_INT(3, g_espRestarts);
 }
 
 void test_a_conversion_cut_short_runs_again_from_the_copies(void) {
@@ -874,6 +979,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_backups_are_copied_too);
   RUN_TEST(test_a_copy_left_from_an_older_conversion_is_removed);
   RUN_TEST(test_nothing_is_converted_if_the_copy_fails);
+  RUN_TEST(test_a_file_that_cant_be_saved_restarts_to_try_again);
+  RUN_TEST(test_the_fermenter_file_waits_for_every_other_file);
+  RUN_TEST(test_the_conversion_gives_up_after_three_tries);
+  RUN_TEST(test_giving_up_starts_on_default_settings);
+  RUN_TEST(test_giving_up_saves_the_default_settings);
+  RUN_TEST(test_a_retry_that_works_clears_the_count);
+  RUN_TEST(test_a_power_cut_starts_the_count_again);
   RUN_TEST(test_a_conversion_cut_short_runs_again_from_the_copies);
   RUN_TEST(test_a_finished_conversion_removes_its_marker);
   RUN_TEST(test_a_marker_left_by_a_power_cut_is_tidied_up);

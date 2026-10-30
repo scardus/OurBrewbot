@@ -55,6 +55,7 @@ struct FsEntry {
 static FsEntry g_fsEntries[FS_MAX_FILES];
 static bool    g_fsFull        = false;   // open-for-write always fails
 static long    g_fsWriteLimit  = -1;      // bytes still accepted; -1 = unlimited
+static const char* g_fsFailPath = nullptr;  // open-for-write of this one file fails
 static int     g_fsWriteCount  = 0;       // files opened for writing since the last reset
 // Mounting (mountFileSystem() in Config.cpp)
 static int     g_fsMountFailures = 0;     // the next N begin() calls fail
@@ -233,6 +234,7 @@ public:
     }
     // write / append
     if (g_fsFull) return File();
+    if (g_fsFailPath && strcmp(path, g_fsFailPath) == 0) return File();
     FsEntry* e = find(path);
     if (!e) e = create(path);
     if (!e) return File();
@@ -255,6 +257,7 @@ static void fsTestReset() {
   g_fsFull       = false;
   g_fsWriteLimit = -1;
   g_fsWriteCount = 0;
+  g_fsFailPath   = nullptr;
   g_fsMountFailures = 0;
   g_fsBeginCalls    = 0;
   g_fsFormats       = 0;
@@ -287,6 +290,7 @@ static void fsTestSetFull(bool full)      { g_fsFull = full; }
 static void fsTestSetMountFailures(int n) { g_fsMountFailures = n; }
 static void fsTestSetFormatFails(bool f)  { g_fsFormatFails = f; }
 static void fsTestSetWriteLimit(long n)   { g_fsWriteLimit = n; }
+static void fsTestFailWritesTo(const char* path) { g_fsFailPath = path; }   // nullptr = none
 
 // How many files have been opened for writing since fsTestReset() or the last
 // fsTestClearWriteCount(), so a test can check that nothing was rewritten.
