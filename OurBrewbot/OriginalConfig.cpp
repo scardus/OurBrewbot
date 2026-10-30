@@ -95,6 +95,7 @@ struct OrigRetryRecord {
 
 static uint32_t s_earlierFailures = 0;   // failed attempts before this boot's
 static bool     s_gaveUp          = false;
+static bool     s_copyFailed      = false;   // this boot couldn't copy the originals to /orig/
 
 bool originalConversionGaveUp() { return s_gaveUp; }
 
@@ -126,7 +127,12 @@ static void conversionFailed() {
 }
 
 void logOriginalConversionProblems() {
-  if (s_gaveUp) {
+  if (s_gaveUp && s_copyFailed) {
+    // The defaults have been saved over the live files, and there was no
+    // complete copy of them in /orig/
+    logMsgL(SYSLOG_ERR, "DEFERRED [CFG] Original MyBrewbot config could not be copied after %u tries - running on default settings, the original settings were not kept",
+            ORIG_MAX_ATTEMPTS);
+  } else if (s_gaveUp) {
     logMsgL(SYSLOG_ERR, "DEFERRED [CFG] Original MyBrewbot config could not be saved after %u tries - running on default settings, the originals are in %s",
             ORIG_MAX_ATTEMPTS, ORIG_DIR);
   } else if (s_converted && s_earlierFailures > 0) {
@@ -176,14 +182,26 @@ static void origPath(char* buf, size_t size, const char* base, bool backup) {
 
 // Loads an original file from its copy in /orig/ (primary, then backup).
 // `file` is a name like PSTR("jsonGlobal").
-static bool loadOriginal(JsonDocument& doc, PGM_P file) {
+//
+// Returns false only when the file doesn't exist: there is nothing to convert.
+// If it exists but neither copy can be read, `doc` is left empty and this
+// returns true, so the converter still saves the file in OurBrewbot's format,
+// where every missing setting loads as its default. Left alone, the live file
+// would stay in the original's format and be misread as OurBrewbot's.
+// `reportIfUnreadable` is false where the same file is read a second time, so
+// the report says it once.
+static bool loadOriginal(JsonDocument& doc, PGM_P file, bool reportIfUnreadable = true) {
   char base[20], primary[40], backup[40];
   strncpy_P(base, file, sizeof(base) - 1);
   base[sizeof(base) - 1] = '\0';
   origPath(primary, sizeof(primary), base, false);
   origPath(backup,  sizeof(backup),  base, true);
   if (!LittleFS.exists(primary) && !LittleFS.exists(backup)) return false;
-  return loadJsonDocSafe(doc, primary, backup);
+  if (!loadJsonDocSafe(doc, primary, backup)) {
+    doc.clear();
+    if (reportIfUnreadable) REPORT("%s.txt could not be read - its settings start on defaults", base);
+  }
+  return true;
 }
 
 static bool copyFile(const char* from, const char* to) {
@@ -282,7 +300,7 @@ static void readFacts(OriginalFacts& facts) {
   }
 
   JsonDocument doc;
-  if (loadOriginal(doc, PSTR("jsonGlobal"))) {
+  if (loadOriginal(doc, PSTR("jsonGlobal"), false)) {
     facts.fahrenheit = ((doc[KEY("unit")] | 1) == 0);
 
     // One service for the whole controller: 2 Brewer's Friend, 3 Brewfather,
@@ -294,7 +312,7 @@ static void readFacts(OriginalFacts& facts) {
     if (hasId && service == 3) facts.brewServiceSlot = BREW_SERVICE_BREWFATHER - 1;
   }
   doc.clear();
-  if (loadOriginal(doc, PSTR("jsonFermenter"))) {
+  if (loadOriginal(doc, PSTR("jsonFermenter"), false)) {
     for (int i = 0; i < MAX_FERMENTERS; i++) {
       facts.tempControl[i] = doc[KEY("TempControl")][i] | 1;
       // Inverted like Power: 0 = send, 1 = don't
@@ -610,7 +628,7 @@ static bool convertProfileSteps(const OriginalFacts& facts) {
 
 static bool convertBrewServices(const OriginalFacts& facts) {
   JsonDocument doc;
-  if (!loadOriginal(doc, PSTR("jsonGlobal"))) return true;   // nothing to convert
+  if (!loadOriginal(doc, PSTR("jsonGlobal"), false)) return true;   // nothing to convert - convertGlobal() reports an unreadable file
   int service = doc[KEY("brewservice")] | 0;
 
   initDefaultBrewServiceConfig();
@@ -721,6 +739,7 @@ bool convertOriginalConfig() {
   if (!LittleFS.exists(ORIG_IN_PROGRESS)) {
     if (!copyOriginalFiles()) {
       logMsgL(SYSLOG_ERR, "[CFG] Original config NOT converted - could not keep a copy");
+      s_copyFailed = true;
       conversionFailed();
       return false;
     }

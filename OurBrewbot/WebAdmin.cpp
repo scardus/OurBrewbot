@@ -542,6 +542,18 @@ function showMsg(id, t, ok) {
   }
 }
 
+// After a save: reload the tab to show what the device saved. A refused save
+// keeps its error and the user's edits on screen instead, holding off the auto
+// refresh as if the form had just been edited.
+function afterSave(d, reload) {
+  if (d.status == 'ok') {
+    dirty = false;
+    setTimeout(reload, 500);
+  } else {
+    markDirty();
+  }
+}
+
 // GET a URL and parse the reply as JSON, giving up after FETCH_TIMEOUT_MS.
 // Without a time limit a request lost on a sleeping phone's connection never
 // finishes, and the tab waiting for it stays blank until the page is reloaded.
@@ -829,7 +841,7 @@ function saveFerm(i) {
   };
   fetch('/fermenter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('fm' + i, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadFermenters, 500); })
+    .then(function (d) { showMsg('fm' + i, d.msg, d.status == 'ok'); afterSave(d, loadFermenters); })
     .catch(function (e) { showMsg('fm' + i, 'Error: ' + e, false); });
 }
 
@@ -854,7 +866,7 @@ function profAction(i, a) {
   if (a == 'start') body.ProfileIndex = parseInt(byId('fp' + i).value);
   fetch('/fermenter/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('fm' + i, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadFermenters, 500); })
+    .then(function (d) { showMsg('fm' + i, d.msg, d.status == 'ok'); afterSave(d, loadFermenters); })
     .catch(function (e) { showMsg('fm' + i, 'Error: ' + e, false); });
 }
 
@@ -1108,7 +1120,7 @@ function saveProfile(p) {
   }
   fetch('/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('ppm' + p, d.msg, d.status == 'ok'); dirty = false; setTimeout(loadProfiles, 500); })
+    .then(function (d) { showMsg('ppm' + p, d.msg, d.status == 'ok'); afterSave(d, loadProfiles); })
     .catch(function (e) { showMsg('ppm' + p, 'Error: ' + e, false); });
 }
 
@@ -1162,7 +1174,7 @@ function saveProbe(i) {
   body['tempAdjust'] = parseFloat(byId('pa' + i).value);
   fetch('/probes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('pm', d.msg, d.status == 'ok'); dirty = false; setTimeout(loadProbes, 500); })
+    .then(function (d) { showMsg('pm', d.msg, d.status == 'ok'); afterSave(d, loadProbes); })
     .catch(function (e) { showMsg('pm', 'Error: ' + e, false); });
 }
 
@@ -1319,7 +1331,7 @@ function savePlug(i) {
   body['fermenter']    = ferm;
   fetch('/smartplug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('sm' + i + 'm', d.msg, d.status == 'ok'); dirty = false; setTimeout(loadPlugs, 500); })
+    .then(function (d) { showMsg('sm' + i + 'm', d.msg, d.status == 'ok'); afterSave(d, loadPlugs); })
     .catch(function (e) { showMsg('sm' + i + 'm', 'Error: ' + e, false); });
 }
 
@@ -1700,7 +1712,7 @@ function saveTilt(colour) {
   };
   fetch('/tilt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('tlm' + colour, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadTilts, 500); })
+    .then(function (d) { showMsg('tlm' + colour, d.msg, d.status == 'ok'); afterSave(d, loadTilts); })
     .catch(function (e) { showMsg('tlm' + colour, 'Error: ' + e, false); });
 }
 
@@ -1710,7 +1722,7 @@ function clearTilt(colour) {
   var body = { colour: colour, function: 99, fermenter: 99, tempAdjust: 0, sgAdjust: 0, _clear: true };
   fetch('/tilt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('tlm' + colour, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadTilts, 500); })
+    .then(function (d) { showMsg('tlm' + colour, d.msg, d.status == 'ok'); afterSave(d, loadTilts); })
     .catch(function (e) { showMsg('tlm' + colour, 'Error: ' + e, false); });
 }
 
@@ -1780,7 +1792,7 @@ function saveISpindel(idx) {
   };
   fetch('/ispindel/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('ism' + idx, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadISpindels, 500); })
+    .then(function (d) { showMsg('ism' + idx, d.msg, d.status == 'ok'); afterSave(d, loadISpindels); })
     .catch(function (e) { showMsg('ism' + idx, 'Error: ' + e, false); });
 }
 
@@ -1790,7 +1802,7 @@ function clearISpindel(idx) {
   var body = { index: idx, _clear: true };
   fetch('/ispindel/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
-    .then(function (d) { showMsg('ism' + idx, d.msg, d.status == 'ok'); dirty = false; if (d.status == 'ok') setTimeout(loadISpindels, 500); })
+    .then(function (d) { showMsg('ism' + idx, d.msg, d.status == 'ok'); afterSave(d, loadISpindels); })
     .catch(function (e) { showMsg('ism' + idx, 'Error: ' + e, false); });
 }
 

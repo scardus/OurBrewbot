@@ -41,8 +41,15 @@ uint32_t uptimeSeconds() { return s_uptimeSec; }
 uint32_t uptimeStamp()   { return s_uptimeSec ? s_uptimeSec : 1; }
 uint32_t uptimeSince(uint32_t stamp) { return (s_uptimeSec > stamp) ? s_uptimeSec - stamp : 0; }
 
-// ---- log lines are discarded; the conversion report is checked instead ----
-void logMsgImpl(uint8_t, PGM_P, ...) {}
+// ---- log capture: the last line, for the DEFERRED give-up messages. Most
+// tests check the conversion report instead. ----
+static char s_lastLog[256];
+void logMsgImpl(uint8_t, PGM_P fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(s_lastLog, sizeof(s_lastLog), fmt, args);
+  va_end(args);
+}
 
 // The code under test.
 #include "../../OurBrewbot/TextSafe.cpp"
@@ -73,6 +80,8 @@ void setUp(void) {
   espTestClearRtc();   // a cold boot: no failed conversion attempts counted
   g_espRestarts  = 0;
   s_gaveUp       = false;
+  s_copyFailed   = false;
+  s_lastLog[0]   = '\0';
 }
 
 void tearDown(void) {}
@@ -264,6 +273,31 @@ void test_giving_up_saves_the_default_settings(void) {
   TEST_ASSERT_FALSE(convertOriginalConfig());   // so it isn't converted again
 }
 
+void test_giving_up_after_a_save_failure_says_the_originals_are_in_orig(void) {
+  stageConversionWithFailingSaves();
+  convertOriginalConfig();
+  convertOriginalConfig();
+  convertOriginalConfig();
+  fsTestSetFull(false);
+  logOriginalConversionProblems();
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "the originals are in /orig"));
+}
+
+void test_giving_up_after_a_copy_failure_says_the_originals_were_not_kept(void) {
+  // The copy to /orig/ never finished, so the defaults saved over the live
+  // files leave no copy of the original settings anywhere
+  stageOriginal();
+  fsTestSetFull(true);
+  convertOriginalConfig();
+  convertOriginalConfig();
+  convertOriginalConfig();
+  fsTestSetFull(false);
+  TEST_ASSERT_TRUE(originalConversionGaveUp());
+  logOriginalConversionProblems();
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "the original settings were not kept"));
+  TEST_ASSERT_NULL(strstr(s_lastLog, "/orig"));
+}
+
 void test_a_retry_that_works_clears_the_count(void) {
   stageConversionWithFailingSaves();
   convertOriginalConfig();
@@ -310,6 +344,57 @@ void test_a_marker_left_by_a_power_cut_is_tidied_up(void) {
   fsTestWrite(ORIG_IN_PROGRESS, "");
   convertOriginalConfig();
   TEST_ASSERT_FALSE(LittleFS.exists(ORIG_IN_PROGRESS));
+}
+
+// ============================================================
+// An original file that can't be read
+// ============================================================
+
+void test_an_unreadable_file_is_saved_with_default_settings(void) {
+  stageOriginal();
+  fsTestWrite("/jsonProbe.txt",     "{not json");
+  fsTestWrite("/jsonProbebkup.txt", "{not json");
+  loadAllConfig();
+
+  TEST_ASSERT_TRUE(originalConfigConverted());
+  TEST_ASSERT_TRUE(reportHas("jsonProbe.txt could not be read - its settings start on defaults"));
+  // Saved in OurBrewbot's format, not left for the loader to misread
+  TEST_ASSERT_TRUE(fileHas(FILE_PROBE, "\"Function\":[99,99"));
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_probes[0].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_probes[0].fermenter);
+  // The other files are still converted
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_F1_HOT, g_smartPlugs[0].function);
+}
+
+void test_an_unreadable_file_read_twice_is_reported_once(void) {
+  // jsonGlobal.txt is read for the global and the brew service settings
+  stageOriginal();
+  fsTestWrite("/jsonGlobal.txt", "{not json");
+  loadAllConfig();
+
+  const char* text  = fsTestRead(ORIG_REPORT_FILE);
+  const char* first = strstr(text, "jsonGlobal.txt could not be read");
+  TEST_ASSERT_NOT_NULL(first);
+  TEST_ASSERT_NULL(strstr(first + 1, "jsonGlobal.txt could not be read"));
+  TEST_ASSERT_EQUAL_UINT8(UNIT_CELSIUS, g_globalConfig.unit);
+  TEST_ASSERT_FALSE(g_brewServices[BREW_SERVICE_BREWFATHER - 1].enabled);
+}
+
+void test_a_copy_that_cant_be_read_still_finishes_the_conversion(void) {
+  // A retry after a power cut, when the copy of the fermenter file can't be
+  // read but the live file still can: the conversion must still finish
+  stageOriginal();
+  convertOriginalConfig();
+  fsTestWrite(FILE_FERMENTER, ORIG_FERMENTER);
+  fsTestWrite(ORIG_IN_PROGRESS, "");
+  fsTestWrite("/orig/jsonFermenter.txt", "{not json");
+  loadAllConfig();
+
+  TEST_ASSERT_TRUE(originalConfigConverted());
+  TEST_ASSERT_TRUE(reportHas("jsonFermenter.txt could not be read"));
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"BrewServices\""));
+  TEST_ASSERT_EQUAL_FLOAT(22.0f, g_fermenters[0].ceilingTemp);
+  TEST_ASSERT_FALSE(convertOriginalConfig());   // done, so not converted again
 }
 
 // ============================================================
@@ -984,12 +1069,17 @@ int main(int argc, char** argv) {
   RUN_TEST(test_the_conversion_gives_up_after_three_tries);
   RUN_TEST(test_giving_up_starts_on_default_settings);
   RUN_TEST(test_giving_up_saves_the_default_settings);
+  RUN_TEST(test_giving_up_after_a_save_failure_says_the_originals_are_in_orig);
+  RUN_TEST(test_giving_up_after_a_copy_failure_says_the_originals_were_not_kept);
   RUN_TEST(test_a_retry_that_works_clears_the_count);
   RUN_TEST(test_a_power_cut_starts_the_count_again);
   RUN_TEST(test_a_conversion_cut_short_runs_again_from_the_copies);
   RUN_TEST(test_a_finished_conversion_removes_its_marker);
   RUN_TEST(test_a_marker_left_by_a_power_cut_is_tidied_up);
 
+  RUN_TEST(test_an_unreadable_file_is_saved_with_default_settings);
+  RUN_TEST(test_an_unreadable_file_read_twice_is_reported_once);
+  RUN_TEST(test_a_copy_that_cant_be_read_still_finishes_the_conversion);
   RUN_TEST(test_jsonConfig_is_deleted_and_not_copied);
   RUN_TEST(test_the_wifi_details_are_copied_to_the_wifi_store);
   RUN_TEST(test_the_wifi_details_are_copied_from_the_backup_file);
