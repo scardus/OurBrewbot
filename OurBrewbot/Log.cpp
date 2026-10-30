@@ -115,10 +115,119 @@ void logRetrySyslog() {
   }
 }
 
+// ============================================================
+// Recent lines for the WebUI log drawer (GET /logs)
+// ============================================================
+//
+// The last LOG_RING_SIZE bytes of log lines are kept in RAM so the admin page
+// can show them live. Lines are stored at their real length: they average
+// about 70 bytes, so fixed 192-byte slots would waste most of the space.
+//
+// Each record is [level][length][text], with no NUL. The text is the
+// timestamp plus the message, e.g. "[012:34:56] [TEMP] Probe ...". The longest
+// is 16 (widest timestamp) + 191 (message) = 207 bytes, so the length fits in
+// one byte. A record can wrap past the end of s_ring back to the start;
+// ringPut() and ringGet() take care of that.
+//
+// When a new line doesn't fit, the oldest lines are dropped. Every line gets
+// a sequence number, so a reader asks for "the lines after N" and is told how
+// many it missed. Reading never removes anything, so any number of browsers
+// can follow the log, and a failed request can simply be repeated.
+//
+// The ring is never cleared - not even by logInit(), which runs again
+// whenever WiFi reconnects or the syslog settings are saved.
+#define LOG_RING_SIZE 2048
+
+static uint8_t  s_ring[LOG_RING_SIZE];
+static uint16_t s_ringTail = 0;   // where the oldest record starts
+static uint16_t s_ringUsed = 0;   // bytes currently in use
+static uint32_t s_firstSeq = 1;   // sequence number of the oldest record
+static uint32_t s_nextSeq  = 1;   // sequence number the next line will get
+static uint32_t s_bootId   = 0;   // chosen on first use; 0 = not chosen yet
+
+static void ringPut(uint16_t pos, uint8_t b) { s_ring[pos % LOG_RING_SIZE] = b; }
+static uint8_t ringGet(uint16_t pos)         { return s_ring[pos % LOG_RING_SIZE]; }
+
+static void ringDropOldest() {
+  uint16_t size = 2 + ringGet(s_ringTail + 1);
+  s_ringTail = (s_ringTail + size) % LOG_RING_SIZE;
+  s_ringUsed -= size;
+  s_firstSeq++;
+}
+
+// Copy one finished line into the ring. Called first thing in sendLogLine(),
+// so it has returned before the syslog and MQTT sends start - it adds nothing
+// to the deepest stack point, and a line logged during those sends is stored
+// after this one. No buffers, no allocation, no logging.
+static void logRingAdd(uint8_t level, const char* ts, const char* msg) {
+  size_t tsLen = strlen(ts);
+  size_t len   = tsLen + strlen(msg);
+  if (len > 255) len = 255;     // can't happen today (207 max); keeps it in a byte
+  if (level > SYSLOG_DEBUG) level = SYSLOG_DEBUG;   // the page shows it as one digit
+
+  while ((size_t)(LOG_RING_SIZE - s_ringUsed) < len + 2) ringDropOldest();
+
+  uint16_t pos = s_ringTail + s_ringUsed;
+  ringPut(pos++, level);
+  ringPut(pos++, (uint8_t)len);
+  for (size_t i = 0; i < len; i++) {
+    char c = (i < tsLen) ? ts[i] : msg[i - tsLen];
+    // A CR or LF in a message would split it into two lines on the page
+    if ((uint8_t)c < 0x20) c = ' ';
+    ringPut(pos++, (uint8_t)c);
+  }
+  s_ringUsed += len + 2;
+  s_nextSeq++;
+}
+
+size_t logRingRead(uint32_t after, char* buf, size_t bufSize,
+                   uint32_t& next, uint32_t& lost, bool& more) {
+  // Lines after `after` that were dropped before anyone read them. after = 0
+  // means "I have nothing yet", so nothing counts as missed.
+  lost = 0;
+  if (after != 0 && after + 1 < s_firstSeq) lost = s_firstSeq - after - 1;
+  next = after + lost;
+  more = false;
+
+  size_t   n   = 0;
+  uint16_t pos = s_ringTail;
+  for (uint32_t seq = s_firstSeq; seq < s_nextSeq; seq++) {
+    uint8_t level = ringGet(pos);
+    uint8_t len   = ringGet(pos + 1);
+    if (seq > after) {
+      // Whole lines only: "<level> <text>\n" is len + 3 bytes
+      if (n + len + 3 > bufSize) {
+        more = true;
+        break;
+      }
+      buf[n++] = '0' + level;
+      buf[n++] = ' ';
+      for (uint8_t i = 0; i < len; i++) buf[n++] = (char)ringGet(pos + 2 + i);
+      buf[n++] = '\n';
+      next = seq;
+    }
+    pos = (pos + 2 + len) % LOG_RING_SIZE;
+  }
+  return n;
+}
+
+uint32_t logRingLastSeq() {
+  return s_nextSeq - 1;
+}
+
+uint32_t logBootId() {
+  // Only has to differ from the last boot's, so the page can tell that the
+  // controller restarted. ESP.random() is the hardware random number generator.
+  while (s_bootId == 0) s_bootId = ESP.random();
+  return s_bootId;
+}
+
 // Send one finished log line to every output: serial, syslog and the MQTT
 // log topic. ts is the "[HHH:MM:SS] " timestamp, which serial has already
 // printed by the time this runs.
 static void sendLogLine(uint8_t level, const char* ts, const char* msg) {
+  logRingAdd(level, ts, msg);
+
   Serial.print(msg);
   Serial.print("\r\n");
 

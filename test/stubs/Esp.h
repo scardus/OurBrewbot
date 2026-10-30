@@ -32,6 +32,7 @@ static uint32_t g_espFreeHeap  = 24000;
 // How many times ESP.restart() was called. The real one never returns; this
 // one does, so a test can check that a restart was asked for.
 static int      g_espRestarts  = 0;
+static uint32_t g_espRandom    = 0x1234ABCD;
 
 // RTC user memory: 512 bytes that survive a reset. Crash.cpp keeps its crash
 // record and checkpoint breadcrumb here, so post-mortem behaviour can only be
@@ -49,6 +50,8 @@ public:
   uint32_t getFreeContStack()        { return 1024; }
   void     wdtFeed()                 {}
   void     restart()                 { g_espRestarts++; }
+  // The hardware random number generator; settable so a test gets a known value
+  uint32_t random()                  { return g_espRandom; }
 
   // Board identity, reported by WebAPI.cpp's /board_info.json and /status.
   // Fixed values so a payload-shape test has something stable to assert on.

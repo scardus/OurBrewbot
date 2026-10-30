@@ -455,6 +455,95 @@ button.stepact.del:hover:not(:disabled) {
   font-size: 11px;
   white-space: nowrap;
 }
+
+/* ---- Log drawer ---- */
+/* Closed, only its header bar shows at the bottom of the screen */
+#logdrawer {
+  display: flex;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  flex-direction: column;
+  background: #111;
+  border-top: 1px solid #444;
+  z-index: 999;
+}
+#logdrawer.open {
+  height: 35vh;
+}
+#logdrawer .logopt,
+#loglines {
+  display: none;
+}
+#logdrawer.open .logopt {
+  display: inline-block;
+}
+#logdrawer.open #loglines {
+  display: block;
+}
+/* Room at the bottom of the page so the drawer doesn't hide anything */
+body {
+  padding-bottom: 40px;
+}
+body.logopen {
+  padding-bottom: calc(35vh + 8px);
+}
+#loghead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  border-bottom: 1px solid #333;
+}
+#loghead button,
+#loghead select {
+  background: #16213e;
+  border: 1px solid #444;
+  color: #e0e0e0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+}
+#loghead button:hover { color: #fff; border-color: #888; }
+#logstate {
+  flex: 1;
+  font-size: 12px;
+  color: #4caf50;
+}
+#logstate.warn {
+  color: #f0ad4e;
+}
+#loglines {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 6px;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+/* Colour by syslog level: 0-3 errors, 4 warnings, 5 notices */
+#loglines .lv0,
+#loglines .lv1,
+#loglines .lv2,
+#loglines .lv3 { color: #f44; }
+#loglines .lv4 { color: #f0ad4e; }
+#loglines .lv5 { color: #fff; }
+#loglines .lv6,
+#loglines .lv7 { color: #bbb; }
+#loglines .gap {
+  color: #53d8fb;
+  font-style: italic;
+}
+/* The level filter: hide lines less important than the one chosen */
+#loglines.max5 .lv6,
+#loglines.max5 .lv7,
+#loglines.max4 .lv5,
+#loglines.max4 .lv6,
+#loglines.max4 .lv7 { display: none; }
 </style>
 </head>
 <body>
@@ -482,6 +571,22 @@ button.stepact.del:hover:not(:disabled) {
   <div id="t5" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
   <div id="t6" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
   <div id="t7" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
+
+  <!-- Outside the tabs, so loadTab() never rebuilds it -->
+  <div id="logdrawer" role="region" aria-label="Controller log">
+    <div id="loghead">
+      <button id="logbtn" onclick="logToggle()" aria-expanded="false" aria-controls="loglines">&#9650; Log</button>
+      <span id="logstate">Connecting...</span>
+      <select id="loglevel" class="logopt" onchange="logFilter()" title="Which log lines to show">
+        <option value="7">Everything</option>
+        <option value="5">Notices and worse</option>
+        <option value="4">Warnings and worse</option>
+      </select>
+      <button id="logpause" class="logopt" onclick="logTogglePause()">Pause</button>
+      <button class="logopt" onclick="logClear()">Clear</button>
+    </div>
+    <div id="loglines" class="max7"></div>
+  </div>
 
 <script>
 var activeTab = 0;
@@ -1998,6 +2103,161 @@ function stopRefresh() {
   refreshTimer = null;
 }
 
+// ---- LIVE LOG DRAWER ----
+// The controller keeps its last ~2 KB of log lines, and GET /logs returns the
+// ones after a given sequence number. While this page is visible the lines are
+// collected every 3 s, or every second while the drawer is open, so opening it
+// shows everything since the page loaded (up to LOG_MAX_LINES). Reading never
+// removes anything on the controller, so a failed poll is simply repeated.
+//   logAfter = sequence number of the last line we have
+//   logBoot  = the controller's boot ID; it changes when the controller
+//              restarts and its numbering starts again from 1
+// This is separate from the tab auto refresh: pausing one never pauses the other.
+var LOG_MAX_LINES = 2000;
+var LOG_OPEN_MS = 1000;     // poll interval with the drawer open
+var LOG_CLOSED_MS = 3000;   // poll interval with the drawer closed
+var LOG_MORE_MS = 250;      // when the controller has more lines waiting
+var logOpen = false;
+var logPaused = false;
+var logBoot = '';
+var logAfter = 0;
+var logTimer = null;
+var logBusy = false;        // a poll is waiting for the controller
+var logFails = 0;           // failed polls in a row, for the retry back-off
+
+// Poll again after ms, replacing any poll already scheduled. Nothing is
+// scheduled while the log is paused or the page is hidden.
+function logSchedule(ms) {
+  logStop();
+  if (!logPaused && !document.hidden) logTimer = setTimeout(logPoll, ms);
+}
+
+function logStop() {
+  if (logTimer) clearTimeout(logTimer);
+  logTimer = null;
+}
+
+function logInterval() {
+  return logOpen ? LOG_OPEN_MS : LOG_CLOSED_MS;
+}
+
+function logSetState(text, warn) {
+  var e = byId('logstate');
+  e.textContent = text;
+  e.className = warn ? 'warn' : '';
+}
+
+// Add one row to the drawer, dropping the oldest beyond LOG_MAX_LINES.
+// textContent, never innerHTML: log lines can contain any text.
+function logAddRow(cls, text) {
+  var box = byId('loglines');
+  var row = document.createElement('div');
+  row.className = cls;
+  row.textContent = text;
+  box.appendChild(row);
+  while (box.childNodes.length > LOG_MAX_LINES) box.removeChild(box.firstChild);
+}
+
+// One poll. Only one is ever waiting for the controller: the next is
+// scheduled when this one has finished.
+function logPoll() {
+  logTimer = null;
+  if (logBusy || logPaused || document.hidden) return;
+  logBusy = true;
+  var ctl = new AbortController();
+  var timer = setTimeout(function () { ctl.abort(); }, FETCH_TIMEOUT_MS);
+  fetch('/logs?boot=' + logBoot + '&after=' + logAfter, { signal: ctl.signal })
+    .then(function (r) {
+      if (r.status == 400) return null;
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text().then(function (text) { logAccept(r, text); return true; });
+    })
+    .then(function (ok) {
+      logFails = 0;
+      if (!ok) {
+        // The controller didn't recognise our place in its log: start again
+        // from its oldest line
+        logAfter = 0;
+        logAddRow('gap', '-- log view restarted --');
+        logSchedule(logInterval());
+      }
+    })
+    .catch(function () {
+      // Wait 2, 4, 8, then 15 s between retries. logAfter is kept, so the
+      // lines logged meanwhile still arrive if the controller has them.
+      logFails++;
+      if (!logPaused) logSetState('Reconnecting...', true);
+      logSchedule(Math.min(15000, 1000 * Math.pow(2, logFails)));
+    })
+    .finally(function () {
+      clearTimeout(timer);
+      logBusy = false;
+    });
+}
+
+// Add the lines from one good reply, then schedule the next poll.
+function logAccept(r, text) {
+  var boot = r.headers.get('X-Log-Boot') || '';
+  var next = parseInt(r.headers.get('X-Log-Next'), 10);
+  var lost = parseInt(r.headers.get('X-Log-Lost'), 10);
+  if (!boot || isNaN(next) || isNaN(lost)) throw new Error('bad reply');
+
+  // Keep following the newest line only if the user hasn't scrolled up to read
+  var box = byId('loglines');
+  var follow = box.scrollHeight - box.scrollTop - box.clientHeight < 20;
+
+  if (logBoot && boot != logBoot) logAddRow('gap', '-- controller restarted --');
+  if (lost > 0) logAddRow('gap', '-- ' + lost + (lost == 1 ? ' line' : ' lines') + ' missed --');
+  // Each line is "<level digit> <timestamp> <message>"
+  var lines = text.split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i]) logAddRow('lv' + lines[i].charAt(0), lines[i].substring(2));
+  }
+  if (follow) box.scrollTop = box.scrollHeight;
+
+  logBoot = boot;
+  logAfter = next;
+  if (!logPaused) logSetState('Live', false);   // paused while this reply was on its way
+  logSchedule(r.headers.get('X-Log-More') == '1' ? LOG_MORE_MS : logInterval());
+}
+
+// Open or close the drawer. Closed, only its header bar shows at the bottom
+// of the screen. Lines are collected either way.
+function logToggle() {
+  logOpen = !logOpen;
+  byId('logdrawer').className = logOpen ? 'open' : '';
+  document.body.classList.toggle('logopen', logOpen);
+  var btn = byId('logbtn');
+  btn.innerHTML = logOpen ? '&#9660; Log' : '&#9650; Log';
+  btn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
+  if (logOpen) {
+    var box = byId('loglines');
+    box.scrollTop = box.scrollHeight;
+    if (!logBusy) logSchedule(0);   // fetch the newest lines straight away
+  }
+}
+
+// Pause stops polling only. The controller keeps its lines, so a short pause
+// loses nothing; a long one shows a "lines missed" row when resumed.
+function logTogglePause() {
+  logPaused = !logPaused;
+  byId('logpause').textContent = logPaused ? 'Resume' : 'Pause';
+  if (logPaused) {
+    logStop();
+    logSetState('Paused', true);
+  } else {
+    logSchedule(0);
+  }
+}
+
+function logClear() {
+  byId('loglines').textContent = '';
+}
+
+function logFilter() {
+  byId('loglines').className = 'max' + byId('loglevel').value;
+}
+
 // ---- PAUSE WHILE HIDDEN ----
 // A phone freezes a page in the background, and a desktop browser slows its
 // timers to once a minute, so a background tab only ever shows old data. Stop
@@ -2009,23 +2269,40 @@ function resumeRefresh() {
   if (!dirty) loadTab();
   startRefresh();
 }
+// The log drawer stops collecting while hidden too; the "lines missed" row
+// covers the gap when the page is shown again.
 document.addEventListener('visibilitychange', function () {
-  if (document.hidden) stopRefresh();
-  else resumeRefresh();
+  if (document.hidden) {
+    stopRefresh();
+    logStop();
+  } else {
+    resumeRefresh();
+    logSchedule(0);
+  }
 });
 // persisted = the browser has brought this page back from its back/forward cache.
 window.addEventListener('pageshow', function (e) {
-  if (e.persisted) resumeRefresh();
+  if (e.persisted) {
+    resumeRefresh();
+    logSchedule(0);
+  }
 });
 
 refreshStart = Date.now();
 loadTab();
 if (!document.hidden) startRefresh();
+logSchedule(LOG_OPEN_MS);   // let the first tab start loading before the log
 setInterval(updateBar, 100);
+// The log drawer's controls aren't part of any settings form, so using them
+// mustn't hold off the tab refresh
 document.body.addEventListener('focusin', function (e) {
+  if (e.target.closest('#logdrawer')) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') markDirty();
 });
-document.body.addEventListener('input', function () { markDirty(); });
+document.body.addEventListener('input', function (e) {
+  if (e.target.closest('#logdrawer')) return;
+  markDirty();
+});
 </script>
 </body>
 </html>)rawliteral";

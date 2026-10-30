@@ -152,6 +152,10 @@ public:
     recordSend(code, contentType);
     httpRespAppend(body, body ? strlen(body) : 0);
   }
+  void send(int code, const char* contentType, const char* body, size_t len) {
+    recordSend(code, contentType);
+    httpRespAppend(body, len);
+  }
   void send(int code, const char* contentType, const __FlashStringHelper* body) {
     const char* s = reinterpret_cast<const char*>(body);
     recordSend(code, contentType);
@@ -169,6 +173,10 @@ public:
     g_httpResp.contentLengthSet      = true;
   }
 
+  // The real one takes Strings, so F() names and values work too
+  void sendHeader(const String& name, const String& value, bool first = false) {
+    sendHeader(name.c_str(), value.c_str(), first);
+  }
   void sendHeader(const char* name, const char* value, bool /*first*/ = false) {
     if (g_httpResp.headerCount >= HTTP_RESP_MAX_HEADERS) return;
     HttpRespHeader& h = g_httpResp.headers[g_httpResp.headerCount++];

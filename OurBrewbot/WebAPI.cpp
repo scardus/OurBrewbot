@@ -127,6 +127,7 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/probes",           HTTP_GET,  handleProbes,             true  },
   { "/probes",           HTTP_POST, handleProbePost,          true  },
   { "/health",           HTTP_GET,  handleHealth,             true  },
+  { "/logs",             HTTP_GET,  handleLogs,               false },
   { "/admin",            HTTP_GET,  handleAdmin,              true  },
   { "/smartplugs",       HTTP_GET,  handleSmartPlugs,         true  },
   { "/smartplug",        HTTP_POST, handleSmartPlugPost,      true  },
@@ -847,6 +848,80 @@ void handleHealth(ESP8266WebServer& server) {
   doc["ip"]          = WiFi.localIP().toString();
   doc["resetReason"] = ESP.getResetReason();
   sendJsonDoc(server, doc);
+}
+
+// ============================================================
+// LIVE LOG — GET /logs?boot=<id>&after=<n>
+//
+// The admin page's log drawer polls this every second or so. It returns the
+// log lines after sequence number `after` as plain text, one per line:
+// "<level digit> <timestamp> <message>". Log.cpp keeps the lines, and reading
+// them removes nothing. The headers tell the page where to carry on from:
+//   X-Log-Boot  this boot's ID - when it changes, the controller restarted
+//   X-Log-Next  the `after` to send next time
+//   X-Log-Lost  lines that were dropped before they could be read
+//   X-Log-More  1 if more lines are waiting than fitted in this reply
+// The route is registered with logging off, so polling adds no log lines.
+// ============================================================
+
+// The longest log line logRingRead() can return must fit in the reply
+static_assert(sizeof(s_chunkBuf) >= 210, "s_chunkBuf too small for the longest log line");
+
+// Read a decimal sequence number: digits only, and no bigger than a uint32_t.
+static bool parseLogSeq(const String& text, uint32_t& value) {
+  if (text.length() == 0 || text.length() > 10) return false;
+  uint64_t v = 0;
+  for (size_t i = 0; i < text.length(); i++) {
+    char c = text.c_str()[i];
+    if (c < '0' || c > '9') return false;
+    v = v * 10 + (c - '0');
+  }
+  if (v > 0xFFFFFFFFULL) return false;
+  value = (uint32_t)v;
+  return true;
+}
+
+// The strings are kept in flash (F() and PSTR()): a plain string literal
+// takes RAM on the ESP8266 for as long as the firmware runs.
+void handleLogs(ESP8266WebServer& server) {
+  char boot[9];
+  snprintf_P(boot, sizeof(boot), PSTR("%08lX"), (unsigned long)logBootId());
+
+  // The checks run in this order:
+  // 1. A malformed `after` is refused, whatever the boot ID.
+  uint32_t after = 0;
+  String afterArg = server.arg(F("after"));
+  if (afterArg.length() > 0 && !parseLogSeq(afterArg, after)) {
+    sendErr(server, 400, F("Bad 'after' value"));
+    return;
+  }
+  // 2. A missing or different boot ID means the page has no lines from this
+  //    boot yet (its first poll, or the controller restarted), so its `after`
+  //    is thrown away and it starts again from the oldest line kept. This
+  //    comes before check 3: a cursor from before a restart is usually
+  //    bigger than anything this boot has logged.
+  if (server.arg(F("boot")) != boot) after = 0;
+  // 3. A line this boot hasn't logged yet - only a broken page would ask for it
+  if (after > logRingLastSeq()) {
+    sendErr(server, 400, F("Bad 'after' value"));
+    return;
+  }
+
+  uint32_t next;
+  uint32_t lost;
+  bool more;
+  size_t n = logRingRead(after, s_chunkBuf, sizeof(s_chunkBuf), next, lost, more);
+
+  char nextStr[11];
+  char lostStr[11];
+  snprintf_P(nextStr, sizeof(nextStr), PSTR("%lu"), (unsigned long)next);
+  snprintf_P(lostStr, sizeof(lostStr), PSTR("%lu"), (unsigned long)lost);
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.sendHeader(F("X-Log-Boot"), boot);
+  server.sendHeader(F("X-Log-Next"), nextStr);
+  server.sendHeader(F("X-Log-Lost"), lostStr);
+  server.sendHeader(F("X-Log-More"), more ? F("1") : F("0"));
+  server.send(200, "text/plain; charset=utf-8", s_chunkBuf, n);
 }
 
 // ============================================================

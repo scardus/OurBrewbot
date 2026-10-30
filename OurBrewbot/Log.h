@@ -51,6 +51,27 @@ void logInit();
 // while syslog is working, switched off, or WiFi is down.
 void logRetrySyslog();
 
+// ---- Recent lines for the WebUI log drawer (GET /logs) ----
+// Every log line is also kept in a small RAM ring (about the last 2 KB).
+
+// Copy the lines newer than sequence number `after` into buf, oldest first,
+// one "<level digit> <timestamp> <message>\n" per line, whole lines only.
+// Returns the number of bytes written (no NUL is added). after = 0 means
+// "from the oldest line still kept".
+//   next = sequence number of the last line copied (after + lost if none)
+//   lost = lines after `after` that were dropped before they could be read
+//   more = true if there are lines that did not fit in buf
+// bufSize must be at least 210 bytes so the longest line always fits.
+size_t logRingRead(uint32_t after, char* buf, size_t bufSize,
+                   uint32_t& next, uint32_t& lost, bool& more);
+
+// Sequence number of the newest line kept (0 if nothing has been logged).
+uint32_t logRingLastSeq();
+
+// A random number chosen once per boot, so the page can tell the controller
+// has restarted (its sequence numbers start again from 1).
+uint32_t logBootId();
+
 // Implementation — do not call directly; use the logMsg()/logMsgL() macros
 // below, which move the format literal to flash via PSTR(). Format strings
 // were the largest block of .rodata held in DRAM (~160 call sites).
