@@ -2641,6 +2641,25 @@ static void test_logs_different_boot_starts_again_from_the_oldest_line(void) {
   TEST_ASSERT_EQUAL_UINT32(0, s_ringReadAfter);
 }
 
+// After a restart the page's old cursor is usually bigger than anything the
+// new boot has logged. The boot check comes first, so that is a fresh start,
+// not a "line this boot hasn't logged" refusal.
+static void test_logs_restart_with_a_cursor_beyond_the_new_boot_starts_again(void) {
+  s_ringLastSeq = 10;
+  getLogs("12345678", "500");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT32(0, s_ringReadAfter);
+}
+
+// A malformed cursor is refused whatever the boot ID says
+static void test_logs_malformed_cursor_is_refused_even_with_a_different_boot(void) {
+  s_ringLastSeq = 10;
+  s_ringReadAfter = 0xDEAD;
+  getLogs("12345678", "abc");
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT32(0xDEAD, s_ringReadAfter);
+}
+
 static void test_logs_malformed_cursor_is_refused(void) {
   const char* bad[] = { "abc", "12a", "-1", "+5", " 5", "5 ", "12345678901", "4294967296" };
   s_ringLastSeq = 0xFFFFFFFF;
@@ -2920,6 +2939,8 @@ int main(int, char**) {
   RUN_TEST(test_logs_first_poll_starts_from_the_oldest_line);
   RUN_TEST(test_logs_same_boot_carries_on_after_the_cursor);
   RUN_TEST(test_logs_different_boot_starts_again_from_the_oldest_line);
+  RUN_TEST(test_logs_restart_with_a_cursor_beyond_the_new_boot_starts_again);
+  RUN_TEST(test_logs_malformed_cursor_is_refused_even_with_a_different_boot);
   RUN_TEST(test_logs_malformed_cursor_is_refused);
   RUN_TEST(test_logs_largest_cursor_is_accepted);
   RUN_TEST(test_logs_cursor_beyond_the_newest_line_is_refused);

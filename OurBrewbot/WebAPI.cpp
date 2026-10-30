@@ -881,21 +881,27 @@ static bool parseLogSeq(const String& text, uint32_t& value) {
   return true;
 }
 
+// The strings are kept in flash (F() and PSTR()): a plain string literal
+// takes RAM on the ESP8266 for as long as the firmware runs.
 void handleLogs(ESP8266WebServer& server) {
   char boot[9];
-  snprintf(boot, sizeof(boot), "%08lX", (unsigned long)logBootId());
+  snprintf_P(boot, sizeof(boot), PSTR("%08lX"), (unsigned long)logBootId());
 
+  // The checks run in this order:
+  // 1. A malformed `after` is refused, whatever the boot ID.
   uint32_t after = 0;
-  String afterArg = server.arg("after");
+  String afterArg = server.arg(F("after"));
   if (afterArg.length() > 0 && !parseLogSeq(afterArg, after)) {
     sendErr(server, 400, F("Bad 'after' value"));
     return;
   }
-  // A missing or different boot ID means the page has no lines from this
-  // boot yet (its first poll, or the controller restarted): start again from
-  // the oldest line kept.
-  if (server.arg("boot") != boot) after = 0;
-  // A line this boot hasn't logged yet - only a broken page would ask for it
+  // 2. A missing or different boot ID means the page has no lines from this
+  //    boot yet (its first poll, or the controller restarted), so its `after`
+  //    is thrown away and it starts again from the oldest line kept. This
+  //    comes before check 3: a cursor from before a restart is usually
+  //    bigger than anything this boot has logged.
+  if (server.arg(F("boot")) != boot) after = 0;
+  // 3. A line this boot hasn't logged yet - only a broken page would ask for it
   if (after > logRingLastSeq()) {
     sendErr(server, 400, F("Bad 'after' value"));
     return;
@@ -908,13 +914,13 @@ void handleLogs(ESP8266WebServer& server) {
 
   char nextStr[11];
   char lostStr[11];
-  snprintf(nextStr, sizeof(nextStr), "%lu", (unsigned long)next);
-  snprintf(lostStr, sizeof(lostStr), "%lu", (unsigned long)lost);
-  server.sendHeader("Cache-Control", "no-store");
-  server.sendHeader("X-Log-Boot", boot);
-  server.sendHeader("X-Log-Next", nextStr);
-  server.sendHeader("X-Log-Lost", lostStr);
-  server.sendHeader("X-Log-More", more ? "1" : "0");
+  snprintf_P(nextStr, sizeof(nextStr), PSTR("%lu"), (unsigned long)next);
+  snprintf_P(lostStr, sizeof(lostStr), PSTR("%lu"), (unsigned long)lost);
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.sendHeader(F("X-Log-Boot"), boot);
+  server.sendHeader(F("X-Log-Next"), nextStr);
+  server.sendHeader(F("X-Log-Lost"), lostStr);
+  server.sendHeader(F("X-Log-More"), more ? F("1") : F("0"));
   server.send(200, "text/plain; charset=utf-8", s_chunkBuf, n);
 }
 
