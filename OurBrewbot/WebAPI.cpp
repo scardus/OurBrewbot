@@ -222,7 +222,7 @@ void setupWebServer(ESP8266WebServer& server) {
       if (!otaUploadInstalled()) {
         holdPlugsOff(false);   // no restart is coming: the control loop takes over again
         String err = "Update FAILED: ";
-        if (otaUploadRefused()) err += "this is not a complete OurBrewbot firmware file";
+        if (otaUploadRefused()) err += F("this is not a complete OurBrewbot firmware file");
         else                    err += Update.getError();
         server.send(500, "text/html", err);
       } else {
