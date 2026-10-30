@@ -1883,6 +1883,16 @@ static void test_a_cut_short_firmware_file_is_refused(void) {
   TEST_ASSERT_TRUE(otaUploadRefused());
 }
 
+// The /update reply clears the result, so a later request with no file in it
+// isn't answered with an earlier upload's "refused"
+static void test_clearing_the_upload_result_forgets_a_refused_upload(void) {
+  uploadTestImage(TEST_IMAGE_SIZE - 100);
+  TEST_ASSERT_TRUE(otaUploadRefused());
+  otaUploadClear();
+  TEST_ASSERT_FALSE(otaUploadRefused());
+  TEST_ASSERT_FALSE(otaUploadInstalled());
+}
+
 // An upload with no file in it used to be reported as a success, and restarted
 static void test_an_upload_with_no_file_is_not_installed(void) {
   srv.testUpload().status = UPLOAD_FILE_START;
@@ -2659,6 +2669,7 @@ int main(int, char**) {
   RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
   RUN_TEST(test_a_complete_firmware_file_is_installed);
   RUN_TEST(test_a_cut_short_firmware_file_is_refused);
+  RUN_TEST(test_clearing_the_upload_result_forgets_a_refused_upload);
   RUN_TEST(test_an_upload_with_no_file_is_not_installed);
   RUN_TEST(test_ota_upload_start_puts_a_cooling_fermenter_back_to_idle);
   RUN_TEST(test_a_failed_ota_upload_waits_out_the_compressor_delay);

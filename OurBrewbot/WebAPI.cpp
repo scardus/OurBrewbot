@@ -48,6 +48,7 @@ void handleSyslogConfig(ESP8266WebServer& server);
 void handleSyslogConfigPost(ESP8266WebServer& server);
 static bool otaUploadInstalled();
 static bool otaUploadRefused();
+static void otaUploadClear();
 
 // One buffer shared by the GET handlers that send their reply in chunks:
 // /fermenters, /status, /debug, /ispindels, /smartplugs and /profiles. Each
@@ -222,8 +223,10 @@ void setupWebServer(ESP8266WebServer& server) {
       if (!otaUploadInstalled()) {
         holdPlugsOff(false);   // no restart is coming: the control loop takes over again
         String err = "Update FAILED: ";
-        if (otaUploadRefused()) err += F("this is not a complete OurBrewbot firmware file");
-        else                    err += Update.getError();
+        if (otaUploadRefused())     err += F("this is not a complete OurBrewbot firmware file");
+        else if (Update.hasError()) err += Update.getError();
+        else                        err += F("no firmware file was received");
+        otaUploadClear();   // so the next request isn't answered with this one's result
         server.send(500, "text/html", err);
       } else {
         server.send(200, "text/html",
@@ -948,6 +951,7 @@ static bool s_otaRefused   = false;   // the file failed the check, so nothing w
 
 static bool otaUploadInstalled() { return s_otaInstalled; }
 static bool otaUploadRefused()   { return s_otaRefused; }
+static void otaUploadClear()     { s_otaInstalled = false; s_otaRefused = false; }
 
 void handleOTAUpload(ESP8266WebServer& server) {
   HTTPUpload& upload = server.upload();
