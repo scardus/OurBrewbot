@@ -49,6 +49,7 @@ void handleBoardInfo(ESP8266WebServer& server);
 void handleStatus(ESP8266WebServer& server);
 void handleProbes(ESP8266WebServer& server);
 void handleHealth(ESP8266WebServer& server);
+void handleLogs(ESP8266WebServer& server);
 void handleReset(ESP8266WebServer& server);
 void handleReboot(ESP8266WebServer& server);
 void handleOTAPage(ESP8266WebServer& server);

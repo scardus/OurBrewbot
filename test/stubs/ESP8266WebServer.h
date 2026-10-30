@@ -152,6 +152,10 @@ public:
     recordSend(code, contentType);
     httpRespAppend(body, body ? strlen(body) : 0);
   }
+  void send(int code, const char* contentType, const char* body, size_t len) {
+    recordSend(code, contentType);
+    httpRespAppend(body, len);
+  }
   void send(int code, const char* contentType, const __FlashStringHelper* body) {
     const char* s = reinterpret_cast<const char*>(body);
     recordSend(code, contentType);

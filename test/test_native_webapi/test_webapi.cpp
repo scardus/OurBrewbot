@@ -67,7 +67,33 @@ uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
 uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
 
 // ---- no-op / recording doubles for the modules not compiled in ----
-void logMsgImpl(uint8_t, PGM_P, ...) {}
+// Counts log calls, so a test can check a route adds no "[API]" line
+static int s_logCalls = 0;
+void logMsgImpl(uint8_t, PGM_P, ...) { s_logCalls++; }
+
+// Log.cpp's recent-lines ring (GET /logs). Scripted: a test says what the
+// ring holds and checks what the handler asked it for.
+static uint32_t    s_ringLastSeq     = 0;
+static uint32_t    s_ringReadAfter   = 0;
+static size_t      s_ringReadBufSize = 0;
+static const char* s_ringText        = "";
+static uint32_t    s_ringNext        = 0;
+static uint32_t    s_ringLost        = 0;
+static bool        s_ringMore        = false;
+size_t logRingRead(uint32_t after, char* buf, size_t bufSize,
+                   uint32_t& next, uint32_t& lost, bool& more) {
+  s_ringReadAfter   = after;
+  s_ringReadBufSize = bufSize;
+  size_t n = strlen(s_ringText);
+  if (n > bufSize) n = bufSize;
+  memcpy(buf, s_ringText, n);
+  next = s_ringNext;
+  lost = s_ringLost;
+  more = s_ringMore;
+  return n;
+}
+uint32_t logRingLastSeq() { return s_ringLastSeq; }
+uint32_t logBootId()      { return 0x0BADF00D; }
 void logInit() {}
 
 // Mqtt.cpp
@@ -244,6 +270,14 @@ void setUp(void) {
   }
 
   srv.clearArgs();
+  s_logCalls        = 0;
+  s_ringLastSeq     = 0;
+  s_ringReadAfter   = 0;
+  s_ringReadBufSize = 0;
+  s_ringText        = "";
+  s_ringNext        = 0;
+  s_ringLost        = 0;
+  s_ringMore        = false;
   srv.setMethod(HTTP_GET);
   srv.setUri("/");
   srv.setOrigin("");
@@ -2554,6 +2588,126 @@ static void test_update_check_endpoint_runs_a_check_and_returns_the_result(void)
   TEST_ASSERT_FALSE(doc["UpdateAvailable"].as<bool>());
 }
 
+// ============================================================
+// GET /logs - the admin page's live log drawer
+//
+// The ring itself is tested in the Log suite; here logRingRead() is a
+// scripted double, so these check only what the handler asks it for and how
+// it turns the answer into a reply.
+// ============================================================
+
+static void getLogs(const char* boot, const char* after) {
+  srv.clearArgs();
+  if (boot)  srv.setArg("boot", boot);
+  if (after) srv.setArg("after", after);
+  request(HTTP_GET, "/logs");
+}
+
+// Polling every second must not fill the log with "[API] GET /logs" lines
+static void test_logs_polling_adds_no_log_line(void) {
+  s_logCalls = 0;
+  request(HTTP_GET, "/health");
+  TEST_ASSERT_TRUE(s_logCalls > 0);   // proves the counter sees an [API] line
+
+  s_logCalls = 0;
+  httpRespReset();
+  getLogs(nullptr, nullptr);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(0, s_logCalls);
+}
+
+// The page's first poll has no boot ID yet: everything kept is sent
+static void test_logs_first_poll_starts_from_the_oldest_line(void) {
+  s_ringLastSeq = 10;
+  getLogs(nullptr, nullptr);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT32(0, s_ringReadAfter);
+  TEST_ASSERT_EQUAL_STRING("0BADF00D", httpRespHeader("X-Log-Boot"));
+}
+
+static void test_logs_same_boot_carries_on_after_the_cursor(void) {
+  s_ringLastSeq = 10;
+  getLogs("0BADF00D", "5");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT32(5, s_ringReadAfter);
+}
+
+// The controller restarted since the page's last poll: its old cursor means
+// nothing in this boot, so start again from the oldest line
+static void test_logs_different_boot_starts_again_from_the_oldest_line(void) {
+  s_ringLastSeq = 10;
+  getLogs("12345678", "5");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT32(0, s_ringReadAfter);
+}
+
+static void test_logs_malformed_cursor_is_refused(void) {
+  const char* bad[] = { "abc", "12a", "-1", "+5", " 5", "5 ", "12345678901", "4294967296" };
+  s_ringLastSeq = 0xFFFFFFFF;
+  for (const char* after : bad) {
+    httpRespReset();
+    s_ringReadAfter = 0xDEAD;
+    getLogs("0BADF00D", after);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(400, g_httpResp.code, after);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0xDEAD, s_ringReadAfter, after);
+  }
+}
+
+static void test_logs_largest_cursor_is_accepted(void) {
+  s_ringLastSeq = 0xFFFFFFFF;
+  getLogs("0BADF00D", "4294967295");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, s_ringReadAfter);
+}
+
+// Only a broken page asks for a line this boot hasn't logged yet
+static void test_logs_cursor_beyond_the_newest_line_is_refused(void) {
+  s_ringLastSeq = 10;
+  getLogs("0BADF00D", "11");
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+
+  httpRespReset();
+  getLogs("0BADF00D", "10");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+}
+
+static void test_logs_reply_carries_the_lines_and_where_to_carry_on(void) {
+  s_ringLastSeq = 10;
+  s_ringText = "6 [000:00:01] one\n4 [000:00:02] two\n";
+  s_ringNext = 7;
+  s_ringLost = 3;
+  s_ringMore = true;
+  getLogs("0BADF00D", "3");
+
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, g_httpResp.sendCount);
+  TEST_ASSERT_EQUAL_STRING("text/plain; charset=utf-8", g_httpResp.contentType);
+  TEST_ASSERT_EQUAL_STRING("6 [000:00:01] one\n4 [000:00:02] two\n", g_httpResp.body);
+  TEST_ASSERT_EQUAL_STRING("no-store", httpRespHeader("Cache-Control"));
+  TEST_ASSERT_EQUAL_STRING("7", httpRespHeader("X-Log-Next"));
+  TEST_ASSERT_EQUAL_STRING("3", httpRespHeader("X-Log-Lost"));
+  TEST_ASSERT_EQUAL_STRING("1", httpRespHeader("X-Log-More"));
+  // Other websites must not be able to read the log
+  TEST_ASSERT_EQUAL_STRING("", httpRespHeader("Access-Control-Allow-Origin"));
+}
+
+// The whole of s_chunkBuf is offered to the ring
+static void test_logs_reply_uses_the_whole_response_buffer(void) {
+  getLogs(nullptr, nullptr);
+  TEST_ASSERT_EQUAL_UINT(sizeof(s_chunkBuf), s_ringReadBufSize);
+}
+
+// An empty reply is a normal answer, not an error
+static void test_logs_nothing_new_is_an_empty_200(void) {
+  s_ringLastSeq = 10;
+  s_ringNext = 10;
+  getLogs("0BADF00D", "10");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT(0, g_httpResp.bodyLen);
+  TEST_ASSERT_EQUAL_STRING("10", httpRespHeader("X-Log-Next"));
+  TEST_ASSERT_EQUAL_STRING("0", httpRespHeader("X-Log-More"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -2761,6 +2915,17 @@ int main(int, char**) {
   RUN_TEST(test_controller_post_rejects_malformed_json_and_changes_nothing);
   RUN_TEST(test_update_check_endpoint_runs_a_check_and_returns_the_result);
   RUN_TEST(test_controller_saves_and_reports_the_crash_reports_switch);
+
+  RUN_TEST(test_logs_polling_adds_no_log_line);
+  RUN_TEST(test_logs_first_poll_starts_from_the_oldest_line);
+  RUN_TEST(test_logs_same_boot_carries_on_after_the_cursor);
+  RUN_TEST(test_logs_different_boot_starts_again_from_the_oldest_line);
+  RUN_TEST(test_logs_malformed_cursor_is_refused);
+  RUN_TEST(test_logs_largest_cursor_is_accepted);
+  RUN_TEST(test_logs_cursor_beyond_the_newest_line_is_refused);
+  RUN_TEST(test_logs_reply_carries_the_lines_and_where_to_carry_on);
+  RUN_TEST(test_logs_reply_uses_the_whole_response_buffer);
+  RUN_TEST(test_logs_nothing_new_is_an_empty_200);
 
   return UNITY_END();
 }
