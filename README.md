@@ -31,7 +31,7 @@ New/Updated Features:
 - Home Assistant MQTT Discovery & Control - auto-creates HA entities with no YAML needed (optional, per-broker toggle)
 - LittleFS file browser in admin page for inspecting config files
 - BLE AT command console for debugging HM-10 Bluetooth module
-- Live log viewer - the **Log** button on the admin page opens a drawer showing the controller's log as it happens, with no syslog server or MQTT broker needed. It starts with the last few seconds of lines and keeps collecting while the admin page is visible, even with the drawer closed. It is a live view, not a stored log: lines can be missed if the browser falls behind or the page is hidden, and the drawer says when that happens
+- Live log viewer - the **Log** bar at the bottom of the admin page opens a drawer showing the controller's log as it happens, with no syslog server or MQTT broker needed. It starts with the last few seconds of lines and keeps collecting while the admin page is visible, even with the drawer closed. It is a live view, not a stored log: lines can be missed if the browser falls behind or the page is hidden, and the drawer says when that happens
 - Rebuilt Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation
 - Daily firmware update check — tells you (admin page, syslog, Home Assistant) when a newer release is out
 - Crash reports — after a crash or watchdog reset, the crash details are sent to ourbrewbot.com to help fix bugs

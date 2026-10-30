@@ -457,30 +457,35 @@ button.stepact.del:hover:not(:disabled) {
 }
 
 /* ---- Log drawer ---- */
-#logbtn {
-  margin-left: auto;
-}
-#logbtn.open {
-  background: #0f3460;
-  border-bottom: 2px solid #53d8fb;
-  color: #fff;
-}
+/* Closed, only its header bar shows at the bottom of the screen */
 #logdrawer {
-  display: none;
+  display: flex;
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 35vh;
   flex-direction: column;
   background: #111;
   border-top: 1px solid #444;
   z-index: 999;
 }
 #logdrawer.open {
-  display: flex;
+  height: 35vh;
+}
+#logdrawer .logopt,
+#loglines {
+  display: none;
+}
+#logdrawer.open .logopt {
+  display: inline-block;
+}
+#logdrawer.open #loglines {
+  display: block;
 }
 /* Room at the bottom of the page so the drawer doesn't hide anything */
+body {
+  padding-bottom: 40px;
+}
 body.logopen {
   padding-bottom: calc(35vh + 8px);
 }
@@ -557,7 +562,6 @@ body.logopen {
     <button onclick="showTab(5)" id="tb5">Smart Plugs</button>
     <button onclick="showTab(6)" id="tb6">Reporting</button>
     <button onclick="showTab(7)" id="tb7">System Settings</button>
-    <button onclick="logToggle()" id="logbtn" aria-expanded="false" aria-controls="logdrawer">Log</button>
   </div>
   <div id="t0" class="tab active"><div class="card"><p style="color:#888">Loading...</p></div></div>
   <div id="t1" class="tab"><div class="card"><p style="color:#888">Loading...</p></div></div>
@@ -571,15 +575,15 @@ body.logopen {
   <!-- Outside the tabs, so loadTab() never rebuilds it -->
   <div id="logdrawer" role="region" aria-label="Controller log">
     <div id="loghead">
+      <button id="logbtn" onclick="logToggle()" aria-expanded="false" aria-controls="loglines">&#9650; Log</button>
       <span id="logstate">Connecting...</span>
-      <select id="loglevel" onchange="logFilter()" title="Which log lines to show">
+      <select id="loglevel" class="logopt" onchange="logFilter()" title="Which log lines to show">
         <option value="7">Everything</option>
         <option value="5">Notices and worse</option>
         <option value="4">Warnings and worse</option>
       </select>
-      <button id="logpause" onclick="logTogglePause()">Pause</button>
-      <button onclick="logClear()">Clear</button>
-      <button onclick="logToggle()">Close</button>
+      <button id="logpause" class="logopt" onclick="logTogglePause()">Pause</button>
+      <button class="logopt" onclick="logClear()">Clear</button>
     </div>
     <div id="loglines" class="max7"></div>
   </div>
@@ -2217,13 +2221,14 @@ function logAccept(r, text) {
   logSchedule(r.headers.get('X-Log-More') == '1' ? LOG_MORE_MS : logInterval());
 }
 
-// Open or close the drawer. Lines are collected either way.
+// Open or close the drawer. Closed, only its header bar shows at the bottom
+// of the screen. Lines are collected either way.
 function logToggle() {
   logOpen = !logOpen;
   byId('logdrawer').className = logOpen ? 'open' : '';
   document.body.classList.toggle('logopen', logOpen);
   var btn = byId('logbtn');
-  btn.className = logOpen ? 'open' : '';
+  btn.innerHTML = logOpen ? '&#9660; Log' : '&#9650; Log';
   btn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
   if (logOpen) {
     var box = byId('loglines');
