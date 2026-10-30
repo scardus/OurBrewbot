@@ -58,5 +58,6 @@ void holdPlugsOff(bool hold);
 // Get current state of a plug (on/off)
 bool getPlugState(uint8_t plugIndex);
 
-// RF transmission via RCSwitch
-void rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol);
+// RF transmission via RCSwitch. Returns false, sending nothing, when the
+// settings fail checkRfSettings() (Config.h): the burst would trip the watchdog.
+bool rfTransmit(uint32_t code, uint8_t bits, uint16_t delayUs, uint8_t protocol);

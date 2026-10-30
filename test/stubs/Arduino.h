@@ -102,6 +102,7 @@ public:
     return true;
   }
   bool equalsIgnoreCase(const char* other) const { return strcasecmp(buf_, other) == 0; }
+  bool equalsIgnoreCase(const String& other) const { return equalsIgnoreCase(other.c_str()); }
   bool startsWith(const char* prefix) const { return strncasecmp(buf_, prefix, strlen(prefix)) == 0; }
 
   // ---- added for WebAPI.cpp ----

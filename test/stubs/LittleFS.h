@@ -56,6 +56,19 @@ static FsEntry g_fsEntries[FS_MAX_FILES];
 static bool    g_fsFull        = false;   // open-for-write always fails
 static long    g_fsWriteLimit  = -1;      // bytes still accepted; -1 = unlimited
 static int     g_fsWriteCount  = 0;       // files opened for writing since the last reset
+// Mounting (mountFileSystem() in Config.cpp)
+static int     g_fsMountFailures = 0;     // the next N begin() calls fail
+static int     g_fsBeginCalls    = 0;
+static int     g_fsFormats       = 0;
+static bool    g_fsFormatFails   = false;
+static bool    g_fsAutoFormat    = true;  // the real library's default
+
+// The real LittleFSConfig's only setting that the firmware uses
+class LittleFSConfig {
+public:
+  explicit LittleFSConfig(bool autoFormat = true) : autoFormat(autoFormat) {}
+  bool autoFormat;
+};
 
 class File {
   FsEntry* e_   = nullptr;
@@ -159,7 +172,29 @@ class LittleFSStub {
     return nullptr;   // out of slots
   }
 public:
-  bool begin() { return true; }
+  bool setConfig(const LittleFSConfig& cfg) { g_fsAutoFormat = cfg.autoFormat; return true; }
+
+  // Fails while fsTestSetMountFailures() has failures left. Unlike the real
+  // library it never formats by itself, so tests check g_fsAutoFormat instead.
+  bool begin() {
+    g_fsBeginCalls++;
+    if (g_fsMountFailures > 0) {
+      g_fsMountFailures--;
+      return false;
+    }
+    return true;
+  }
+
+  // Erases every file
+  bool format() {
+    g_fsFormats++;
+    if (g_fsFormatFails) return false;
+    for (int i = 0; i < FS_MAX_FILES; i++) {
+      g_fsEntries[i].used = false;
+      g_fsEntries[i].len  = 0;
+    }
+    return true;
+  }
 
   bool exists(const char* path) { return find(path) != nullptr; }
 
@@ -220,6 +255,11 @@ static void fsTestReset() {
   g_fsFull       = false;
   g_fsWriteLimit = -1;
   g_fsWriteCount = 0;
+  g_fsMountFailures = 0;
+  g_fsBeginCalls    = 0;
+  g_fsFormats       = 0;
+  g_fsFormatFails   = false;
+  g_fsAutoFormat    = true;
 }
 
 // Place a file directly, bypassing the config writers - this is how tests
@@ -244,6 +284,8 @@ static const char* fsTestRead(const char* path) {
 }
 
 static void fsTestSetFull(bool full)      { g_fsFull = full; }
+static void fsTestSetMountFailures(int n) { g_fsMountFailures = n; }
+static void fsTestSetFormatFails(bool f)  { g_fsFormatFails = f; }
 static void fsTestSetWriteLimit(long n)   { g_fsWriteLimit = n; }
 
 // How many files have been opened for writing since fsTestReset() or the last

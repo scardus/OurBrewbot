@@ -22,6 +22,8 @@
  */
 
 #include "MqttParse.h"
+#include <cmath>
+#include <cstdlib>
 
 bool parseMqttCommandTopic(const char* topic, const char* baseTopic,
                             char* scope, size_t scopeSize,
@@ -49,8 +51,29 @@ bool parseMqttCommandTopic(const char* topic, const char* baseTopic,
 }
 
 int fermenterIndexFromScope(const char* scope) {
+  // Exactly "Fermenter" and one digit. atoi() used to read "FermenterX" and
+  // "Fermenter0abc" as fermenter 0.
   if (strncmp(scope, "Fermenter", 9) != 0) return -1;
-  int idx = atoi(scope + 9);
-  if (idx < 0 || idx >= MAX_FERMENTERS) return -1;
+  char digit = scope[9];
+  if (digit < '0' || digit > '9' || scope[10] != '\0') return -1;
+  int idx = digit - '0';
+  if (idx >= MAX_FERMENTERS) return -1;
   return idx;
+}
+
+bool parseMqttNumber(const char* text, float* out) {
+  // strtof() reads as much of the text as it can, so check where it stopped:
+  // only spaces may follow the number. atof() turned "abc" into 0, a valid
+  // hysteresis or compressor delay.
+  char* end = nullptr;
+  float value = strtof(text, &end);
+  if (end == text) return false;          // no number at all
+  while (*end == ' ') end++;
+  if (*end != '\0') return false;         // something after the number
+  // strtof() also reads "nan" and "inf". NaN passes every range check, as any
+  // comparison with it is false, and a NaN floor or ceiling meant heating or
+  // cooling never stopped.
+  if (!std::isfinite(value)) return false;
+  *out = value;
+  return true;
 }

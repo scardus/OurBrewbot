@@ -69,6 +69,8 @@ class ESP8266WebServer {
   Arg        args_[WEB_TEST_MAX_ARGS] = {};
   HTTPMethod method_ = HTTP_GET;
   char       uri_[64] = {0};
+  char       origin_[64] = {0};
+  char       host_[64] = "192.168.0.207";
   HTTPUpload upload_{};
 
 public:
@@ -105,6 +107,17 @@ public:
   void setBody(const char* json) { setArg("plain", json); }
   void clearArgs() { for (int i = 0; i < WEB_TEST_MAX_ARGS; i++) args_[i].used = false; }
 
+  // Request headers. Only Origin is read by the firmware (with Host, which
+  // the real class keeps separately), so one slot is enough.
+  void setOrigin(const char* origin) {
+    strncpy(origin_, origin ? origin : "", sizeof(origin_) - 1);
+    origin_[sizeof(origin_) - 1] = '\0';
+  }
+  void setHost(const char* host) {
+    strncpy(host_, host ? host : "", sizeof(host_) - 1);
+    host_[sizeof(host_) - 1] = '\0';
+  }
+
   HTTPUpload& testUpload() { return upload_; }
 
   // ---- request surface (production-facing) ----
@@ -120,6 +133,12 @@ public:
 
   HTTPMethod  method() { return method_; }
   String      uri()    { return String(uri_); }
+  // A header that wasn't sent is an empty String, as in the real class
+  String header(const char* name) {
+    return (strcmp(name, "Origin") == 0) ? String(origin_) : String("");
+  }
+  String hostHeader() { return String(host_); }
+  template <typename... Args> void collectHeaders(const Args&...) {}
   WiFiClient  client() { return WiFiClient(); }
   HTTPUpload& upload() { return upload_; }
 

@@ -350,6 +350,36 @@ void test_getProfileTargetTemp_nonramp_returns_endTemp_directly(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, getProfileTargetTemp(F));
 }
 
+// The step types whose WebUI row has no Start Temp hold End Temp from hour 0.
+// The WebUI keeps a greyed-out Start Temp (usually 0) and Days, and these used
+// to ramp from that hidden 0 C up to End Temp.
+void test_getProfileTargetTemp_holds_endTemp_for_types_without_a_start_temp(void) {
+  g_fermenters[F].profileRunning = true;
+  g_fermenters[F].profileNo      = 1;
+  g_fermenters[F].currentStep    = 0;
+  g_fermenters[F].currentHour    = 0;
+  const uint8_t holdTypes[] = { STEP_SPECIFIC_GRAVITY, STEP_ATTENUATION, STEP_TEMP_REACHED,
+                                STEP_SG_REACHED, STEP_ATTN_REACHED };
+  for (uint8_t t : holdTypes) {
+    g_profileSteps[0] = makeStep(t, /*days=*/7.0f, /*start=*/0.0f, /*end=*/20.0f, 1.010f);
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 20.0f, getProfileTargetTemp(F), "step type holds End Temp");
+  }
+}
+
+// The four types that show Start Temp keep ramping
+void test_getProfileTargetTemp_ramps_for_types_with_a_start_temp(void) {
+  g_fermenters[F].profileRunning = true;
+  g_fermenters[F].profileNo      = 1;
+  g_fermenters[F].currentStep    = 0;
+  g_fermenters[F].currentHour    = 24;   // halfway through a 2-day step
+  const uint8_t rampTypes[] = { STEP_TEMP_OVER_TIME, STEP_TIME_OVER_TEMP,
+                                STEP_TIME_AND_SG, STEP_TIME_AND_ATTN };
+  for (uint8_t t : rampTypes) {
+    g_profileSteps[0] = makeStep(t, /*days=*/2.0f, /*start=*/10.0f, /*end=*/20.0f, 1.010f);
+    TEST_ASSERT_FLOAT_WITHIN_MESSAGE(0.01f, 15.0f, getProfileTargetTemp(F), "step type ramps");
+  }
+}
+
 // ---- countProfileSteps ----
 
 void test_countProfileSteps_out_of_range_slot_returns_zero(void) {
@@ -828,6 +858,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_getProfileTargetTemp_none_past_last_step);
   RUN_TEST(test_getProfileTargetTemp_ramp_interpolates_and_clamps);
   RUN_TEST(test_getProfileTargetTemp_nonramp_returns_endTemp_directly);
+  RUN_TEST(test_getProfileTargetTemp_holds_endTemp_for_types_without_a_start_temp);
+  RUN_TEST(test_getProfileTargetTemp_ramps_for_types_with_a_start_temp);
 
   RUN_TEST(test_countProfileSteps_out_of_range_slot_returns_zero);
   RUN_TEST(test_countProfileSteps_all_empty_returns_zero);

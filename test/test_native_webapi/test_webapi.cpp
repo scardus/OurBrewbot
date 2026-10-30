@@ -109,7 +109,12 @@ void handleAdmin(ESP8266WebServer&) {}
 // SmartPlugs.cpp - the RF layer. rfTransmit is recorded so the plug-test
 // endpoint can be checked without an RCSwitch.
 static int s_rfTransmits = 0;
-void rfTransmit(uint32_t, uint8_t, uint16_t, uint8_t) { s_rfTransmits++; }
+static bool s_rfRefuses = false;   // true: act as if the RF settings were refused
+bool rfTransmit(uint32_t, uint8_t, uint16_t, uint8_t) {
+  if (s_rfRefuses) return false;
+  s_rfTransmits++;
+  return true;
+}
 bool g_rfSniffActive = false;
 
 // OurBrewbot.cpp - restartDevice() sends the mDNS goodbye, then restarts.
@@ -199,6 +204,7 @@ void setUp(void) {
   s_importActive    = false;   // Config.cpp's config-import state
   s_importLastWrite = 0;
   s_rfTransmits = 0;
+  s_rfRefuses   = false;
   s_forceOffs   = 0;
   s_allPlugsOffs = 0;
   s_offCodeAtAllPlugsOff = 0;
@@ -235,6 +241,8 @@ void setUp(void) {
   srv.clearArgs();
   srv.setMethod(HTTP_GET);
   srv.setUri("/");
+  srv.setOrigin("");
+  srv.setHost("192.168.0.207");
 }
 
 void tearDown(void) {}
@@ -544,11 +552,17 @@ static void test_send_err_envelope_carries_the_code(void) {
   TEST_ASSERT_EQUAL_STRING("{\"status\":\"error\",\"msg\":\"Bad thing\"}", g_httpResp.body);
 }
 
-static void test_cors_headers_are_set(void) {
-  sendCORSHeaders(srv);
-  TEST_ASSERT_EQUAL_STRING("*", httpRespHeader("Access-Control-Allow-Origin"));
-  TEST_ASSERT_EQUAL_STRING("GET, POST, OPTIONS", httpRespHeader("Access-Control-Allow-Methods"));
-  TEST_ASSERT_EQUAL_STRING("Content-Type", httpRespHeader("Access-Control-Allow-Headers"));
+// "Access-Control-Allow-Origin: *" let any website read the API (the MQTT
+// password included, through /fs/file) from a browser on the same network.
+// The WebUI is served by the controller itself, so it never needed it.
+static void test_no_response_allows_other_websites_to_read_it(void) {
+  sendJsonResponse(srv, "{}", 200);
+  TEST_ASSERT_EQUAL_STRING("", httpRespHeader("Access-Control-Allow-Origin"));
+  httpRespReset();
+  JsonDocument doc;
+  doc["a"] = 1;
+  sendJsonDoc(srv, doc);
+  TEST_ASSERT_EQUAL_STRING("", httpRespHeader("Access-Control-Allow-Origin"));
 }
 
 static void test_parse_json_body_accepts_valid_json(void) {
@@ -1504,7 +1518,9 @@ static void test_smartplug_post_updates_a_slot(void) {
 
 // Zero bits would make RCSwitch transmit nothing at all.
 static void test_smartplug_post_ignores_an_impossible_bit_count(void) {
-  g_smartPlugs[0].bits = 24;
+  g_smartPlugs[0].protocol    = 1;
+  g_smartPlugs[0].bits        = 24;
+  g_smartPlugs[0].delayLength = 410;
   postBody("{\"index\":0,\"bits\":0}");
   handleSmartPlugPost(srv);
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
@@ -1607,6 +1623,28 @@ static void test_smartplug_post_ignored_value_does_not_switch_the_plug_off(void)
   TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
 }
 
+// A pulse length long enough for one send to trip the watchdog (3500 us is
+// ~4.5 s with protocol 1) is refused before anything is stored or switched.
+static void test_smartplug_post_refuses_a_pulse_length_that_would_trip_the_watchdog(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"delay\":3500}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("pulse length too long"));
+  TEST_ASSERT_EQUAL_UINT16(410, g_smartPlugs[0].delayLength);
+  TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+}
+
+// rc-switch only knows protocols 1-12 (it quietly sent anything else as 1)
+static void test_smartplug_post_refuses_an_unknown_protocol(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"protocol\":13}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("protocol out of range"));
+  TEST_ASSERT_EQUAL_UINT8(1, g_smartPlugs[0].protocol);
+}
+
 static void test_smartplug_test_transmits_the_selected_code(void) {
   g_smartPlugs[0].onCode  = 0x123456;
   g_smartPlugs[0].offCode = 0xABCDEF;
@@ -1622,6 +1660,17 @@ static void test_smartplug_test_refuses_when_no_code_is_configured(void) {
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
   TEST_ASSERT_TRUE(bodyContains("No code configured"));
   TEST_ASSERT_EQUAL_INT(0, s_rfTransmits);
+}
+
+// A saved plug whose RF settings rfTransmit() refuses: the test says so
+// rather than reporting "RF code sent"
+static void test_smartplug_test_reports_refused_rf_settings(void) {
+  g_smartPlugs[0].onCode = 0x123456;
+  s_rfRefuses = true;
+  postBody("{\"index\":0,\"action\":\"on\"}");
+  handleSmartPlugTest(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("RF settings refused"));
 }
 
 // ============================================================
@@ -1702,6 +1751,49 @@ static void test_ota_upload_chunks_do_not_switch_the_plugs_again(void) {
   TEST_ASSERT_TRUE(s_plugsHeldOff);          // a successful upload ends in a restart
 }
 
+// Fermenter 1 cooling: beer at 30 C over its 20 C ceiling, with its
+// 10-minute compressor delay long past
+static void startCoolingF0(void) {
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    s_state[i]           = STATUS_IDLE;
+    s_lastCoolingStop[i] = 0;
+  }
+  g_fermenterDebugMode = true;
+  g_fermenterDebugOverrides[F0].enabled  = true;
+  g_fermenterDebugOverrides[F0].beerTemp = 30.0f;
+  s_uptimeSec = 3600;
+  processFermenters();
+  TEST_ASSERT_EQUAL_UINT8(STATUS_COOLING, g_fermenters[F0].status);
+}
+
+// The upload switches the cooler off, so the controller must count the
+// compressor delay from then. It used to stay in its cooling state, and a
+// failed upload let the next control pass switch the cooler straight back on.
+static void test_ota_upload_start_puts_a_cooling_fermenter_back_to_idle(void) {
+  startCoolingF0();
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_UINT8(STATUS_IDLE, g_fermenters[F0].status);
+  TEST_ASSERT_EQUAL_UINT32(3600, s_lastCoolingStop[F0]);
+  TEST_ASSERT_TRUE(g_fermenters[F0].power);   // only the control state changes
+}
+
+static void test_a_failed_ota_upload_waits_out_the_compressor_delay(void) {
+  startCoolingF0();
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_ABORTED;
+  handleOTAUpload(srv);
+
+  s_uptimeSec += 30;                 // the next control pass after the failure
+  processFermenters();
+  TEST_ASSERT_EQUAL_UINT8(STATUS_IDLE, g_fermenters[F0].status);
+
+  s_uptimeSec += 10 * 60;            // the 10-minute delay has passed
+  processFermenters();
+  TEST_ASSERT_EQUAL_UINT8(STATUS_COOLING, g_fermenters[F0].status);
+}
+
 // The connection dropped: no restart is coming, so control takes over again
 static void test_an_aborted_ota_upload_releases_the_plugs(void) {
   srv.testUpload().status = UPLOAD_FILE_START;
@@ -1738,6 +1830,56 @@ static void request(HTTPMethod method, const char* uri) {
   srv.setMethod(method);
   srv.setUri(uri);
   dispatchApiRequest(srv);
+}
+
+// ---- POSTs from other websites are refused ----
+
+// A page on another site, open in a browser on the LAN, tried to reboot it
+static void test_a_post_from_another_website_is_refused(void) {
+  srv.setOrigin("http://example.com");
+  request(HTTP_POST, "/reboot");
+  TEST_ASSERT_EQUAL_INT(403, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Cross-site request refused"));
+  TEST_ASSERT_EQUAL_INT(0, s_restarts);
+}
+
+// The WebUI's own requests name the controller as their Origin, by its IP
+// address or its .local name - whichever the browser used
+static void test_a_post_from_the_webui_itself_is_accepted(void) {
+  srv.setOrigin("http://192.168.0.207");
+  request(HTTP_POST, "/reboot");
+  TEST_ASSERT_EQUAL_INT(1, s_restarts);
+
+  srv.setHost("ourbrewbot-3c71bf.local");
+  srv.setOrigin("http://OurBrewbot-3C71BF.local");
+  request(HTTP_POST, "/reboot");
+  TEST_ASSERT_EQUAL_INT(2, s_restarts);
+}
+
+// curl, scripts, Home Assistant and the iSpindel send no Origin
+static void test_a_post_with_no_origin_is_accepted(void) {
+  request(HTTP_POST, "/reboot");
+  TEST_ASSERT_EQUAL_INT(1, s_restarts);
+}
+
+// Reading needs no protection here: without the CORS header a browser won't
+// show another site the reply
+static void test_a_get_from_another_website_is_answered(void) {
+  srv.setOrigin("http://example.com");
+  request(HTTP_GET, "/reboot");
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+}
+
+// A firmware upload from another website: no plugs switched, nothing written
+static void test_an_upload_from_another_website_is_ignored(void) {
+  srv.setMethod(HTTP_POST);
+  srv.setOrigin("http://example.com");
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_INT(0, s_allPlugsOffs);
+  TEST_ASSERT_FALSE(s_plugsHeldOff);
 }
 
 static void test_get_reboot_asks_for_confirmation_and_does_not_restart(void) {
@@ -2268,7 +2410,7 @@ int main(int, char**) {
   // helpers
   RUN_TEST(test_send_ok_envelope);
   RUN_TEST(test_send_err_envelope_carries_the_code);
-  RUN_TEST(test_cors_headers_are_set);
+  RUN_TEST(test_no_response_allows_other_websites_to_read_it);
   RUN_TEST(test_parse_json_body_accepts_valid_json);
   RUN_TEST(test_parse_json_body_rejects_garbage);
   RUN_TEST(test_get_valid_index_accepts_an_in_range_value);
@@ -2361,8 +2503,11 @@ int main(int, char**) {
   RUN_TEST(test_smartplug_post_switches_off_for_any_rf_setting_change);
   RUN_TEST(test_smartplug_post_leaves_the_plug_alone_when_switching_is_unchanged);
   RUN_TEST(test_smartplug_post_ignored_value_does_not_switch_the_plug_off);
+  RUN_TEST(test_smartplug_post_refuses_a_pulse_length_that_would_trip_the_watchdog);
+  RUN_TEST(test_smartplug_post_refuses_an_unknown_protocol);
   RUN_TEST(test_smartplug_test_transmits_the_selected_code);
   RUN_TEST(test_smartplug_test_refuses_when_no_code_is_configured);
+  RUN_TEST(test_smartplug_test_reports_refused_rf_settings);
   RUN_TEST(test_rf_sniffer_poll_switches_the_receiver_on);
   RUN_TEST(test_rf_sniffer_stays_on_while_the_page_keeps_polling);
   RUN_TEST(test_rf_sniffer_switches_the_receiver_off_10s_after_the_last_poll);
@@ -2374,6 +2519,13 @@ int main(int, char**) {
   RUN_TEST(test_ota_upload_start_switches_every_plug_off_and_holds_them);
   RUN_TEST(test_ota_upload_chunks_do_not_switch_the_plugs_again);
   RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
+  RUN_TEST(test_ota_upload_start_puts_a_cooling_fermenter_back_to_idle);
+  RUN_TEST(test_a_failed_ota_upload_waits_out_the_compressor_delay);
+  RUN_TEST(test_a_post_from_another_website_is_refused);
+  RUN_TEST(test_a_post_from_the_webui_itself_is_accepted);
+  RUN_TEST(test_a_post_with_no_origin_is_accepted);
+  RUN_TEST(test_a_get_from_another_website_is_answered);
+  RUN_TEST(test_an_upload_from_another_website_is_ignored);
   RUN_TEST(test_get_reboot_asks_for_confirmation_and_does_not_restart);
   RUN_TEST(test_post_reboot_restarts);
   RUN_TEST(test_get_reset_with_target_erases_nothing);

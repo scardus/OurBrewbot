@@ -89,6 +89,8 @@ void setUp(void) {
   s_importActive    = false;
   s_importLastWrite = 0;
   s_unsavedFiles    = 0;
+  s_fsMountAttempts = 0;
+  s_fsFormatted     = false;
   s_uptimeSec       = 1000;
   s_lastLog[0]      = '\0';
 }
@@ -1284,6 +1286,58 @@ static void test_a_failed_correction_save_while_loading_is_tried_again(void) {
   TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER_BKP, "\"CeilingTemp\":[22,"));
 }
 
+// ============================================================
+// MOUNTING THE FILESYSTEM - retried before it is formatted
+// ============================================================
+
+static void test_a_normal_mount_keeps_the_settings_and_never_formats(void) {
+  fsTestWrite(FILE_GLOBAL, "{\"Unit\":1}");
+  TEST_ASSERT_TRUE(mountFileSystem());
+  TEST_ASSERT_FALSE(g_fsAutoFormat);         // the library may never format by itself
+  TEST_ASSERT_EQUAL_INT(1, g_fsBeginCalls);
+  TEST_ASSERT_EQUAL_INT(0, g_fsFormats);
+  TEST_ASSERT_TRUE(LittleFS.exists(FILE_GLOBAL));
+}
+
+// One or two bad reads at boot: the settings survive
+static void test_a_failed_mount_is_tried_again_before_formatting(void) {
+  fsTestWrite(FILE_GLOBAL, "{\"Unit\":1}");
+  fsTestSetMountFailures(2);
+  TEST_ASSERT_TRUE(mountFileSystem());
+  TEST_ASSERT_EQUAL_INT(3, g_fsBeginCalls);
+  TEST_ASSERT_EQUAL_INT(0, g_fsFormats);
+  TEST_ASSERT_TRUE(LittleFS.exists(FILE_GLOBAL));
+  logFileSystemBootProblems();
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "mounted at boot on attempt 3 of 3"));
+}
+
+// A new device with blank flash, or a filesystem that really is damaged
+static void test_a_filesystem_that_never_mounts_is_formatted(void) {
+  fsTestWrite(FILE_GLOBAL, "{\"Unit\":1}");
+  fsTestSetMountFailures(3);
+  TEST_ASSERT_TRUE(mountFileSystem());
+  TEST_ASSERT_EQUAL_INT(4, g_fsBeginCalls);   // 3 failures, then once after the format
+  TEST_ASSERT_EQUAL_INT(1, g_fsFormats);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_GLOBAL));
+  logFileSystemBootProblems();
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "was formatted"));
+}
+
+static void test_a_filesystem_that_cannot_be_formatted_reports_failure(void) {
+  fsTestSetMountFailures(3);
+  fsTestSetFormatFails(true);
+  TEST_ASSERT_FALSE(mountFileSystem());
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "unusable"));
+}
+
+// A plain first-time mount has nothing to report
+static void test_a_normal_mount_logs_no_boot_problem(void) {
+  TEST_ASSERT_TRUE(mountFileSystem());
+  s_lastLog[0] = '\0';
+  logFileSystemBootProblems();
+  TEST_ASSERT_EQUAL_STRING("", s_lastLog);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -1397,6 +1451,13 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_failed_save_is_tried_again_by_the_periodic_save);
   RUN_TEST(test_a_save_that_fails_after_the_backup_is_tried_again);
   RUN_TEST(test_a_failed_tilt_save_is_tried_again_by_the_periodic_save);
+
+  // mounting the filesystem
+  RUN_TEST(test_a_normal_mount_keeps_the_settings_and_never_formats);
+  RUN_TEST(test_a_failed_mount_is_tried_again_before_formatting);
+  RUN_TEST(test_a_filesystem_that_never_mounts_is_formatted);
+  RUN_TEST(test_a_filesystem_that_cannot_be_formatted_reports_failure);
+  RUN_TEST(test_a_normal_mount_logs_no_boot_problem);
 
   // missing or damaged copies at load
   RUN_TEST(test_loading_a_good_pair_leaves_the_file_alone);

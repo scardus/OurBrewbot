@@ -200,6 +200,22 @@ void switchOffAll() {
 }
 
 // ============================================================
+// IDLE ALL
+// ============================================================
+
+void idleAllFermenters() {
+  // Called just after every plug has been forced off. Without it a fermenter
+  // that was cooling stayed in its cooling state, so if a firmware upload
+  // failed the next control pass switched the compressor straight back on,
+  // inside its compressor delay. goIdle() records the stop, so the delay is
+  // counted from now. Power and settings are left as they are.
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    g_fermenters[i].status = STATUS_IDLE;
+    goIdle(i);
+  }
+}
+
+// ============================================================
 // ALARM CHECKING
 // ============================================================
 
@@ -385,11 +401,14 @@ const char* getFermenterStatusStr(uint8_t status) {
 bool validateFermenterField(uint8_t idx, const char* key, float value, const char** errMsg) {
   if (errMsg) *errMsg = nullptr;
 
+  // Every range test below is "!(in range)" so a NaN fails it (see
+  // checkTempBand() in Config.h)
+
   // The ceiling, floor and hysteresis are checked as a set by checkTempBand()
   // (Config.h): the new value together with the two stored ones.
   if (strcmp(key, "ceiling_temperature") == 0 || strcmp(key, "floor_temperature") == 0) {
     // Checked here first so MQTT keeps its one message for either setting
-    if (value < TEMP_SETTING_MIN_C || value > TEMP_SETTING_MAX_C) {
+    if (!(value >= TEMP_SETTING_MIN_C && value <= TEMP_SETTING_MAX_C)) {
       if (errMsg) *errMsg = "temperature out of range (-20 to 50)";
       return false;
     }
@@ -399,12 +418,12 @@ bool validateFermenterField(uint8_t idx, const char* key, float value, const cha
   } else if (strcmp(key, "hysteresis") == 0) {
     if (!checkTempBand(g_fermenters[idx].ceilingTemp, g_fermenters[idx].floorTemp, value, errMsg)) return false;
   } else if (strcmp(key, "compressor_delay") == 0) {
-    if (value < 0.0f || value > 1440.0f) {
+    if (!(value >= 0.0f && value <= 1440.0f)) {
       if (errMsg) *errMsg = "compressor delay out of range (0 to 1440 min)";
       return false;
     }
   } else if (strcmp(key, "og") == 0 || strcmp(key, "tg") == 0) {
-    if (value < 0.990f || value > 1.200f) {
+    if (!(value >= 0.990f && value <= 1.200f)) {
       if (errMsg) *errMsg = "gravity out of range (0.990 to 1.200)";
       return false;
     }

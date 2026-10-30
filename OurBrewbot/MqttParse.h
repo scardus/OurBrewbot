@@ -37,3 +37,8 @@ bool parseMqttCommandTopic(const char* topic, const char* baseTopic,
 // Extract the fermenter index from a "FermenterN" scope string. Returns -1 if
 // scope doesn't start with "Fermenter" or N is outside [0, MAX_FERMENTERS).
 int fermenterIndexFromScope(const char* scope);
+
+// Read an MQTT payload as a number. Returns false, leaving *out untouched,
+// unless the whole payload is one ordinary number (spaces around it are
+// allowed): text, a number followed by text, "nan" and "inf" are all refused.
+bool parseMqttNumber(const char* text, float* out);

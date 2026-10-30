@@ -721,6 +721,19 @@ bool loadSmartPlugConfig() {
     }
   }
   if (corrected) saveSmartPlugConfig();
+  // RF timing that would trip the watchdog is only logged: rfTransmit() won't
+  // send it, and the file keeps the setting so it can be seen and corrected.
+  for (int i = 0; i < MAX_SMART_PLUGS; i++) {
+    const SmartPlugConfig& p = g_smartPlugs[i];
+    const char* rfErr = nullptr;
+    if ((p.onCode != 0 || p.offCode != 0) &&
+        !checkRfSettings(p.protocol, p.bits, p.delayLength, &rfErr)) {
+      char why[64];
+      strncpy_P(why, rfErr, sizeof(why) - 1);   // the reason is in flash
+      why[sizeof(why) - 1] = '\0';
+      logMsg("[CFG] Plug %d: %s - it won't be sent until this is corrected", i, why);
+    }
+  }
   return true;
 }
 
@@ -972,6 +985,53 @@ bool saveSyslogConfig() {
   JsonDocument doc;
   cfgSaveScalar(doc, &g_syslogConfig, kSyslogFields, CFG_COUNT(kSyslogFields));
   return saveConfigDoc(CFG_FILE_SYSLOG, doc, FILE_SYSLOG, FILE_SYSLOG_BKP);
+}
+
+// ============================================================
+// MOUNT THE FILESYSTEM
+// ============================================================
+
+#define FS_MOUNT_ATTEMPTS 3
+
+// What mountFileSystem() had to do at boot, for logFileSystemBootProblems()
+static uint8_t s_fsMountAttempts = 0;
+static bool    s_fsFormatted     = false;
+
+bool mountFileSystem() {
+  // LittleFS formats itself whenever a mount fails. One bad flash read at boot
+  // would then erase every setting, the plugs' RF codes included, so that is
+  // switched off and the mount is tried a few times first.
+  LittleFS.setConfig(LittleFSConfig(false));
+  for (uint8_t attempt = 1; attempt <= FS_MOUNT_ATTEMPTS; attempt++) {
+    s_fsMountAttempts = attempt;
+    if (LittleFS.begin()) {
+      logMsg("[FS] LittleFS mounted OK (attempt %u)", attempt);
+      return true;
+    }
+    logMsgL(SYSLOG_WARNING, "[FS] LittleFS mount failed (attempt %u of %u)",
+            attempt, FS_MOUNT_ATTEMPTS);
+    if (attempt < FS_MOUNT_ATTEMPTS) delay(100);
+  }
+
+  // Still can't be mounted: a new device with blank flash, or a damaged
+  // filesystem. Format it so the controller can save settings again.
+  s_fsFormatted = true;
+  logMsgL(SYSLOG_ERR, "[FS] LittleFS can't be mounted - formatting it, any saved settings are lost");
+  if (LittleFS.format() && LittleFS.begin()) {
+    logMsg("[FS] LittleFS formatted and mounted");
+    return true;
+  }
+  logMsgL(SYSLOG_ERR, "[FS] LittleFS unusable - running on defaults, nothing can be saved");
+  return false;
+}
+
+void logFileSystemBootProblems() {
+  if (s_fsFormatted) {
+    logMsgL(SYSLOG_ERR, "DEFERRED [FS] LittleFS couldn't be mounted at boot and was formatted - saved settings were lost");
+  } else if (s_fsMountAttempts > 1) {
+    logMsgL(SYSLOG_WARNING, "DEFERRED [FS] LittleFS mounted at boot on attempt %u of %u",
+            s_fsMountAttempts, FS_MOUNT_ATTEMPTS);
+  }
 }
 
 // ============================================================

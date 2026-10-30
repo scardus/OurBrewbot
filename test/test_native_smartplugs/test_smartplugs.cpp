@@ -42,8 +42,9 @@ static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
-// ---- no-op stubs ----
-void logMsgImpl(uint8_t, PGM_P, ...) {}
+// ---- log lines are counted, for the once-a-minute refusal message ----
+static int s_logLines = 0;
+void logMsgImpl(uint8_t, PGM_P, ...) { s_logLines++; }
 
 // The code under test. Also brings the file-static s_plugState[] into scope
 // so the fixture can clear it between tests.
@@ -76,6 +77,8 @@ void setUp(void) {
   test_setMillis(0);
   g_rfSniffActive = false;
   s_plugsHeldOff  = false;
+  s_refusalLogged = false;
+  s_logLines      = 0;
 }
 
 void tearDown(void) {}
@@ -407,6 +410,66 @@ static void test_force_off_ignores_an_out_of_range_index(void) {
 }
 
 // ============================================================
+// RF TIMING LIMITS - a burst long enough to trip the watchdog is never sent
+// ============================================================
+
+// rfBurstMs() = 10 repeats x (bits x pulses per bit + sync pulses) x pulse length
+static void test_burst_time_follows_each_protocols_pulse_counts(void) {
+  TEST_ASSERT_EQUAL_UINT32(524,  rfBurstMs(1, 24, 410));   // the desk device's plugs
+  TEST_ASSERT_EQUAL_UINT32(461,  rfBurstMs(3, 24, 100));   // protocol 3 at its default
+  TEST_ASSERT_EQUAL_UINT32(1738, rfBurstMs(8, 32, 200));   // the longest protocol
+  TEST_ASSERT_EQUAL_UINT32(0,    rfBurstMs(0, 24, 350));   // unknown protocols
+  TEST_ASSERT_EQUAL_UINT32(0,    rfBurstMs(13, 24, 350));
+}
+
+// Protocol 1, 24 bits: 1,563 us is the longest pulse inside the 2 s limit
+static void test_rf_settings_limit_is_two_seconds_a_send(void) {
+  TEST_ASSERT_TRUE (checkRfSettings(1, 24, 1563, nullptr));
+  TEST_ASSERT_FALSE(checkRfSettings(1, 24, 1564, nullptr));
+  TEST_ASSERT_FALSE(checkRfSettings(1, 24, 3500, nullptr));   // a typo for 350
+}
+
+static void test_rf_settings_need_a_known_protocol_bits_and_pulse_length(void) {
+  const char* err = nullptr;
+  TEST_ASSERT_FALSE(checkRfSettings(0, 24, 350, &err));
+  TEST_ASSERT_EQUAL_STRING("RF protocol out of range (1 to 12)", err);
+  TEST_ASSERT_FALSE(checkRfSettings(13, 24, 350, nullptr));
+  TEST_ASSERT_FALSE(checkRfSettings(1, 0, 350, nullptr));
+  TEST_ASSERT_FALSE(checkRfSettings(1, 33, 350, nullptr));
+  TEST_ASSERT_FALSE(checkRfSettings(1, 24, 0, nullptr));
+  TEST_ASSERT_TRUE (checkRfSettings(1, 24, 350, &err));
+  TEST_ASSERT_NULL(err);
+}
+
+// The control loop's switch is refused, and the plug isn't recorded as on
+static void test_a_plug_with_a_too_long_burst_is_never_switched(void) {
+  configurePlug(P);
+  g_smartPlugs[P].protocol    = 1;
+  g_smartPlugs[P].delayLength = 3500;
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
+  TEST_ASSERT_FALSE(getPlugState(P));
+  smartPlugForceOff(P);
+  TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
+  TEST_ASSERT_FALSE(rfTransmit(0x123456, 24, 3500, 1));
+}
+
+// The control loop asks every 10 s, but the reason is logged once a minute
+static void test_a_refused_send_is_logged_once_a_minute(void) {
+  configurePlug(P);
+  g_smartPlugs[P].protocol    = 1;
+  g_smartPlugs[P].delayLength = 3500;
+  for (uint32_t t = 0; t < 60000; t += 10000) {
+    test_setMillis(t);
+    smartPlugSwitch(P, true);
+  }
+  TEST_ASSERT_EQUAL_INT(1, s_logLines);
+  test_setMillis(60000);
+  smartPlugSwitch(P, true);
+  TEST_ASSERT_EQUAL_INT(2, s_logLines);
+}
+
+// ============================================================
 
 int main(int, char**) {
   UNITY_BEGIN();
@@ -445,6 +508,12 @@ int main(int, char**) {
   RUN_TEST(test_a_released_plug_is_switched_again);
   RUN_TEST(test_force_off_still_works_while_held);
   RUN_TEST(test_all_plugs_force_off_reaches_every_plug_with_an_off_code);
+
+  RUN_TEST(test_burst_time_follows_each_protocols_pulse_counts);
+  RUN_TEST(test_rf_settings_limit_is_two_seconds_a_send);
+  RUN_TEST(test_rf_settings_need_a_known_protocol_bits_and_pulse_length);
+  RUN_TEST(test_a_plug_with_a_too_long_burst_is_never_switched);
+  RUN_TEST(test_a_refused_send_is_logged_once_a_minute);
 
   return UNITY_END();
 }
