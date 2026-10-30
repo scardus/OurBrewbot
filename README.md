@@ -271,6 +271,8 @@ When MQTT is enabled and **HA Discovery** is turned on, the device publishes Hom
 
 The broker password is never shown once it is saved: `GET /mqtt` returns `********` in its place, and the admin page's Password field reads "unchanged" — leave it empty to keep the saved password. It is still stored in `jsonMqtt.txt`, so the file browser and **Export Config** files contain it; keep exported files private.
 
+**More than one controller on the same broker:** give each one its own **Base Topic** in the MQTT settings (for example `ourbrewbot-garage` and `ourbrewbot-shed`). Every controller starts with the base topic `ourbrewbot`. Two controllers with the same base topic publish over each other's readings and status, so Home Assistant shows a mix of the two, and with **Allow HA Control** on, both act on the same commands: switching Fermenter 1 on one switches Fermenter 1 on the other.
+
 ### Entity types
 
 Discovery creates one HA device for the controller, one for each fermenter, and one for each configured probe, Tilt and iSpindel. Empty or unassigned slots are skipped.
