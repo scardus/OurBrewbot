@@ -74,7 +74,8 @@ void logInit() {}
 void mqttApplyControlSubscription() {}
 static int s_mqttSettingsChanges = 0;
 void mqttSettingsChanged() { s_mqttSettingsChanges++; }
-void publishAllHaDiscovery() {}
+static int s_haDiscoveryPublishes = 0;
+void publishAllHaDiscovery() { s_haDiscoveryPublishes++; }
 bool forcePublishAllHaDiscovery() { return true; }
 void cleanupAllHaDiscovery() {}
 bool testMqtt() { return true; }
@@ -1334,6 +1335,42 @@ static void test_mqtt_post_with_the_same_settings_keeps_the_connection(void) {
   handleMqttConfigPost(srv);
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
   TEST_ASSERT_EQUAL_INT(0, s_mqttSettingsChanges);
+}
+
+// ---- turning HA Discovery on publishes it at once ----
+
+static void test_mqtt_post_publishes_discovery_when_it_is_turned_on(void) {
+  seedMqttConfig();
+  g_mqttConfig.haDiscovery = false;
+  s_mqttSettingsChanges  = 0;
+  s_haDiscoveryPublishes = 0;
+  postBody("{\"haDiscovery\":true}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, s_haDiscoveryPublishes);
+  TEST_ASSERT_EQUAL_INT(0, s_mqttSettingsChanges);
+}
+
+static void test_mqtt_post_leaves_discovery_to_the_reconnect(void) {
+  // The connection is closed for the new host, and the next one publishes it
+  seedMqttConfig();
+  g_mqttConfig.haDiscovery = false;
+  s_mqttSettingsChanges  = 0;
+  s_haDiscoveryPublishes = 0;
+  postBody("{\"haDiscovery\":true,\"host\":\"new.host\"}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_mqttSettingsChanges);
+  TEST_ASSERT_EQUAL_INT(0, s_haDiscoveryPublishes);
+}
+
+static void test_mqtt_post_with_discovery_already_on_does_not_publish_it(void) {
+  // The WebUI sends every field on each save
+  seedMqttConfig();
+  g_mqttConfig.haDiscovery = true;
+  s_haDiscoveryPublishes = 0;
+  postBody("{\"haDiscovery\":true}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(0, s_haDiscoveryPublishes);
 }
 
 // ---- the broker password is never sent out ----
@@ -2614,6 +2651,9 @@ int main(int, char**) {
   RUN_TEST(test_mqtt_post_rejected_port_changes_nothing);
   RUN_TEST(test_mqtt_post_reconnects_when_a_connection_setting_changes);
   RUN_TEST(test_mqtt_post_with_the_same_settings_keeps_the_connection);
+  RUN_TEST(test_mqtt_post_publishes_discovery_when_it_is_turned_on);
+  RUN_TEST(test_mqtt_post_leaves_discovery_to_the_reconnect);
+  RUN_TEST(test_mqtt_post_with_discovery_already_on_does_not_publish_it);
   RUN_TEST(test_mqtt_get_masks_a_saved_password);
   RUN_TEST(test_mqtt_get_returns_an_empty_password_when_none_is_saved);
   RUN_TEST(test_mqtt_post_with_the_mask_keeps_the_saved_password);

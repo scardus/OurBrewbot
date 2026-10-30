@@ -1669,9 +1669,11 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
     copyText(g_mqttConfig.password, doc["password"].as<const char*>(), sizeof(g_mqttConfig.password));
   }
   if (baseTopic != nullptr)              copyText(g_mqttConfig.baseTopic, baseTopic, sizeof(g_mqttConfig.baseTopic));
+  bool haTurnedOn = false;
   if (!doc["haDiscovery"].isNull()) {
     bool newHa = doc["haDiscovery"];
     if (g_mqttConfig.haDiscovery && !newHa) cleanupAllHaDiscovery();
+    haTurnedOn = !g_mqttConfig.haDiscovery && newHa;
     g_mqttConfig.haDiscovery = newHa;
   }
   if (!doc["allowControl"].isNull()) {
@@ -1680,7 +1682,13 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
   }
   if (!doc["logEnabled"].isNull()) g_mqttConfig.logEnabled = doc["logEnabled"];
   bool saved = saveMqttConfig();
-  if (reconnect) mqttSettingsChanged();
+  if (reconnect) {
+    mqttSettingsChanged();   // the new connection publishes discovery itself
+  } else if (haTurnedOn) {
+    // The open connection carries on, and would otherwise only publish
+    // discovery when it next connects or Home Assistant restarts
+    publishAllHaDiscovery();
+  }
   sendSaveResult(server, saved, F("MQTT config saved"));
 }
 
