@@ -347,6 +347,57 @@ void test_a_marker_left_by_a_power_cut_is_tidied_up(void) {
 }
 
 // ============================================================
+// An original file that can't be read
+// ============================================================
+
+void test_an_unreadable_file_is_saved_with_default_settings(void) {
+  stageOriginal();
+  fsTestWrite("/jsonProbe.txt",     "{not json");
+  fsTestWrite("/jsonProbebkup.txt", "{not json");
+  loadAllConfig();
+
+  TEST_ASSERT_TRUE(originalConfigConverted());
+  TEST_ASSERT_TRUE(reportHas("jsonProbe.txt could not be read - its settings start on defaults"));
+  // Saved in OurBrewbot's format, not left for the loader to misread
+  TEST_ASSERT_TRUE(fileHas(FILE_PROBE, "\"Function\":[99,99"));
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_probes[0].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_probes[0].fermenter);
+  // The other files are still converted
+  TEST_ASSERT_EQUAL_UINT8(PLUG_FN_F1_HOT, g_smartPlugs[0].function);
+}
+
+void test_an_unreadable_file_read_twice_is_reported_once(void) {
+  // jsonGlobal.txt is read for the global and the brew service settings
+  stageOriginal();
+  fsTestWrite("/jsonGlobal.txt", "{not json");
+  loadAllConfig();
+
+  const char* text  = fsTestRead(ORIG_REPORT_FILE);
+  const char* first = strstr(text, "jsonGlobal.txt could not be read");
+  TEST_ASSERT_NOT_NULL(first);
+  TEST_ASSERT_NULL(strstr(first + 1, "jsonGlobal.txt could not be read"));
+  TEST_ASSERT_EQUAL_UINT8(UNIT_CELSIUS, g_globalConfig.unit);
+  TEST_ASSERT_FALSE(g_brewServices[BREW_SERVICE_BREWFATHER - 1].enabled);
+}
+
+void test_a_copy_that_cant_be_read_still_finishes_the_conversion(void) {
+  // A retry after a power cut, when the copy of the fermenter file can't be
+  // read but the live file still can: the conversion must still finish
+  stageOriginal();
+  convertOriginalConfig();
+  fsTestWrite(FILE_FERMENTER, ORIG_FERMENTER);
+  fsTestWrite(ORIG_IN_PROGRESS, "");
+  fsTestWrite("/orig/jsonFermenter.txt", "{not json");
+  loadAllConfig();
+
+  TEST_ASSERT_TRUE(originalConfigConverted());
+  TEST_ASSERT_TRUE(reportHas("jsonFermenter.txt could not be read"));
+  TEST_ASSERT_TRUE(fileHas(FILE_FERMENTER, "\"BrewServices\""));
+  TEST_ASSERT_EQUAL_FLOAT(22.0f, g_fermenters[0].ceilingTemp);
+  TEST_ASSERT_FALSE(convertOriginalConfig());   // done, so not converted again
+}
+
+// ============================================================
 // Secrets
 // ============================================================
 
@@ -1026,6 +1077,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_finished_conversion_removes_its_marker);
   RUN_TEST(test_a_marker_left_by_a_power_cut_is_tidied_up);
 
+  RUN_TEST(test_an_unreadable_file_is_saved_with_default_settings);
+  RUN_TEST(test_an_unreadable_file_read_twice_is_reported_once);
+  RUN_TEST(test_a_copy_that_cant_be_read_still_finishes_the_conversion);
   RUN_TEST(test_jsonConfig_is_deleted_and_not_copied);
   RUN_TEST(test_the_wifi_details_are_copied_to_the_wifi_store);
   RUN_TEST(test_the_wifi_details_are_copied_from_the_backup_file);
