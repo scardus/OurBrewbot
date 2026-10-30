@@ -1221,6 +1221,31 @@ static void test_fs_save_rejects_a_lookalike_path(void) {
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
 }
 
+// The filesystem fills up part way through an imported file. It used to be
+// reported as saved, so the import carried on and restarted on a cut-short file.
+static void test_fs_save_reports_a_file_that_was_cut_short(void) {
+  s_importActive = true;      // the current settings were saved by an earlier file
+  fsTestSetWriteLimit(10);
+  srv.setArg("name", "/jsonGlobal.txt");
+  srv.setBody("{\"unit\":1,\"fNo\":2,\"swNo\":20}");
+  handleFsFileSave(srv);
+  fsTestSetWriteLimit(-1);
+  TEST_ASSERT_EQUAL_INT(500, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("incomplete"));
+}
+
+// A setting is used at once even if flash won't take it, but the reply must
+// not say "saved"
+static void test_a_setting_that_cant_be_saved_is_reported(void) {
+  fsTestSetFull(true);
+  postBody("{\"colour\":0,\"fermenter\":1}");
+  handleTiltPost(srv);
+  fsTestSetFull(false);
+  TEST_ASSERT_EQUAL_INT(500, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("not saved to flash"));
+  TEST_ASSERT_EQUAL_UINT8(1, g_tilts[TILT_RED].fermenter);   // in use all the same
+}
+
 // ============================================================
 // handleMqttConfigPost - base topic checks
 // ============================================================
@@ -2573,6 +2598,8 @@ int main(int, char**) {
   RUN_TEST(test_fs_file_accepts_a_name_without_a_leading_slash);
   RUN_TEST(test_fs_save_rejects_a_path_outside_the_whitelist);
   RUN_TEST(test_fs_save_rejects_a_lookalike_path);
+  RUN_TEST(test_fs_save_reports_a_file_that_was_cut_short);
+  RUN_TEST(test_a_setting_that_cant_be_saved_is_reported);
   RUN_TEST(test_mqtt_post_rejects_an_unusable_base_topic_and_changes_nothing);
   RUN_TEST(test_mqtt_post_rejected_port_changes_nothing);
   RUN_TEST(test_mqtt_post_reconnects_when_a_connection_setting_changes);
