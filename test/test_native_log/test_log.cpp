@@ -113,6 +113,11 @@ void setUp(void) {
   s_mqttLastLine[0] = '\0';
   s_mqttLogsOnceFromInside = false;
   s_logBufferInUse = false;
+  s_ringTail = 0;
+  s_ringUsed = 0;
+  s_firstSeq = 1;
+  s_nextSeq  = 1;
+  s_bootId   = 0;
   WiFi.connected = true;
   WiFi.resolveOk = true;
   WiFi.resolveTo = IPAddress(192, 168, 0, 50);
@@ -607,6 +612,194 @@ static void test_the_shared_buffer_is_released_after_each_line(void) {
 }
 
 // ============================================================
+// RECENT-LINES RING (the WebUI log drawer's GET /logs)
+// ============================================================
+
+static char     s_rbuf[4096];
+static uint32_t s_rnext;
+static uint32_t s_rlost;
+static bool     s_rmore;
+
+// Read everything after `after` into s_rbuf as a NUL-terminated string.
+static size_t readRing(uint32_t after, size_t bufSize = sizeof(s_rbuf) - 1) {
+  size_t n = logRingRead(after, s_rbuf, bufSize, s_rnext, s_rlost, s_rmore);
+  s_rbuf[n] = '\0';
+  return n;
+}
+
+static void test_ring_empty_returns_nothing(void) {
+  TEST_ASSERT_EQUAL_UINT(0, readRing(0));
+  TEST_ASSERT_EQUAL_UINT32(0, s_rnext);
+  TEST_ASSERT_EQUAL_UINT32(0, s_rlost);
+  TEST_ASSERT_FALSE(s_rmore);
+  TEST_ASSERT_EQUAL_UINT32(0, logRingLastSeq());
+}
+
+static void test_ring_lines_come_back_in_order_with_level_and_timestamp(void) {
+  logMsg("first");
+  logMsgL(SYSLOG_WARNING, "second %d", 2);
+
+  readRing(0);
+  TEST_ASSERT_EQUAL_STRING("6 [000:00:00] first\n4 [000:00:00] second 2\n", s_rbuf);
+  TEST_ASSERT_EQUAL_UINT32(2, s_rnext);
+  TEST_ASSERT_EQUAL_UINT32(0, s_rlost);
+  TEST_ASSERT_FALSE(s_rmore);
+  TEST_ASSERT_EQUAL_UINT32(2, logRingLastSeq());
+}
+
+// Reading removes nothing, so a failed request can simply be repeated.
+static void test_ring_read_starts_after_the_cursor_and_is_repeatable(void) {
+  logMsg("first");
+  logMsg("second");
+
+  readRing(1);
+  TEST_ASSERT_EQUAL_STRING("6 [000:00:00] second\n", s_rbuf);
+  readRing(1);
+  TEST_ASSERT_EQUAL_STRING("6 [000:00:00] second\n", s_rbuf);
+  TEST_ASSERT_EQUAL_UINT32(2, s_rnext);
+}
+
+static void test_ring_cursor_at_the_newest_line_gives_an_empty_reply(void) {
+  logMsg("first");
+  logMsg("second");
+
+  TEST_ASSERT_EQUAL_UINT(0, readRing(2));
+  TEST_ASSERT_EQUAL_UINT32(2, s_rnext);
+  TEST_ASSERT_EQUAL_UINT32(0, s_rlost);
+  TEST_ASSERT_FALSE(s_rmore);
+}
+
+// 100 lines of 22 bytes each (2 + 12 timestamp + "line NNN") can't all fit
+// in 2,048 bytes. The oldest go whole, and a reader still on line 1 is told
+// exactly how many it missed.
+static void test_ring_overflow_drops_whole_oldest_lines_and_counts_them(void) {
+  for (int i = 1; i <= 100; i++) logMsg("line %03d", i);
+
+  TEST_ASSERT_TRUE(s_firstSeq > 2);
+  TEST_ASSERT_TRUE(s_ringUsed <= LOG_RING_SIZE);
+  TEST_ASSERT_EQUAL_UINT32(100, logRingLastSeq());
+
+  readRing(1);
+  TEST_ASSERT_EQUAL_UINT32(s_firstSeq - 2, s_rlost);
+  TEST_ASSERT_EQUAL_UINT32(100, s_rnext);
+  TEST_ASSERT_FALSE(s_rmore);
+
+  char expected[32];
+  snprintf(expected, sizeof(expected), "6 [000:00:00] line %03u\n", (unsigned)s_firstSeq);
+  TEST_ASSERT_EQUAL_INT(0, strncmp(s_rbuf, expected, strlen(expected)));
+  TEST_ASSERT_NOT_NULL(strstr(s_rbuf, "line 100\n"));
+}
+
+// Lines of many different lengths, pushed round the ring several times so
+// records straddle the end of the buffer, all come back exactly as logged.
+static void test_ring_wraps_lines_across_the_end_intact(void) {
+  char text[64];
+  for (int i = 1; i <= 300; i++) {
+    int len = 5 + (i * 7) % 50;
+    memset(text, 'a' + i % 26, len);
+    text[len] = '\0';
+    logMsg("%d %s", i, text);
+  }
+
+  readRing(0);
+  TEST_ASSERT_FALSE(s_rmore);
+  TEST_ASSERT_EQUAL_UINT32(300, s_rnext);
+
+  // Check every line kept, one at a time
+  char expected[96];
+  const char* p = s_rbuf;
+  for (uint32_t i = s_firstSeq; i <= 300; i++) {
+    int len = 5 + (i * 7) % 50;
+    memset(text, 'a' + i % 26, len);
+    text[len] = '\0';
+    snprintf(expected, sizeof(expected), "6 [000:00:00] %u %s\n", (unsigned)i, text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(p, expected, strlen(expected)), expected);
+    p += strlen(expected);
+  }
+  TEST_ASSERT_EQUAL_CHAR('\0', *p);
+}
+
+// The widest timestamp plus a full 191-character message is the longest
+// possible line: "<digit> " + 16 + 191 + "\n" = 210 bytes. It must come back
+// whole, and fit exactly in the smallest buffer logRingRead() allows.
+static void test_ring_longest_line_is_kept_whole(void) {
+  s_uptimeSec = 0xFFFFFFFF;
+  char big[300];
+  memset(big, 'x', sizeof(big) - 1);
+  big[sizeof(big) - 1] = '\0';
+  logMsg("%s", big);
+
+  TEST_ASSERT_EQUAL_UINT(210, readRing(0, 210));
+  TEST_ASSERT_FALSE(s_rmore);
+  TEST_ASSERT_EQUAL_INT(0, strncmp(s_rbuf, "6 [1193046:28:15] xxx", 21));
+
+  TEST_ASSERT_EQUAL_UINT(0, readRing(0, 209));
+  TEST_ASSERT_TRUE(s_rmore);
+}
+
+// A full buffer stops at the last whole line, and the cursor says where to
+// carry on from.
+static void test_ring_only_whole_lines_fit_the_buffer(void) {
+  for (int i = 1; i <= 5; i++) logMsg("abcde%d", i);   // 21 bytes per line out
+
+  TEST_ASSERT_EQUAL_UINT(42, readRing(0, 50));
+  TEST_ASSERT_TRUE(s_rmore);
+  TEST_ASSERT_EQUAL_UINT32(2, s_rnext);
+  TEST_ASSERT_EQUAL_STRING("6 [000:00:00] abcde1\n6 [000:00:00] abcde2\n", s_rbuf);
+
+  readRing(s_rnext, 50);
+  TEST_ASSERT_EQUAL_STRING("6 [000:00:00] abcde3\n6 [000:00:00] abcde4\n", s_rbuf);
+  TEST_ASSERT_EQUAL_UINT32(4, s_rnext);
+}
+
+// If no line fits, the cursor still moves past the missed lines, so the same
+// loss is never reported twice.
+static void test_ring_missed_lines_are_counted_once_even_if_nothing_fits(void) {
+  for (int i = 1; i <= 100; i++) logMsg("line %03d", i);
+
+  TEST_ASSERT_EQUAL_UINT(0, readRing(1, 10));
+  TEST_ASSERT_EQUAL_UINT32(s_firstSeq - 2, s_rlost);
+  TEST_ASSERT_EQUAL_UINT32(s_firstSeq - 1, s_rnext);
+
+  readRing(s_rnext);
+  TEST_ASSERT_EQUAL_UINT32(0, s_rlost);
+}
+
+// A CR or LF inside a message would look like two lines on the page.
+static void test_ring_control_characters_become_spaces(void) {
+  logMsg("a\r\nb\tc");
+  readRing(0);
+  TEST_ASSERT_EQUAL_STRING("6 [000:00:00] a  b c\n", s_rbuf);
+}
+
+// A line logged while another is still being sent is stored after it.
+static void test_ring_keeps_a_nested_log_call_in_order(void) {
+  g_mqttConfig.enabled    = true;
+  g_mqttConfig.logEnabled = true;
+  s_mqttLogsOnceFromInside = true;   // the MQTT send of "outer" logs "inner"
+
+  logMsg("outer");
+  readRing(0);
+  TEST_ASSERT_EQUAL_STRING("6 [000:00:00] outer\n6 [000:00:00] inner\n", s_rbuf);
+}
+
+// logInit() runs again whenever WiFi reconnects or syslog is saved; an open
+// log drawer must not lose its lines when it does.
+static void test_ring_is_not_cleared_by_loginit(void) {
+  logMsg("kept");
+  enableSyslog();
+  readRing(0);
+  TEST_ASSERT_EQUAL_STRING("6 [000:00:00] kept\n", s_rbuf);
+}
+
+static void test_boot_id_is_chosen_once(void) {
+  g_espRandom = 0xCAFEF00D;
+  TEST_ASSERT_EQUAL_HEX32(0xCAFEF00D, logBootId());
+  g_espRandom = 0x11111111;
+  TEST_ASSERT_EQUAL_HEX32(0xCAFEF00D, logBootId());
+}
+
+// ============================================================
 
 int main(int, char**) {
   UNITY_BEGIN();
@@ -660,6 +853,20 @@ int main(int, char**) {
 
   RUN_TEST(test_a_nested_log_call_leaves_both_lines_intact);
   RUN_TEST(test_the_shared_buffer_is_released_after_each_line);
+
+  RUN_TEST(test_ring_empty_returns_nothing);
+  RUN_TEST(test_ring_lines_come_back_in_order_with_level_and_timestamp);
+  RUN_TEST(test_ring_read_starts_after_the_cursor_and_is_repeatable);
+  RUN_TEST(test_ring_cursor_at_the_newest_line_gives_an_empty_reply);
+  RUN_TEST(test_ring_overflow_drops_whole_oldest_lines_and_counts_them);
+  RUN_TEST(test_ring_wraps_lines_across_the_end_intact);
+  RUN_TEST(test_ring_longest_line_is_kept_whole);
+  RUN_TEST(test_ring_only_whole_lines_fit_the_buffer);
+  RUN_TEST(test_ring_missed_lines_are_counted_once_even_if_nothing_fits);
+  RUN_TEST(test_ring_control_characters_become_spaces);
+  RUN_TEST(test_ring_keeps_a_nested_log_call_in_order);
+  RUN_TEST(test_ring_is_not_cleared_by_loginit);
+  RUN_TEST(test_boot_id_is_chosen_once);
 
   return UNITY_END();
 }
