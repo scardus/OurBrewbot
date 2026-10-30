@@ -35,6 +35,7 @@
 #include "StackProbe.h"
 #include "TextSafe.h"
 #include "Uptime.h"
+#include "FirmwareCheck.h"
 
 // Forward refs to global server (defined in OurBrewbot.cpp)
 extern ESP8266WebServer g_webServer;
@@ -45,6 +46,8 @@ void handleBLESniffPoll(ESP8266WebServer& server);
 void handleBLESniffSend(ESP8266WebServer& server);
 void handleSyslogConfig(ESP8266WebServer& server);
 void handleSyslogConfigPost(ESP8266WebServer& server);
+static bool otaUploadInstalled();
+static bool otaUploadRefused();
 
 // One buffer shared by the GET handlers that send their reply in chunks:
 // /fermenters, /status, /debug, /ispindels, /smartplugs and /profiles. Each
@@ -216,10 +219,11 @@ void setupWebServer(ESP8266WebServer& server) {
         sendErr(server, 403, F("Cross-site request refused"));
         return;
       }
-      if (Update.hasError()) {
+      if (!otaUploadInstalled()) {
         holdPlugsOff(false);   // no restart is coming: the control loop takes over again
         String err = "Update FAILED: ";
-        err += Update.getError();
+        if (otaUploadRefused()) err += "this is not a complete OurBrewbot firmware file";
+        else                    err += Update.getError();
         server.send(500, "text/html", err);
       } else {
         server.send(200, "text/html",
@@ -930,6 +934,14 @@ void handleOTAPage(ESP8266WebServer& server) {
   server.sendContent_P(OTA_PAGE);
 }
 
+// The firmware upload in progress, checked as it arrives (see FirmwareCheck.cpp)
+static FirmwareCheck s_otaCheck;
+static bool s_otaInstalled = false;   // Update.end() accepted it: it runs after the restart
+static bool s_otaRefused   = false;   // the file failed the check, so nothing was installed
+
+static bool otaUploadInstalled() { return s_otaInstalled; }
+static bool otaUploadRefused()   { return s_otaRefused; }
+
 void handleOTAUpload(ESP8266WebServer& server) {
   HTTPUpload& upload = server.upload();
 
@@ -953,16 +965,28 @@ void handleOTAUpload(ESP8266WebServer& server) {
     // If the upload fails, control resumes from idle, so a cooler switched
     // off here waits out its compressor delay before it can run again
     idleAllFermenters();
+    firmwareCheckStart(s_otaCheck);
+    s_otaInstalled = false;
+    s_otaRefused   = false;
     uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     if (!Update.begin(maxSketchSpace)) {
       Update.printError(Serial);
     }
   } else if (upload.status == UPLOAD_FILE_WRITE) {
+    firmwareCheckAdd(s_otaCheck, upload.buf, upload.currentSize);
     if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
       Update.printError(Serial);
     }
   } else if (upload.status == UPLOAD_FILE_END) {
-    if (Update.end(true)) {
+    if (!firmwareCheckPassed(s_otaCheck)) {
+      // Cut short or damaged. Update.end() without "true" throws the upload
+      // away, so the firmware already running stays in place.
+      logMsgL(SYSLOG_WARNING, "[OTA] Refused %s: not a complete firmware file (%u bytes, length or CRC wrong)",
+              upload.filename.c_str(), (unsigned)upload.totalSize);
+      Update.end();
+      s_otaRefused = true;
+    } else if (Update.end(true)) {
+      s_otaInstalled = true;
       // size_t is unsigned int on the ESP8266, so %u is right on the target -
       // but it is 64-bit on the host that builds the native tests, where the
       // same line warns. The cast makes it correct on both and changes

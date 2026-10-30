@@ -164,6 +164,8 @@ ESP8266WebServer g_webServer;
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"
 #include "../../OurBrewbot/TextSafe.cpp"
+#include "../../OurBrewbot/FirmwareCheck.cpp"
+#include "../test_native_firmwarecheck/firmware_image.h"
 // ---- stack depth check: reads the ESP8266 loop stack, nothing to do here ----
 void stackCheck(uint8_t, const char*) {}
 
@@ -1794,6 +1796,42 @@ static void test_a_failed_ota_upload_waits_out_the_compressor_delay(void) {
   TEST_ASSERT_EQUAL_UINT8(STATUS_COOLING, g_fermenters[F0].status);
 }
 
+// Sends an upload of the first `size` bytes of the test image
+static void uploadTestImage(size_t size) {
+  makeTestImage();
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status      = UPLOAD_FILE_WRITE;
+  srv.testUpload().buf         = g_testImage;
+  srv.testUpload().currentSize = size;
+  srv.testUpload().totalSize   = size;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+}
+
+static void test_a_complete_firmware_file_is_installed(void) {
+  uploadTestImage(TEST_IMAGE_SIZE);
+  TEST_ASSERT_TRUE(otaUploadInstalled());
+  TEST_ASSERT_FALSE(otaUploadRefused());
+}
+
+// A download cut short, say: the old firmware has to stay in place
+static void test_a_cut_short_firmware_file_is_refused(void) {
+  uploadTestImage(TEST_IMAGE_SIZE - 100);
+  TEST_ASSERT_FALSE(otaUploadInstalled());
+  TEST_ASSERT_TRUE(otaUploadRefused());
+}
+
+// An upload with no file in it used to be reported as a success, and restarted
+static void test_an_upload_with_no_file_is_not_installed(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+  TEST_ASSERT_FALSE(otaUploadInstalled());
+}
+
 // The connection dropped: no restart is coming, so control takes over again
 static void test_an_aborted_ota_upload_releases_the_plugs(void) {
   srv.testUpload().status = UPLOAD_FILE_START;
@@ -2555,6 +2593,9 @@ int main(int, char**) {
   RUN_TEST(test_ota_upload_start_switches_every_plug_off_and_holds_them);
   RUN_TEST(test_ota_upload_chunks_do_not_switch_the_plugs_again);
   RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
+  RUN_TEST(test_a_complete_firmware_file_is_installed);
+  RUN_TEST(test_a_cut_short_firmware_file_is_refused);
+  RUN_TEST(test_an_upload_with_no_file_is_not_installed);
   RUN_TEST(test_ota_upload_start_puts_a_cooling_fermenter_back_to_idle);
   RUN_TEST(test_a_failed_ota_upload_waits_out_the_compressor_delay);
   RUN_TEST(test_a_post_from_another_website_is_refused);
