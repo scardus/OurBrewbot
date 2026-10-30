@@ -2186,7 +2186,7 @@ function logPoll() {
       // Wait 2, 4, 8, then 15 s between retries. logAfter is kept, so the
       // lines logged meanwhile still arrive if the controller has them.
       logFails++;
-      logSetState('Reconnecting...', true);
+      if (!logPaused) logSetState('Reconnecting...', true);
       logSchedule(Math.min(15000, 1000 * Math.pow(2, logFails)));
     })
     .finally(function () {
@@ -2217,7 +2217,7 @@ function logAccept(r, text) {
 
   logBoot = boot;
   logAfter = next;
-  logSetState('Live', false);
+  if (!logPaused) logSetState('Live', false);   // paused while this reply was on its way
   logSchedule(r.headers.get('X-Log-More') == '1' ? LOG_MORE_MS : logInterval());
 }
 
