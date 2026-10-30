@@ -575,6 +575,10 @@ bool loadProfileSteps();
 bool saveProfileSteps();
 bool loadTiltConfig();
 bool saveTiltConfig();
+// A Tilt with a role, a fermenter or a calibration. Only MAX_TILT_SLOTS of
+// them fit in jsonTilt.txt.
+bool    tiltIsSetUp(const TiltConfig& tilt);
+uint8_t countSetUpTilts();
 bool loadiSpindelConfig();
 bool saveiSpindelConfig();
 bool loadBrewServiceConfig();

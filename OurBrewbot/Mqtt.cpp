@@ -1023,6 +1023,24 @@ static bool mqttEnsureConnected() {
   return mqttConnect();
 }
 
+// Called when the broker, login, base topic or enabled setting is saved. An
+// open connection keeps using the old ones until it happens to drop, and the
+// WebUI's Test would report on it, so close it: the next report or Test
+// connects with the new settings.
+void mqttSettingsChanged() {
+  if (g_mqtt.connected()) {
+    // The broker only sends the "offline" will for a connection that is lost,
+    // not one closed on purpose. s_availTopic still holds the old base topic:
+    // it is only rebuilt on connect.
+    g_mqtt.publish(s_availTopic, "offline", true);
+    g_mqtt.disconnect();
+    logMsg("[MQTT] Settings changed - disconnected, will reconnect with the new settings");
+  }
+  g_mqttWasConnected = false;
+  g_mqttLastAttempt  = 0;      // connect at the next report, without waiting out a backoff
+  g_mqttBackoffMs    = 5000;
+}
+
 // ============================================================
 // FORCE DISCOVER — manual trigger from admin UI button
 // ============================================================

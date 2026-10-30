@@ -72,6 +72,8 @@ void logInit() {}
 
 // Mqtt.cpp
 void mqttApplyControlSubscription() {}
+static int s_mqttSettingsChanges = 0;
+void mqttSettingsChanged() { s_mqttSettingsChanges++; }
 void publishAllHaDiscovery() {}
 bool forcePublishAllHaDiscovery() { return true; }
 void cleanupAllHaDiscovery() {}
@@ -164,6 +166,8 @@ ESP8266WebServer g_webServer;
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"
 #include "../../OurBrewbot/TextSafe.cpp"
+#include "../../OurBrewbot/FirmwareCheck.cpp"
+#include "../test_native_firmwarecheck/firmware_image.h"
 // ---- stack depth check: reads the ESP8266 loop stack, nothing to do here ----
 void stackCheck(uint8_t, const char*) {}
 
@@ -1217,6 +1221,31 @@ static void test_fs_save_rejects_a_lookalike_path(void) {
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
 }
 
+// The filesystem fills up part way through an imported file. It used to be
+// reported as saved, so the import carried on and restarted on a cut-short file.
+static void test_fs_save_reports_a_file_that_was_cut_short(void) {
+  s_importActive = true;      // the current settings were saved by an earlier file
+  fsTestSetWriteLimit(10);
+  srv.setArg("name", "/jsonGlobal.txt");
+  srv.setBody("{\"unit\":1,\"fNo\":2,\"swNo\":20}");
+  handleFsFileSave(srv);
+  fsTestSetWriteLimit(-1);
+  TEST_ASSERT_EQUAL_INT(500, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("incomplete"));
+}
+
+// A setting is used at once even if flash won't take it, but the reply must
+// not say "saved"
+static void test_a_setting_that_cant_be_saved_is_reported(void) {
+  fsTestSetFull(true);
+  postBody("{\"colour\":0,\"fermenter\":1}");
+  handleTiltPost(srv);
+  fsTestSetFull(false);
+  TEST_ASSERT_EQUAL_INT(500, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("not saved to flash"));
+  TEST_ASSERT_EQUAL_UINT8(1, g_tilts[TILT_RED].fermenter);   // in use all the same
+}
+
 // ============================================================
 // handleMqttConfigPost - base topic checks
 // ============================================================
@@ -1272,6 +1301,39 @@ static void test_mqtt_post_rejected_port_changes_nothing(void) {
   handleMqttConfigPost(srv);
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
   assertMqttConfigUnchanged();
+}
+
+// ---- a connection setting that changes closes the open connection ----
+
+static void test_mqtt_post_reconnects_when_a_connection_setting_changes(void) {
+  const char* bodies[] = {
+    "{\"host\":\"new.host\"}",
+    "{\"port\":1884}",
+    "{\"username\":\"brewer\"}",
+    "{\"password\":\"secret\"}",
+    "{\"baseTopic\":\"brewbot2\"}",
+    "{\"enabled\":true}",
+  };
+  for (size_t k = 0; k < sizeof(bodies) / sizeof(bodies[0]); k++) {
+    seedMqttConfig();
+    s_mqttSettingsChanges = 0;
+    postBody(bodies[k]);
+    handleMqttConfigPost(srv);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(200, g_httpResp.code, bodies[k]);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, s_mqttSettingsChanges, bodies[k]);
+  }
+}
+
+static void test_mqtt_post_with_the_same_settings_keeps_the_connection(void) {
+  // The WebUI sends every field on each save, and the masked password back
+  seedMqttConfig();
+  strlcpy(g_mqttConfig.password, "secret", sizeof(g_mqttConfig.password));
+  s_mqttSettingsChanges = 0;
+  postBody("{\"enabled\":false,\"host\":\"old.host\",\"port\":1883,\"username\":\"\","
+           "\"password\":\"********\",\"baseTopic\":\"ourbrewbot\",\"logEnabled\":true}");
+  handleMqttConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(0, s_mqttSettingsChanges);
 }
 
 // ---- the broker password is never sent out ----
@@ -1794,6 +1856,52 @@ static void test_a_failed_ota_upload_waits_out_the_compressor_delay(void) {
   TEST_ASSERT_EQUAL_UINT8(STATUS_COOLING, g_fermenters[F0].status);
 }
 
+// Sends an upload of the first `size` bytes of the test image
+static void uploadTestImage(size_t size) {
+  makeTestImage();
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status      = UPLOAD_FILE_WRITE;
+  srv.testUpload().buf         = g_testImage;
+  srv.testUpload().currentSize = size;
+  srv.testUpload().totalSize   = size;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+}
+
+static void test_a_complete_firmware_file_is_installed(void) {
+  uploadTestImage(TEST_IMAGE_SIZE);
+  TEST_ASSERT_TRUE(otaUploadInstalled());
+  TEST_ASSERT_FALSE(otaUploadRefused());
+}
+
+// A download cut short, say: the old firmware has to stay in place
+static void test_a_cut_short_firmware_file_is_refused(void) {
+  uploadTestImage(TEST_IMAGE_SIZE - 100);
+  TEST_ASSERT_FALSE(otaUploadInstalled());
+  TEST_ASSERT_TRUE(otaUploadRefused());
+}
+
+// The /update reply clears the result, so a later request with no file in it
+// isn't answered with an earlier upload's "refused"
+static void test_clearing_the_upload_result_forgets_a_refused_upload(void) {
+  uploadTestImage(TEST_IMAGE_SIZE - 100);
+  TEST_ASSERT_TRUE(otaUploadRefused());
+  otaUploadClear();
+  TEST_ASSERT_FALSE(otaUploadRefused());
+  TEST_ASSERT_FALSE(otaUploadInstalled());
+}
+
+// An upload with no file in it used to be reported as a success, and restarted
+static void test_an_upload_with_no_file_is_not_installed(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  srv.testUpload().status = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+  TEST_ASSERT_FALSE(otaUploadInstalled());
+}
+
 // The connection dropped: no restart is coming, so control takes over again
 static void test_an_aborted_ota_upload_releases_the_plugs(void) {
   srv.testUpload().status = UPLOAD_FILE_START;
@@ -2231,6 +2339,42 @@ static void test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit(void) {
   TEST_ASSERT_EQUAL_FLOAT(0.0f, g_tilts[0].tempAdjust);
 }
 
+// Four Tilts set up, so the settings file is full
+static void setUpFourTilts(void) {
+  for (int c = TILT_RED; c <= TILT_PURPLE; c++) {
+    g_tilts[c].colour    = (uint8_t)c;
+    g_tilts[c].fermenter = 0;
+  }
+}
+
+static void test_tilt_post_refuses_a_fifth_set_up_tilt(void) {
+  setUpFourTilts();
+  postBody("{\"colour\":7,\"fermenter\":1}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Only 4 Tilts"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_PINK].colour);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_PINK].fermenter);
+}
+
+static void test_tilt_post_still_edits_one_of_four_set_up_tilts(void) {
+  setUpFourTilts();
+  postBody("{\"colour\":2,\"fermenter\":3,\"sgAdjust\":0.001}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(3, g_tilts[TILT_BLACK].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.001f, g_tilts[TILT_BLACK].sgAdjust);
+}
+
+static void test_tilt_post_allows_a_fifth_tilt_left_unassigned(void) {
+  // Saving a Tilt with no role, fermenter or calibration doesn't use a slot
+  setUpFourTilts();
+  postBody("{\"colour\":7,\"function\":99,\"fermenter\":99,\"tempAdjust\":0,\"sgAdjust\":0}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+}
+
 static void test_ispindel_payload_converts_temp_adjust_as_a_span(void) {
   g_globalConfig.unit = UNIT_FAHRENHEIT;
   g_iSpindels[0].tempAdjust = 0.5f;
@@ -2464,8 +2608,12 @@ int main(int, char**) {
   RUN_TEST(test_fs_file_accepts_a_name_without_a_leading_slash);
   RUN_TEST(test_fs_save_rejects_a_path_outside_the_whitelist);
   RUN_TEST(test_fs_save_rejects_a_lookalike_path);
+  RUN_TEST(test_fs_save_reports_a_file_that_was_cut_short);
+  RUN_TEST(test_a_setting_that_cant_be_saved_is_reported);
   RUN_TEST(test_mqtt_post_rejects_an_unusable_base_topic_and_changes_nothing);
   RUN_TEST(test_mqtt_post_rejected_port_changes_nothing);
+  RUN_TEST(test_mqtt_post_reconnects_when_a_connection_setting_changes);
+  RUN_TEST(test_mqtt_post_with_the_same_settings_keeps_the_connection);
   RUN_TEST(test_mqtt_get_masks_a_saved_password);
   RUN_TEST(test_mqtt_get_returns_an_empty_password_when_none_is_saved);
   RUN_TEST(test_mqtt_post_with_the_mask_keeps_the_saved_password);
@@ -2519,6 +2667,10 @@ int main(int, char**) {
   RUN_TEST(test_ota_upload_start_switches_every_plug_off_and_holds_them);
   RUN_TEST(test_ota_upload_chunks_do_not_switch_the_plugs_again);
   RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
+  RUN_TEST(test_a_complete_firmware_file_is_installed);
+  RUN_TEST(test_a_cut_short_firmware_file_is_refused);
+  RUN_TEST(test_clearing_the_upload_result_forgets_a_refused_upload);
+  RUN_TEST(test_an_upload_with_no_file_is_not_installed);
   RUN_TEST(test_ota_upload_start_puts_a_cooling_fermenter_back_to_idle);
   RUN_TEST(test_a_failed_ota_upload_waits_out_the_compressor_delay);
   RUN_TEST(test_a_post_from_another_website_is_refused);
@@ -2554,6 +2706,9 @@ int main(int, char**) {
   RUN_TEST(test_tilt_payload_converts_temp_adjust_as_a_span);
   RUN_TEST(test_tilt_post_converts_temp_adjust_from_fahrenheit);
   RUN_TEST(test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit);
+  RUN_TEST(test_tilt_post_refuses_a_fifth_set_up_tilt);
+  RUN_TEST(test_tilt_post_still_edits_one_of_four_set_up_tilts);
+  RUN_TEST(test_tilt_post_allows_a_fifth_tilt_left_unassigned);
   RUN_TEST(test_ispindel_payload_converts_temp_adjust_as_a_span);
   RUN_TEST(test_ispindel_config_post_converts_temp_adjust_from_fahrenheit);
   RUN_TEST(test_celsius_mode_leaves_temp_adjust_untouched);

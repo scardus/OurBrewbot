@@ -1548,6 +1548,36 @@ void test_successful_connect_resets_the_backoff(void) {
   TEST_ASSERT_EQUAL_INT(before + 1, g_mqttTest.lastConnect.attempts);
 }
 
+// ---- a saved change to the broker, login or base topic ----
+
+void test_a_settings_change_marks_the_old_topic_offline_and_disconnects(void) {
+  connectFixture();
+  mqttSettingsChanged();
+  TEST_ASSERT_EQUAL_STRING("offline", mqttTestPayloadFor(BASE "/availability"));
+  TEST_ASSERT_TRUE(mqttTestRetainedFor(BASE "/availability"));
+  TEST_ASSERT_EQUAL_INT(1, g_mqttTest.disconnectCount);
+  TEST_ASSERT_FALSE(g_mqttTest.connected);
+}
+
+void test_after_a_settings_change_the_next_report_uses_the_new_settings(void) {
+  connectFixture();
+  strlcpy(g_mqttConfig.host,      "192.168.0.99", sizeof(g_mqttConfig.host));
+  strlcpy(g_mqttConfig.baseTopic, "newbase",      sizeof(g_mqttConfig.baseTopic));
+  mqttSettingsChanged();
+  reportMqtt();   // straight away - no backoff to wait out
+  TEST_ASSERT_TRUE(g_mqttTest.connected);
+  TEST_ASSERT_EQUAL_STRING("192.168.0.99", g_mqttTest.serverHost);
+  TEST_ASSERT_EQUAL_STRING("newbase/availability", g_mqttTest.lastConnect.willTopic);
+  TEST_ASSERT_EQUAL_STRING("online", mqttTestLastPayloadFor("newbase/availability"));
+}
+
+void test_a_settings_change_while_disconnected_publishes_nothing(void) {
+  mqttTestSetConnected(false);
+  mqttSettingsChanged();
+  TEST_ASSERT_EQUAL_INT(0, mqttTestPublishCount());
+  TEST_ASSERT_EQUAL_INT(0, g_mqttTest.disconnectCount);
+}
+
 // ============================================================
 
 int main(int, char**) {
@@ -1663,6 +1693,9 @@ int main(int, char**) {
   RUN_TEST(test_mqtt_loop_only_runs_while_connected);
   RUN_TEST(test_failed_connect_backs_off_before_retrying);
   RUN_TEST(test_successful_connect_resets_the_backoff);
+  RUN_TEST(test_a_settings_change_marks_the_old_topic_offline_and_disconnects);
+  RUN_TEST(test_after_a_settings_change_the_next_report_uses_the_new_settings);
+  RUN_TEST(test_a_settings_change_while_disconnected_publishes_nothing);
 
   return UNITY_END();
 }

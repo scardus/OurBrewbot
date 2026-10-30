@@ -220,6 +220,7 @@ void setup() {
     if (originalConfigConverted()) {
       logMsgL(SYSLOG_NOTICE, "DEFERRED [CFG] Original MyBrewbot config converted - see %s", ORIG_REPORT_FILE);
     }
+    logOriginalConversionProblems();
     logMsgL(SYSLOG_NOTICE, "DEFERRED [WIFI] Connected. IP: %s", WiFi.localIP().toString().c_str());
   } else {
     // No syslog, but still read (and clear) any crash record so the crash

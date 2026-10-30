@@ -109,6 +109,7 @@ struct MqttTestState {
   uint16_t bufferSize     = 0;
   uint8_t  socketTimeout  = 0;
   int      loopCount      = 0;
+  int      disconnectCount = 0;
 
   void (*callback)(char*, uint8_t*, unsigned int) = nullptr;
 
@@ -142,6 +143,7 @@ public:
   bool connected() { return g_mqttTest.connected; }
   int  state()     { return g_mqttTest.state; }
   bool loop()      { g_mqttTest.loopCount++; return g_mqttTest.connected; }
+  void disconnect() { g_mqttTest.connected = false; g_mqttTest.disconnectCount++; }
 
   bool connect(const char* id, const char* user, const char* pass,
                const char* willTopic, uint8_t willQos, bool willRetain,

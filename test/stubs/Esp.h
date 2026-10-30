@@ -29,6 +29,9 @@
 
 static rst_info g_espResetInfo = { REASON_DEFAULT_RST, 0, 0, 0, 0, 0, 0 };
 static uint32_t g_espFreeHeap  = 24000;
+// How many times ESP.restart() was called. The real one never returns; this
+// one does, so a test can check that a restart was asked for.
+static int      g_espRestarts  = 0;
 
 // RTC user memory: 512 bytes that survive a reset. Crash.cpp keeps its crash
 // record and checkpoint breadcrumb here, so post-mortem behaviour can only be
@@ -45,7 +48,7 @@ public:
   uint8_t  getHeapFragmentation()    { return 0; }
   uint32_t getFreeContStack()        { return 1024; }
   void     wdtFeed()                 {}
-  void     restart()                 {}
+  void     restart()                 { g_espRestarts++; }
 
   // Board identity, reported by WebAPI.cpp's /board_info.json and /status.
   // Fixed values so a payload-shape test has something stable to assert on.

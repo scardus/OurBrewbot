@@ -863,6 +863,24 @@ bool loadTiltConfig() {
   return true;
 }
 
+// True for a Tilt the user has set up: given a role or a fermenter, or
+// calibrated. A Tilt that has only been heard is in g_tilts too (see
+// processTiltReading()), but is not set up.
+bool tiltIsSetUp(const TiltConfig& tilt) {
+  return tilt.function  != PROBE_UNASSIGNED ||
+         tilt.fermenter != PROBE_UNASSIGNED ||
+         tilt.tempAdjust != 0.0f ||
+         tilt.sgAdjust   != 0.0f;
+}
+
+uint8_t countSetUpTilts() {
+  uint8_t count = 0;
+  for (int c = 0; c < MAX_TILTS; c++) {
+    if (g_tilts[c].colour != PROBE_UNASSIGNED && tiltIsSetUp(g_tilts[c])) count++;
+  }
+  return count;
+}
+
 bool saveTiltConfig() {
   JsonDocument doc;
   JsonArray addrArr = doc["Address"].to<JsonArray>();
@@ -872,10 +890,15 @@ bool saveTiltConfig() {
   JsonArray saArr   = doc["SG_Adjust"].to<JsonArray>();
   JsonArray mbbArr  = doc["MBB"].to<JsonArray>();
 
-  // Write configured colours (colour != PROBE_UNASSIGNED) first, pad to MAX_TILT_SLOTS
+  // Only MAX_TILT_SLOTS colours fit in the file. The Tilts that are set up go
+  // in first and the ones that have only been heard after them, so Tilts
+  // nearby that were never set up can't push out one that was.
   int count = 0;
-  for (int c = 0; c < MAX_TILTS && count < MAX_TILT_SLOTS; c++) {
-    if (g_tilts[c].colour != PROBE_UNASSIGNED) {
+  for (int pass = 0; pass < 2; pass++) {
+    bool wantSetUp = (pass == 0);
+    for (int c = 0; c < MAX_TILTS && count < MAX_TILT_SLOTS; c++) {
+      if (g_tilts[c].colour == PROBE_UNASSIGNED) continue;
+      if (tiltIsSetUp(g_tilts[c]) != wantSetUp) continue;
       addrArr.add(g_tilts[c].colour);
       fnArr.add(g_tilts[c].function);
       fermArr.add(g_tilts[c].fermenter);
@@ -1038,22 +1061,33 @@ void logFileSystemBootProblems() {
 // LOAD ALL / SAVE ALL
 // ============================================================
 
+static void initAllDefaultConfig();
+static void saveSettingsInUse();
+
 void loadAllConfig() {
   logMsg("[CFG] Loading all configuration...");
   // Before any loader: a loader that corrects a value saves the file at once,
   // which would hide the signs of an original config (see OriginalConfig.cpp)
   convertOriginalConfig();
-  loadGlobalConfig();
-  loadFermenterConfig();
-  loadProbeConfig();
-  loadSmartPlugConfig();
-  loadProfileConfig();
-  loadProfileSteps();
-  loadiSpindelConfig();
-  loadTiltConfig();
-  loadBrewServiceConfig();
-  loadMqttConfig();
-  loadSyslogConfig();
+  if (originalConversionGaveUp()) {
+    // An original config that couldn't be saved after three tries. Start like
+    // a new install rather than on a mix of converted and original files, and
+    // save the defaults so the next boot loads the same settings.
+    initAllDefaultConfig();
+    saveSettingsInUse();
+  } else {
+    loadGlobalConfig();
+    loadFermenterConfig();
+    loadProbeConfig();
+    loadSmartPlugConfig();
+    loadProfileConfig();
+    loadProfileSteps();
+    loadiSpindelConfig();
+    loadTiltConfig();
+    loadBrewServiceConfig();
+    loadMqttConfig();
+    loadSyslogConfig();
+  }
 
   // One-shot migration: bump any AlarmTolerance==0 to 3.0 (the new default
   // for the severe-deviation escape hatch). Old configs never exposed this
@@ -1326,8 +1360,8 @@ void resetWiFiConfig() {
 // FULL RESET
 // ============================================================
 
-void resetAllConfig() {
-  logMsgL(SYSLOG_NOTICE, "[CFG] Resetting all configuration to defaults");
+// Every setting back to its default, in memory only
+static void initAllDefaultConfig() {
   initDefaultGlobalConfig();
   initDefaultFermenterConfig();
   initDefaultProbeConfig();
@@ -1338,7 +1372,14 @@ void resetAllConfig() {
   initDefaultBrewServiceConfig();
   initDefaultMqttConfig();
   initDefaultSyslogConfig();
-  saveAllConfig();
+}
+
+void resetAllConfig() {
+  logMsgL(SYSLOG_NOTICE, "[CFG] Resetting all configuration to defaults");
+  initAllDefaultConfig();
+  // Not saveAllConfig(): it leaves out the Tilt file, so the old Tilt settings
+  // would be loaded again after the restart
+  saveSettingsInUse();
 
   // Remove WiFi config so WiFiManager re-runs the portal
   clearWiFiProvisioningArtifacts();

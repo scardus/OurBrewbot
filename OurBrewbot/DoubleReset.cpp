@@ -36,8 +36,8 @@
 #include <Arduino.h>
 #include <user_interface.h>   // struct rst_info, REASON_EXT_SYS_RST
 
-// RTC memory word for the marker. Crash.cpp uses words 0-54; RTC user memory
-// has 128 words.
+// RTC memory word for the marker. Crash.cpp uses words 0-54 and
+// OriginalConfig.cpp words 101-102; RTC user memory has 128 words.
 static const uint32_t DOUBLE_RESET_OFFSET = 100;
 // Any other value - including whatever RTC memory holds after a power cut -
 // means "no first press"

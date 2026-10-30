@@ -653,6 +653,33 @@ void test_tilt_save_stops_at_max_slots_when_more_colours_are_configured(void) {
   TEST_ASSERT_TRUE(fileHas(FILE_TILT, "\"Address\":[0,1,2,3]"));
 }
 
+void test_tilt_save_keeps_a_set_up_tilt_ahead_of_ones_only_heard(void) {
+  // Four lower colours heard nearby, never set up (processTiltReading() only
+  // marks the colour), and a Pink Tilt that is set up
+  for (int c = TILT_RED; c <= TILT_PURPLE; c++) g_tilts[c].colour = (uint8_t)c;
+  g_tilts[TILT_PINK].colour    = TILT_PINK;
+  g_tilts[TILT_PINK].fermenter = 0;
+  g_tilts[TILT_PINK].sgAdjust  = 0.002f;
+  TEST_ASSERT_TRUE(saveTiltConfig());
+
+  initDefaultTiltConfig();
+  TEST_ASSERT_TRUE(loadTiltConfig());
+  TEST_ASSERT_EQUAL_UINT8(TILT_PINK, g_tilts[TILT_PINK].colour);
+  TEST_ASSERT_EQUAL_UINT8(0, g_tilts[TILT_PINK].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.002f, g_tilts[TILT_PINK].sgAdjust);
+  // The three heard-only Tilts that still fit come after it
+  TEST_ASSERT_TRUE(fileHas(FILE_TILT, "\"Address\":[7,0,1,2]"));
+}
+
+void test_count_set_up_tilts_ignores_tilts_only_heard(void) {
+  g_tilts[TILT_RED].colour      = TILT_RED;      // heard only
+  g_tilts[TILT_GREEN].colour    = TILT_GREEN;
+  g_tilts[TILT_GREEN].function  = PROBE_FN_BEER;
+  g_tilts[TILT_BLUE].colour     = TILT_BLUE;
+  g_tilts[TILT_BLUE].tempAdjust = -0.5f;
+  TEST_ASSERT_EQUAL_UINT8(2, countSetUpTilts());
+}
+
 void test_tilt_load_starts_from_defaults_when_the_file_is_missing(void) {
   g_tilts[TILT_RED].colour = TILT_RED;    // stale in-memory state
   TEST_ASSERT_FALSE(loadTiltConfig());
@@ -959,11 +986,27 @@ void test_reset_all_config_restores_defaults_and_writes_every_file(void) {
   const char* files[] = {
     FILE_GLOBAL, FILE_FERMENTER, FILE_PROBE, FILE_SMARTPLUGS, FILE_PROFILE,
     FILE_STEPS, FILE_ISPINDEL, FILE_BREWSVC, FILE_MQTT, FILE_SYSLOG,
+    FILE_TILT,
   };
   for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
     TEST_ASSERT_TRUE_MESSAGE(LittleFS.exists(files[i]), files[i]);
   }
   TEST_ASSERT_FALSE(LittleFS.exists(FILE_CONFIG));   // portal re-runs on boot
+}
+
+void test_reset_all_config_clears_the_saved_tilt_settings(void) {
+  // A Tilt assigned and calibrated before the reset
+  g_tilts[TILT_PINK].colour    = TILT_PINK;
+  g_tilts[TILT_PINK].fermenter = 0;
+  g_tilts[TILT_PINK].sgAdjust  = 0.004f;
+  TEST_ASSERT_TRUE(saveTiltConfig());
+
+  resetAllConfig();
+  loadTiltConfig();   // what the restart after a reset does
+
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_PINK].colour);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_PINK].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_tilts[TILT_PINK].sgAdjust);
 }
 
 void test_reset_all_config_survives_a_read_only_filesystem(void) {
@@ -1394,6 +1437,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_tilt_save_packs_configured_colours_first_and_pads_the_rest);
   RUN_TEST(test_tilt_round_trip_survives_the_slot_repacking);
   RUN_TEST(test_tilt_save_stops_at_max_slots_when_more_colours_are_configured);
+  RUN_TEST(test_tilt_save_keeps_a_set_up_tilt_ahead_of_ones_only_heard);
+  RUN_TEST(test_count_set_up_tilts_ignores_tilts_only_heard);
   RUN_TEST(test_tilt_load_starts_from_defaults_when_the_file_is_missing);
 
   // brew service migrations
@@ -1428,6 +1473,7 @@ int main(int argc, char** argv) {
   // resets
   RUN_TEST(test_reset_wifi_config_clears_the_provisioning_artifacts);
   RUN_TEST(test_reset_all_config_restores_defaults_and_writes_every_file);
+  RUN_TEST(test_reset_all_config_clears_the_saved_tilt_settings);
   RUN_TEST(test_reset_all_config_survives_a_read_only_filesystem);
 
   // reboot log

@@ -35,6 +35,7 @@
 #include "StackProbe.h"
 #include "TextSafe.h"
 #include "Uptime.h"
+#include "FirmwareCheck.h"
 
 // Forward refs to global server (defined in OurBrewbot.cpp)
 extern ESP8266WebServer g_webServer;
@@ -45,6 +46,9 @@ void handleBLESniffPoll(ESP8266WebServer& server);
 void handleBLESniffSend(ESP8266WebServer& server);
 void handleSyslogConfig(ESP8266WebServer& server);
 void handleSyslogConfigPost(ESP8266WebServer& server);
+static bool otaUploadInstalled();
+static bool otaUploadRefused();
+static void otaUploadClear();
 
 // One buffer shared by the GET handlers that send their reply in chunks:
 // /fermenters, /status, /debug, /ispindels, /smartplugs and /profiles. Each
@@ -216,10 +220,13 @@ void setupWebServer(ESP8266WebServer& server) {
         sendErr(server, 403, F("Cross-site request refused"));
         return;
       }
-      if (Update.hasError()) {
+      if (!otaUploadInstalled()) {
         holdPlugsOff(false);   // no restart is coming: the control loop takes over again
         String err = "Update FAILED: ";
-        err += Update.getError();
+        if (otaUploadRefused())     err += F("this is not a complete OurBrewbot firmware file");
+        else if (Update.hasError()) err += Update.getError();
+        else                        err += F("no firmware file was received");
+        otaUploadClear();   // so the next request isn't answered with this one's result
         server.send(500, "text/html", err);
       } else {
         server.send(200, "text/html",
@@ -276,6 +283,14 @@ static void sendOk(ESP8266WebServer& server, const __FlashStringHelper* msg) {
 
 static void sendErr(ESP8266WebServer& server, int code, const __FlashStringHelper* msg) {
   sendStatusMsg(server, code, false, msg);
+}
+
+// The reply for a change that is already in use. If it couldn't be saved to
+// flash, say so rather than "saved": the 10-minute save tries it again, but
+// a restart before then would lose it.
+static void sendSaveResult(ESP8266WebServer& server, bool saved, const __FlashStringHelper* okMsg) {
+  if (saved) sendOk(server, okMsg);
+  else       sendErr(server, 500, F("In use, but not saved to flash yet - it is tried again every 10 minutes"));
 }
 
 // Parse the POST body into doc; sends the 400 error and returns false on
@@ -577,8 +592,7 @@ void handleFermenter(ESP8266WebServer& server) {
     // control loop, so a rejected body leaves the fermenter untouched.
     g_fermenters[idx] = fc;
 
-    saveFermenterConfig();
-    sendOk(server, F("Configuration saved"));
+    sendSaveResult(server, saveFermenterConfig(), F("Configuration saved"));
     return;
   }
 
@@ -704,11 +718,11 @@ void handleController(ESP8266WebServer& server) {
     if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
     if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
     if (doc["BrewServiceId"].is<const char*>()) copyText(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
-    saveGlobalConfig();
+    bool saved = saveGlobalConfig();
     // HA discovery advertises the temperature unit — republish so entities
     // pick up the new unit (retained topics are overwritten in place).
     if (g_globalConfig.unit != oldUnit) publishAllHaDiscovery();
-    sendOk(server, F("Configuration saved"));
+    sendSaveResult(server, saved, F("Configuration saved"));
     return;
   }
   JsonDocument doc;
@@ -930,6 +944,15 @@ void handleOTAPage(ESP8266WebServer& server) {
   server.sendContent_P(OTA_PAGE);
 }
 
+// The firmware upload in progress, checked as it arrives (see FirmwareCheck.cpp)
+static FirmwareCheck s_otaCheck;
+static bool s_otaInstalled = false;   // Update.end() accepted it: it runs after the restart
+static bool s_otaRefused   = false;   // the file failed the check, so nothing was installed
+
+static bool otaUploadInstalled() { return s_otaInstalled; }
+static bool otaUploadRefused()   { return s_otaRefused; }
+static void otaUploadClear()     { s_otaInstalled = false; s_otaRefused = false; }
+
 void handleOTAUpload(ESP8266WebServer& server) {
   HTTPUpload& upload = server.upload();
 
@@ -953,16 +976,28 @@ void handleOTAUpload(ESP8266WebServer& server) {
     // If the upload fails, control resumes from idle, so a cooler switched
     // off here waits out its compressor delay before it can run again
     idleAllFermenters();
+    firmwareCheckStart(s_otaCheck);
+    s_otaInstalled = false;
+    s_otaRefused   = false;
     uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     if (!Update.begin(maxSketchSpace)) {
       Update.printError(Serial);
     }
   } else if (upload.status == UPLOAD_FILE_WRITE) {
+    firmwareCheckAdd(s_otaCheck, upload.buf, upload.currentSize);
     if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
       Update.printError(Serial);
     }
   } else if (upload.status == UPLOAD_FILE_END) {
-    if (Update.end(true)) {
+    if (!firmwareCheckPassed(s_otaCheck)) {
+      // Cut short or damaged. Update.end() without "true" throws the upload
+      // away, so the firmware already running stays in place.
+      logMsgL(SYSLOG_WARNING, "[OTA] Refused %s: not a complete firmware file (%u bytes, length or CRC wrong)",
+              upload.filename.c_str(), (unsigned)upload.totalSize);
+      Update.end();
+      s_otaRefused = true;
+    } else if (Update.end(true)) {
+      s_otaInstalled = true;
       // size_t is unsigned int on the ESP8266, so %u is right on the target -
       // but it is 64-bit on the host that builds the native tests, where the
       // same line warns. The cast makes it correct on both and changes
@@ -1062,8 +1097,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     g_iSpindels[idx].corrGravity    = 0.0f;
     g_iSpindels[idx].runTime        = 0.0f;
     g_iSpindels[idx].gravityUnit[0] = '\0';
-    saveiSpindelConfig();
-    sendOk(server, F("iSpindel slot cleared"));
+    sendSaveResult(server, saveiSpindelConfig(), F("iSpindel slot cleared"));
     return;
   }
 
@@ -1079,8 +1113,7 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
   if (doc["collectData"].isNull() && !doc["fermenter"].isNull()) {
     g_iSpindels[idx].collectData = (g_iSpindels[idx].fermenter != PROBE_UNASSIGNED);
   }
-  saveiSpindelConfig();
-  sendOk(server, F("iSpindel updated"));
+  sendSaveResult(server, saveiSpindelConfig(), F("iSpindel updated"));
 }
 
 // ============================================================
@@ -1154,8 +1187,7 @@ void handleProbePost(ESP8266WebServer& server) {
   if (!doc["function"].isNull())   g_probes[idx].function   = doc["function"];
   if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_probes[idx].fermenter = v; }
   if (!doc["tempAdjust"].isNull()) g_probes[idx].tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
-  saveProbeConfig();
-  sendOk(server, F("Probe updated"));
+  sendSaveResult(server, saveProbeConfig(), F("Probe updated"));
 }
 
 // ============================================================
@@ -1240,8 +1272,7 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
   }
 
   g_smartPlugs[idx] = plug;
-  saveSmartPlugConfig();
-  sendOk(server, F("Plug updated"));
+  sendSaveResult(server, saveSmartPlugConfig(), F("Plug updated"));
 }
 
 // ============================================================
@@ -1544,8 +1575,7 @@ void handleBrewServicesPost(ESP8266WebServer& server) {
   if (!doc["enabled"].isNull())    g_brewServices[idx].enabled = doc["enabled"];
   if (doc["serviceId"].is<const char*>())  copyText(g_brewServices[idx].serviceId,  doc["serviceId"].as<const char*>(),  sizeof(g_brewServices[0].serviceId));
   if (doc["deviceName"].is<const char*>()) copyText(g_brewServices[idx].deviceName, doc["deviceName"].as<const char*>(), sizeof(g_brewServices[0].deviceName));
-  saveBrewServiceConfig();
-  sendOk(server, F("Brew service saved"));
+  sendSaveResult(server, saveBrewServiceConfig(), F("Brew service saved"));
 }
 
 // ============================================================
@@ -1619,6 +1649,18 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
     }
   }
 
+  // A change the open connection can't pick up: it is closed after the save
+  // and opened again with the new settings
+  bool passwordChanged = doc["password"].is<const char*>() &&
+                         strcmp(doc["password"].as<const char*>(), MQTT_PASSWORD_MASK) != 0 &&
+                         strcmp(doc["password"].as<const char*>(), g_mqttConfig.password) != 0;
+  bool reconnect = passwordChanged ||
+                   (!doc["enabled"].isNull() && doc["enabled"].as<bool>() != g_mqttConfig.enabled) ||
+                   (!doc["port"].isNull() && port != g_mqttConfig.port) ||
+                   (doc["host"].is<const char*>() && strcmp(doc["host"].as<const char*>(), g_mqttConfig.host) != 0) ||
+                   (doc["username"].is<const char*>() && strcmp(doc["username"].as<const char*>(), g_mqttConfig.username) != 0) ||
+                   (baseTopic != nullptr && strcmp(baseTopic, g_mqttConfig.baseTopic) != 0);
+
   if (!doc["enabled"].isNull())          g_mqttConfig.enabled = doc["enabled"];
   if (doc["host"].is<const char*>())     copyText(g_mqttConfig.host,     doc["host"].as<const char*>(),     sizeof(g_mqttConfig.host));
   if (!doc["port"].isNull())             g_mqttConfig.port = (uint16_t)port;
@@ -1637,8 +1679,9 @@ void handleMqttConfigPost(ESP8266WebServer& server) {
     mqttApplyControlSubscription();  // takes effect immediately on live connection
   }
   if (!doc["logEnabled"].isNull()) g_mqttConfig.logEnabled = doc["logEnabled"];
-  saveMqttConfig();
-  sendOk(server, F("MQTT config saved"));
+  bool saved = saveMqttConfig();
+  if (reconnect) mqttSettingsChanged();
+  sendSaveResult(server, saved, F("MQTT config saved"));
 }
 
 void handleMqttTest(ESP8266WebServer& server) {
@@ -1754,9 +1797,9 @@ void handleProfilePost(ESP8266WebServer& server) {
       }
     }
   }
-  saveProfileConfig();
-  saveProfileSteps();
-  sendOk(server, F("Profile saved"));
+  bool saved = saveProfileConfig();
+  saved &= saveProfileSteps();
+  sendSaveResult(server, saved, F("Profile saved"));
 }
 
 // ============================================================
@@ -1909,8 +1952,13 @@ void handleFsFileSave(ESP8266WebServer& server) {
 
   File f = LittleFS.open(name, "w");
   if (!f) { sendErr(server, 500, F("Write failed")); return; }
-  f.print(body);
+  size_t written = f.print(body);
   f.close();
+  if (written != body.length()) {
+    // Filesystem full, say. The WebUI then puts the previous settings back.
+    sendErr(server, 500, F("Write failed - the file is incomplete"));
+    return;
+  }
   sendJsonResponse(server, "{\"status\":\"ok\"}");
 }
 
@@ -1972,19 +2020,29 @@ void handleTiltPost(ESP8266WebServer& server) {
     g_tilts[colour].tempAdjust = 0.0f;
     g_tilts[colour].sgAdjust   = 0.0f;
     g_tilts[colour].mbb        = 0;
-    saveTiltConfig();
-    sendOk(server, F("Tilt slot cleared"));
+    sendSaveResult(server, saveTiltConfig(), F("Tilt slot cleared"));
     return;
   }
 
-  // Mark the slot as configured so saveTiltConfig() includes it
-  g_tilts[colour].colour = (uint8_t)colour;
-  if (!doc["function"].isNull())   g_tilts[colour].function   = doc["function"];
-  if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_tilts[colour].fermenter = v; }
-  if (!doc["tempAdjust"].isNull()) g_tilts[colour].tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
-  if (!doc["sgAdjust"].isNull())   g_tilts[colour].sgAdjust   = doc["sgAdjust"];
-  saveTiltConfig();
-  sendOk(server, F("Tilt updated"));
+  // The changes go on a copy first, so a refused save leaves the Tilt as it was.
+  // Marking the colour makes saveTiltConfig() include it.
+  TiltConfig tilt = g_tilts[colour];
+  tilt.colour = (uint8_t)colour;
+  if (!doc["function"].isNull())   tilt.function   = doc["function"];
+  if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) tilt.fermenter = v; }
+  if (!doc["tempAdjust"].isNull()) tilt.tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
+  if (!doc["sgAdjust"].isNull())   tilt.sgAdjust   = doc["sgAdjust"];
+
+  // Only MAX_TILT_SLOTS Tilts fit in the settings file. A fifth used to be
+  // dropped from the file without a word and lost at the next restart.
+  bool newlySetUp = tiltIsSetUp(tilt) &&
+                    !(g_tilts[colour].colour != PROBE_UNASSIGNED && tiltIsSetUp(g_tilts[colour]));
+  if (newlySetUp && countSetUpTilts() >= MAX_TILT_SLOTS) {
+    sendErr(server, 400, F("Only 4 Tilts can be set up - clear one first"));
+    return;
+  }
+  g_tilts[colour] = tilt;
+  sendSaveResult(server, saveTiltConfig(), F("Tilt updated"));
 }
 
 // ============================================================
@@ -2016,9 +2074,9 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
   }
   if (!doc["facility"].isNull()) { uint8_t v = doc["facility"]; if (v <= 23) g_syslogConfig.facility = v; }
   if (!doc["minLevel"].isNull()) { uint8_t v = doc["minLevel"]; if (v <= 7)  g_syslogConfig.minLevel = v; }
-  saveSyslogConfig();
+  bool saved = saveSyslogConfig();
   logInit();  // re-resolve host with new config
-  sendOk(server, F("Syslog config saved"));
+  sendSaveResult(server, saved, F("Syslog config saved"));
 }
 
 // ============================================================

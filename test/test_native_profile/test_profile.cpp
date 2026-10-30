@@ -159,6 +159,36 @@ void test_TimeOverTemp_blocks_before_days_elapsed(void) {
   TEST_ASSERT_FALSE(isStepComplete(F, step));
 }
 
+// ---- fractional Days: counted in 10-minute ticks, not whole hours ----
+
+void test_a_tenth_of_a_day_is_not_cut_to_two_hours(void) {
+  // 0.1 days is 2 h 24 min - 14 ticks to the nearest tick. Whole hours made it 2 h.
+  ProfileStep step = makeStep(STEP_TIME_OVER_TEMP, 0.1f, 0, 0, 0);
+  g_fermenters[F].currentHour = 2;
+  g_fermenters[F].hourTicks   = 0;
+  TEST_ASSERT_FALSE(isStepComplete(F, step));
+  g_fermenters[F].hourTicks   = 1;   // 2 h 10 min
+  TEST_ASSERT_FALSE(isStepComplete(F, step));
+  g_fermenters[F].hourTicks   = 2;   // 2 h 20 min
+  TEST_ASSERT_TRUE(isStepComplete(F, step));
+}
+
+void test_a_step_of_days_with_a_part_hour_waits_for_it(void) {
+  // 1.5 days is a whole number of hours (36) and must still finish exactly there
+  ProfileStep step = makeStep(STEP_TIME_OVER_TEMP, 1.5f, 0, 0, 0);
+  g_fermenters[F].currentHour = 35;
+  g_fermenters[F].hourTicks   = 5;
+  TEST_ASSERT_FALSE(isStepComplete(F, step));
+  g_fermenters[F].currentHour = 36;
+  g_fermenters[F].hourTicks   = 0;
+  TEST_ASSERT_TRUE(isStepComplete(F, step));
+}
+
+void test_a_step_with_no_days_is_complete_at_once(void) {
+  ProfileStep step = makeStep(STEP_TIME_OVER_TEMP, 0.0f, 0, 0, 0);
+  TEST_ASSERT_TRUE(isStepComplete(F, step));
+}
+
 // ---- STEP_FREE_RISE: days elapsed only ----
 
 void test_FreeRise_completes_when_days_elapsed(void) {
@@ -332,6 +362,18 @@ void test_getProfileTargetTemp_ramp_interpolates_and_clamps(void) {
 
   g_fermenters[F].currentHour = 96;  // past 100% - must clamp, not overshoot
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, getProfileTargetTemp(F));
+}
+
+void test_getProfileTargetTemp_ramp_moves_every_ten_minutes(void) {
+  // It used to move only on the hour
+  g_fermenters[F].profileRunning = true;
+  g_fermenters[F].profileNo      = 1;
+  g_fermenters[F].currentStep    = 0;
+  g_profileSteps[0] = makeStep(STEP_TEMP_OVER_TIME, /*days=*/1.0f, /*start=*/10.0f, /*end=*/20.0f, 0);
+
+  g_fermenters[F].currentHour = 12;
+  g_fermenters[F].hourTicks   = 3;   // 12 h 30 min of 24 h: 75 of 144 ticks
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 10.0f + 10.0f * 75.0f / 144.0f, getProfileTargetTemp(F));
 }
 
 void test_getProfileTargetTemp_nonramp_returns_endTemp_directly(void) {
@@ -826,6 +868,9 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_TimeOverTemp_completes_when_days_elapsed);
   RUN_TEST(test_TimeOverTemp_blocks_before_days_elapsed);
+  RUN_TEST(test_a_tenth_of_a_day_is_not_cut_to_two_hours);
+  RUN_TEST(test_a_step_of_days_with_a_part_hour_waits_for_it);
+  RUN_TEST(test_a_step_with_no_days_is_complete_at_once);
 
   RUN_TEST(test_FreeRise_completes_when_days_elapsed);
   RUN_TEST(test_FreeRise_blocks_before_days_elapsed);
@@ -857,6 +902,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_getProfileTargetTemp_none_in_standard_mode);
   RUN_TEST(test_getProfileTargetTemp_none_past_last_step);
   RUN_TEST(test_getProfileTargetTemp_ramp_interpolates_and_clamps);
+  RUN_TEST(test_getProfileTargetTemp_ramp_moves_every_ten_minutes);
   RUN_TEST(test_getProfileTargetTemp_nonramp_returns_endTemp_directly);
   RUN_TEST(test_getProfileTargetTemp_holds_endTemp_for_types_without_a_start_temp);
   RUN_TEST(test_getProfileTargetTemp_ramps_for_types_with_a_start_temp);
