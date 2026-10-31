@@ -344,6 +344,114 @@ button.stepact.del:hover:not(:disabled) {
   border-bottom: 1px solid #222;
 }
 
+/* ---- Stacked tables on narrow screens ----
+   A table with class "stack" is too wide for a phone, so below 720px each
+   row becomes a small card of its own. The header row (class "hd") is
+   hidden and each cell shows its data-label above its value instead.
+   Cells marked "num" and "acts" share the card's top line (title on the
+   left, buttons or reading on the right) and "wide" cells span both
+   columns. Wider screens see the normal table. */
+
+/* Text shown only in the card layout, e.g. "Step " before a step number */
+.mob {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .tbl.stack .mob {
+    display: inline;
+  }
+
+  .tbl.stack,
+  .tbl.stack tbody,
+  .tbl.stack td {
+    display: block;
+  }
+
+  .tbl.stack tr.hd {
+    display: none;
+  }
+
+  .tbl.stack tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 10px;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 8px;
+  }
+
+  .tbl.stack td {
+    border: none;
+    padding: 0;
+  }
+
+  .tbl.stack td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: #aaa;
+    font-size: 12px;
+    margin-bottom: 2px;
+  }
+
+  .tbl.stack td.num {
+    grid-row: 1;
+    grid-column: 1;
+    align-self: center;
+    font-weight: bold;
+    color: #e94560;
+  }
+
+  .tbl.stack td.acts {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: center;
+    text-align: right;
+  }
+
+  .tbl.stack td.wide {
+    grid-column: 1 / span 2;
+  }
+
+  /* Line up with the inputs beside it, below their labels */
+  .tbl.stack td.bottom {
+    align-self: end;
+  }
+
+  .tbl.stack td select {
+    width: 100%;
+  }
+
+  /* Leave room for the info icon after the step type */
+  .tbl.stack td.wide select {
+    width: calc(100% - 24px);
+  }
+
+  .tbl.stack td input[type=number] {
+    width: 100% !important;
+    box-sizing: border-box;
+  }
+
+  /* An input with its unit beside it, e.g. a probe's Adjust */
+  .tbl.stack td input.unit {
+    width: 80px !important;
+  }
+
+  /* Bigger buttons for fingers */
+  .tbl.stack button.stepact {
+    min-width: 36px;
+    line-height: 28px;
+  }
+
+  /* Open tooltips leftwards, so they stay on screen */
+  .tbl.stack .tip .tt {
+    left: auto;
+    right: 0;
+    max-width: calc(100vw - 48px);
+  }
+}
+
 /* ---- Toggle switch ---- */
 .sw {
   position: relative;
@@ -1130,24 +1238,27 @@ function loadProfilesFromState() {
     if (live == 0) {
       html += '<div class="prof-empty">No steps yet — click <b>+ Add Step</b> to begin.</div>';
     } else {
-      html += '<table class="tbl"><tr><th>#</th><th>Step Type</th><th>Start Temp (&deg;' + tempUnit + ')</th><th>End Temp (&deg;' + tempUnit + ')</th><th>SG Trigger</th><th>Days</th><th></th></tr>';
+      // class="stack" turns each step into a card on a phone (see the CSS)
+      var startLabel = 'Start Temp (&deg;' + tempUnit + ')';
+      var endLabel   = 'End Temp (&deg;' + tempUnit + ')';
+      html += '<table class="tbl stack"><tr class="hd"><th>#</th><th>Step Type</th><th>' + startLabel + '</th><th>' + endLabel + '</th><th>SG Trigger</th><th>Days</th><th></th></tr>';
       for (var s = 0; s < live; s++) {
         var st = pe.steps[s];
         var fl = stepFieldsEnabled(st.stepType);
         var upDis   = (locked || s == 0)        ? ' disabled' : '';
         var dnDis   = (locked || s == live - 1) ? ' disabled' : '';
         var delDis  = locked ? ' disabled' : '';
-        html += '<tr><td>' + (s + 1) + '</td>';
-        html += '<td><select id="pst' + p + '_' + s + '" onchange="onStepFieldChange(' + p + ',' + s + ')"' + disAttr + '>';
+        html += '<tr><td class="num"><span class="mob">Step </span>' + (s + 1) + '</td>';
+        html += '<td class="wide" data-label="Step Type"><select id="pst' + p + '_' + s + '" onchange="onStepFieldChange(' + p + ',' + s + ')"' + disAttr + '>';
         for (var t = 0; t < stepTypes.length; t++) html += '<option value="' + stepTypes[t].id + '"' + (stepTypes[t].id == st.stepType ? ' selected' : '') + '>' + escHtml(stepTypes[t].name) + '</option>';
         html += '</select>';
         html += '<span class="tip" tabindex="0" aria-label="Step info">&#9432;<span class="tt" id="ptt' + p + '_' + s + '">' + buildStepTooltipHtml(st.stepType) + '</span></span>';
         html += '</td>';
-        html += '<td><input type="number" step="0.1"   id="pss' + p + '_' + s + '" value="' + st.startTemp + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.s && !locked ? '' : ' disabled') + '></td>';
-        html += '<td><input type="number" step="0.1"   id="pse' + p + '_' + s + '" value="' + st.endTemp   + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.e && !locked ? '' : ' disabled') + '></td>';
-        html += '<td><input type="number" step="0.001" id="psg' + p + '_' + s + '" value="' + st.sgTrigger + '" style="width:80px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.g && !locked ? '' : ' disabled') + '></td>';
-        html += '<td><input type="number" step="0.1"   id="psd' + p + '_' + s + '" value="' + st.days      + '" style="width:60px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.d && !locked ? '' : ' disabled') + '></td>';
-        html += '<td style="white-space:nowrap">';
+        html += '<td data-label="' + startLabel + '"><input type="number" step="0.1"   id="pss' + p + '_' + s + '" value="' + st.startTemp + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.s && !locked ? '' : ' disabled') + '></td>';
+        html += '<td data-label="' + endLabel + '"><input type="number" step="0.1"   id="pse' + p + '_' + s + '" value="' + st.endTemp   + '" style="width:70px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.e && !locked ? '' : ' disabled') + '></td>';
+        html += '<td data-label="SG Trigger"><input type="number" step="0.001" id="psg' + p + '_' + s + '" value="' + st.sgTrigger + '" style="width:80px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.g && !locked ? '' : ' disabled') + '></td>';
+        html += '<td data-label="Days"><input type="number" step="0.1"   id="psd' + p + '_' + s + '" value="' + st.days      + '" style="width:60px" oninput="onStepFieldChange(' + p + ',' + s + ')"' + (fl.d && !locked ? '' : ' disabled') + '></td>';
+        html += '<td class="acts" style="white-space:nowrap">';
         html += '<button class="stepact" title="Move up"   onclick="moveProfileStep(' + p + ',' + s + ',-1)"' + upDis  + '>&#9650;</button>';
         html += '<button class="stepact" title="Move down" onclick="moveProfileStep(' + p + ',' + s + ',1)"'  + dnDis  + '>&#9660;</button>';
         html += '<button class="stepact del" title="Delete step" onclick="deleteProfileStep(' + p + ',' + s + ')"' + delDis + '>&#10005;</button>';
@@ -1252,17 +1363,18 @@ function loadProbes() {
   getJson('/probes').then(function (d) {
     if (!replyIsCurrent(seq)) return;
     var p = d.probes;
-    var html = '<div class="card"><table class="tbl"><tr><th>Address</th><th>Temp</th><th>Name</th><th>Function</th><th>Fermenter</th><th>Adjust</th><th></th></tr>';
-    if (p.length == 0) html += '<tr><td colspan="7" style="color:#888">No probes detected. Connect DS18B20 probes to the Green Jack.</td></tr>';
+    // class="stack" turns each probe into a card on a phone (see the CSS)
+    var html = '<div class="card"><table class="tbl stack"><tr class="hd"><th>Address</th><th>Temp</th><th>Name</th><th>Function</th><th>Fermenter</th><th>Adjust</th><th></th></tr>';
+    if (p.length == 0) html += '<tr><td class="wide" colspan="7" style="color:#888">No probes detected. Connect DS18B20 probes to the Green Jack.</td></tr>';
     for (var i = 0; i < p.length; i++) {
       var q = p[i];
-      html += '<tr><td style="font-family:monospace;font-size:12px">' + escHtml(q.address) + '</td>';
-      html += '<td>' + (q.temperature > -100 ? q.temperature.toFixed(1) + '&deg;' + tempUnit : '<span style="color:#f44">--</span>') + '</td>';
-      html += '<td>' + escHtml(q.name) + '</td>';
-      html += '<td><select id="pf' + q.index + '">' + fnOpts(q.function) + '</select></td>';
-      html += '<td><select id="pr' + q.index + '">' + fermOpts(q.fermenter) + '</select></td>';
-      html += '<td><input type="number" step="0.1" id="pa' + q.index + '" value="' + q.tempAdjust + '" style="width:60px"> &deg;' + tempUnit + '</td>';
-      html += '<td><button class="save" onclick="saveProbe(' + q.index + ')">Save</button></td></tr>';
+      html += '<tr><td class="wide" data-label="Address"><span style="font-family:monospace;font-size:12px">' + escHtml(q.address) + '</span></td>';
+      html += '<td class="acts">' + (q.temperature > -100 ? q.temperature.toFixed(1) + '&deg;' + tempUnit : '<span style="color:#f44">--</span>') + '</td>';
+      html += '<td class="num">' + escHtml(q.name) + '</td>';
+      html += '<td data-label="Function"><select id="pf' + q.index + '">' + fnOpts(q.function) + '</select></td>';
+      html += '<td data-label="Fermenter"><select id="pr' + q.index + '">' + fermOpts(q.fermenter) + '</select></td>';
+      html += '<td data-label="Adjust"><input type="number" class="unit" step="0.1" id="pa' + q.index + '" value="' + q.tempAdjust + '" style="width:60px"> &deg;' + tempUnit + '</td>';
+      html += '<td class="bottom"><button class="save" onclick="saveProbe(' + q.index + ')">Save</button></td></tr>';
     }
     html += '</table><div class="msg" id="pm"></div></div>';
     byId('t2').innerHTML = html;
