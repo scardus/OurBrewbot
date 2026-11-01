@@ -162,6 +162,12 @@ public:
     httpRespAppend(s, s ? strlen(s) : 0);
   }
 
+  void send_P(int code, PGM_P contentType, PGM_P body, size_t len) {
+    recordSend(code, contentType);
+    setContentLength(len);
+    httpRespAppend(body, len);
+  }
+
   void sendContent(const String& body) { httpRespAppend(body.c_str(), body.length()); }
   void sendContent(const char* body)   { httpRespAppend(body, body ? strlen(body) : 0); }
   void sendContent(const char* body, size_t len) { httpRespAppend(body, len); }

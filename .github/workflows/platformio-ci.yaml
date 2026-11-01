@@ -6,6 +6,7 @@ on:
     paths:
       - 'OurBrewbot/**'
       - 'test/**'
+      - 'web/**'
       - 'platformio.ini'
       - '.github/workflows/platformio-ci.yaml'
   pull_request:
@@ -13,6 +14,7 @@ on:
     paths:
       - 'OurBrewbot/**'
       - 'test/**'
+      - 'web/**'
       - 'platformio.ini'
       - '.github/workflows/platformio-ci.yaml'
   workflow_dispatch:
@@ -50,6 +52,9 @@ jobs:
             ${{ runner.os }}-pio-
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
+      - name: Check web assets
+        run: python -m unittest discover -s test -p test_web_assets.py
+
       - name: Run static analysis
         run: pio check --fail-on-defect=high
       - name: Run native unit tests

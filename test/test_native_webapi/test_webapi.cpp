@@ -130,10 +130,6 @@ void bleRequestReinit() { s_bleReinits++; }
 // iSpindel.cpp
 void handleiSpindelPost(const String&) {}
 
-// WebAdmin.cpp serves the admin page and is out of scope for native testing
-// (1800 lines of PROGMEM HTML/CSS/JS with nothing assertable). WebAPI.cpp's
-// route table takes its address, so the symbol still has to resolve.
-void handleAdmin(ESP8266WebServer&) {}
 
 // SmartPlugs.cpp - the RF layer. rfTransmit is recorded so the plug-test
 // endpoint can be checked without an RCSwitch.
@@ -199,6 +195,7 @@ ESP8266WebServer g_webServer;
 void stackCheck(uint8_t, const char*) {}
 
 #include "../../OurBrewbot/WebAPI.cpp"
+#include "../../OurBrewbot/WebAdmin.cpp"
 
 // ============================================================
 // FIXTURE
@@ -298,7 +295,7 @@ static bool bodyContains(const char* needle) {
 }
 
 // ============================================================
-// handleFermenter POST — THE PARTIAL-WRITE FIX
+// handleFermenter POST â€” THE PARTIAL-WRITE FIX
 //
 // Each of these posts a VALID temperature trio alongside one invalid field
 // that is checked further down the handler. The response must be a 400 and the
@@ -454,7 +451,7 @@ static void test_only_the_addressed_fermenter_is_modified(void) {
 }
 
 // ============================================================
-// handleFermenter POST — THE HOLISTIC TRIO RULES
+// handleFermenter POST â€” THE HOLISTIC TRIO RULES
 //
 // Ceiling, floor and hysteresis are validated as a set against the
 // would-be-combined state, deliberately: a partial POST is checked against the
@@ -517,7 +514,7 @@ static void test_exactly_twice_hysteresis_is_accepted(void) {
 }
 
 // ============================================================
-// handleFermenter — INDEX AND BODY VALIDATION
+// handleFermenter â€” INDEX AND BODY VALIDATION
 // ============================================================
 
 static void test_missing_fermenter_index_is_rejected(void) {
@@ -1036,7 +1033,7 @@ static void test_send_json_doc_sets_a_content_length(void) {
 }
 
 // ============================================================
-// handleFermenterProfile — ACTION DISPATCH
+// handleFermenterProfile â€” ACTION DISPATCH
 // ============================================================
 
 // A profile with one usable step, which start requires.
@@ -1542,7 +1539,7 @@ static void test_fs_save_reports_a_write_failure(void) {
 }
 
 // ============================================================
-// handleDebug — runtime-only sensor overrides
+// handleDebug â€” runtime-only sensor overrides
 // ============================================================
 
 static void test_debug_post_sets_the_global_mode(void) {
@@ -2061,10 +2058,47 @@ static void test_an_upload_from_another_website_is_ignored(void) {
   TEST_ASSERT_FALSE(s_plugsHeldOff);
 }
 
+// The Python asset tests check decompressed page content. Here, verify the
+// router sends the exact binary representation with its full declared length.
+static void assertWebPage(const uint8_t* page, size_t length) {
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("text/html; charset=utf-8", g_httpResp.contentType);
+  TEST_ASSERT_EQUAL_STRING("gzip", httpRespHeader("Content-Encoding"));
+  TEST_ASSERT_EQUAL_STRING("no-store", httpRespHeader("Cache-Control"));
+  TEST_ASSERT_TRUE(g_httpResp.contentLengthSet);
+  TEST_ASSERT_EQUAL_UINT(length, g_httpResp.declaredContentLength);
+  size_t captured = min(length, (size_t)HTTP_RESP_MAX_BODY - 1);
+  TEST_ASSERT_EQUAL_UINT(captured, g_httpResp.bodyLen);
+  TEST_ASSERT_EQUAL_MEMORY(page, g_httpResp.body, captured);
+}
+
+static void test_pages_send_gzip_without_writing_settings(void) {
+  struct Page { const char* path; const uint8_t* data; size_t length; };
+  const Page pages[] = {
+    {"/", ROOT_PAGE, sizeof(ROOT_PAGE)},
+    {"/admin", ADMIN_PAGE, sizeof(ADMIN_PAGE)},
+    {"/update", OTA_PAGE, sizeof(OTA_PAGE)},
+    {"/config", CONFIG_PAGE, sizeof(CONFIG_PAGE)},
+    {"/WiFi", CONFIG_PAGE, sizeof(CONFIG_PAGE)},
+    {"/reset", RESET_PAGE, sizeof(RESET_PAGE)},
+    {"/reboot", REBOOT_PAGE, sizeof(REBOOT_PAGE)},
+    {"/rf/sniff", RF_SNIFF_PAGE, sizeof(RF_SNIFF_PAGE)},
+    {"/ble/sniff", BLE_SNIFF_PAGE, sizeof(BLE_SNIFF_PAGE)}
+  };
+  int writes = g_fsWriteCount;
+  for (const Page& page : pages) {
+    httpRespReset();
+    request(HTTP_GET, page.path);
+    assertWebPage(page.data, page.length);
+  }
+  TEST_ASSERT_EQUAL_INT(writes, g_fsWriteCount);
+  TEST_ASSERT_EQUAL_INT(0, s_restarts);
+}
+
 static void test_get_reboot_asks_for_confirmation_and_does_not_restart(void) {
   request(HTTP_GET, "/reboot");
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
-  TEST_ASSERT_TRUE(bodyContains("<form method='post' action='/reboot'>"));
+  assertWebPage(REBOOT_PAGE, sizeof(REBOOT_PAGE));
   TEST_ASSERT_EQUAL_INT(0, s_restarts);
 }
 
@@ -2083,7 +2117,7 @@ static void test_get_reset_with_target_erases_nothing(void) {
   srv.setArg("target", "config");
   request(HTTP_GET, "/reset");
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
-  TEST_ASSERT_TRUE(bodyContains("<form method='post' action='/reset'>"));
+  assertWebPage(RESET_PAGE, sizeof(RESET_PAGE));
   TEST_ASSERT_TRUE(g_fermenters[0].power);
   TEST_ASSERT_EQUAL_INT(0, s_restarts);
 }
@@ -2111,7 +2145,7 @@ static void test_post_reset_switches_the_plugs_off_before_erasing_them(void) {
 static void test_post_reset_without_target_only_asks(void) {
   g_fermenters[0].power = true;
   request(HTTP_POST, "/reset");
-  TEST_ASSERT_TRUE(bodyContains("Confirm Reset"));
+  assertWebPage(RESET_PAGE, sizeof(RESET_PAGE));
   TEST_ASSERT_TRUE(g_fermenters[0].power);
   TEST_ASSERT_EQUAL_INT(0, s_restarts);
   TEST_ASSERT_EQUAL_INT(0, s_allPlugsOffs);
@@ -2891,6 +2925,7 @@ int main(int, char**) {
   RUN_TEST(test_a_post_with_no_origin_is_accepted);
   RUN_TEST(test_a_get_from_another_website_is_answered);
   RUN_TEST(test_an_upload_from_another_website_is_ignored);
+  RUN_TEST(test_pages_send_gzip_without_writing_settings);
   RUN_TEST(test_get_reboot_asks_for_confirmation_and_does_not_restart);
   RUN_TEST(test_post_reboot_restarts);
   RUN_TEST(test_get_reset_with_target_erases_nothing);
