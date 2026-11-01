@@ -298,6 +298,36 @@ views:
             name: Attenuation
             grid_options:
               columns: 6
+          # Not tiles: the numeric-input feature rounds to 2 decimals (1.018 shows as
+          # 1.02), so gravities get a 3-decimal card and are edited from more-info
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f0_og
+            primary: OG
+            secondary: >-
+              {%- set v = states('number.ourbrewbot_f0_og') -%}
+              {{ '%.3f' | format(v | float) ~ ' SG' if is_number(v) else v | title }}
+            icon: mdi:test-tube
+            color: blue
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 6
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f0_tg
+            primary: Target SG
+            secondary: >-
+              {%- set v = states('number.ourbrewbot_f0_tg') -%}
+              {{ '%.3f' | format(v | float) ~ ' SG' if is_number(v) else v | title }}
+            icon: mdi:test-tube
+            color: blue
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 6
           - type: custom:mushroom-template-card
             primary: Est. ABV
             secondary: >-
@@ -394,24 +424,6 @@ views:
           - type: tile
             entity: number.ourbrewbot_f0_compressor_delay
             name: Compressor delay
-            features_position: inline
-            features:
-              - type: numeric-input
-                style: buttons
-            grid_options:
-              columns: 12
-          - type: tile
-            entity: number.ourbrewbot_f0_og
-            name: OG
-            features_position: inline
-            features:
-              - type: numeric-input
-                style: buttons
-            grid_options:
-              columns: 12
-          - type: tile
-            entity: number.ourbrewbot_f0_tg
-            name: Target SG
             features_position: inline
             features:
               - type: numeric-input
@@ -630,6 +642,36 @@ views:
             name: Attenuation
             grid_options:
               columns: 6
+          # Not tiles: the numeric-input feature rounds to 2 decimals (1.018 shows as
+          # 1.02), so gravities get a 3-decimal card and are edited from more-info
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f1_og
+            primary: OG
+            secondary: >-
+              {%- set v = states('number.ourbrewbot_f1_og') -%}
+              {{ '%.3f' | format(v | float) ~ ' SG' if is_number(v) else v | title }}
+            icon: mdi:test-tube
+            color: blue
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 6
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f1_tg
+            primary: Target SG
+            secondary: >-
+              {%- set v = states('number.ourbrewbot_f1_tg') -%}
+              {{ '%.3f' | format(v | float) ~ ' SG' if is_number(v) else v | title }}
+            icon: mdi:test-tube
+            color: blue
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 6
           - type: custom:mushroom-template-card
             primary: Est. ABV
             secondary: >-
@@ -726,24 +768,6 @@ views:
           - type: tile
             entity: number.ourbrewbot_f1_compressor_delay
             name: Compressor delay
-            features_position: inline
-            features:
-              - type: numeric-input
-                style: buttons
-            grid_options:
-              columns: 12
-          - type: tile
-            entity: number.ourbrewbot_f1_og
-            name: OG
-            features_position: inline
-            features:
-              - type: numeric-input
-                style: buttons
-            grid_options:
-              columns: 12
-          - type: tile
-            entity: number.ourbrewbot_f1_tg
-            name: Target SG
             features_position: inline
             features:
               - type: numeric-input
@@ -962,6 +986,36 @@ views:
             name: Attenuation
             grid_options:
               columns: 6
+          # Not tiles: the numeric-input feature rounds to 2 decimals (1.018 shows as
+          # 1.02), so gravities get a 3-decimal card and are edited from more-info
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f2_og
+            primary: OG
+            secondary: >-
+              {%- set v = states('number.ourbrewbot_f2_og') -%}
+              {{ '%.3f' | format(v | float) ~ ' SG' if is_number(v) else v | title }}
+            icon: mdi:test-tube
+            color: blue
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 6
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f2_tg
+            primary: Target SG
+            secondary: >-
+              {%- set v = states('number.ourbrewbot_f2_tg') -%}
+              {{ '%.3f' | format(v | float) ~ ' SG' if is_number(v) else v | title }}
+            icon: mdi:test-tube
+            color: blue
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 6
           - type: custom:mushroom-template-card
             primary: Est. ABV
             secondary: >-
@@ -1058,24 +1112,6 @@ views:
           - type: tile
             entity: number.ourbrewbot_f2_compressor_delay
             name: Compressor delay
-            features_position: inline
-            features:
-              - type: numeric-input
-                style: buttons
-            grid_options:
-              columns: 12
-          - type: tile
-            entity: number.ourbrewbot_f2_og
-            name: OG
-            features_position: inline
-            features:
-              - type: numeric-input
-                style: buttons
-            grid_options:
-              columns: 12
-          - type: tile
-            entity: number.ourbrewbot_f2_tg
-            name: Target SG
             features_position: inline
             features:
               - type: numeric-input
@@ -1294,6 +1330,36 @@ views:
             name: Attenuation
             grid_options:
               columns: 6
+          # Not tiles: the numeric-input feature rounds to 2 decimals (1.018 shows as
+          # 1.02), so gravities get a 3-decimal card and are edited from more-info
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f3_og
+            primary: OG
+            secondary: >-
+              {%- set v = states('number.ourbrewbot_f3_og') -%}
+              {{ '%.3f' | format(v | float) ~ ' SG' if is_number(v) else v | title }}
+            icon: mdi:test-tube
+            color: blue
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 6
+          - type: custom:mushroom-template-card
+            entity: number.ourbrewbot_f3_tg
+            primary: Target SG
+            secondary: >-
+              {%- set v = states('number.ourbrewbot_f3_tg') -%}
+              {{ '%.3f' | format(v | float) ~ ' SG' if is_number(v) else v | title }}
+            icon: mdi:test-tube
+            color: blue
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 6
           - type: custom:mushroom-template-card
             primary: Est. ABV
             secondary: >-
@@ -1390,24 +1456,6 @@ views:
           - type: tile
             entity: number.ourbrewbot_f3_compressor_delay
             name: Compressor delay
-            features_position: inline
-            features:
-              - type: numeric-input
-                style: buttons
-            grid_options:
-              columns: 12
-          - type: tile
-            entity: number.ourbrewbot_f3_og
-            name: OG
-            features_position: inline
-            features:
-              - type: numeric-input
-                style: buttons
-            grid_options:
-              columns: 12
-          - type: tile
-            entity: number.ourbrewbot_f3_tg
-            name: Target SG
             features_position: inline
             features:
               - type: numeric-input
