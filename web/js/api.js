@@ -3,6 +3,7 @@
 const requests = [];
 let requestRunning = false;
 
+// Queue a controller request, prioritizing explicit actions over background reads.
 function request(path, options={}, background=false) {
   return new Promise((resolve,reject) => {
     requests.push({path,options,background,resolve,reject});
@@ -11,6 +12,7 @@ function request(path, options={}, background=false) {
   });
 }
 
+// Run one queued request with a timeout and report uncertain POST outcomes safely.
 async function pumpRequests() {
   if (requestRunning || !requests.length) return;
   requestRunning=true;
@@ -55,10 +57,13 @@ async function pumpRequests() {
   }
 }
 
+// Read endpoint data through the shared serialized request queue.
 const get = async (path,background=false) => (await request(path,{},background)).data;
+// Send a JSON action through the queue without automatically retrying it.
 const post = async (path,data,options={}) => (await request(path,{method:'POST',
   headers:{'Content-Type':'application/json'},body:JSON.stringify(data),...options})).data;
 
+// Read an endpoint and update its browser state using the controller's units.
 async function fetchData(name, background=false) {
   // These legacy replies contain temperatures but no unit field. Read the
   // existing controller endpoint first rather than extending their contracts.
@@ -83,6 +88,7 @@ async function fetchData(name, background=false) {
   return value;
 }
 
+// List the endpoint data needed by the current view or selected tab.
 function routeData() {
   if (state.route==='dashboard' || state.route==='profiles') return ['fermenters','profiles'];
   if (state.route==='sensors') return [state.sensorTab];
@@ -97,6 +103,7 @@ function routeData() {
   return [];
 }
 
+// Load missing or refreshed view data, ignoring results after navigation changes.
 async function loadRoute(force=false) {
   const generation=++routeGeneration;
   let received=false;
@@ -118,6 +125,7 @@ async function loadRoute(force=false) {
   }
 }
 
+// Poll the visible view without replacing editing forms or overlapping refreshes.
 async function refreshVisible() {
   if (pollBusy || saving || state.paused || document.hidden || !state.ready) return;
   pollBusy=true;

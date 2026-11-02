@@ -1,7 +1,11 @@
 'use strict';
+// Find the first matching element within the supplied root.
 const $ = (s, root = document) => root.querySelector(s);
+// Return all matching elements as an array within the supplied root.
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+// Escape device text before inserting it into HTML.
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Copy JSON-compatible data so draft edits cannot change saved state.
 const clone = value => JSON.parse(JSON.stringify(value));
 const paths = {
   dashboard:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -23,32 +27,44 @@ const paths = {
   close:'<path d="m6 6 12 12M6 18 18 6"/>',
   download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>'
 };
+// Build the requested inline SVG icon, falling back to the information icon.
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.info}</svg>`;
 const navItems = [['dashboard','Dashboard'],['profiles','Profiles'],['sensors','Sensors'],['plugs','Smart plugs'],['reporting','Reporting'],['system','System & diagnostics']];
+// Format a Celsius temperature in the selected display unit.
 const temp = value => value == null ? '—' : (state.unit === 'F' ? value*1.8+32 : value).toFixed(1);
+// Convert a Celsius temperature difference into the display unit.
 const delta = value => state.unit === 'F' ? +(value*1.8).toFixed(2) : value;
+// Convert an absolute temperature from the display unit to Celsius.
 const toC = value => state.unit === 'F' ? (value-32)/1.8 : value;
+// Convert a temperature difference from the display unit to Celsius.
 const deltaC = value => state.unit === 'F' ? value/1.8 : value;
+// Build a labelled status badge with the requested appearance.
 const badge = (label,kind='good') => `<span class="badge ${kind}"><i></i>${esc(label)}</span>`;
+// Build an action button for the shared click handler.
 const btn = (label,action,cls='secondary',extra='') => `<button type="button" class="button ${cls}" data-action="${action}" ${extra}>${label}</button>`;
+// Build a labelled input with optional validation attributes and help text.
 function field(label,name,value,type='text',extra='',help='') {
   return `<label class="field">${esc(label)}
     <input name="${name}" type="${type}" value="${esc(value)}" ${extra}>
     ${help?`<small>${esc(help)}</small>`:''}</label>`;
 }
 
+// Build a labelled dropdown with its current option selected.
 function select(label,name,value,options,extra='') {
   const choices=options.map(([key,text])=>
     `<option value="${esc(key)}" ${String(value)===String(key)?'selected':''}>${esc(text)}</option>`).join('');
   return `<label class="field">${esc(label)}<select name="${name}" ${extra}>${choices}</select></label>`;
 }
+// List fermenter choices together with the unassigned option.
 const fermOptions = () => [[99,'Unassigned'],...state.fermenters.map(f=>[f.id,f.name])];
 const fnOptions = [[99,'Unassigned'],[2,'Beer temperature'],[3,'Ambient temperature'],[4,'Tilt probe'],[5,'iSpindel probe'],[6,'Air probe'],[7,'Control temperature']];
+// Build a labelled checkbox switch with optional help text.
 function toggle(label,name,checked,help='') {
   return `<label class="toggle-row"><span>${esc(label)}${help?`<small>${esc(help)}</small>`:''}</span>
     <input type="checkbox" name="${name}" ${checked?'checked':''}></label>`;
 }
 
+// Build the shared save, discard and validation-message controls.
 function actions(label='Save changes',extras='') {
   return `<div class="form-actions"><div class="form-error" role="alert"></div>
     <button type="submit" class="button" data-save>${label}</button>${extras}
@@ -56,11 +72,13 @@ function actions(label='Save changes',extras='') {
     <span class="saved-label">No unsaved changes</span></div>`;
 }
 
+// Build a page heading, description and optional action controls.
 function title(kicker,name,description,buttons='') {
   return `<div class="page-title"><div><p class="eyebrow">${kicker}</p><h1>${name}</h1>
     <p class="subtitle">${description}</p></div><div class="title-actions">${buttons}</div></div>`;
 }
 
+// Read named form controls, keeping checkbox values as booleans.
 function formData(form) {
   const data={};
   for (const input of $$('[name]',form)) {
@@ -70,6 +88,7 @@ function formData(form) {
   return data;
 }
 
+// Restore supplied values into matching form controls.
 function applyData(form,data) {
   for (const input of $$('[name]',form)) {
     if (!(input.name in data)) continue;
@@ -80,6 +99,7 @@ function applyData(form,data) {
 
 // Keep the displayed baseline separate from exact profile temperatures.
 // A name-only edit must not save a rounded graph label back to the controller.
+// Record form baselines and restore drafts after rendering a view.
 function mountForms(root=document) {
   for (const form of $$('form[data-form]',root)) {
     const key=form.dataset.form;
@@ -94,6 +114,7 @@ function mountForms(root=document) {
   }
 }
 
+// Show a temporary message, replacing any previous dismissal timer.
 function toast(text) {
   $('#toast').textContent=text;
   $('#toast').classList.add('show');
@@ -101,12 +122,14 @@ function toast(text) {
   toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),4200);
 }
 
+// Close the mobile navigation and update its accessibility state.
 function closeNav() {
   $('#sidebar').classList.remove('open');
   $('#nav-scrim').hidden=true;
   $('#menu-toggle').setAttribute('aria-expanded','false');
 }
 
+// Render the selected route while restoring drafts and horizontal scroll positions.
 function render() {
   const requested=location.hash.slice(1).split('/')[0];
   state.route=navItems.some(item=>item[0]===requested)?requested:'dashboard';
@@ -137,6 +160,7 @@ function render() {
   document.title=navItems.find(item=>item[0]===state.route)[1]+' · OurBrewbot';
 }
 const stepNames=['Temperature over time','Time at temperature','Free rise','Specific gravity','Attenuation','Temperature reached','Gravity reached','Attenuation reached','Time and gravity','Time and attenuation'];
+// Build the System tabs and the currently selected diagnostics panel.
 function system() {
   const tabs=[['overview','Controller'],['settings','Settings'],['files','Files & backup'],
     ['rf','RF sniffer'],['ble','BLE console'],['update','Firmware']];
@@ -146,11 +170,13 @@ function system() {
         data-action="system-tab" data-value="${key}">${label}</button>`).join('')}</div>${systemPanels[state.systemTab]()}`;
 }
 
+// Set the shared modal content and open it if necessary.
 function showModal(html) {
   $('#modal-content').innerHTML=html;
   if (!$('#modal').open) $('#modal').showModal();
 }
 
+// Download browser-held text through a temporary object URL.
 function download(name,text,type='application/json') {
   const url=URL.createObjectURL(new Blob([text],{type}));
   const link=document.createElement('a');
@@ -160,6 +186,7 @@ function download(name,text,type='application/json') {
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
+// Read the profile draft while preserving untouched temperature precision.
 function captureProfile() {
   const index=state.profile;
   const form=$(`form[data-form="profile-${index}"]`);
@@ -177,12 +204,14 @@ function captureProfile() {
   return profile;
 }
 
+// Keep a profile draft only while it differs from the saved profile.
 function profileChanged() {
   const profile=captureProfile();
   if (profileValues(profile)===profileValues(state.profiles[state.profile])) profileDrafts.delete(state.profile);
   else profileDrafts.set(state.profile,profile);
 }
 
+// Display a validation or save message beside the relevant form.
 function saveError(form,message) {
   $('.form-error',form).textContent=message;
 }

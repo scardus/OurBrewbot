@@ -1,7 +1,9 @@
 'use strict';
 
+// Serialize the editable parts of a profile for change comparisons.
 function profileValues(p) { return JSON.stringify({name:p.name,steps:p.steps}); }
 
+// Track form drafts and update save availability and unsaved-change labels.
 function updateDirty(form) {
   const key=form.dataset.form;
   const changed=key.startsWith('profile-')
@@ -16,12 +18,15 @@ function updateDirty(form) {
   if (unknownForms.has(key)) form.dataset.unknown='true';
 }
 
+// Update the visible profile form's unsaved-change state after rendering.
 function markProfileDraft() {
   const form=$('form[data-form^="profile-"]');
   if (form) updateDirty(form);
 }
 
+// Build the existing profile JSON contract with temperatures and all fifteen slots.
 function profilePayload(index, profile) {
+  // Convert a stored Celsius profile temperature into the controller's selected unit.
   const display=value=>state.unit==='F'?value*1.8+32:value;
   const steps=profile.steps.map(step=>({stepType:step.type,startTemp:display(step.start),
     endTemp:display(step.end),sgTrigger:step.trigger,days:step.days}));
@@ -31,11 +36,13 @@ function profilePayload(index, profile) {
 
 // Labels may be rounded for readability. Send the received number unchanged
 // unless the user edited that field; a name-only save must not alter control.
+// Keep a received numeric value unchanged unless its form field was edited.
 function savedNumber(form,data,name,received) {
   const baseline=formBaselines.get(form);
   return baseline && data[name]===baseline[name] ? received : +data[name];
 }
 
+// Validate fermenter settings and build their existing JSON save contract.
 function fermenterPayload(form,data,index) {
   const fermenter=state.fermenters[index],raw=fermenter.raw;
   const body={Fermenter:fermenter.id,FermenterName:data.name,BeerName:data.beer,YeastName:data.yeast,
@@ -63,6 +70,7 @@ function fermenterPayload(form,data,index) {
   return body;
 }
 
+// Build a probe, Tilt or iSpindel save without rounding unchanged calibration values.
 function sensorPayload(form,data,kind,index) {
   const sensors=kind==='probe'?state.probes:kind==='tilt'?state.tilts:state.ispindels;
   const sensor=sensors[index];
@@ -75,6 +83,7 @@ function sensorPayload(form,data,kind,index) {
   return body;
 }
 
+// Validate RF timings and translate a plug draft into the firmware's save contract.
 function plugPayload(data,index) {
   const role=data.role,fermenter=+data.fermenter;
   if ((role==='hot'||role==='cold') && fermenter===99) throw new Error('Choose a fermenter for this heater or cooler.');
@@ -95,6 +104,7 @@ function plugPayload(data,index) {
     function:plugFunction,fermenter};
 }
 
+// Validate the MQTT topic and preserve the saved password unless explicitly changed.
 function mqttPayload(data) {
   // TextSafe.cpp::isValidBaseTopic() rejects wildcards, controls and a leading $.
   if (!data.baseTopic || /^[\$]|[+#\x00-\x1f\x7f]/.test(data.baseTopic)) {
@@ -107,6 +117,7 @@ function mqttPayload(data) {
   return body;
 }
 
+// Prevent duplicate validation and save attempts for the same form.
 async function saveForm(form) {
   if (form.dataset.checking) return;
   form.dataset.checking='true';
@@ -114,6 +125,7 @@ async function saveForm(form) {
   finally { delete form.dataset.checking; }
 }
 
+// Validate and save a changed form, then reread its endpoint before clearing the draft.
 async function saveFormChecked(form) {
   if (saving || form.dataset.dirty!=='true' || !form.reportValidity()) return;
   if (state.unitChanged) { saveError(form,'Controller units changed. Discard all drafts and refresh before saving.'); return; }
@@ -199,6 +211,7 @@ const backupFiles=[['global','/jsonGlobal.txt'],['fermenter','/jsonFermenter.txt
   ['tilt','/jsonTilt.txt'],['ispindel','/jsoniSpindel.txt'],['brewservices','/jsonBrewServices.txt'],
   ['mqtt','/jsonMqtt.txt'],['syslog','/jsonSyslog.txt']];
 
+// Download a complete backup only after every supported saved file has been read.
 async function exportConfig() {
   const configs={},failed=[];
   for (const [key,path] of backupFiles) {
@@ -212,6 +225,7 @@ async function exportConfig() {
   toast('Saved configuration backup downloaded.');
 }
 
+// Validate a backup and confirm its import, with rollback requested if a write fails.
 async function importConfig(file) {
   let bundle;
   try { bundle=JSON.parse(await file.text()); }
@@ -243,12 +257,14 @@ async function importConfig(file) {
   });
 }
 
+// Validate and send an AT command, then select BLE console polling.
 async function sendBle(command) {
   if (!command || command.length>64) { toast('Enter an AT command of at most 64 characters.'); return; }
   await post('/ble/sniff/send',{cmd:command});
   state.console='ble';
 }
 
+// Copy a saved RF preset into the plug draft without writing controller settings.
 function applyPreset(form) {
   const d=formData(form),preset=plugPresets[+d.preset];
   if (d.preset==='' || !preset) return;
@@ -260,6 +276,7 @@ function applyPreset(form) {
 }
 
 // A refresh resolves uncertainty only for forms whose endpoint was reread.
+// Reread view data and clear uncertain-save markers only for refreshed endpoints.
 async function refreshForms() {
   if (!await loadRoute(true)) return;
   const names=routeData();
@@ -273,6 +290,7 @@ async function refreshForms() {
   }
 }
 
+// Discard a form's browser draft and restore its saved values and unit state.
 function discardForm(form) {
   const key=form.dataset.form,oldUnit=form.dataset.unit;
   drafts.delete(key);
@@ -291,6 +309,7 @@ function discardForm(form) {
   }
 }
 
+// Open the destination selector for copying a profile into another draft slot.
 function chooseProfileCopy() {
   const choices=[[-1,'Choose an editable slot'],
     ...state.profiles.map((profile,index)=>[index,profile.name+(profile.used?' (in use)':'')])];
@@ -298,6 +317,7 @@ function chooseProfileCopy() {
     `<div class="modal-actions">${btn('Cancel','close-modal','ghost')}${btn('Copy as draft','copy-confirm','')}</div>`);
 }
 
+// Copy the selected profile draft into a different editable slot without saving it.
 function copyProfile() {
   const destination=+$('[name="copy-slot"]').value;
   if (destination<0 || destination===state.profile || state.profiles[destination].used) {
@@ -314,6 +334,7 @@ function copyProfile() {
   render();
 }
 
+// Add, remove or reorder a step in an unlocked profile draft.
 function editProfileStep(actionName,index) {
   if (state.profiles[state.profile].used) return;
   const profile=captureProfile(),steps=profile.steps;
@@ -326,6 +347,7 @@ function editProfileStep(actionName,index) {
   render();
 }
 
+// Confirm and apply a profile command using the fermenter's saved assignment.
 function controlProfile(index,command) {
   const fermenter=state.fermenters[index];
   confirmAction('Change profile state?',command+' for '+fermenter.name+' using the saved profile assignment.', 'Apply',async()=>{
@@ -338,6 +360,7 @@ function controlProfile(index,command) {
   });
 }
 
+// Confirm clearing a Tilt or iSpindel slot, then reload its saved state.
 function clearSensor(kind,index) {
   const tilt=kind==='tilts',sensor=tilt?state.tilts[index]:state.ispindels[index];
   confirmAction('Clear sensor slot?','The saved assignment and calibration will be cleared.','Clear',async()=>{
@@ -348,6 +371,7 @@ function clearSensor(kind,index) {
   });
 }
 
+// Confirm transmitting a configured plug's saved code and refresh its state.
 function testPlug(index,command) {
   if (!state.plugs.some(plug=>plug.index===index && (plug.onCode||plug.offCode))) {
     toast('Choose a configured plug.'); return;
@@ -360,6 +384,7 @@ function testPlug(index,command) {
     });
 }
 
+// Read a saved file into an escaped preview with a browser download option.
 async function viewFile(index) {
   const file=state.files[index];
   const text=(await request('/fs/file?name='+encodeURIComponent(file.name),{text:true})).data;
@@ -369,6 +394,7 @@ async function viewFile(index) {
 }
 
 // Keep the small fixed action list here; substantial operations have named helpers above.
+// Route a data-action button to its UI operation or explicit controller request.
 async function action(target) {
   const actionName=target.dataset.action,index=+target.dataset.id,value=target.dataset.value;
   if (saving && !['close-modal','close-editor'].includes(actionName)) return;

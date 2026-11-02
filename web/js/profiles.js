@@ -14,6 +14,7 @@ const stepHelp=[
   'Ramp from Start to End over Days. Advance after Days when attenuation is at or above the target percentage.'
 ];
 
+// Build the profile selector and selected draft editor, locking profiles that are in use.
 function profiles() {
   const saved=state.profiles[state.profile];
   const profile=profileDrafts.get(state.profile)||saved;
@@ -46,6 +47,7 @@ function profiles() {
     </div>`;
 }
 
+// Build the fields, controls and help text relevant to one profile step type.
 function profileStep(step,i,count,locked) {
   const fields=['sed','sed','sed','egd','egd','e','eg','eg','segd','segd'][step.type];
   const condition=fields.includes('g');
@@ -67,6 +69,7 @@ function profileStep(step,i,count,locked) {
   </div>`;
 }
 
+// Draw the profile's temperature sequence, including held steps and free-rise bands.
 function profilePlot(profile) {
   if (!profile.steps.length) return '<p class="empty-state">Add a step to preview the profile.</p>';
   // Profile.cpp::stepRamps() uses Start only for types 0, 1, 8 and 9.
@@ -77,6 +80,7 @@ function profilePlot(profile) {
   }));
   const values=segments.flatMap(segment=>[segment.start,segment.end]);
   const low=Math.min(...values)-3,high=Math.max(...values)+3;
+  // Map a Celsius temperature into the chart's vertical coordinate.
   const y=value=>95-(value-low)/(high-low)*65;
   const width=420/profile.steps.length;
   return `<svg class="profile-plot" viewBox="0 0 490 120" role="img" aria-label="Temperature sequence for ${esc(profile.name)}">

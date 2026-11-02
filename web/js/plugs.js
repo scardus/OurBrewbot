@@ -1,11 +1,13 @@
 'use strict';
 
+// Build the smart-plug view and its link to the RF sniffer.
 function plugs() {
   return title('HEAT WHEN NEEDED. COOL WHEN NEEDED.','Smart plugs',
     'Configure your RF plugs, then test each saved assignment.',btn('Open RF sniffer','open-rf','secondary'))+
     `<div class="grid">${state.plugs.map(plugCard).join('')}</div>`;
 }
 
+// Build one plug's assignment, RF settings, preset choices and explicit test controls.
 function plugCard(p,i) {
   const fermenter=state.fermenters[p.fermenter]?.name||('Fermenter '+p.fermenter);
   let name=fermenter+(p.role==='hot'?' · Heater':' · Cooler');

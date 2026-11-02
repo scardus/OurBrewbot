@@ -1,7 +1,9 @@
 'use strict';
 
+// Show a confirmation dialog and run its callback only after the user accepts.
 function confirmAction(heading,description,label,callback) {
   showModal(`<h2>${esc(heading)}</h2><p>${esc(description)}</p><div class="modal-actions">${btn('Cancel','close-modal','ghost')}<button class="button" id="confirm-action">${esc(label)}</button></div>`);
+  // Run the accepted action once and show any reported failure.
   $('#confirm-action').onclick=async()=>{
     $('#confirm-action').disabled=true;
     $('#modal').close();
@@ -9,6 +11,7 @@ function confirmAction(heading,description,label,callback) {
   };
 }
 
+// Read current runtime overrides and open their fermenter-specific editor.
 async function showDebug(id) {
   await fetchData('debug');
   const f=state.fermenters[id],override=state.debug.Overrides.find(v=>+v.Fermenter===f.id)||{};
@@ -20,11 +23,13 @@ async function showDebug(id) {
     `</div><button class="button" type="submit">Apply overrides</button></form>`);
 }
 
+// Append a log entry while retaining at most two thousand entries in the browser.
 function addLog(text,level='info',timestamp='') {
   logLines.push([timestamp,level,text]);
   if (logLines.length>2000) logLines.splice(0,logLines.length-2000);
 }
 
+// Apply log search and level filters, following new entries only when already at the end.
 function renderLogs() {
   const q=$('#log-search').value.toLowerCase(),level=$('#log-filter').value;
   const node=$('#log-lines'),follow=node.scrollHeight-node.scrollTop-node.clientHeight<30;
@@ -35,6 +40,7 @@ function renderLogs() {
 }
 
 let logBusy=false;
+// Read incremental log entries and recover the cursor after a controller restart or rejection.
 async function pollLogs() {
   if (logBusy || state.logPaused || saving || document.hidden || !state.ready) return;
   logBusy=true;
@@ -62,6 +68,7 @@ async function pollLogs() {
 }
 
 let lastConsolePoll=0,consoleBusy=false;
+// Poll the active RF or BLE console at its own interval and bound the displayed output.
 async function pollConsole() {
   const kind=state.console;
   if (!kind || consoleBusy || saving || document.hidden || state.route!=='system' || state.systemTab!==kind) return;
@@ -78,12 +85,14 @@ async function pollConsole() {
   finally { consoleBusy=false; lastConsolePoll=Date.now(); }
 }
 
+// Track typed form edits in browser drafts without saving to the controller.
 document.addEventListener('input',event=>{
   const form=event.target.closest('form[data-form]');
   if (!form) return;
   if (form.dataset.form.startsWith('profile-')) profileChanged();
   updateDirty(form);
 });
+// Update changed controls, rebuild profile fields when needed and accept an import file.
 document.addEventListener('change',event=>{
   const form=event.target.closest('form[data-form]');
   if (form) {
@@ -98,6 +107,7 @@ document.addEventListener('change',event=>{
     importConfig(file).catch(error=>toast(error.message));
   }
 });
+// Send explicit form submissions to the appropriate validated save or command handler.
 document.addEventListener('submit',event=>{
   event.preventDefault();
   const form=event.target;
@@ -106,6 +116,7 @@ document.addEventListener('submit',event=>{
   else if (form.dataset.debug!==undefined) saveDebug(form).catch(error=>toast(error.message));
 });
 
+// Validate and apply runtime sensor overrides without retrying an uncertain result.
 async function saveDebug(form) {
   const button=$('button[type="submit"]',form);
   if (button.disabled || form.dataset.unknown) return;
@@ -123,31 +134,41 @@ async function saveDebug(form) {
     toast(error.message+(error.unknown?' Close and reopen overrides to read their state.':''));
   } finally { button.disabled=!!form.dataset.unknown; }
 }
+// Delegate action-button clicks to the shared action handler.
 document.addEventListener('click',event=>{
   const target=event.target.closest('[data-action]');
   if (target) action(target).catch(error=>toast(error.message));
 });
 
+// Toggle mobile navigation and keep its accessibility state in sync.
 $('#menu-toggle').onclick=()=>{
   const open=$('#sidebar').classList.toggle('open');
   $('#nav-scrim').hidden=!open;
   $('#menu-toggle').setAttribute('aria-expanded',String(open));
 };
 $('#nav-scrim').onclick=closeNav;
+// Move keyboard focus directly to the page content.
 $('.skip').onclick=event=>{event.preventDefault(); $('#main').focus();};
+// Open or close the log drawer and render the retained log entries.
 $('#log-toggle').onclick=()=>{
   const node=$('#log-content'); node.hidden=!node.hidden;
   $('#log-toggle').setAttribute('aria-expanded',String(!node.hidden)); renderLogs();
 };
 $('#log-search').oninput=renderLogs;
 $('#log-filter').onchange=renderLogs;
+// Pause or resume log polling and update the button label.
 $('#log-pause').onclick=()=>{state.logPaused=!state.logPaused; $('#log-pause').textContent=state.logPaused?'Resume':'Pause';};
+// Clear only the browser-held log entries.
 $('#log-clear').onclick=()=>{logLines=[]; renderLogs();};
+// Download retained log entries as a plain-text file.
 $('#log-download').onclick=()=>download('ourbrewbot.log',logLines.map(l=>l[0]+' '+l[1]+' '+l[2]).join('\n'),'text/plain');
+// Clear the active editor selection when the drawer is dismissed.
 $('#editor').addEventListener('cancel',()=>{state.editorId=null;});
+// Ask the browser to warn before leaving a tab with unsaved drafts.
 window.addEventListener('beforeunload',event=>{
   if (drafts.size || profileDrafts.size) { event.preventDefault(); event.returnValue=''; }
 });
+// Load the newly selected route and stop the previous diagnostics console.
 window.addEventListener('hashchange',()=>{
   state.console=null;
   const requested=location.hash.slice(1).split('/')[0];
@@ -155,9 +176,11 @@ window.addEventListener('hashchange',()=>{
   if (state.ready) loadRoute();
   window.scrollTo(0,0);
 });
+// Refresh stale readings when the browser tab becomes visible again.
 document.addEventListener('visibilitychange',()=>{
   if (!document.hidden) { lastPoll=0; lastLogPoll=0; refreshVisible(); }
 });
+// Schedule reading, log and console polling while the tab is visible and ready.
 setInterval(()=>{
   if (document.hidden || !state.ready) return;
   updateAge();
@@ -167,6 +190,7 @@ setInterval(()=>{
   pollConsole();
 },250);
 
+// Load initial controller data before displaying the requested view.
 (async()=>{
   try {
     await fetchData('controller');
