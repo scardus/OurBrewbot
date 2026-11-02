@@ -54,6 +54,8 @@ jobs:
         run: pip install --upgrade platformio
       - name: Check web assets
         run: python -m unittest discover -s test -p test_web_assets.py
+      - name: Check WebUI behaviour
+        run: node --test test/test_web_ui.cjs
 
       - name: Run static analysis
         run: pio check --fail-on-defect=high

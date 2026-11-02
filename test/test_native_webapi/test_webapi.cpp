@@ -2095,6 +2095,28 @@ static void test_pages_send_gzip_without_writing_settings(void) {
   TEST_ASSERT_EQUAL_INT(0, s_restarts);
 }
 
+static void test_shared_assets_have_immutable_gzip_responses(void) {
+  int writes = g_fsWriteCount;
+  httpRespReset();
+  request(HTTP_GET, WEB_CSS_PATH);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("text/css; charset=utf-8", g_httpResp.contentType);
+  TEST_ASSERT_EQUAL_STRING("gzip", httpRespHeader("Content-Encoding"));
+  TEST_ASSERT_EQUAL_STRING("public, max-age=31536000, immutable", httpRespHeader("Cache-Control"));
+  TEST_ASSERT_EQUAL_UINT(sizeof(WEB_CSS), g_httpResp.declaredContentLength);
+  TEST_ASSERT_EQUAL_MEMORY(WEB_CSS, g_httpResp.body, g_httpResp.bodyLen);
+
+  httpRespReset();
+  request(HTTP_GET, WEB_JS_PATH);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("application/javascript", g_httpResp.contentType);
+  TEST_ASSERT_EQUAL_STRING("gzip", httpRespHeader("Content-Encoding"));
+  TEST_ASSERT_EQUAL_STRING("public, max-age=31536000, immutable", httpRespHeader("Cache-Control"));
+  TEST_ASSERT_EQUAL_UINT(sizeof(WEB_JS), g_httpResp.declaredContentLength);
+  TEST_ASSERT_EQUAL_MEMORY(WEB_JS, g_httpResp.body, g_httpResp.bodyLen);
+  TEST_ASSERT_EQUAL_INT(writes, g_fsWriteCount);
+}
+
 static void test_get_reboot_asks_for_confirmation_and_does_not_restart(void) {
   request(HTTP_GET, "/reboot");
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
@@ -2926,6 +2948,7 @@ int main(int, char**) {
   RUN_TEST(test_a_get_from_another_website_is_answered);
   RUN_TEST(test_an_upload_from_another_website_is_ignored);
   RUN_TEST(test_pages_send_gzip_without_writing_settings);
+  RUN_TEST(test_shared_assets_have_immutable_gzip_responses);
   RUN_TEST(test_get_reboot_asks_for_confirmation_and_does_not_restart);
   RUN_TEST(test_post_reboot_restarts);
   RUN_TEST(test_get_reset_with_target_erases_nothing);

@@ -20,8 +20,12 @@
 
 // Pages are compressed at build time and sent directly from flash. Always
 // supply the binary length: gzip data contains NUL bytes, unlike HTML text.
-static inline void sendWebPage(ESP8266WebServer& server, const uint8_t* page, size_t length) {
+static inline void sendWebAsset(ESP8266WebServer& server, const uint8_t* data, size_t length, PGM_P type, bool immutable) {
   server.sendHeader(F("Content-Encoding"), F("gzip"));
-  server.sendHeader(F("Cache-Control"), F("no-store"));
-  server.send_P(200, PSTR("text/html; charset=utf-8"), (PGM_P)page, length);
+  server.sendHeader(F("Cache-Control"), immutable ? F("public, max-age=31536000, immutable") : F("no-store"));
+  server.send_P(200, type, (PGM_P)data, length);
+}
+
+static inline void sendWebPage(ESP8266WebServer& server, const uint8_t* page, size_t length) {
+  sendWebAsset(server, page, length, PSTR("text/html; charset=utf-8"), false);
 }

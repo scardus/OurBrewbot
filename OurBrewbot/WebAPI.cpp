@@ -105,7 +105,17 @@ struct ApiRoute {
   bool       log;        // false for high-frequency poll endpoints
 };
 
+static void handleWebCSS(ESP8266WebServer& server) {
+  sendWebAsset(server, WEB_CSS, sizeof(WEB_CSS), PSTR("text/css; charset=utf-8"), true);
+}
+
+static void handleWebJS(ESP8266WebServer& server) {
+  sendWebAsset(server, WEB_JS, sizeof(WEB_JS), PSTR("application/javascript"), true);
+}
+
 static const ApiRoute kRoutes[] PROGMEM = {
+  { WEB_CSS_PATH,         HTTP_GET,  handleWebCSS,             false },
+  { WEB_JS_PATH,          HTTP_GET,  handleWebJS,              false },
   { "/",                 HTTP_GET,  handleRoot,               true  },
   { "/controller",       HTTP_GET,  handleController,         true  },
   { "/controller",       HTTP_POST, handleController,         true  },

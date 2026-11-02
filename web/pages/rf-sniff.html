@@ -1,1 +1,76 @@
-<!DOCTYPE html><html><head><meta charset='utf-8'><title>RF Sniffer</title><style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui,sans-serif;padding:16px}h2{color:#e94560}a{color:#53d8fb}.info{background:#16213e;padding:12px;border-radius:6px;margin:12px 0;font-size:14px}.log{background:#0a0a1a;border:1px solid #333;border-radius:6px;padding:12px;margin:12px 0;font-family:monospace;font-size:13px;min-height:200px;max-height:400px;overflow-y:auto}.entry{padding:4px 0;border-bottom:1px solid #222}.code{color:#53d8fb;font-weight:bold;font-size:15px}.meta{color:#888;font-size:12px}.btn{display:inline-block;background:#e94560;color:#fff;padding:8px 16px;border-radius:4px;cursor:pointer;border:none;font-size:14px;margin:4px}.btn:hover{background:#c73650}.btn-off{background:#333;color:#888}.status{font-size:14px;margin:8px 0}.on{color:#4f4}.off{color:#f44}</style></head><body><h2>RF Code Sniffer</h2><div class='info'><p>Press buttons on your Dial remote. Received codes appear below.</p><p>You can also press 'Test Transmit' to verify the transmitter — if working, the receiver will pick up the transmitted code.</p></div><div class='status'>Receiver on GPIO14 (D5): <span id='st' class='on'>Listening...</span></div><button class='btn' onclick='testTx()'>Test Transmit (GPIO4)</button><button class='btn' onclick='clearLog()'>Clear Log</button><div id='log' class='log'><div style='color:#888'>Waiting for RF signals...</div></div><script>var log=document.getElementById('log'),first=true;function addEntry(d){if(first){log.innerHTML='';first=false;}var e=document.createElement('div');e.className='entry';e.innerHTML='<span class="code">'+d.code+' ('+d.hex+')</span> '+'<span class="meta">'+d.bits+'-bit, delay='+d.delay+'&mu;s, proto='+d.protocol+'</span>';log.insertBefore(e,log.firstChild);}function poll(){fetch('/rf/sniff/poll').then(function(r){return r.json()}).then(function(d){if(d.received)addEntry(d);}).catch(function(){});}function clearLog(){log.innerHTML='<div style="color:#888">Waiting for RF signals...</div>';first=true;}setInterval(poll,500);</script><br><a href='/admin'>Back to Admin</a></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RF sniffer · OurBrewbot</title>
+  <style>
+    *{box-sizing:border-box}body{background:#101621;color:#eef0f5;font:16px/1.5 system-ui,sans-serif;margin:0;padding:16px;max-width:900px}
+    a{color:#88bce8}button,select{font:inherit;min-height:44px;max-width:100%;padding:8px;margin:4px 0;background:#1d2636;color:inherit;border:1px solid #78869c;border-radius:6px}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#181f2d;padding:12px;min-height:200px;max-height:400px;overflow:auto}
+  </style>
+</head>
+<body>
+  <h1>RF code sniffer</h1>
+  <p>Press a remote button to capture its code. Receiver: GPIO14 (D5). Stopping polls lets the receiver turn off after ten seconds.</p>
+  <div class="controls"><button id="start">Start listening</button><button id="stop">Stop listening</button><button id="clear">Clear display</button></div>
+  <p id="status" role="status">Listening…</p>
+  <pre id="log" aria-label="Captured codes"></pre>
+  <h2>Test a saved plug</h2>
+  <p>Tests use saved codes and switch the real plug. No configuration is saved.</p>
+  <div class="controls"><label>Configured plug <select id="plug"><option value="">Loading…</option></select></label><button id="on">Test on</button><button id="off">Test off</button></div>
+  <p><a href="/admin">Back to Admin</a></p>
+  <script>
+  'use strict';
+  const status=document.getElementById('status'),log=document.getElementById('log'),plug=document.getElementById('plug');
+  let listening=true,pollBusy=false,testBusy=false;
+  let requestQueue=Promise.resolve();
+  // A confirmed test waits for an active poll instead of losing the click.
+  function call(path,options) {
+    const result=requestQueue.catch(()=>{}).then(()=>sendRequest(path,options));
+    requestQueue=result;
+    return result;
+  }
+  async function sendRequest(path,options) {
+    const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),8000);
+    try {
+      const reply=await fetch(path,{...options,signal:abort.signal,cache:'no-store'}),data=await reply.json();
+      if (!reply.ok || data.status==='error') throw new Error(data.msg||'Request failed');
+      return data;
+    } finally { clearTimeout(timer); }
+  }
+  document.getElementById('start').onclick=()=>{listening=true;status.textContent='Listening…';};
+  document.getElementById('stop').onclick=()=>{listening=false;status.textContent='Receiver polling stopped.';};
+  document.getElementById('clear').onclick=()=>{log.textContent='';};
+  async function test(action) {
+    if (testBusy || plug.value==='') return;
+    if (!confirm('Transmit the saved '+action+' code and switch plug '+plug.value+'?')) return;
+    testBusy=true;
+    document.getElementById('on').disabled=true;
+    document.getElementById('off').disabled=true;
+    try { status.textContent=(await call('/smartplug/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:+plug.value,action})})).msg; }
+    catch (error) { status.textContent='Test result requires checking: '+error.message; }
+    finally {
+      testBusy=false;
+      document.getElementById('on').disabled=false;
+      document.getElementById('off').disabled=false;
+    }
+  }
+  document.getElementById('on').onclick=()=>test('on');
+  document.getElementById('off').onclick=()=>test('off');
+  call('/smartplugs').then(data=>{
+    plug.replaceChildren(new Option('Choose a configured plug',''));
+    data.plugs.filter(p=>p.onCode||p.offCode).forEach(p=>plug.add(new Option('Plug '+p.index+' · '+p.manufacturer+' '+p.model,p.index)));
+  }).catch(error=>{status.textContent=error.message;});
+  setInterval(async()=>{
+    if (!listening || pollBusy || testBusy || document.hidden) return;
+    pollBusy=true;
+    try {
+      const data=await call('/rf/sniff/poll');
+      if (data.received) log.textContent=('Code '+data.code+' ('+data.hex+') · '+data.bits+' bits · '+data.delay+' µs · protocol '+data.protocol+'\n'+log.textContent).slice(0,12000);
+    } catch (error) { status.textContent=error.message; }
+    finally { pollBusy=false; }
+  },500);
+  </script>
+</body>
+</html>
