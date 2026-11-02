@@ -173,6 +173,7 @@ public:
   void sendContent(const char* body, size_t len) { httpRespAppend(body, len); }
   // PROGMEM is a no-op on the host, so a flash string is just a char*.
   void sendContent_P(const char* body) { httpRespAppend(body, body ? strlen(body) : 0); }
+  void sendContent_P(const char* body, size_t len) { httpRespAppend(body, len); }
 
   void setContentLength(size_t len) {
     g_httpResp.declaredContentLength = len;

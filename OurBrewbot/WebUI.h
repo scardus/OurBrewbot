@@ -23,7 +23,11 @@
 static inline void sendWebAsset(ESP8266WebServer& server, const uint8_t* data, size_t length, PGM_P type, bool immutable) {
   server.sendHeader(F("Content-Encoding"), F("gzip"));
   server.sendHeader(F("Cache-Control"), immutable ? F("public, max-age=31536000, immutable") : F("no-store"));
-  server.send_P(200, type, (PGM_P)data, length);
+  // Send the headers on their own, then the body. send_P() would keep its
+  // header String allocated for the whole transfer: ~220 B more heap per page.
+  server.setContentLength(length);
+  server.send(200, type, "");
+  server.sendContent_P((PGM_P)data, length);
 }
 
 static inline void sendWebPage(ESP8266WebServer& server, const uint8_t* page, size_t length) {
