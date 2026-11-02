@@ -13,18 +13,24 @@
   var cssReady = !!document.getElementById('ui-style').sheet;
   var domReady = document.readyState !== 'loading';
   var started = false;
+  // Load the controls once both the stylesheet and document are ready.
   function startUI() {
     if (!cssReady || !domReady || started) return;
     started = true;
     var script = document.createElement('script');
     script.src = '{{JS_PATH}}';
+    // Show a recovery message if the controls script cannot load.
     script.onerror = function () { document.getElementById('main').textContent = 'Unable to load controls. Reload this page, or open /update for recovery.'; };
     document.head.appendChild(script);
   }
+  // Mark the document ready and retry starting the controls.
   document.addEventListener('DOMContentLoaded', function () { domReady = true; startUI(); });
   var style = document.getElementById('ui-style');
+  // Mark the stylesheet ready and retry starting the controls.
   style.addEventListener('load', function () { cssReady = true; startUI(); }, {once:true});
+  // Report a failed stylesheet load once the message container is available.
   style.addEventListener('error', function () {
+    // Display the stylesheet recovery message in the main content area.
     function failed() { document.getElementById('main').textContent = 'Unable to load the stylesheet. Reload the page.'; }
     if (domReady) failed(); else document.addEventListener('DOMContentLoaded', failed, {once:true});
   });

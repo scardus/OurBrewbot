@@ -1,5 +1,6 @@
 'use strict';
 
+// Build the overview totals and fermenter cards from the latest browser state.
 function dashboard() {
   const active=state.fermenters.filter(f => f.power).length;
   const alarms=state.fermenters.filter(f => f.alarmActive).length;
@@ -20,10 +21,12 @@ function dashboard() {
     `<div class="dashboard-note">${icon('shield')}Readings refresh separately from your edits. Settings are saved only when you choose Save.</div>`;
 }
 
+// Build a labelled sensor value that polling can update independently of its form.
 function sensorReading(label, key, value) {
   return `<div><span data-live="${key}">${esc(value)}</span><small>${esc(label)}</small></div>`;
 }
 
+// Build the selected sensor tab with current readings, assignments and calibration forms.
 function sensors() {
   const kind=state.sensorTab;
   const slots=state[kind];
@@ -55,12 +58,14 @@ function sensors() {
     }).join('')}</div>`:'<p class="empty-state">No detected or configured sensors returned by the controller.</p>');
 }
 
+// Summarize an iSpindel's extra readings and the age of its last report.
 function spindelDetail(s) {
   const age=s.minutesSince>=65535?'Never seen':s.minutesSince===0?'Less than a minute ago':s.minutesSince+' min ago';
   return 'Angle '+shown(s.angle)+'° · RSSI '+shown(s.rssi)+' dBm · Velocity '+shown(s.velocity)+
     ' · Corrected gravity '+shown(s.corrGravity)+' · Runtime '+shown(s.runTime)+' s · Unit '+shown(s.gravityUnit)+' · '+age;
 }
 
+// Update live text and status badges without replacing editing forms.
 function updateLiveReadings() {
   $$('[data-controller]').forEach(node=>{
     node.textContent=controllerValue(node.dataset.controller);
@@ -92,6 +97,7 @@ function updateLiveReadings() {
   updateAge();
 }
 
+// Format controller and reset information with the appropriate units.
 function controllerValue(field) {
   const value=field==='resetReason'?state.health.resetReason:state.controller[field];
   if (field==='RSSI') return shown(value)+' dBm';
@@ -101,6 +107,7 @@ function controllerValue(field) {
 }
 
 const systemPanels={
+  // Build controller information and links to the standalone maintenance pages.
   overview() {
     return `<div class="system-layout"><article class="card panel"><h2>Controller information</h2>`+
       [['Firmware','FirmwareVersion'],['WiFi network','WiFiSSID'],['IP address','IP'],['mDNS name','mDNSName'],
@@ -111,6 +118,7 @@ const systemPanels={
       [['/reboot','Restart controller'],['/reset','Reset configuration'],['/config','Reset WiFi'],['/update','Upload firmware'],['/','API directory']]
         .map(([href,label])=>`<a class="file-row" href="${href}">${label} ${icon('arrow')}</a>`).join('')+'</article></div>';
   },
+  // Build the global settings, runtime debug and syslog configuration forms.
   settings() {
     const g=state.global,s=state.syslog;
     return `<div class="grid"><article class="card panel"><h2>Global settings</h2><form data-form="global"><div class="fields">`+
@@ -128,6 +136,7 @@ const systemPanels={
       select('Minimum level','level',s.minLevel,['Emergency','Alert','Critical','Error','Warning','Notice','Info','Debug'].map((n,i)=>[i,n]))+
       '</div>'+actions()+'</form></article></div>';
   },
+  // Build backup actions and the saved-file preview list.
   files() {
     return `<div class="system-layout"><article class="card panel"><h2>Configuration backup</h2><p class="subtitle">Export saved configuration files. Backups can contain credentials; keep them private.</p>`+
       `<div class="two-col-actions" style="margin-top:20px">${btn('Export configuration','export','secondary')}${btn('Import configuration…','import','ghost')}</div>`+
@@ -135,6 +144,7 @@ const systemPanels={
       `<article class="card panel"><h2>LittleFS files</h2><div class="file-list">${state.files.map((f,i)=>
         `<button class="file-row" data-action="file-view" data-id="${i}"><span>${icon('file')} ${esc(f.name)}</span><small>${finite(f.size)} B</small></button>`).join('')}</div></article></div>`;
   },
+  // Build RF listening controls and explicit tests for configured plugs.
   rf() {
     return `<article class="card panel"><h2>RF code sniffer</h2><p class="notice info">Start listening to enable the receiver. Tests transmit the selected plug's saved codes and operate the real plug.</p>`+
       `<div class="two-col-actions">${btn('Start listening','console-start','secondary','data-value="rf"')}${btn('Stop listening','console-stop','ghost')}${btn('Clear','rf-clear','ghost')}</div>`+
@@ -143,12 +153,14 @@ const systemPanels={
         `<option value="${p.index}">Plug ${p.index} · ${esc(p.manufacturer)} ${esc(p.model)}</option>`).join('')}</select>`+
       btn('Test on','rf-test','secondary','data-value="on"')+btn('Test off','rf-test','ghost','data-value="off"')+'</div></article>';
   },
+  // Build BLE console controls, common AT commands and the manual command form.
   ble() {
     return `<article class="card panel"><h2>BLE AT console</h2><p class="notice">Tilt scanning pauses while this console is active. It resumes after polling stops and the device's timeout expires.</p>`+
       `<div class="two-col-actions">${btn('Start console','console-start','secondary','data-value="ble"')}${btn('Stop console','console-stop','ghost')}</div>`+
       `<div class="command-buttons">${['AT','AT+VERS?','AT+ROLE?','AT+IMME?','AT+DISI?','AT+ADDR?','AT+BAUD?'].map(c=>btn(c,'ble-send','small secondary',`data-value="${c}"`)).join('')}</div>`+
       `<div class="console" id="ble-output">Console polling is stopped.</div><form id="ble-form" class="console-input"><input name="cmd" maxlength="64" required placeholder="Enter AT command…" aria-label="AT command"><button class="button" type="submit">Send</button>${btn('Clear','ble-clear','ghost')}</form></article>`;
   },
+  // Build firmware upload navigation and the current release-check result.
   update() {
     const c=state.controller;
     return `<div class="system-layout"><article class="card panel"><h2>Firmware update</h2><p class="subtitle">Current firmware: ${esc(shown(c.FirmwareVersion))}. The standalone uploader accepts a local .bin file and remains usable if the main controls fail to load.</p>`+
@@ -158,12 +170,14 @@ const systemPanels={
   }
 };
 
+// Summarize the controller's latest release-check state.
 function updateDescription(c) {
   if (c.UpdateCheckError) return c.UpdateCheckError;
   if (!c.UpdateChecked) return 'No completed check.';
   return c.UpdateAvailable?'Available version: '+c.LatestVersion:'No newer release found. Last check age: '+shown(c.LastUpdateCheck)+' min';
 }
 
+// Build escaped release-check text and a validated release-notes link.
 function updateResult(controller) {
   const description=esc(updateDescription(controller));
   if (!controller.UpdateAvailable) return description;
@@ -171,6 +185,7 @@ function updateResult(controller) {
   return description+` · <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Release notes</a>`;
 }
 
+// Refresh reading-age labels, temperature units and the connection indicator.
 function updateAge() {
   $('#unit-toggle').textContent='°'+state.unit;
   const age=state.lastUpdated?Math.floor((Date.now()-state.lastUpdated)/1000):null;

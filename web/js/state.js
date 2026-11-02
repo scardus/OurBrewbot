@@ -24,10 +24,14 @@ let logAfter = 0;
 let logMore = false;
 let saving = false;
 
+// Convert a value to a finite number, using the fallback for invalid input.
 const finite = (value, fallback=0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+// Normalize a sensor temperature to Celsius or mark it as unavailable.
 const sensorTemp = value => value == null || +value===-127 || toC(finite(value,-127))<=-100 ? null : toC(+value);
+// Format a received value for display, using a dash when it is missing.
 const shown = value => value == null ? '—' : String(value);
 
+// Store controller settings and block existing drafts after a unit change.
 function setController(data) {
   const unit = data.Unit === 2 ? 'F' : 'C';
   if (state.ready && unit !== state.unit && (drafts.size || profileDrafts.size)) {
@@ -42,6 +46,7 @@ function setController(data) {
     debug:!!state.debug.DebugMode};
 }
 
+// Normalize fermenter replies into browser state and refresh profile edit locks.
 function setFermenters(data) {
   const unit=data[0]?.TempUnit;
   if (unit && unit!==state.unit) setController({...state.controller,Unit:unit==='F'?2:1});
@@ -59,6 +64,7 @@ function setFermenters(data) {
   updateProfileLocks();
 }
 
+// Normalize saved profiles, stopping each one at its first empty step.
 function setProfiles(data) {
   state.profiles = data.profiles.map(p => ({name:p.name, used:'',
     // The runner stops at the first empty slot, even if later slots contain data.
@@ -68,17 +74,20 @@ function setProfiles(data) {
   updateProfileLocks();
 }
 
+// Find how many steps precede the firmware runner's first empty slot.
 function profileStepCount(steps) {
   const end=steps.findIndex(s => !s.stepType && !s.days && !s.startTemp && !s.endTemp);
   return end<0 ? steps.length : end;
 }
 
+// Identify profiles used by running or paused fermenters so they cannot be edited.
 function updateProfileLocks() {
   state.profiles.forEach((p,i) => {
     p.used = state.fermenters.filter(f => (f.running || f.paused) && f.profile===i+1).map(f => f.name).join(', ');
   });
 }
 
+// Normalize probe, Tilt or iSpindel replies for display and editing.
 function setSensors(kind, data) {
   if (kind==='probes') state.probes = data.probes.map(p => ({...p, fn:+p.function,
     temp:sensorTemp(p.temperature), adjust:deltaC(+p.tempAdjust)}));
@@ -95,6 +104,7 @@ function setSensors(kind, data) {
     fn:p.function===2?2:99, temp:sensorTemp(p.temperature), adjust:deltaC(+p.tempAdjust)}));
 }
 
+// Translate saved plug function numbers into editable roles and fermenter assignments.
 function setPlugs(data) {
   state.plugs = data.plugs.map(p => ({...p,
     role:p.function<8 ? (p.function%2?'cold':'hot') : p.function===8?'aux1':p.function===9?'aux2':'none',

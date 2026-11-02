@@ -1,5 +1,6 @@
 'use strict';
 
+// Build service-reporting and MQTT configuration forms with their explicit test actions.
 function reporting() {
   const m=state.mqtt;
   return title('KEEP YOUR BREW CONNECTED','Reporting',
@@ -27,6 +28,7 @@ function reporting() {
     </article>`;
 }
 
+// Build one reporting service's saved settings and connection-test controls.
 function serviceCard(s,i) {
   return `<article class="card panel">
     <div class="panel-header"><div class="service-heading"><div class="service-logo">${i?'Bf':'B'}</div>

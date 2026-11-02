@@ -1,5 +1,6 @@
 'use strict';
 
+// Build one dashboard card with live readings, control state and profile progress.
 function fermCard(f) {
   const cls=!f.power?'off':f.status==='Heating'?'heating':f.status==='Cooling'?'cooling':'holding';
   const profile=state.profiles[f.profile-1];
@@ -38,6 +39,7 @@ function fermCard(f) {
   </article>`;
 }
 
+// Open a fermenter's settings drawer and restore any unsaved browser draft.
 function openFerm(id) {
   state.editorId=id;
   const f=state.fermenters[id],profile=state.profiles[f.profile-1],running=f.running||f.paused;

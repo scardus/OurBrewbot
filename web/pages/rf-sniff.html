@@ -26,11 +26,13 @@
   let listening=true,pollBusy=false,testBusy=false;
   let requestQueue=Promise.resolve();
   // A confirmed test waits for an active poll instead of losing the click.
+  // Queue requests so a confirmed test can wait for the current poll.
   function call(path,options) {
     const result=requestQueue.catch(()=>{}).then(()=>sendRequest(path,options));
     requestQueue=result;
     return result;
   }
+  // Send one timed JSON request and reject controller-reported failures.
   async function sendRequest(path,options) {
     const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),8000);
     try {
@@ -39,9 +41,13 @@
       return data;
     } finally { clearTimeout(timer); }
   }
+  // Enable receiver polling.
   document.getElementById('start').onclick=()=>{listening=true;status.textContent='Listening…';};
+  // Stop polling so the receiver can time out.
   document.getElementById('stop').onclick=()=>{listening=false;status.textContent='Receiver polling stopped.';};
+  // Clear captured codes from the browser display.
   document.getElementById('clear').onclick=()=>{log.textContent='';};
+  // Confirm a saved-code transmission and block duplicate tests until it completes.
   async function test(action) {
     if (testBusy || plug.value==='') return;
     if (!confirm('Transmit the saved '+action+' code and switch plug '+plug.value+'?')) return;
@@ -56,12 +62,16 @@
       document.getElementById('off').disabled=false;
     }
   }
+  // Request an explicit test of the selected plug's saved on code.
   document.getElementById('on').onclick=()=>test('on');
+  // Request an explicit test of the selected plug's saved off code.
   document.getElementById('off').onclick=()=>test('off');
+  // Populate the selector with plugs that have saved RF codes.
   call('/smartplugs').then(data=>{
     plug.replaceChildren(new Option('Choose a configured plug',''));
     data.plugs.filter(p=>p.onCode||p.offCode).forEach(p=>plug.add(new Option('Plug '+p.index+' · '+p.manufacturer+' '+p.model,p.index)));
   }).catch(error=>{status.textContent=error.message;});
+  // Poll captured codes while listening, without overlapping a poll or plug test.
   setInterval(async()=>{
     if (!listening || pollBusy || testBusy || document.hidden) return;
     pollBusy=true;
