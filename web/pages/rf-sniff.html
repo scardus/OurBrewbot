@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RF sniffer · OurBrewbot</title>
+  <style>
+    *{box-sizing:border-box}body{background:#101621;color:#eef0f5;font:16px/1.5 system-ui,sans-serif;margin:0;padding:16px;max-width:900px}
+    a{color:#88bce8}button,select{font:inherit;min-height:44px;max-width:100%;padding:8px;margin:4px 0;background:#1d2636;color:inherit;border:1px solid #78869c;border-radius:6px}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#181f2d;padding:12px;min-height:200px;max-height:400px;overflow:auto}
+  </style>
+</head>
+<body>
+  <h1>RF code sniffer</h1>
+  <p>Press a remote button to capture its code. Receiver: GPIO14 (D5). Stopping polls lets the receiver turn off after ten seconds.</p>
+  <div class="controls"><button id="start">Start listening</button><button id="stop">Stop listening</button><button id="clear">Clear display</button></div>
+  <p id="status" role="status">Listening…</p>
+  <pre id="log" aria-label="Captured codes"></pre>
+  <h2>Test a saved plug</h2>
+  <p>Tests use saved codes and switch the real plug. No configuration is saved.</p>
+  <div class="controls"><label>Configured plug <select id="plug"><option value="">Loading…</option></select></label><button id="on">Test on</button><button id="off">Test off</button></div>
+  <p><a href="/admin">Back to Admin</a></p>
+  <script>
+  'use strict';
+  const status=document.getElementById('status'),log=document.getElementById('log'),plug=document.getElementById('plug');
+  let listening=true,pollBusy=false,testBusy=false;
+  let requestQueue=Promise.resolve();
+  // A confirmed test waits for an active poll instead of losing the click.
+  function call(path,options) {
+    const result=requestQueue.catch(()=>{}).then(()=>sendRequest(path,options));
+    requestQueue=result;
+    return result;
+  }
+  async function sendRequest(path,options) {
+    const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),8000);
+    try {
+      const reply=await fetch(path,{...options,signal:abort.signal,cache:'no-store'}),data=await reply.json();
+      if (!reply.ok || data.status==='error') throw new Error(data.msg||'Request failed');
+      return data;
+    } finally { clearTimeout(timer); }
+  }
+  document.getElementById('start').onclick=()=>{listening=true;status.textContent='Listening…';};
+  document.getElementById('stop').onclick=()=>{listening=false;status.textContent='Receiver polling stopped.';};
+  document.getElementById('clear').onclick=()=>{log.textContent='';};
+  async function test(action) {
+    if (testBusy || plug.value==='') return;
+    if (!confirm('Transmit the saved '+action+' code and switch plug '+plug.value+'?')) return;
+    testBusy=true;
+    document.getElementById('on').disabled=true;
+    document.getElementById('off').disabled=true;
+    try { status.textContent=(await call('/smartplug/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:+plug.value,action})})).msg; }
+    catch (error) { status.textContent='Test result requires checking: '+error.message; }
+    finally {
+      testBusy=false;
+      document.getElementById('on').disabled=false;
+      document.getElementById('off').disabled=false;
+    }
+  }
+  document.getElementById('on').onclick=()=>test('on');
+  document.getElementById('off').onclick=()=>test('off');
+  call('/smartplugs').then(data=>{
+    plug.replaceChildren(new Option('Choose a configured plug',''));
+    data.plugs.filter(p=>p.onCode||p.offCode).forEach(p=>plug.add(new Option('Plug '+p.index+' · '+p.manufacturer+' '+p.model,p.index)));
+  }).catch(error=>{status.textContent=error.message;});
+  setInterval(async()=>{
+    if (!listening || pollBusy || testBusy || document.hidden) return;
+    pollBusy=true;
+    try {
+      const data=await call('/rf/sniff/poll');
+      if (data.received) log.textContent=('Code '+data.code+' ('+data.hex+') · '+data.bits+' bits · '+data.delay+' µs · protocol '+data.protocol+'\n'+log.textContent).slice(0,12000);
+    } catch (error) { status.textContent=error.message; }
+    finally { pollBusy=false; }
+  },500);
+  </script>
+</body>
+</html>

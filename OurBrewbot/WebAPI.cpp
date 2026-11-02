@@ -19,6 +19,8 @@
  */
 
 #include "WebAPI.h"
+#include "WebUI.h"
+#include "WebUIAssets.h"
 #include "Log.h"
 #include "Mqtt.h"
 #include "Fermenter.h"
@@ -103,7 +105,17 @@ struct ApiRoute {
   bool       log;        // false for high-frequency poll endpoints
 };
 
+static void handleWebCSS(ESP8266WebServer& server) {
+  sendWebAsset(server, WEB_CSS, sizeof(WEB_CSS), PSTR("text/css; charset=utf-8"), true);
+}
+
+static void handleWebJS(ESP8266WebServer& server) {
+  sendWebAsset(server, WEB_JS, sizeof(WEB_JS), PSTR("application/javascript"), true);
+}
+
 static const ApiRoute kRoutes[] PROGMEM = {
+  { WEB_CSS_PATH,         HTTP_GET,  handleWebCSS,             false },
+  { WEB_JS_PATH,          HTTP_GET,  handleWebJS,              false },
   { "/",                 HTTP_GET,  handleRoot,               true  },
   { "/controller",       HTTP_GET,  handleController,         true  },
   { "/controller",       HTTP_POST, handleController,         true  },
@@ -321,86 +333,9 @@ static int getValidIndex(ESP8266WebServer& server, const JsonDocument& doc,
 // ============================================================
 
 
-static const char ROOT_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
-    <html><head><meta charset='utf-8'>
-    <meta name='viewport' content='width=device-width,initial-scale=1'>
-    <title>OurBrewbot</title>
-    <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}
-    h2{color:#e94560;margin:0 0 16px}
-    a{color:#53d8fb;text-decoration:none}
-    a:hover{text-decoration:underline}
-    .card{background:#16213e;border:1px solid #333;border-radius:6px;padding:16px;margin-bottom:12px}
-    .card h3{color:#e94560;margin-bottom:10px;font-size:15px}
-    .btn{display:inline-block;background:#e94560;color:#fff;padding:10px 24px;border-radius:4px;font-size:16px;font-weight:bold;margin-bottom:16px}
-    .btn:hover{background:#c73650;text-decoration:none}
-    ul{list-style:none;padding:0}
-    li{padding:6px 0;border-bottom:1px solid #222;font-size:14px}
-    li:last-child{border-bottom:none}
-    li a{font-family:monospace;font-size:13px}
-    .method{display:inline-block;width:40px;color:#e94560;font-weight:bold;font-family:monospace;font-size:13px}
-    .desc{color:#aaa;margin-left:8px}
-    </style></head><body>
-    <h2>OurBrewbot</h2>
-    <a class='btn' href='/admin'>Open Admin Dashboard</a>
-    <div class='card'><h3>REST API</h3><ul>
-    <li><span class='method'>GET</span><a href='/ble/sniff'>/ble/sniff</a><span class='desc'> &mdash; BLE sniff page</span></li>
-    <li><span class='method'>GET</span><a href='/ble/sniff/poll'>/ble/sniff/poll</a><span class='desc'> &mdash; poll BLE sniff results</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/ble/sniff/send</span><span class='desc'> &mdash; send BLE AT command</span></li>
-    <li><span class='method'>GET</span><a href='/board_info.json'>/board_info.json</a><span class='desc'> &mdash; board info</span></li>
-    <li><span class='method'>GET</span><a href='/brewservices'>/brewservices</a><span class='desc'> &mdash; brew service config</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/brewservices</span><span class='desc'> &mdash; update brew service</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/brewservices/test</span><span class='desc'> &mdash; test brew service</span></li>
-    <li><span class='method'>GET</span><a href='/config'>/config</a><span class='desc'> &mdash; WiFi reset page</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/wifi/reset</span><span class='desc'> &mdash; clear WiFi settings and reboot into setup portal</span></li>
-    <li><span class='method'>GET</span><a href='/controller'>/controller</a><span class='desc'> &mdash; controller config</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/controller</span><span class='desc'> &mdash; update global config</span></li>
-    <li><span class='method'>GET</span><a href='/debug'>/debug</a><span class='desc'> &mdash; debug config &amp; overrides</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/debug</span><span class='desc'> &mdash; update debug config</span></li>
-    <li><span class='method'>GET</span><a href='/fermenters'>/fermenters</a><span class='desc'> &mdash; all fermenter data</span></li>
-    <li><span class='method'>GET</span><a href='/fermenter?id=0'>/fermenter?id=N</a><span class='desc'> &mdash; single fermenter</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter</span><span class='desc'> &mdash; update fermenter config</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fermenter/profile</span><span class='desc'> &mdash; profile control (start/stop/pause/resume/next/prev)</span></li>
-    <li><span class='method'>GET</span><a href='/fs/files'>/fs/files</a><span class='desc'> &mdash; list LittleFS files</span></li>
-    <li><span class='method'>GET</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/file?name=...</span><span class='desc'> &mdash; read file content</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/save</span><span class='desc'> &mdash; save config file to LittleFS</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/fs/import/abort</span><span class='desc'> &mdash; cancel a config import, putting the previous settings back</span></li>
-    <li><span class='method'>GET</span><a href='/health'>/health</a><span class='desc'> &mdash; system health</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/iSpindel</span><span class='desc'> &mdash; iSpindel gravity data</span></li>
-    <li><span class='method'>GET</span><a href='/ispindels'>/ispindels</a><span class='desc'> &mdash; iSpindel config &amp; live data</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/ispindel/config</span><span class='desc'> &mdash; update iSpindel config</span></li>
-    <li><span class='method'>GET</span><a href='/mqtt'>/mqtt</a><span class='desc'> &mdash; MQTT config</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt</span><span class='desc'> &mdash; update MQTT config</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt/test</span><span class='desc'> &mdash; test MQTT connection</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt/discover</span><span class='desc'> &mdash; trigger HA discovery</span></li>
-    <li><span class='method'>GET</span><a href='/probes'>/probes</a><span class='desc'> &mdash; temperature probes</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/probes</span><span class='desc'> &mdash; update probe config</span></li>
-    <li><span class='method'>GET</span><a href='/profiles'>/profiles</a><span class='desc'> &mdash; fermentation profiles</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/profile</span><span class='desc'> &mdash; update profile</span></li>
-    <li><span class='method'>GET</span><a href='/reboot'>/reboot</a><span class='desc'> &mdash; reboot device (asks for confirmation)</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/reboot</span><span class='desc'> &mdash; reboot device</span></li>
-    <li><span class='method'>GET</span><a href='/reset'>/reset</a><span class='desc'> &mdash; reset configuration (asks for confirmation)</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/reset?target=config</span><span class='desc'> &mdash; reset all configuration to defaults</span></li>
-    <li><span class='method'>GET</span><a href='/rf/sniff'>/rf/sniff</a><span class='desc'> &mdash; RF sniff page</span></li>
-    <li><span class='method'>GET</span><a href='/rf/sniff/poll'>/rf/sniff/poll</a><span class='desc'> &mdash; poll RF sniff results</span></li>
-    <li><span class='method'>GET</span><a href='/smartplugs'>/smartplugs</a><span class='desc'> &mdash; smart plug config</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/smartplug</span><span class='desc'> &mdash; update smart plug</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/smartplug/test</span><span class='desc'> &mdash; test smart plug RF</span></li>
-    <li><span class='method'>GET</span><a href='/status'>/status</a><span class='desc'> &mdash; quick status</span></li>
-    <li><span class='method'>GET</span><a href='/syslog'>/syslog</a><span class='desc'> &mdash; syslog config</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/syslog</span><span class='desc'> &mdash; update syslog config</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/tilt</span><span class='desc'> &mdash; update Tilt config</span></li>
-    <li><span class='method'>GET</span><a href='/tilts'>/tilts</a><span class='desc'> &mdash; Tilt hydrometer config &amp; live data</span></li>
-    <li><span class='method'>GET</span><a href='/update'>/update</a><span class='desc'> &mdash; OTA firmware update</span></li>
-    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/update/check</span><span class='desc'> &mdash; check ourbrewbot.com for a newer firmware now</span></li>
-    </ul></div>
-    </body></html>)rawliteral";
 
 void handleRoot(ESP8266WebServer& server) {
-  server.setContentLength(strlen_P(ROOT_PAGE));
-  server.send(200, "text/html", "");
-  server.sendContent_P(ROOT_PAGE);
+  sendWebPage(server, ROOT_PAGE, sizeof(ROOT_PAGE));
 }
 
 // ============================================================
@@ -932,35 +867,12 @@ void handleLogs(ESP8266WebServer& server) {
 // settings. A GET shows a page whose button sends the POST.
 // ============================================================
 
-static const char RESET_PAGE[] PROGMEM =
-    "<html><body><h3>Reset Configuration?</h3>"
-    "<p>This will erase all settings.</p>"
-    "<form method='post' action='/reset'>"
-    "<input type='hidden' name='target' value='config'>"
-    "<button type='submit'>Confirm Reset</button>"
-    "</form>"
-    "<p><a href='/'>Cancel</a></p>"
-    "</body></html>";
 
-static const char REBOOT_PAGE[] PROGMEM =
-    "<html><body><h3>Restart OurBrewbot?</h3>"
-    "<p>The controller restarts and is back in about 20 seconds.</p>"
-    "<form method='post' action='/reboot'>"
-    "<button type='submit'>Restart</button>"
-    "</form>"
-    "<p><a href='/'>Cancel</a></p>"
-    "</body></html>";
-
-static void sendConfirmPage(ESP8266WebServer& server, PGM_P page) {
-  server.setContentLength(strlen_P(page));
-  server.send(200, "text/html", "");
-  server.sendContent_P(page);
-}
 
 void handleReset(ESP8266WebServer& server) {
   // target=config is required as well, so a bare POST erases nothing
   if (server.method() != HTTP_POST || server.arg("target") != "config") {
-    sendConfirmPage(server, RESET_PAGE);
+    sendWebPage(server, RESET_PAGE, sizeof(RESET_PAGE));
     return;
   }
   server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Configuration reset\"}"));
@@ -972,7 +884,7 @@ void handleReset(ESP8266WebServer& server) {
 
 void handleReboot(ESP8266WebServer& server) {
   if (server.method() != HTTP_POST) {
-    sendConfirmPage(server, REBOOT_PAGE);
+    sendWebPage(server, REBOOT_PAGE, sizeof(REBOOT_PAGE));
     return;
   }
   server.send(200, "application/json", F("{\"status\":\"ok\",\"msg\":\"Rebooting\"}"));
@@ -985,38 +897,9 @@ void handleReboot(ESP8266WebServer& server) {
 // OTA UPDATE — GET /update + POST /update
 // ============================================================
 
-// Served from PROGMEM via sendContent_P — server.send(F(...)) would copy the
-// whole page into a heap String per request.
-static const char OTA_PAGE[] PROGMEM =
-    "<!DOCTYPE html><html><head>"
-    "<meta charset='utf-8'>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>OurBrewbot - Firmware Update</title>"
-    "<style>"
-    "*{box-sizing:border-box;margin:0;padding:0}"
-    "body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}"
-    "h2{color:#e94560;margin:0 0 16px}"
-    ".card{background:#16213e;border:1px solid #333;border-radius:6px;padding:16px;max-width:480px}"
-    "p{margin-bottom:12px;font-size:14px;color:#aaa}"
-    "input[type=file]{color:#e0e0e0;font-size:13px;margin-bottom:16px;display:block}"
-    "input[type=submit]{background:#e94560;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px}"
-    "input[type=submit]:hover{background:#c73650}"
-    "a{color:#53d8fb;text-decoration:none;font-size:13px}"
-    "</style></head><body>"
-    "<h2>Firmware Update</h2>"
-    "<div class='card'>"
-    "<p>Select a firmware .bin file and click Upload. The device will reboot automatically after a successful update.</p>"
-    "<form method='POST' action='/update' enctype='multipart/form-data'>"
-    "<input type='file' name='firmware' accept='.bin'>"
-    "<input type='submit' value='Upload Firmware'>"
-    "</form></div>"
-    "<p style='margin-top:12px'><a href='/'>&#8592; Cancel</a></p>"
-    "</body></html>";
-
+// Page content is generated from web/pages into gzip PROGMEM data.
 void handleOTAPage(ESP8266WebServer& server) {
-  server.setContentLength(strlen_P(OTA_PAGE));
-  server.send(200, "text/html", "");
-  server.sendContent_P(OTA_PAGE);
+  sendWebPage(server, OTA_PAGE, sizeof(OTA_PAGE));
 }
 
 // The firmware upload in progress, checked as it arrives (see FirmwareCheck.cpp)
@@ -1195,48 +1078,9 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
 // WIFI RESET PAGE + ACTION
 // ============================================================
 
-// Served from PROGMEM via sendContent_P — see OTA_PAGE note above.
-static const char CONFIG_PAGE[] PROGMEM =
-    "<!DOCTYPE html><html><head>"
-    "<meta charset='utf-8'>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>OurBrewbot - Reset WiFi</title>"
-    "<style>"
-    "*{box-sizing:border-box;margin:0;padding:0}"
-    "body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}"
-    "h2{color:#e94560;margin:0 0 16px}"
-    ".card{background:#16213e;border:1px solid #333;border-radius:6px;padding:16px;max-width:480px}"
-    "p{margin-bottom:12px;font-size:14px;color:#aaa;line-height:1.5}"
-    ".warn{color:#ffd166}"
-    ".btn{background:#e94560;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px}"
-    ".btn:hover{background:#c73650}"
-    "a{color:#53d8fb;text-decoration:none;font-size:13px}"
-    "</style></head><body>"
-    "<h2>Reset WiFi Settings</h2>"
-    "<div class='card'>"
-    "<p>WiFi credentials are managed by WiFiManager. This action clears the saved WiFi settings, reboots the controller, and reopens the setup portal on the next boot.</p>"
-    "<p class='warn'>Are you sure? The device will disconnect from the network until you reconnect it through the setup portal.</p>"
-    "<button class='btn' onclick='resetWiFi()'>Reset WiFi And Reboot</button>"
-    "</div>"
-    "<p id='msg' style='margin-top:12px;color:#aaa'></p>"
-    "<p style='margin-top:12px'><a href='/admin'>&#8592; Back to Admin</a></p>"
-    "<script>"
-    "function resetWiFi(){"
-    "if(!confirm('Are you sure you want to clear WiFi settings and reboot into the setup portal?'))return;"
-    "var msg=document.getElementById('msg');"
-    "msg.textContent='Resetting WiFi settings and rebooting...';"
-    "fetch('/wifi/reset',{method:'POST'})"
-    ".then(function(r){return r.json()})"
-    ".then(function(d){msg.textContent=d.msg||'Rebooting into setup portal...'})"
-    ".catch(function(e){msg.textContent='Error: '+e});"
-    "}"
-    "</script>"
-    "</body></html>";
-
+// Page content is generated from web/pages into gzip PROGMEM data.
 void handleConfigPage(ESP8266WebServer& server) {
-  server.setContentLength(strlen_P(CONFIG_PAGE));
-  server.send(200, "text/html", "");
-  server.sendContent_P(CONFIG_PAGE);
+  sendWebPage(server, CONFIG_PAGE, sizeof(CONFIG_PAGE));
 }
 
 void handleWiFiReset(ESP8266WebServer& server) {
@@ -1426,56 +1270,9 @@ void handleRFSniffPoll(ESP8266WebServer& server) {
   sendJsonDoc(server, doc);
 }
 
-// Served from PROGMEM via sendContent_P — was a ~1.9 KB heap String per request.
-static const char RF_SNIFF_PAGE[] PROGMEM =
-    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-    "<title>RF Sniffer</title>"
-    "<style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui,sans-serif;padding:16px}"
-    "h2{color:#e94560}a{color:#53d8fb}"
-    ".info{background:#16213e;padding:12px;border-radius:6px;margin:12px 0;font-size:14px}"
-    ".log{background:#0a0a1a;border:1px solid #333;border-radius:6px;padding:12px;margin:12px 0;"
-    "font-family:monospace;font-size:13px;min-height:200px;max-height:400px;overflow-y:auto}"
-    ".entry{padding:4px 0;border-bottom:1px solid #222}"
-    ".code{color:#53d8fb;font-weight:bold;font-size:15px}"
-    ".meta{color:#888;font-size:12px}"
-    ".btn{display:inline-block;background:#e94560;color:#fff;padding:8px 16px;border-radius:4px;"
-    "cursor:pointer;border:none;font-size:14px;margin:4px}"
-    ".btn:hover{background:#c73650}"
-    ".btn-off{background:#333;color:#888}"
-    ".status{font-size:14px;margin:8px 0}"
-    ".on{color:#4f4}.off{color:#f44}"
-    "</style></head><body>"
-    "<h2>RF Code Sniffer</h2>"
-    "<div class='info'>"
-    "<p>Press buttons on your Dial remote. Received codes appear below.</p>"
-    "<p>You can also press 'Test Transmit' to verify the transmitter — "
-    "if working, the receiver will pick up the transmitted code.</p></div>"
-    "<div class='status'>Receiver on GPIO14 (D5): <span id='st' class='on'>Listening...</span></div>"
-    "<button class='btn' onclick='testTx()'>Test Transmit (GPIO4)</button>"
-    "<button class='btn' onclick='clearLog()'>Clear Log</button>"
-    "<div id='log' class='log'><div style='color:#888'>Waiting for RF signals...</div></div>"
-    "<script>"
-    "var log=document.getElementById('log'),first=true;"
-    "function addEntry(d){"
-    "if(first){log.innerHTML='';first=false;}"
-    "var e=document.createElement('div');e.className='entry';"
-    "e.innerHTML='<span class=\"code\">'+d.code+' ('+d.hex+')</span> '"
-    "+'<span class=\"meta\">'+d.bits+'-bit, delay='+d.delay+'&mu;s, proto='+d.protocol+'</span>';"
-    "log.insertBefore(e,log.firstChild);}"
-    "function poll(){"
-    "fetch('/rf/sniff/poll').then(function(r){return r.json()}).then(function(d){"
-    "if(d.received)addEntry(d);"
-    "}).catch(function(){});}"
-    "function clearLog(){log.innerHTML='<div style=\"color:#888\">Waiting for RF signals...</div>';first=true;}"
-    "setInterval(poll,500);"
-    "</script>"
-    "<br><a href='/admin'>Back to Admin</a>"
-    "</body></html>";
-
+// Page content is generated from web/pages into gzip PROGMEM data.
 void handleRFSniff(ESP8266WebServer& server) {
-  server.setContentLength(strlen_P(RF_SNIFF_PAGE));
-  server.send(200, "text/html", "");
-  server.sendContent_P(RF_SNIFF_PAGE);
+  sendWebPage(server, RF_SNIFF_PAGE, sizeof(RF_SNIFF_PAGE));
 }
 
 // ============================================================
@@ -1547,79 +1344,14 @@ void handleBLESniffSend(ESP8266WebServer& server) {
   sendJsonDoc(server, resp);
 }
 
-// Served from PROGMEM via sendContent_P — was a ~2.7 KB heap String per request.
-static const char BLE_SNIFF_PAGE[] PROGMEM =
-    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-    "<title>BLE AT Console</title>"
-    "<style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui,sans-serif;padding:16px}"
-    "h2{color:#e94560}a{color:#53d8fb}"
-    ".info{background:#16213e;padding:12px;border-radius:6px;margin:12px 0;font-size:14px}"
-    ".log{background:#0a0a1a;border:1px solid #333;border-radius:6px;padding:12px;margin:12px 0;"
-    "font-family:monospace;font-size:13px;min-height:200px;max-height:400px;overflow-y:auto;"
-    "white-space:pre-wrap;word-break:break-all}"
-    ".sent{color:#e94560;font-weight:bold}"
-    ".recv{color:#53d8fb}"
-    ".btn{display:inline-block;background:#e94560;color:#fff;padding:8px 16px;border-radius:4px;"
-    "cursor:pointer;border:none;font-size:14px;margin:4px}"
-    ".btn:hover{background:#c73650}"
-    ".btn-at{background:#0f3460;color:#53d8fb;border:1px solid #53d8fb;padding:6px 12px;"
-    "border-radius:4px;cursor:pointer;font-size:13px;margin:2px}"
-    ".btn-at:hover{background:#1a4a8a}"
-    ".cmd-row{display:flex;gap:8px;margin:12px 0;align-items:center}"
-    ".cmd-row input{flex:1;background:#0f3460;border:1px solid #444;color:#e0e0e0;padding:8px 12px;"
-    "border-radius:4px;font-family:monospace;font-size:14px}"
-    ".status{font-size:14px;margin:8px 0}"
-    ".on{color:#4f4}.off{color:#f44}"
-    "</style></head><body>"
-    "<h2>BLE AT Command Console</h2>"
-    "<div class='info'>"
-    "<p>Send AT commands to the HM-10 Bluetooth module. Tilt scanning is paused while this page is open.</p>"
-    "<p>Common commands: AT (test), AT+VERS? (firmware), AT+ROLE? (role), AT+DISI? (iBeacon scan ~3s)</p></div>"
-    "<div class='status'>HM-10 on GPIO12/13 (D6/D7): <span id='st' class='on'>Connected</span></div>"
-    "<div style='margin:8px 0'>"
-    "<button class='btn-at' onclick=\"sendCmd('AT')\">AT</button>"
-    "<button class='btn-at' onclick=\"sendCmd('AT+VERS?')\">AT+VERS?</button>"
-    "<button class='btn-at' onclick=\"sendCmd('AT+ROLE?')\">AT+ROLE?</button>"
-    "<button class='btn-at' onclick=\"sendCmd('AT+IMME?')\">AT+IMME?</button>"
-    "<button class='btn-at' onclick=\"sendCmd('AT+DISI?')\">AT+DISI?</button>"
-    "<button class='btn-at' onclick=\"sendCmd('AT+ADDR?')\">AT+ADDR?</button>"
-    "<button class='btn-at' onclick=\"sendCmd('AT+BAUD?')\">AT+BAUD?</button>"
-    "</div>"
-    "<div class='cmd-row'>"
-    "<input type='text' id='cmd' placeholder='Type AT command...' onkeydown='if(event.key==\"Enter\")sendManual()'>"
-    "<button class='btn' onclick='sendManual()'>Send</button>"
-    "<button class='btn' onclick='clearLog()' style='background:#333'>Clear</button>"
-    "</div>"
-    "<div id='log' class='log'><span style='color:#888'>Waiting for data...</span></div>"
-    "<script>"
-    "var log=document.getElementById('log'),first=true;"
-    "function appendLog(html){"
-    "if(first){log.innerHTML='';first=false;}"
-    "log.innerHTML+=html;log.scrollTop=log.scrollHeight;}"
-    "function sendCmd(c){"
-    "appendLog('<div class=\"sent\">&gt; '+c+'</div>');"
-    "fetch('/ble/sniff/send',{method:'POST',headers:{'Content-Type':'application/json'},"
-    "body:JSON.stringify({cmd:c})}).catch(function(e){appendLog('<div style=\"color:#f44\">Send error: '+e+'</div>')});}"
-    "function sendManual(){var i=document.getElementById('cmd');if(i.value){sendCmd(i.value);i.value='';}}"
-    "function poll(){"
-    "fetch('/ble/sniff/poll').then(function(r){return r.json()}).then(function(d){"
-    "if(d.len>0){appendLog('<span class=\"recv\">'+d.data.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</span>');}"
-    "}).catch(function(){});}"
-    "function clearLog(){log.innerHTML='<span style=\"color:#888\">Waiting for data...</span>';first=true;}"
-    "setInterval(poll,300);"
-    "</script>"
-    "<br><a href='/admin'>Back to Admin</a>"
-    "</body></html>";
-
+// Page content is generated from web/pages into gzip PROGMEM data.
 void handleBLESniff(ESP8266WebServer& server) {
   // Reset sniff state
   s_bleSniffLen = 0;
   g_bleSniffActive = true;
   s_bleSniffLastPoll = millis();
 
-  server.setContentLength(strlen_P(BLE_SNIFF_PAGE));
-  server.send(200, "text/html", "");
-  server.sendContent_P(BLE_SNIFF_PAGE);
+  sendWebPage(server, BLE_SNIFF_PAGE, sizeof(BLE_SNIFF_PAGE));
 }
 
 // ============================================================

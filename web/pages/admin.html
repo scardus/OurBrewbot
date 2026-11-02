@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <meta name="description" content="Local fermentation control.">
+  <title>OurBrewbot</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23ed6475'/%3E%3Cpath d='M13 10h10a5 5 0 010 10 5 5 0 010 10H13z' fill='none' stroke='%23111827' stroke-width='3'/%3E%3C/svg%3E">
+  <link id="ui-style" rel="stylesheet" href="{{CSS_PATH}}">
+  <script>
+  'use strict';
+  var cssReady = !!document.getElementById('ui-style').sheet;
+  var domReady = document.readyState !== 'loading';
+  var started = false;
+  function startUI() {
+    if (!cssReady || !domReady || started) return;
+    started = true;
+    var script = document.createElement('script');
+    script.src = '{{JS_PATH}}';
+    script.onerror = function () { document.getElementById('main').textContent = 'Unable to load controls. Reload this page, or open /update for recovery.'; };
+    document.head.appendChild(script);
+  }
+  document.addEventListener('DOMContentLoaded', function () { domReady = true; startUI(); });
+  var style = document.getElementById('ui-style');
+  style.addEventListener('load', function () { cssReady = true; startUI(); }, {once:true});
+  style.addEventListener('error', function () {
+    function failed() { document.getElementById('main').textContent = 'Unable to load the stylesheet. Reload the page.'; }
+    if (domReady) failed(); else document.addEventListener('DOMContentLoaded', failed, {once:true});
+  });
+  startUI();
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar" aria-label="Main navigation">
+      <a class="brand" href="#dashboard"><span class="brand-symbol" aria-hidden="true">b<span>°</span></span><span>OurBrewbot<span class="brand-sub">FERMENTATION CONTROL</span></span></a>
+      <nav id="navigation"></nav>
+      <div class="sidebar-bottom"><span class="device-icon" aria-hidden="true">▣</span><div><strong>OurBrewbot</strong><span>Local controller</span></div><span class="connection-dot"></span></div>
+    </aside>
+    <button id="nav-scrim" class="nav-scrim" aria-label="Close navigation" hidden></button>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="breadcrumb">
+          <button id="menu-toggle" class="icon-button mobile-menu" aria-label="Open navigation"
+                  aria-expanded="false" aria-controls="sidebar">☰</button>
+          <span>BREW ROOM</span><span class="crumb-slash">/</span><strong id="crumb">Dashboard</strong>
+        </div>
+        <div class="topbar-right">
+          <span id="connection" class="connection"><i></i> Connecting…</span>
+          <button type="button" class="icon-button" data-action="refresh" aria-label="Refresh controller data">↻</button>
+          <span class="top-separator"></span>
+          <span id="unit-toggle" class="unit-button" aria-label="Temperature unit">—</span>
+        </div>
+      </header>
+      <main id="main" tabindex="-1"><p role="status">Connecting to controller…</p></main>
+      <footer class="page-footer"><span>OURBREWBOT <span class="footer-version"></span></span><span>Local first. Brew focused.</span></footer>
+    </div>
+  </div>
+  <section id="log-drawer" class="log-drawer" aria-label="Controller log">
+    <div class="log-bar">
+      <button id="log-toggle" aria-expanded="false" aria-controls="log-content">
+        <span class="log-symbol">&gt;_</span> Controller log <span class="log-count">0</span><span class="log-chevron">⌃</span>
+      </button>
+      <span class="log-bar-status"><i></i> Controller stream</span><span class="log-latest"></span>
+    </div>
+    <div id="log-content" hidden>
+      <div class="log-tools">
+        <label class="sr-only" for="log-search">Search log</label><input id="log-search" placeholder="Search messages…">
+        <label class="sr-only" for="log-filter">Log level</label>
+        <select id="log-filter">
+          <option value="all">All levels</option><option value="warning">Warnings</option><option value="error">Errors</option>
+        </select>
+        <button id="log-pause" class="button small secondary">Pause</button>
+        <button id="log-download" class="button small secondary">Download</button>
+        <button id="log-clear" class="button small ghost">Clear</button>
+      </div>
+      <div id="log-lines" class="log-lines" role="log"></div>
+    </div>
+  </section>
+  <dialog id="editor" class="editor" aria-label="Fermenter settings"><div id="editor-content"></div></dialog>
+  <dialog id="modal" class="modal" aria-label="Controller action"><div id="modal-content"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

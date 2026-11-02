@@ -79,6 +79,9 @@ jobs:
 
       # A tag can point at any commit, including one that never went through CI,
       # so the release re-runs the same gates rather than assuming it did.
+      - name: Check web assets
+        run: python -m unittest discover -s test -p test_web_assets.py
+
       - name: Run static analysis
         run: pio check --fail-on-defect=high
 
