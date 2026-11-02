@@ -149,10 +149,14 @@ $('#menu-toggle').onclick=()=>{
 $('#nav-scrim').onclick=closeNav;
 // Move keyboard focus directly to the page content.
 $('.skip').onclick=event=>{event.preventDefault(); $('#main').focus();};
-// Open or close the log drawer and render the retained log entries.
+// Open or close the log drawer, following the newest entries whenever it opens.
 $('#log-toggle').onclick=()=>{
   const node=$('#log-content'); node.hidden=!node.hidden;
   $('#log-toggle').setAttribute('aria-expanded',String(!node.hidden)); renderLogs();
+  if (!node.hidden) {
+    const log=$('#log-lines');
+    log.scrollTop=log.scrollHeight;
+  }
 };
 $('#log-search').oninput=renderLogs;
 $('#log-filter').onchange=renderLogs;

@@ -258,6 +258,43 @@ test('a rejected log cursor resets before the next request',async()=>{
   assert.deepEqual(paths,['/logs?boot=old&after=999','/logs?boot=&after=0']);
 });
 
+test('opening the log drawer follows new entries until the user scrolls back',()=>{
+  const {run,context}=ui();
+  const elements={};
+  const drawer=elements['#log-content']={hidden:true};
+  let height=1000,position=100;
+  const lines=elements['#log-lines']={clientHeight:200};
+  Object.defineProperties(lines,{
+    scrollHeight:{get:()=>height},
+    scrollTop:{get:()=>position,set:value=>{position=Math.max(0,Math.min(value,height-200));}},
+    innerHTML:{set:html=>{height=(html.match(/class="log-line /g)||[]).length*20;}}
+  });
+  elements['#log-search']={value:''};
+  elements['#log-filter']={value:'all'};
+  context.document={addEventListener:()=>{},querySelector:selector=>
+    elements[selector]||=({addEventListener:()=>{},setAttribute:()=>{}})};
+  context.window={addEventListener:()=>{}};
+  const source=fs.readFileSync(path.join(__dirname,'../web/js/bootstrap.js'),'utf8');
+  // Register the real drawer controls without starting polling or initial GETs.
+  vm.runInContext(source.slice(0,source.indexOf('\nsetInterval(')),context);
+  run("for(let i=0;i<50;i++) addLog('Line '+i);");
+
+  elements['#log-toggle'].onclick();
+  assert.equal(drawer.hidden,false);
+  assert.equal(position,800);
+  run("addLog('New line'); renderLogs();");
+  assert.equal(position,820);
+
+  lines.scrollTop=200;
+  run("addLog('Another line'); renderLogs();");
+  assert.equal(position,200);
+  elements['#log-toggle'].onclick();
+  assert.equal(drawer.hidden,true);
+  assert.equal(position,200);
+  elements['#log-toggle'].onclick();
+  assert.equal(position,840);
+});
+
 test('the import handler clears selection so the same file can be chosen again',()=>{
   const {run,context}=ui();
   const handlers={};
