@@ -4,73 +4,156 @@
 function system() {
   const tabs=[['overview','Controller'],['settings','Settings'],['files','Files & backup'],
     ['rf','RF sniffer'],['ble','BLE console'],['update','Firmware']];
-  return title('LOOK AFTER YOUR CONTROLLER','System & diagnostics','Settings, maintenance and tools for your brew room.')+`
+  return title('LOOK AFTER YOUR CONTROLLER','System & diagnostics',
+    'Settings, maintenance and tools for your brew room.')+`
     <div class="tabs" role="tablist" aria-label="System section">${tabs.map(([key,label])=>`
       <button role="tab" aria-selected="${state.systemTab===key}" class="${state.systemTab===key?'active':''}"
-        data-action="system-tab" data-value="${key}">${label}</button>`).join('')}</div>${systemPanels[state.systemTab]()}`;
+        data-action="system-tab" data-value="${key}">${label}</button>`).join('')}</div>
+    ${systemPanels[state.systemTab]()}`;
 }
 
 const systemPanels={
   // Build controller information and links to the standalone maintenance pages.
   overview() {
-    return `<div class="system-layout"><article class="card panel"><h2>Controller information</h2>`+
-      [['Firmware','FirmwareVersion'],['WiFi network','WiFiSSID'],['IP address','IP'],['mDNS name','mDNSName'],
-        ['Signal strength','RSSI'],['Free heap','FreeHeap'],['Uptime','Uptime'],
-        ['Chip ID','ChipId'],['Reset reason','resetReason']].map(([label,field])=>
-        `<div class="list-row"><span>${esc(label)}</span><strong data-controller="${field}">${esc(controllerValue(field))}</strong></div>`).join('')+
-      `</article><article class="card panel"><h2>Maintenance</h2><p class="subtitle">These links open the controller's standalone confirmation pages.</p>`+
-      [['/reboot','Restart controller'],['/reset','Reset configuration'],['/config','Reset WiFi'],['/update','Upload firmware'],['/','API directory']]
-        .map(([href,label])=>`<a class="file-row" href="${href}">${label} ${icon('arrow')}</a>`).join('')+'</article></div>';
+    const details=[
+      ['Firmware','FirmwareVersion'],['WiFi network','WiFiSSID'],['IP address','IP'],['mDNS name','mDNSName'],
+      ['Signal strength','RSSI'],['Free heap','FreeHeap'],['Uptime','Uptime'],
+      ['Chip ID','ChipId'],['Reset reason','resetReason']
+    ].map(([label,field])=>`
+      <div class="list-row">
+        <span>${esc(label)}</span><strong data-controller="${field}">${esc(controllerValue(field))}</strong>
+      </div>`).join('');
+    const links=[
+      ['/reboot','Restart controller'],['/reset','Reset configuration'],['/config','Reset WiFi'],
+      ['/update','Upload firmware'],['/','API directory']
+    ].map(([href,label])=>`<a class="file-row" href="${href}">${label} ${icon('arrow')}</a>`).join('');
+    return `<div class="system-layout">
+      <article class="card panel"><h2>Controller information</h2>${details}</article>
+      <article class="card panel"><h2>Maintenance</h2>
+        <p class="subtitle">These links open the controller's standalone confirmation pages.</p>
+        ${links}
+      </article>
+    </div>`;
   },
   // Build the global settings, runtime debug and syslog configuration forms.
   settings() {
     const g=state.global,s=state.syslog;
-    return `<div class="grid"><article class="card panel"><h2>Global settings</h2><form data-form="global"><div class="fields">`+
-      select('Temperature unit','unit',state.unit,[['C','Celsius (°C)'],['F','Fahrenheit (°F)']])+
-      select('Probe resolution','resolution',g.resolution,[[9,'9 bit'],[10,'10 bit'],[11,'11 bit'],[12,'12 bit']])+
-      field('Alarm delay (seconds)','alarm',g.alarm,'number','min="0" max="3600" step="1" required')+'</div>'+
-      toggle('mDNS discovery','mdns',g.mdns)+toggle('Check for firmware updates','updates',g.updates)+
-      toggle('Send crash reports','crashes',g.crashes)+actions()+'</form></article>'+
-      `<article class="card panel"><h2>Debug mode</h2><form data-form="debug-mode">`+
-      toggle('Enable debug mode','enabled',g.debug,'Shows runtime sensor overrides in fermenter settings.')+actions('Apply debug mode')+'</form></article>'+
-      `<article class="card panel"><h2>Remote syslog</h2><form data-form="syslog">`+
-      toggle('Enable syslog','enabled',s.enabled)+`<div class="fields">`+field('Server host','host',s.host)+
-      field('Port','port',s.port,'number','min="1" max="65535" step="1" required')+
-      select('Facility','facility',s.facility,Array.from({length:24},(_,i)=>[i,i>=16?'Local '+(i-16):'Facility '+i]))+
-      select('Minimum level','level',s.minLevel,['Emergency','Alert','Critical','Error','Warning','Notice','Info','Debug'].map((n,i)=>[i,n]))+
-      '</div>'+actions()+'</form></article></div>';
+    const facilities=Array.from({length:24},(_,i)=>[i,i>=16?'Local '+(i-16):'Facility '+i]);
+    const resolutions=[[9,'9 bit'],[10,'10 bit'],[11,'11 bit'],[12,'12 bit']];
+    const levels=['Emergency','Alert','Critical','Error','Warning','Notice','Info','Debug'].map((name,i)=>[i,name]);
+    return `<div class="grid">
+      <article class="card panel"><h2>Global settings</h2>
+        <form data-form="global">
+          <div class="fields">
+            ${select('Temperature unit','unit',state.unit,[['C','Celsius (°C)'],['F','Fahrenheit (°F)']])}
+            ${select('Probe resolution','resolution',g.resolution,resolutions)}
+            ${field('Alarm delay (seconds)','alarm',g.alarm,'number','min="0" max="3600" step="1" required')}
+          </div>
+          ${toggle('mDNS discovery','mdns',g.mdns)}
+          ${toggle('Check for firmware updates','updates',g.updates)}
+          ${toggle('Send crash reports','crashes',g.crashes)}
+          ${actions()}
+        </form>
+      </article>
+      <article class="card panel"><h2>Debug mode</h2>
+        <form data-form="debug-mode">
+          ${toggle('Enable debug mode','enabled',g.debug,'Shows runtime sensor overrides in fermenter settings.')}
+          ${actions('Apply debug mode')}
+        </form>
+      </article>
+      <article class="card panel"><h2>Remote syslog</h2>
+        <form data-form="syslog">
+          ${toggle('Enable syslog','enabled',s.enabled)}
+          <div class="fields">
+            ${field('Server host','host',s.host)}
+            ${field('Port','port',s.port,'number','min="1" max="65535" step="1" required')}
+            ${select('Facility','facility',s.facility,facilities)}
+            ${select('Minimum level','level',s.minLevel,levels)}
+          </div>
+          ${actions()}
+        </form>
+      </article>
+    </div>`;
   },
   // Build backup actions and the saved-file preview list.
   files() {
-    return `<div class="system-layout"><article class="card panel"><h2>Configuration backup</h2><p class="subtitle">Export saved configuration files. Backups can contain credentials; keep them private.</p>`+
-      `<div class="two-col-actions" style="margin-top:20px">${btn('Export configuration','export','secondary')}${btn('Import configuration…','import','ghost')}</div>`+
-      `<input type="file" id="import-file" accept=".json" hidden><p id="backup-result" class="review-caption" role="status"></p></article>`+
-      `<article class="card panel"><h2>LittleFS files</h2><div class="file-list">${state.files.map((f,i)=>
-        `<button class="file-row" data-action="file-view" data-id="${i}"><span>${icon('file')} ${esc(f.name)}</span><small>${finite(f.size)} B</small></button>`).join('')}</div></article></div>`;
+    const files=state.files.map((f,i)=>`
+      <button class="file-row" data-action="file-view" data-id="${i}">
+        <span>${icon('file')} ${esc(f.name)}</span><small>${finite(f.size)} B</small>
+      </button>`).join('');
+    return `<div class="system-layout">
+      <article class="card panel"><h2>Configuration backup</h2>
+        <p class="subtitle">Export saved configuration files. Backups can contain credentials; keep them private.</p>
+        <div class="two-col-actions" style="margin-top:20px">
+          ${btn('Export configuration','export','secondary')}
+          ${btn('Import configuration…','import','ghost')}
+        </div>
+        <input type="file" id="import-file" accept=".json" hidden>
+        <p id="backup-result" class="review-caption" role="status"></p>
+      </article>
+      <article class="card panel"><h2>LittleFS files</h2>
+        <div class="file-list">${files}</div>
+      </article>
+    </div>`;
   },
   // Build RF listening controls and explicit tests for configured plugs.
   rf() {
-    return `<article class="card panel"><h2>RF code sniffer</h2><p class="notice info">Start listening to enable the receiver. Tests transmit the selected plug's saved codes and operate the real plug.</p>`+
-      `<div class="two-col-actions">${btn('Start listening','console-start','secondary','data-value="rf"')}${btn('Stop listening','console-stop','ghost')}${btn('Clear','rf-clear','ghost')}</div>`+
-      `<div class="console" id="rf-output">Receiver polling is stopped.</div><h3>Test a configured plug</h3>`+
-      `<div class="console-input"><select id="rf-plug" aria-label="Configured plug">${state.plugs.filter(p=>p.onCode||p.offCode).map(p=>
-        `<option value="${p.index}">Plug ${p.index} · ${esc(p.manufacturer)} ${esc(p.model)}</option>`).join('')}</select>`+
-      btn('Test on','rf-test','secondary','data-value="on"')+btn('Test off','rf-test','ghost','data-value="off"')+'</div></article>';
+    const plugChoices=state.plugs.filter(p=>p.onCode||p.offCode).map(p=>
+      `<option value="${p.index}">Plug ${p.index} · ${esc(p.manufacturer)} ${esc(p.model)}</option>`).join('');
+    return `<article class="card panel"><h2>RF code sniffer</h2>
+      <p class="notice info">Start listening to enable the receiver. Tests transmit the selected plug's saved codes
+        and operate the real plug.</p>
+      <div class="two-col-actions">
+        ${btn('Start listening','console-start','secondary','data-value="rf"')}
+        ${btn('Stop listening','console-stop','ghost')}
+        ${btn('Clear','rf-clear','ghost')}
+      </div>
+      <div class="console" id="rf-output">Receiver polling is stopped.</div>
+      <h3>Test a configured plug</h3>
+      <div class="console-input">
+        <select id="rf-plug" aria-label="Configured plug">${plugChoices}</select>
+        ${btn('Test on','rf-test','secondary','data-value="on"')}
+        ${btn('Test off','rf-test','ghost','data-value="off"')}
+      </div>
+    </article>`;
   },
   // Build BLE console controls, common AT commands and the manual command form.
   ble() {
-    return `<article class="card panel"><h2>BLE AT console</h2><p class="notice">Tilt scanning pauses while this console is active. It resumes after polling stops and the device's timeout expires.</p>`+
-      `<div class="two-col-actions">${btn('Start console','console-start','secondary','data-value="ble"')}${btn('Stop console','console-stop','ghost')}</div>`+
-      `<div class="command-buttons">${['AT','AT+VERS?','AT+ROLE?','AT+IMME?','AT+DISI?','AT+ADDR?','AT+BAUD?'].map(c=>btn(c,'ble-send','small secondary',`data-value="${c}"`)).join('')}</div>`+
-      `<div class="console" id="ble-output">Console polling is stopped.</div><form id="ble-form" class="console-input"><input name="cmd" maxlength="64" required placeholder="Enter AT command…" aria-label="AT command"><button class="button" type="submit">Send</button>${btn('Clear','ble-clear','ghost')}</form></article>`;
+    const commands=['AT','AT+VERS?','AT+ROLE?','AT+IMME?','AT+DISI?','AT+ADDR?','AT+BAUD?'];
+    return `<article class="card panel"><h2>BLE AT console</h2>
+      <p class="notice">Tilt scanning pauses while this console is active. It resumes after polling stops
+        and the device's timeout expires.</p>
+      <div class="two-col-actions">
+        ${btn('Start console','console-start','secondary','data-value="ble"')}
+        ${btn('Stop console','console-stop','ghost')}
+      </div>
+      <div class="command-buttons">
+        ${commands.map(c=>btn(c,'ble-send','small secondary',`data-value="${c}"`)).join('')}
+      </div>
+      <div class="console" id="ble-output">Console polling is stopped.</div>
+      <form id="ble-form" class="console-input">
+        <input name="cmd" maxlength="64" required placeholder="Enter AT command…" aria-label="AT command">
+        <button class="button" type="submit">Send</button>
+        ${btn('Clear','ble-clear','ghost')}
+      </form>
+    </article>`;
   },
   // Build firmware upload navigation and the current release-check result.
   update() {
     const c=state.controller;
-    return `<div class="system-layout"><article class="card panel"><h2>Firmware update</h2><p class="subtitle">Current firmware: ${esc(shown(c.FirmwareVersion))}. The standalone uploader accepts a local .bin file and remains usable if the main controls fail to load.</p>`+
-      `<a class="button secondary" style="display:inline-block;margin-top:20px" href="/update">Open firmware uploader</a></article>`+
-      `<article class="card panel"><h2>Release check</h2><p class="subtitle">Requires internet access. Local controls work offline.</p>`+
-      btn('Check for updates','update-check','secondary')+`<p id="update-result" class="review-caption">${updateResult(c)}</p></article></div>`;
+    return `<div class="system-layout">
+      <article class="card panel"><h2>Firmware update</h2>
+        <p class="subtitle">Current firmware: ${esc(shown(c.FirmwareVersion))}. The standalone uploader accepts a local
+          .bin file and remains usable if the main controls fail to load.</p>
+        <a class="button secondary" style="display:inline-block;margin-top:20px"
+          href="/update">Open firmware uploader</a>
+      </article>
+      <article class="card panel"><h2>Release check</h2>
+        <p class="subtitle">Requires internet access. Local controls work offline.</p>
+        ${btn('Check for updates','update-check','secondary')}
+        <p id="update-result" class="review-caption">${updateResult(c)}</p>
+      </article>
+    </div>`;
   }
 };
 
@@ -87,14 +170,16 @@ function controllerValue(field) {
 function updateDescription(c) {
   if (c.UpdateCheckError) return c.UpdateCheckError;
   if (!c.UpdateChecked) return 'No completed check.';
-  return c.UpdateAvailable?'Available version: '+c.LatestVersion:'No newer release found. Last check age: '+shown(c.LastUpdateCheck)+' min';
+  if (c.UpdateAvailable) return 'Available version: '+c.LatestVersion;
+  return 'No newer release found. Last check age: '+shown(c.LastUpdateCheck)+' min';
 }
 
 // Build escaped release-check text and a validated release-notes link.
 function updateResult(controller) {
   const description=esc(updateDescription(controller));
   if (!controller.UpdateAvailable) return description;
-  const url=/^https?:\/\//.test(controller.UpdateNotesUrl)?controller.UpdateNotesUrl:'https://github.com/scardus/OurBrewbot/releases';
+  const url=/^https?:\/\//.test(controller.UpdateNotesUrl)?controller.UpdateNotesUrl:
+    'https://github.com/scardus/OurBrewbot/releases';
   return description+` · <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Release notes</a>`;
 }
 
@@ -127,12 +212,14 @@ async function importConfig(file) {
   }
   const entries=backupFiles.filter(([key])=>Object.prototype.hasOwnProperty.call(bundle.configs,key));
   if (!entries.length) { toast('No supported configuration files were found.'); return; }
-  confirmAction('Import configuration?', 'Import '+entries.length+' saved files from '+file.name+
-    '. Existing settings will be replaced and the controller will restart. Unknown fields inside files are preserved.', 'Import', async()=>{
+  const description='Import '+entries.length+' saved files from '+file.name+
+    '. Existing settings will be replaced and the controller will restart. Unknown fields inside files are preserved.';
+  confirmAction('Import configuration?',description,'Import',async()=>{
     saving=true;
     try {
       for (const [key,path] of entries) {
-        await request('/fs/save?name='+encodeURIComponent(path),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bundle.configs[key])});
+        await request('/fs/save?name='+encodeURIComponent(path),{method:'POST',
+          headers:{'Content-Type':'application/json'},body:JSON.stringify(bundle.configs[key])});
       }
     } catch (error) {
       try { await post('/fs/import/abort',{}); toast('Import failed; rollback requested. '+error.message); }
@@ -144,7 +231,8 @@ async function importConfig(file) {
       await post('/reboot',{});
       toast('Import finished. Controller restarting; reconnect after it returns.');
     } catch (error) {
-      toast('Files imported. Restart result unknown; check the controller before restarting it manually. '+error.message);
+      toast('Files imported. Restart result unknown; check the controller before restarting it manually. '+
+        error.message);
     } finally { saving=false; }
   });
 }
@@ -153,8 +241,11 @@ async function importConfig(file) {
 async function viewFile(index) {
   const file=state.files[index];
   const text=(await request('/fs/file?name='+encodeURIComponent(file.name),{text:true})).data;
-  showModal('<h2>'+esc(file.name)+'</h2><pre class="code-view">'+esc(text)+'</pre>'+
-    '<div class="modal-actions">'+btn('Close','close-modal','ghost')+'<button id="download-file" class="button">Download</button></div>');
+  showModal(`<h2>${esc(file.name)}</h2><pre class="code-view">${esc(text)}</pre>
+    <div class="modal-actions">
+      ${btn('Close','close-modal','ghost')}
+      <button id="download-file" class="button">Download</button>
+    </div>`);
   $('#download-file').onclick=()=>download(file.name,text,'text/plain');
 }
 
@@ -178,7 +269,9 @@ async function pollConsole() {
     const output=$('#'+kind+'-output');
     if (!output) return;
     if (kind==='ble' && data.data) output.textContent+=data.data;
-    if (kind==='rf' && data.received) output.textContent+='\nCode '+data.code+' ('+data.hex+') · '+data.bits+' bits · '+data.delay+' µs · protocol '+data.protocol;
+    if (kind==='rf' && data.received) {
+      output.textContent+='\nCode '+data.code+' ('+data.hex+') · '+data.bits+' bits · '+data.delay+' µs · protocol '+data.protocol;
+    }
     if (output.textContent.length>12000) output.textContent=output.textContent.slice(-12000);
   } catch (error) { toast(error.message); state.console=null; }
   finally { consoleBusy=false; lastConsolePoll=Date.now(); }

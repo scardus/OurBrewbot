@@ -7,7 +7,8 @@ const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
 // Escape device text before inserting it into HTML.
-const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const htmlEscapes = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => htmlEscapes[c]);
 
 // Copy JSON-compatible data so draft edits cannot change saved state.
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -40,7 +41,8 @@ const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">$
 const badge = (label,kind='good') => `<span class="badge ${kind}"><i></i>${esc(label)}</span>`;
 
 // Build an action button for the shared click handler.
-const btn = (label,action,cls='secondary',extra='') => `<button type="button" class="button ${cls}" data-action="${action}" ${extra}>${label}</button>`;
+const btn = (label,action,cls='secondary',extra='') =>
+  `<button type="button" class="button ${cls}" data-action="${action}" ${extra}>${label}</button>`;
 
 // Build a labelled input with optional validation attributes and help text.
 function field(label,name,value,type='text',extra='',help='') {
@@ -95,7 +97,11 @@ function showModal(html) {
 
 // Show a confirmation dialog and run its callback only after the user accepts.
 function confirmAction(heading,description,label,callback) {
-  showModal(`<h2>${esc(heading)}</h2><p>${esc(description)}</p><div class="modal-actions">${btn('Cancel','close-modal','ghost')}<button class="button" id="confirm-action">${esc(label)}</button></div>`);
+  showModal(`<h2>${esc(heading)}</h2><p>${esc(description)}</p>
+    <div class="modal-actions">
+      ${btn('Cancel','close-modal','ghost')}
+      <button class="button" id="confirm-action">${esc(label)}</button>
+    </div>`);
   // Run the accepted action once and show any reported failure.
   $('#confirm-action').onclick=async()=>{
     $('#confirm-action').disabled=true;

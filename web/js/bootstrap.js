@@ -66,13 +66,18 @@ $('#log-search').oninput=renderLogs;
 $('#log-filter').onchange=renderLogs;
 
 // Pause or resume log polling and update the button label.
-$('#log-pause').onclick=()=>{state.logPaused=!state.logPaused; $('#log-pause').textContent=state.logPaused?'Resume':'Pause';};
+$('#log-pause').onclick=()=>{
+  state.logPaused=!state.logPaused;
+  $('#log-pause').textContent=state.logPaused?'Resume':'Pause';
+};
 
 // Clear only the browser-held log entries.
 $('#log-clear').onclick=()=>{logLines=[]; renderLogs();};
 
 // Download retained log entries as a plain-text file.
-$('#log-download').onclick=()=>download('ourbrewbot.log',logLines.map(l=>l[0]+' '+l[1]+' '+l[2]).join('\n'),'text/plain');
+$('#log-download').onclick=()=>{
+  download('ourbrewbot.log',logLines.map(l=>l[0]+' '+l[1]+' '+l[2]).join('\n'),'text/plain');
+};
 
 // Clear the active editor selection when the drawer is dismissed.
 $('#editor').addEventListener('cancel',()=>{state.editorId=null;});

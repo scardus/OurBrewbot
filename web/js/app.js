@@ -1,6 +1,9 @@
 'use strict';
 
-const navItems = [['dashboard','Dashboard'],['profiles','Profiles'],['sensors','Sensors'],['plugs','Smart plugs'],['reporting','Reporting'],['system','System & diagnostics']];
+const navItems = [
+  ['dashboard','Dashboard'],['profiles','Profiles'],['sensors','Sensors'],
+  ['plugs','Smart plugs'],['reporting','Reporting'],['system','System & diagnostics']
+];
 
 // Close the mobile navigation and update its accessibility state.
 function closeNav() {

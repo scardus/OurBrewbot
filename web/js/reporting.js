@@ -3,6 +3,7 @@
 // Build service-reporting and MQTT configuration forms with their explicit test actions.
 function reporting() {
   const m=state.mqtt;
+  const mqttButtons=btn('Test connection','test-mqtt','secondary')+btn('Publish discovery','discover','ghost');
   return title('KEEP YOUR BREW CONNECTED','Reporting',
     'Choose where your readings go. Enable each service per fermenter.')+
     `<div class="grid">${state.services.map(serviceCard).join('')}</div>
@@ -16,14 +17,17 @@ function reporting() {
           ${field('Broker host','host',m.host,'text','maxlength="63"')}
           ${field('Port','port',m.port,'number','min="1" max="65535" required')}
           ${field('Username','username',m.username,'text','maxlength="31"')}
-          ${field('New password','password','','password','autocomplete="new-password" maxlength="47"','Leave blank to keep the saved password.')}
+          ${field('New password','password','','password','autocomplete="new-password" maxlength="47"',
+            'Leave blank to keep the saved password.')}
           ${field('Base topic','baseTopic',m.baseTopic,'text','maxlength="31" required')}
         </div>
-        ${toggle('Home Assistant discovery','haDiscovery',m.haDiscovery,'Advertise the controller and its sensors automatically.')}
-        ${toggle('Allow MQTT control','allowControl',m.allowControl,'Allow commands from your broker to change controller settings.')}
+        ${toggle('Home Assistant discovery','haDiscovery',m.haDiscovery,
+          'Advertise the controller and its sensors automatically.')}
+        ${toggle('Allow MQTT control','allowControl',m.allowControl,
+          'Allow commands from your broker to change controller settings.')}
         ${toggle('Publish log messages','logEnabled',m.logEnabled)}
         ${toggle('Clear saved password','clearPassword',false,'Only tick this to explicitly remove the saved password.')}
-        ${actions('Save MQTT settings',btn('Test connection','test-mqtt','secondary')+btn('Publish discovery','discover','ghost'))}
+        ${actions('Save MQTT settings',mqttButtons)}
       </form>
     </article>`;
 }
@@ -49,7 +53,8 @@ function serviceCard(s,i) {
 function mqttPayload(data) {
   // TextSafe.cpp::isValidBaseTopic() rejects wildcards, controls and a leading $.
   if (!data.baseTopic || /^[\$]|[+#\x00-\x1f\x7f]/.test(data.baseTopic)) {
-    throw new Error('Base topic must be 1–31 bytes, without wildcards or control characters, and must not start with $.');
+    throw new Error('Base topic must be 1–31 bytes, without wildcards or control characters, '+
+      'and must not start with $.');
   }
   const body={enabled:data.enabled,host:data.host,port:+data.port,username:data.username,
     baseTopic:data.baseTopic,haDiscovery:data.haDiscovery,allowControl:data.allowControl,logEnabled:data.logEnabled};

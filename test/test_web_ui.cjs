@@ -163,7 +163,7 @@ test('held profile steps ignore stale Start in the drawn line and axis',()=>{
 test('dashboard includes paused profiles in its running count',()=>{
   const {run}=ui();
   run(`state.fermenters=[{name:'Vessel',profile:1,running:false,paused:true}]; fermCard=()=>'';`);
-  assert.match(run('dashboard()'),/Running profiles<\/div><div[^>]*>1<\/div>/);
+  assert.match(run('dashboard()'),/Running profiles<\/div>\s*<div[^>]*>1<\/div>/);
 });
 
 function saveFixture() {

@@ -20,13 +20,14 @@ function plugCard(p,i) {
     status='Unassigned';
     statusKind='quiet';
   }
+  const roles=[['none','Unassigned'],['hot','Heater'],['cold','Cooler'],['aux1','Auxiliary 1'],['aux2','Auxiliary 2']];
   return `<article class="card panel plug-card">
     <div class="panel-header"><div><div class="slot-label">PLUG ${String(p.index).padStart(2,'0')}</div>
       <h2>${esc(name)}</h2><p>${p.role==='none'?'Available slot':esc(p.manufacturer+' · '+p.model)}</p></div>
       <span data-plug-status="${i}">${badge(status,statusKind)}</span></div>
     <form data-form="plug-${i}">
       <div class="fields">
-        ${select('Role','role',p.role,[['none','Unassigned'],['hot','Heater'],['cold','Cooler'],['aux1','Auxiliary 1'],['aux2','Auxiliary 2']])}
+        ${select('Role','role',p.role,roles)}
         ${select('Fermenter','fermenter',p.fermenter,fermOptions())}
       </div>
       <details><summary>RF codes & manufacturer</summary>
@@ -36,7 +37,9 @@ function plugCard(p,i) {
           ${select('Preset','preset','',[['','Choose a preset'],...plugPresets.map((preset,n)=>[n,preset.n])])}
           ${select('Remote button','remote',0,[[0,'Button 1'],[1,'Button 2'],[2,'Button 3'],[3,'Button 4']])}
         </div>
-        <div style="margin-top:10px">${btn('Apply preset to draft','plug-preset','small secondary',`data-id="${i}"`)}</div>
+        <div style="margin-top:10px">
+          ${btn('Apply preset to draft','plug-preset','small secondary',`data-id="${i}"`)}
+        </div>
         <div class="fields" style="margin-top:15px">
           ${field('On code','onCode',p.onCode,'number','min="0" max="4294967295" step="1" required')}
           ${field('Off code','offCode',p.offCode,'number','min="0" max="4294967295" step="1" required')}
@@ -66,7 +69,8 @@ function plugPayload(data,index) {
   else if (role==='aux2') plugFunction=9;
   // Config.h::checkRfSettings() mirrors rc-switch's twelve protocols:
   // worst-case bit pulses, sync pulses, ten repeats, maximum burst 2000 ms.
-  const pulses=[[4,32],[3,11],[15,101],[4,7],[3,20],[3,24],[7,64],[23,133],[23,137],[4,19],[3,37],[3,37]][+data.protocol-1];
+  const protocolPulses=[[4,32],[3,11],[15,101],[4,7],[3,20],[3,24],[7,64],[23,133],[23,137],[4,19],[3,37],[3,37]];
+  const pulses=protocolPulses[+data.protocol-1];
   if (!pulses || Math.floor(10*(+data.bits*pulses[0]+pulses[1])*(+data.delay)/1000)>2000) {
     throw new Error('These RF timings would make a send exceed the firmware limit of 2 seconds.');
   }
@@ -80,8 +84,9 @@ function applyPreset(form) {
   const d=formData(form),preset=plugPresets[+d.preset];
   if (d.preset==='' || !preset) return;
   const button=+d.remote;
-  for (const [name,value] of Object.entries({manufacturer:preset.m,model:preset.n,
-    onCode:preset.c[button*2],offCode:preset.c[button*2+1],protocol:1,bits:24,delay:preset.d})) form.elements[name].value=value;
+  const values={manufacturer:preset.m,model:preset.n,onCode:preset.c[button*2],offCode:preset.c[button*2+1],
+    protocol:1,bits:24,delay:preset.d};
+  for (const [name,value] of Object.entries(values)) form.elements[name].value=value;
   updateDirty(form);
   toast('Preset applied to draft. Save to store it.');
 }

@@ -11,7 +11,8 @@ function renderLogs() {
   const q=$('#log-search').value.toLowerCase(),level=$('#log-filter').value;
   const node=$('#log-lines'),follow=node.scrollHeight-node.scrollTop-node.clientHeight<30;
   const filtered=logLines.filter(l=>(level==='all'||l[1]===level)&&l[2].toLowerCase().includes(q));
-  node.innerHTML=filtered.map(l=>`<div class="log-line ${l[1]}"><time>${esc(l[0])}</time>${esc(l[2])}</div>`).join('') || '<div class="empty-state">No matching messages.</div>';
+  const lines=filtered.map(l=>`<div class="log-line ${l[1]}"><time>${esc(l[0])}</time>${esc(l[2])}</div>`).join('');
+  node.innerHTML=lines || '<div class="empty-state">No matching messages.</div>';
   $('.log-count').textContent=logLines.length;
   if (follow) node.scrollTop=node.scrollHeight;
 }
@@ -40,7 +41,8 @@ async function pollLogs() {
   } catch (error) {
     // A rejected cursor will never recover by sending it again.
     if (error.httpStatus===400) { logBoot=''; logAfter=0; logMore=false; }
-    $('.log-bar-status').textContent=error.httpStatus===400?'Log cursor reset · reconnecting':'Log connection lost · retrying';
+    $('.log-bar-status').textContent=error.httpStatus===400?
+      'Log cursor reset · reconnecting':'Log connection lost · retrying';
   }
   finally { logBusy=false; lastLogPoll=Date.now(); }
 }
