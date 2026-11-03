@@ -1,0 +1,56 @@
+'use strict';
+// The controller log drawer.
+
+const MAX_LOG_LINES = 2000;
+
+// Append a log entry while retaining a limited number of entries in the browser.
+function addLog(text,level='info',timestamp='') {
+  logLines.push([timestamp,level,text]);
+  if (logLines.length>MAX_LOG_LINES) logLines.splice(0,logLines.length-MAX_LOG_LINES);
+}
+
+// Apply log search and level filters, following new entries only when already at the end.
+function renderLogs() {
+  const q=$('#log-search').value.toLowerCase(),level=$('#log-filter').value;
+  const node=$('#log-lines'),follow=node.scrollHeight-node.scrollTop-node.clientHeight<30;
+  const filtered=logLines.filter(l=>(level==='all'||l[1]===level)&&l[2].toLowerCase().includes(q));
+  const lines=filtered.map(l=>`<div class="log-line ${l[1]}"><time>${esc(l[0])}</time>${esc(l[2])}</div>`).join('');
+  node.innerHTML=lines || '<div class="empty-state">No matching messages.</div>';
+  $('.log-count').textContent=logLines.length;
+  if (follow) node.scrollTop=node.scrollHeight;
+}
+
+let logBusy=false;
+
+// Show the log connection status, keeping its dot: green while connected and amber after a failure.
+function setLogStatus(text,connected) {
+  const dot=connected?'<i></i>':'<i style="background:var(--amber)"></i>';
+  $('.log-bar-status').innerHTML=dot+' '+esc(text);
+}
+
+// Read incremental log entries and recover the cursor after a controller restart or rejection.
+async function pollLogs() {
+  if (logBusy || state.logPaused || saving || document.hidden || !state.ready) return;
+  logBusy=true;
+  try {
+    const reply=await request('/logs?boot='+encodeURIComponent(logBoot)+'&after='+logAfter,{text:true},true);
+    const boot=reply.headers.get('X-Log-Boot')||'';
+    if (logBoot && logBoot!==boot) addLog('Controller restarted. Log cursor reset.','warning');
+    const lost=toFinite(reply.headers.get('X-Log-Lost'));
+    if (lost) addLog(lost+' controller log lines were missed.','warning');
+    logBoot=boot;
+    logAfter=toFinite(reply.headers.get('X-Log-Next'),logAfter);
+    logMore=reply.headers.get('X-Log-More')==='1';
+    for (const line of reply.data.split('\n')) {
+      const match=/^(\d)\s+(\S+)\s+(.*)$/.exec(line);
+      if (match) addLog(match[3],+match[1]<=3?'error':+match[1]===4?'warning':'info',match[2]);
+    }
+    renderLogs();
+    setLogStatus('Controller stream',true);
+  } catch (error) {
+    // A rejected cursor will never recover by sending it again.
+    if (error.httpStatus===400) { logBoot=''; logAfter=0; logMore=false; }
+    setLogStatus(error.httpStatus===400?'Log cursor reset · reconnecting':'Log connection lost · retrying',false);
+  }
+  finally { logBusy=false; lastLogPoll=Date.now(); }
+}

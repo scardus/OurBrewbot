@@ -1,3 +1,4 @@
+/* Theme colours and base elements */
 :root {
   color-scheme:dark;
   --bg:#101621;
@@ -71,6 +72,7 @@ button:active:not(:disabled) {
   top:8px
 }
 
+/* Page layout and sidebar */
 .layout {
   display:flex;
   min-height:100vh
@@ -194,6 +196,7 @@ nav {
   margin-left:auto
 }
 
+/* Top bar */
 .workspace {
   flex:1;
   min-width:0
@@ -263,6 +266,7 @@ nav {
 .nav-scrim {
   display:none
 }
+/* Page headings and buttons */
 main {
   max-width:1370px;
   margin:0 auto;
@@ -380,6 +384,7 @@ p {
   border-radius:50%;
   background:var(--green)
 }
+/* Dashboard summary */
 .overview {
   display:grid;
   grid-template-columns:repeat(4,1fr);
@@ -447,6 +452,7 @@ p {
   color:var(--quiet);
   font-size:10px
 }
+/* Cards and fermenter cards */
 .grid {
   display:grid;
   grid-template-columns:repeat(2,minmax(0,1fr));
@@ -701,6 +707,7 @@ p {
   margin-left:7px;
   color:#536178
 }
+/* Notices and tabs */
 .notice {
   padding:13px 15px;
   border:1px solid #5a4933;
@@ -744,6 +751,7 @@ p {
   border-color:var(--accent);
   color:var(--accent)
 }
+/* Panels and form fields */
 .panel {
   padding:23px
 }
@@ -869,6 +877,7 @@ input[type=checkbox] {
   flex-basis:100%;
   margin-bottom:4px
 }
+/* Fermenter settings drawer */
 .editor {
   position:fixed;
   inset:0 0 0 auto;
@@ -955,6 +964,7 @@ input[type=checkbox] {
 .editor-actions .saved-label {
   margin:0 auto 0 0
 }
+/* Dialogs and toast messages */
 .modal {
   max-width:500px;
   width:calc(100% - 32px);
@@ -1002,6 +1012,7 @@ input[type=checkbox] {
   opacity:1;
   transform:translate(-50%,0)
 }
+/* Profiles view */
 .profile-layout {
   display:grid;
   grid-template-columns:200px minmax(0,1fr);
@@ -1027,6 +1038,9 @@ input[type=checkbox] {
   border-color:#a45c70;
   background:#302632;
   color:var(--text)
+}
+.profile-choice .slot-label {
+  display:block
 }
 .profile-choice small {
   display:block;
@@ -1100,6 +1114,7 @@ input[type=checkbox] {
   height:33px;
   font-size:12px
 }
+/* Label and value rows */
 .list-row {
   padding:15px 0;
   border-bottom:1px solid var(--border);
@@ -1121,6 +1136,7 @@ input[type=checkbox] {
 .list-row strong {
   font-weight:500
 }
+/* Sensors view */
 .sensor-reading {
   display:flex;
   gap:22px;
@@ -1143,6 +1159,7 @@ input[type=checkbox] {
   color:var(--muted)
 }
 
+/* Smart plugs view */
 .plug-card .panel-header {
   margin-bottom:12px
 }
@@ -1162,6 +1179,7 @@ input[type=checkbox] {
 .plug-card details .fields {
   padding-top:10px
 }
+/* Reporting view */
 .service-logo {
   height:36px;
   width:36px;
@@ -1181,6 +1199,7 @@ input[type=checkbox] {
   align-items:center
 }
 
+/* System view and consoles */
 .system-layout {
   display:grid;
   grid-template-columns:1.25fr 1fr;
@@ -1237,9 +1256,16 @@ input[type=checkbox] {
   white-space:pre-wrap;
   overflow-wrap:anywhere
 }
+.console:empty::before {
+  content:attr(data-empty)
+}
 .console-input {
   display:flex;
+  flex-wrap:wrap;
   gap:8px
+}
+.console-input select {
+  max-width:100%
 }
 .console-input input {
   flex:1;
@@ -1267,6 +1293,7 @@ input[type=checkbox] {
   width:28px;
   margin-bottom:10px
 }
+/* Controller log drawer */
 .log-drawer {
   position:fixed;
   z-index:30;
@@ -1317,14 +1344,6 @@ input[type=checkbox] {
   font-size:9px;
   white-space:nowrap
 }
-.log-latest {
-  margin-left:auto;
-  color:#65768d;
-  font:9px ui-monospace,monospace;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis
-}
 .log-tools {
   display:flex;
   gap:8px;
@@ -1364,6 +1383,7 @@ input[type=checkbox] {
   margin-right:15px
 }
 
+/* Shared small layouts */
 .two-col-actions {
   display:flex;
   gap:8px;
@@ -1377,6 +1397,7 @@ input[type=checkbox] {
   margin-top:16px
 }
 
+/* Screen-size adjustments. These must stay last so they override the rules above. */
 @media(min-width:1500px) {
   :root {
     --sidebar:244px
@@ -1462,9 +1483,6 @@ input[type=checkbox] {
   }
   .system-layout {
     grid-template-columns:1fr
-  }
-  .log-latest {
-    display:none
   }
 
 }

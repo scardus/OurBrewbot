@@ -15,8 +15,10 @@ PAGES = (
     ("BLE_SNIFF_PAGE", "ble-sniff.html"),
 )
 
-SCRIPTS = ("views.js", "state.js", "presets.js", "api.js", "fermenters.js", "profiles.js",
-           "plugs.js", "reporting.js", "panels.js", "actions.js", "bootstrap.js")
+# Joined in this order into one browser script, so all files share one global scope.
+# Only bootstrap.js runs anything on load, so it must stay last.
+SCRIPTS = ("html.js", "state.js", "presets.js", "api.js", "forms.js", "app.js", "fermenters.js", "sensors.js",
+           "profiles.js", "plugs.js", "reporting.js", "system.js", "logs.js", "bootstrap.js")
 
 
 def shared_assets(root):
