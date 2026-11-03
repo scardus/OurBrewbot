@@ -233,7 +233,7 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 | GET    | /health            | System health                 |
 | GET    | /logs?boot=&after= | Recent log lines as plain text, after a sequence number (used by the admin page's Log drawer) |
 | POST   | /iSpindel          | iSpindel gravity data         |
-| POST   | /ispindel/config   | Update iSpindel config (fermenter, collect data, clear) |
+| POST   | /ispindel/config   | Update iSpindel config (fermenter, collect data, clear). One iSpindel per fermenter: a move onto a fermenter another iSpindel is on gets a 400 |
 | GET    | /ispindels         | iSpindel config + live data   |
 | GET    | /mqtt              | MQTT config (includes haDiscovery flag; password masked) |
 | POST   | /mqtt              | Update MQTT config (haDiscovery, LWT, discovery cleanup on disable) |
@@ -255,7 +255,7 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 | GET    | /status            | Quick status all fermenters   |
 | GET    | /syslog            | Syslog config                 |
 | POST   | /syslog            | Update syslog config (host, port, facility, minLevel) |
-| POST   | /tilt              | Update Tilt config (fermenter, function, SG/temp adjust) |
+| POST   | /tilt              | Update Tilt config (fermenter, function, SG/temp adjust). One Tilt per fermenter: a move onto a fermenter another Tilt is on gets a 400 |
 | GET    | /tilts             | Tilt hydrometer config + live data |
 | GET    | /update            | OTA firmware update page      |
 | POST   | /update            | Upload new firmware binary    |

@@ -559,6 +559,31 @@ test('every form saves to its endpoint with the expected body and confirmation r
   }
 });
 
+test('the sensors page warns about Tilts or iSpindels already sharing a fermenter',()=>{
+  const {run}=ui();
+  run(`state.fermenters=[{id:0,name:'Vessel <1>'},{id:1,name:'Vessel 2'}];
+    setSensors('tilts',{tilts:[{colour:0,fermenter:0},{colour:1,fermenter:0},{colour:2,fermenter:1},{colour:3,fermenter:99},{colour:4,fermenter:99}]});
+    setSensors('ispindels',{ispindels:[{index:0,name:'A&B',fermenter:1},{index:1,name:'C',fermenter:1},{index:2,name:'D',fermenter:0},{index:3,name:'',fermenter:99}]});
+    setSensors('probes',{probes:[{index:0,function:2,fermenter:0,tempAdjust:0},{index:1,function:3,fermenter:0,tempAdjust:0}]});`);
+  const notices=kind=>run(`state.sensorTab='${kind}'; sensorsView()`).match(/<p class="notice error">.*?<\/p>/g)||[];
+  assert.deepEqual(notices('tilts'),['<p class="notice error">Vessel &lt;1&gt; has 2 Tilts: Red, Green. Only one is used, so unassign the others.</p>']);
+  assert.deepEqual(notices('ispindels'),['<p class="notice error">Vessel 2 has 2 iSpindels: A&amp;B, C. Only one is used, so unassign the others.</p>']);
+  // A fermenter normally has several probes, each with its own function.
+  assert.deepEqual(notices('probes'),[]);
+  run("setSensors('tilts',{tilts:[{colour:0,fermenter:0},{colour:1,fermenter:1}]});");
+  assert.deepEqual(notices('tilts'),[]);
+});
+
+test('a save the firmware refuses shows its reason and keeps the draft',async()=>{
+  const message='Tilt Red is already on this fermenter - unassign it first';
+  const result=await saveThrough('tilt-1',{fn:'99',fermenter:'0',adjust:'0',sgAdjust:'0'},
+    `state.tilts=[{},{tempAdjust:0,sgAdjust:0}];
+    request=async()=>{const error=new Error('${message}'); error.server=true; throw error;};`);
+  assert.equal(result.error,message);
+  // Only the unit check before saving: no confirmation read, so the form and its draft stay as they are.
+  assert.deepEqual(result.reads,['controller']);
+});
+
 test('text longer than the firmware buffer is refused before anything is sent',async()=>{
   const cases=[
     ['ferm-0','name',fermenterFields,fermenterSetup,31],['ferm-0','beer',fermenterFields,fermenterSetup,31],
