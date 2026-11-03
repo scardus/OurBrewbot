@@ -33,6 +33,7 @@ function render() {
       ${icon(key)}<span>${label}</span>
       ${key==='dashboard'?`<span class="nav-count">${state.fermenters.length}</span>`:''}</a>`).join('');
   $('#crumb').textContent=routeLabel;
+  $('.footer-version').textContent=state.controller.FirmwareVersion||'';
   const renderers={dashboard:dashboardView,profiles:profilesView,sensors:sensorsView,plugs:plugsView,
     reporting:reportingView,system:systemView};
   const offline=state.offline?`<div class="notice error">${icon('info')}<div>

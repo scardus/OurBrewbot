@@ -118,7 +118,7 @@ setInterval(()=>{
     await fetchData('profiles');
     state.ready=true;
     state.lastUpdated=Date.now();
-    state.route=navItems.some(n=>n[0]===location.hash.slice(1))?location.hash.slice(1):'dashboard';
+    state.route=currentRoute();
     await loadRoute();
   } catch (error) {
     $('#main').textContent=error.message+' Reload this page to reconnect.';

@@ -451,6 +451,45 @@ const mqttFields={enabled:true,host:'broker',port:'1883',username:'user',passwor
 const serviceFields={enabled:true,serviceId:'key',deviceName:'device'};
 const syslogFields={enabled:true,host:'server',port:'514',facility:'16',level:'6'};
 
+test('log polling keeps the status dot, and shows a failure in amber',async()=>{
+  const {run,context}=ui();
+  const status={};
+  context.document={hidden:false,addEventListener:()=>{},querySelector:()=>status};
+  run('state.ready=true; renderLogs=()=>{};');
+  context.fetch=async()=>({ok:true,status:200,text:async()=>'',headers:{get:()=>null}});
+  await run('pollLogs()');
+  assert.equal(status.innerHTML,'<i></i> Controller stream');
+  context.fetch=async()=>({ok:false,status:500,text:async()=>'{}'});
+  await run('pollLogs()');
+  assert.match(status.innerHTML,/^<i style="background:var\(--amber\)"><\/i> Log connection lost/);
+});
+
+test('the footer shows the firmware version once the controller has been read',()=>{
+  const {run,context}=ui();
+  const footer={};
+  const other={classList:{remove:()=>{}},setAttribute:()=>{},dataset:{},querySelector:()=>null,querySelectorAll:()=>[]};
+  context.document={querySelectorAll:()=>[],querySelector:name=>
+    name==='.footer-version'?footer:name.startsWith('form')?null:other};
+  context.location={hash:'#dashboard'};
+  run("dashboardView=()=>''; state.controller={FirmwareVersion:'1.2.3'}; render();");
+  assert.equal(footer.textContent,'1.2.3');
+});
+
+test('the route ignores anything after a slash, at start-up as well as on navigation',async()=>{
+  const {run,context}=ui();
+  context.location={hash:'#system/details'};
+  assert.equal(run('currentRoute()'),'system');
+  context.location.hash='#unknown';
+  assert.equal(run('currentRoute()'),'dashboard');
+  context.location.hash='#system/details';
+  context.document={querySelector:()=>({}),addEventListener:()=>{}};
+  run('fetchData=async()=>{}; loadRoute=async()=>{};');
+  const source=fs.readFileSync(path.join(__dirname,'../web/js/bootstrap.js'),'utf8');
+  // Run only the start-up block, without registering handlers or timers.
+  await vm.runInContext(source.slice(source.indexOf('\n(async()=>{')),context);
+  assert.equal(run('state.route'),'system');
+});
+
 test('every form saves to its endpoint with the expected body and confirmation reads',async()=>{
   const emptySteps=Array.from({length:14},()=>({stepType:0,startTemp:0,endTemp:0,sgTrigger:0,days:0}));
   const cases=[

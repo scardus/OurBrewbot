@@ -22,6 +22,12 @@ function renderLogs() {
 
 let logBusy=false;
 
+// Show the log connection status, keeping its dot: green while connected and amber after a failure.
+function setLogStatus(text,connected) {
+  const dot=connected?'<i></i>':'<i style="background:var(--amber)"></i>';
+  $('.log-bar-status').innerHTML=dot+' '+esc(text);
+}
+
 // Read incremental log entries and recover the cursor after a controller restart or rejection.
 async function pollLogs() {
   if (logBusy || state.logPaused || saving || document.hidden || !state.ready) return;
@@ -40,12 +46,11 @@ async function pollLogs() {
       if (match) addLog(match[3],+match[1]<=3?'error':+match[1]===4?'warning':'info',match[2]);
     }
     renderLogs();
-    $('.log-bar-status').textContent='Controller stream';
+    setLogStatus('Controller stream',true);
   } catch (error) {
     // A rejected cursor will never recover by sending it again.
     if (error.httpStatus===400) { logBoot=''; logAfter=0; logMore=false; }
-    $('.log-bar-status').textContent=error.httpStatus===400?
-      'Log cursor reset · reconnecting':'Log connection lost · retrying';
+    setLogStatus(error.httpStatus===400?'Log cursor reset · reconnecting':'Log connection lost · retrying',false);
   }
   finally { logBusy=false; lastLogPoll=Date.now(); }
 }
