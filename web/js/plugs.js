@@ -1,4 +1,5 @@
 'use strict';
+// The smart plugs view.
 
 // Build the smart-plug view and its link to the RF sniffer.
 function plugsView() {

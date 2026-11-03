@@ -1,11 +1,12 @@
 'use strict';
+// The profiles view, the profile editor and its drafts.
 
 const stepNames=[
   'Temperature over time','Time at temperature','Free rise','Specific gravity','Attenuation',
   'Temperature reached','Gravity reached','Attenuation reached','Time and gravity','Time and attenuation'
 ];
 
-// Completion rules from Profile.cpp. These replace the old hover-only tooltips.
+// Completion rules from Profile.cpp.
 const stepHelp=[
   'Ramp from Start to End over Days. Advance after Days and when temperature reaches End within the fermenter control band.',
   'Ramp from Start to End over Days. Advance after Days; reaching End is not a completion condition.',

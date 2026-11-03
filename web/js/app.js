@@ -1,4 +1,5 @@
 'use strict';
+// Drawing the current view, live updates and the shared button handler.
 
 const navItems = [
   ['dashboard','Dashboard'],['profiles','Profiles'],['sensors','Sensors'],

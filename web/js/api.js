@@ -1,4 +1,6 @@
 'use strict';
+// The request queue, loading endpoint data and background polling.
+
 // One in-flight request per tab. Explicit actions precede queued background reads.
 const requests = [];
 let requestRunning = false;

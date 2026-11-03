@@ -1,4 +1,5 @@
 'use strict';
+// RF codes for common plug brands. Each codes list holds the on and off code for remote buttons 1 to 4.
 const plugPresets = [
   { name: 'Dial Codeset 1',  manufacturer: 'Dial',  delay: 410, codes: [ 1381717,  1381716,  1394005,  1394004,  1397077,  1397076,  1397845,  1397844] },
   { name: 'Dial Codeset 2',  manufacturer: 'Dial',  delay: 410, codes: [ 4527445,  4527444,  4539733,  4539732,  4542805,  4542804,  4543573,  4543572] },

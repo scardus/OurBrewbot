@@ -1,4 +1,5 @@
 'use strict';
+// The dashboard, fermenter cards, settings drawer and debug overrides.
 
 // Build the overview totals and fermenter cards from the latest browser state.
 function dashboardView() {

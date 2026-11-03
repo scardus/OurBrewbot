@@ -1,4 +1,5 @@
 'use strict';
+// The controller log drawer.
 
 // Append a log entry while retaining at most two thousand entries in the browser.
 function addLog(text,level='info',timestamp='') {

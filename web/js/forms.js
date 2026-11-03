@@ -1,4 +1,5 @@
 'use strict';
+// Draft tracking and the save flow shared by every settings form.
 
 // Read named form controls, keeping checkbox values as booleans.
 function formData(form) {
@@ -19,9 +20,8 @@ function applyData(form,data) {
   }
 }
 
-// Keep the displayed baseline separate from exact profile temperatures.
-// A name-only edit must not save a rounded graph label back to the controller.
 // Record form baselines and restore drafts after rendering a view.
+// Profile forms also keep their exact temperatures, so a name-only edit cannot save rounded values.
 function mountForms(root=document) {
   for (const form of $$('form[data-form]',root)) {
     const key=form.dataset.form;
@@ -56,9 +56,8 @@ function saveError(form,message) {
   $('.form-error',form).textContent=message;
 }
 
-// Labels may be rounded for readability. Send the received number unchanged
-// unless the user edited that field; a name-only save must not alter control.
 // Keep a received numeric value unchanged unless its form field was edited.
+// Fields may be rounded for readability, and a name-only save must not alter control.
 function savedNumber(form,data,name,received) {
   const baseline=formBaselines.get(form);
   return baseline && data[name]===baseline[name] ? received : +data[name];
@@ -152,8 +151,7 @@ async function saveFormChecked(form) {
   }
 }
 
-// A refresh resolves uncertainty only for forms whose endpoint was reread.
-// Reread view data and clear uncertain-save markers only for refreshed endpoints.
+// Reread view data and clear uncertain-save markers only for forms whose endpoint was reread.
 async function refreshForms() {
   if (!await loadRoute(true)) return;
   const names=routeData();

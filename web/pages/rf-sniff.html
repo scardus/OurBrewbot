@@ -36,8 +36,7 @@
   const status=document.getElementById('status'),log=document.getElementById('log'),plug=document.getElementById('plug');
   let listening=true,pollBusy=false,testBusy=false;
   let requestQueue=Promise.resolve();
-  // A confirmed test waits for an active poll instead of losing the click.
-  // Queue requests so a confirmed test can wait for the current poll.
+  // Queue requests so a confirmed test waits for an active poll instead of losing the click.
   function call(path,options) {
     const result=requestQueue.catch(()=>{}).then(()=>sendRequest(path,options));
     requestQueue=result;

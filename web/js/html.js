@@ -1,4 +1,5 @@
 'use strict';
+// HTML builders and small page helpers shared by every view.
 
 // Find the first matching element within the supplied root.
 const $ = (s, root = document) => root.querySelector(s);

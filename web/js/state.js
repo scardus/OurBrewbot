@@ -1,45 +1,50 @@
 'use strict';
+// Browser state, temperature conversion and tidying of controller replies.
 
 // Device data and unsaved edits live only in this browser tab.
 const state = {
-  route:'dashboard', unit:'C', refreshPaused:false, offline:false, ready:false,
-  sensorTab:'probes', systemTab:'overview', selectedProfile:0,
-  logPaused:false, lastUpdated:0, controller:{}, health:{}, debug:{Overrides:[]},
+  // What is on screen.
+  route:'dashboard', sensorTab:'probes', systemTab:'overview', selectedProfile:0, activeConsole:null,
+  // Connection and refresh status.
+  ready:false, offline:false, refreshPaused:false, logPaused:false, lastUpdated:0, controllerReadAt:0,
+  // Display unit, and whether the controller changed it while drafts were open.
+  unit:'C', unitChanged:false,
+  // The latest controller data, tidied by the set functions below.
+  controller:{}, health:{}, debug:{Overrides:[]}, global:{},
   fermenters:[], profiles:[], probes:[], tilts:[], ispindels:[], plugs:[],
-  services:[], mqtt:{}, global:{}, syslog:{}, files:[]
+  services:[], mqtt:{}, syslog:{}, files:[]
 };
 
+// Unsaved edits. A form's key is its data-form attribute, such as "ferm-0", "profile-2" or "mqtt".
+// Drawing a view replaces its forms, so edits are kept here and put back afterwards.
+// formDrafts: form key -> the text of each changed form's fields.
 const formDrafts = new Map();
-
-const formBaselines = new WeakMap();
-
-const profileFormValues = new WeakMap();
-
+// profileDrafts: profile index -> the edited profile, in Celsius. Profiles need this as well as
+// formDrafts because adding, moving or deleting a step changes which fields the form has.
 const profileDrafts = new Map();
-
+// Inputs show rounded text, but a save must not write that rounding back to the controller.
+// formBaselines: form element -> its field text as drawn. A field that still matches was not edited.
+const formBaselines = new WeakMap();
+// profileFormValues: profile form element -> the exact values behind its rounded fields.
+const profileFormValues = new WeakMap();
+// Keys of forms whose last save got no clear answer. Saving stays blocked until they are reread.
 const unknownForms = new Set();
 
-let toastTimer;
-
-let logLines = [];
-
+// Endpoints read at least once, and a counter that stops a slow load drawing over a newer view.
 const loaded = new Set();
-
 let routeGeneration = 0;
-
-let pollBusy = false;
-
-let lastPoll = 0;
-
-let lastLogPoll = 0;
-
-let logBoot = '';
-
-let logAfter = 0;
-
-let logMore = false;
-
+// True while a save or import runs. Polling and other buttons wait until it finishes.
 let saving = false;
+// Background polling: whether a poll is running and when each last ran.
+let pollBusy = false;
+let lastPoll = 0;
+let lastLogPoll = 0;
+// Log drawer: retained lines and the position to read /logs from next.
+let logLines = [];
+let logBoot = '';
+let logAfter = 0;
+let logMore = false;
+let toastTimer;
 
 // Convert a value to a finite number, using the fallback for invalid input.
 const toFinite = (value, fallback=0) => Number.isFinite(Number(value)) ? Number(value) : fallback;

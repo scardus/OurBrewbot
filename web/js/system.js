@@ -1,4 +1,5 @@
 'use strict';
+// The system view: settings, backup, firmware and the RF and BLE consoles.
 
 // Build the System tabs and the currently selected diagnostics panel.
 function systemView() {

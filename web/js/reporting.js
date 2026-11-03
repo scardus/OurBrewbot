@@ -1,4 +1,5 @@
 'use strict';
+// The reporting view for Brewer's Friend, Brewfather and MQTT.
 
 // Build service-reporting and MQTT configuration forms with their explicit test actions.
 function reportingView() {

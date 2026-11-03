@@ -1,4 +1,5 @@
 'use strict';
+// The sensors view for probes, Tilts and iSpindels.
 
 const fnOptions = [
   [99,'Unassigned'],[2,'Beer temperature'],[3,'Ambient temperature'],[4,'Tilt probe'],

@@ -1,4 +1,5 @@
 'use strict';
+// Event wiring, timers and page start-up. Loaded last, because it runs immediately.
 
 // Track typed form edits in browser drafts without saving to the controller.
 document.addEventListener('input',event=>{
