@@ -54,3 +54,47 @@ function plugCard(p,i) {
     </form>
   </article>`;
 }
+
+// Validate RF timings and translate a plug draft into the firmware's save contract.
+function plugPayload(data,index) {
+  const role=data.role,fermenter=+data.fermenter;
+  if ((role==='hot'||role==='cold') && fermenter===99) throw new Error('Choose a fermenter for this heater or cooler.');
+  let plugFunction=99;
+  if (role==='hot') plugFunction=fermenter*2;
+  else if (role==='cold') plugFunction=fermenter*2+1;
+  else if (role==='aux1') plugFunction=8;
+  else if (role==='aux2') plugFunction=9;
+  // Config.h::checkRfSettings() mirrors rc-switch's twelve protocols:
+  // worst-case bit pulses, sync pulses, ten repeats, maximum burst 2000 ms.
+  const pulses=[[4,32],[3,11],[15,101],[4,7],[3,20],[3,24],[7,64],[23,133],[23,137],[4,19],[3,37],[3,37]][+data.protocol-1];
+  if (!pulses || Math.floor(10*(+data.bits*pulses[0]+pulses[1])*(+data.delay)/1000)>2000) {
+    throw new Error('These RF timings would make a send exceed the firmware limit of 2 seconds.');
+  }
+  return {index:state.plugs[index].index,manufacturer:data.manufacturer,model:data.model,
+    onCode:+data.onCode,offCode:+data.offCode,protocol:+data.protocol,bits:+data.bits,delay:+data.delay,
+    function:plugFunction,fermenter};
+}
+
+// Copy a saved RF preset into the plug draft without writing controller settings.
+function applyPreset(form) {
+  const d=formData(form),preset=plugPresets[+d.preset];
+  if (d.preset==='' || !preset) return;
+  const button=+d.remote;
+  for (const [name,value] of Object.entries({manufacturer:preset.m,model:preset.n,
+    onCode:preset.c[button*2],offCode:preset.c[button*2+1],protocol:1,bits:24,delay:preset.d})) form.elements[name].value=value;
+  updateDirty(form);
+  toast('Preset applied to draft. Save to store it.');
+}
+
+// Confirm transmitting a configured plug's saved code and refresh its state.
+function testPlug(index,command) {
+  if (!state.plugs.some(plug=>plug.index===index && (plug.onCode||plug.offCode))) {
+    toast('Choose a configured plug.'); return;
+  }
+  confirmAction('Test plug '+index+' '+command+'?',
+    'This transmits the saved code and switches the real device.','Test '+command,async()=>{
+      const reply=await post('/smartplug/test',{index,action:command});
+      toast(reply.msg);
+      await fetchData('smartplugs');
+    });
+}

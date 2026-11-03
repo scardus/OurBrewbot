@@ -8,7 +8,7 @@ const vm=require('node:vm');
 
 function ui() {
   const context=vm.createContext({console,TextEncoder,AbortController,TypeError,setTimeout,clearTimeout});
-  for (const name of ['views','state','api','fermenters','profiles','plugs','panels','reporting','actions']) {
+  for (const name of ['html','state','api','forms','app','fermenters','sensors','profiles','plugs','reporting','system','logs']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/js/'+name+'.js'),'utf8'),context,{filename:name+'.js'});
   }
   vm.runInContext('toast=()=>{};',context);

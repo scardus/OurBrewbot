@@ -44,3 +44,16 @@ function serviceCard(s,i) {
     </form>
   </article>`;
 }
+
+// Validate the MQTT topic and preserve the saved password unless explicitly changed.
+function mqttPayload(data) {
+  // TextSafe.cpp::isValidBaseTopic() rejects wildcards, controls and a leading $.
+  if (!data.baseTopic || /^[\$]|[+#\x00-\x1f\x7f]/.test(data.baseTopic)) {
+    throw new Error('Base topic must be 1–31 bytes, without wildcards or control characters, and must not start with $.');
+  }
+  const body={enabled:data.enabled,host:data.host,port:+data.port,username:data.username,
+    baseTopic:data.baseTopic,haDiscovery:data.haDiscovery,allowControl:data.allowControl,logEnabled:data.logEnabled};
+  if (data.clearPassword) body.password='';
+  else if (data.password) body.password=data.password;
+  return body;
+}

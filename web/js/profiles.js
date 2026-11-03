@@ -1,5 +1,7 @@
 'use strict';
 
+const stepNames=['Temperature over time','Time at temperature','Free rise','Specific gravity','Attenuation','Temperature reached','Gravity reached','Attenuation reached','Time and gravity','Time and attenuation'];
+
 // Completion rules from Profile.cpp. These replace the old hover-only tooltips.
 const stepHelp=[
   'Ramp from Start to End over Days. Advance after Days and when temperature reaches End within the fermenter control band.',
@@ -98,4 +100,86 @@ function profilePlot(profile) {
         <circle cx="${40+i*width}" cy="${y(segment.start)}" r="3" fill="#ed7182"/>`}
       <text x="${40+i*width+width/2}" y="116" fill="#8d9cb1" font-size="9" text-anchor="middle">Step ${i+1}</text>`).join('')}
   </svg>`;
+}
+
+// Serialize the editable parts of a profile for change comparisons.
+function profileValues(p) { return JSON.stringify({name:p.name,steps:p.steps}); }
+
+// Read the profile draft while preserving untouched temperature precision.
+function captureProfile() {
+  const index=state.profile;
+  const form=$(`form[data-form="profile-${index}"]`);
+  const profile=clone(profileFormValues.get(form)||profileDrafts.get(index)||state.profiles[index]);
+  if (!form) return profile;
+  const data=formData(form),baseline=formBaselines.get(form)||{};
+  profile.name=data.name;
+  profile.steps.forEach((step,n)=>{
+    step.type=+data['type-'+n];
+    if (data['start-'+n]!==baseline['start-'+n]) step.start=toC(+data['start-'+n]);
+    if (data['end-'+n]!==baseline['end-'+n]) step.end=toC(+data['end-'+n]);
+    if (data['days-'+n]!==undefined) step.days=+data['days-'+n];
+    if (data['trigger-'+n]!==undefined) step.trigger=+data['trigger-'+n];
+  });
+  return profile;
+}
+
+// Keep a profile draft only while it differs from the saved profile.
+function profileChanged() {
+  const profile=captureProfile();
+  if (profileValues(profile)===profileValues(state.profiles[state.profile])) profileDrafts.delete(state.profile);
+  else profileDrafts.set(state.profile,profile);
+}
+
+// Update the visible profile form's unsaved-change state after rendering.
+function markProfileDraft() {
+  const form=$('form[data-form^="profile-"]');
+  if (form) updateDirty(form);
+}
+
+// Build the existing profile JSON contract with temperatures and all fifteen slots.
+function profilePayload(index, profile) {
+  // Convert a stored Celsius profile temperature into the controller's selected unit.
+  const display=value=>state.unit==='F'?value*1.8+32:value;
+  const steps=profile.steps.map(step=>({stepType:step.type,startTemp:display(step.start),
+    endTemp:display(step.end),sgTrigger:step.trigger,days:step.days}));
+  while (steps.length<15) steps.push({stepType:0,startTemp:0,endTemp:0,sgTrigger:0,days:0});
+  return {index,name:profile.name,steps};
+}
+
+// Open the destination selector for copying a profile into another draft slot.
+function chooseProfileCopy() {
+  const choices=[[-1,'Choose an editable slot'],
+    ...state.profiles.map((profile,index)=>[index,profile.name+(profile.used?' (in use)':'')])];
+  showModal('<h2>Copy profile</h2>'+select('Destination slot','copy-slot',-1,choices)+
+    `<div class="modal-actions">${btn('Cancel','close-modal','ghost')}${btn('Copy as draft','copy-confirm','')}</div>`);
+}
+
+// Copy the selected profile draft into a different editable slot without saving it.
+function copyProfile() {
+  const destination=+$('[name="copy-slot"]').value;
+  if (destination<0 || destination===state.profile || state.profiles[destination].used) {
+    toast('Choose a different editable slot.'); return;
+  }
+  if (profileDrafts.has(destination) || drafts.has('profile-'+destination)) {
+    toast('Save or discard the destination draft first.'); return;
+  }
+  const profile=clone(profileDrafts.get(state.profile)||state.profiles[state.profile]);
+  profile.used='';
+  profileDrafts.set(destination,profile);
+  state.profile=destination;
+  $('#modal').close();
+  render();
+}
+
+// Add, remove or reorder a step in an unlocked profile draft.
+function editProfileStep(actionName,index) {
+  if (state.profiles[state.profile].used) return;
+  const profile=captureProfile(),steps=profile.steps;
+  if (actionName==='step-add' && steps.length<15) steps.push({type:1,start:19,end:19,days:1,trigger:0});
+  if (actionName==='step-delete') steps.splice(index,1);
+  if (actionName==='step-up'&&index>0) [steps[index-1],steps[index]]=[steps[index],steps[index-1]];
+  if (actionName==='step-down'&&index<steps.length-1) [steps[index],steps[index+1]]=[steps[index+1],steps[index]];
+  profileDrafts.set(state.profile,profile);
+  drafts.delete('profile-'+state.profile);
+  render();
 }

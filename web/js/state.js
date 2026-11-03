@@ -1,4 +1,5 @@
 'use strict';
+
 // Device data and unsaved edits live only in this browser tab.
 const state = {
   route:'dashboard', unit:'C', paused:false, scenario:'normal', ready:false,
@@ -7,27 +8,57 @@ const state = {
   fermenters:[], profiles:[], probes:[], tilts:[], ispindels:[], plugs:[],
   services:[], mqtt:{}, global:{}, syslog:{}, files:[]
 };
+
 const drafts = new Map();
+
 const formBaselines = new WeakMap();
+
 const profileFormValues = new WeakMap();
+
 const profileDrafts = new Map();
+
 const unknownForms = new Set();
+
 let toastTimer;
+
 let logLines = [];
+
 const loaded = new Set();
+
 let routeGeneration = 0;
+
 let pollBusy = false;
+
 let lastPoll = 0;
+
 let lastLogPoll = 0;
+
 let logBoot = '';
+
 let logAfter = 0;
+
 let logMore = false;
+
 let saving = false;
 
 // Convert a value to a finite number, using the fallback for invalid input.
 const finite = (value, fallback=0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+
+// Format a Celsius temperature in the selected display unit.
+const temp = value => value == null ? '—' : (state.unit === 'F' ? value*1.8+32 : value).toFixed(1);
+
+// Convert a Celsius temperature difference into the display unit.
+const delta = value => state.unit === 'F' ? +(value*1.8).toFixed(2) : value;
+
+// Convert an absolute temperature from the display unit to Celsius.
+const toC = value => state.unit === 'F' ? (value-32)/1.8 : value;
+
+// Convert a temperature difference from the display unit to Celsius.
+const deltaC = value => state.unit === 'F' ? value/1.8 : value;
+
 // Normalize a sensor temperature to Celsius or mark it as unavailable.
 const sensorTemp = value => value == null || +value===-127 || toC(finite(value,-127))<=-100 ? null : toC(+value);
+
 // Format a received value for display, using a dash when it is missing.
 const shown = value => value == null ? '—' : String(value);
 
