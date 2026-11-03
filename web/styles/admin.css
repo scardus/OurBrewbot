@@ -1261,7 +1261,11 @@ input[type=checkbox] {
 }
 .console-input {
   display:flex;
+  flex-wrap:wrap;
   gap:8px
+}
+.console-input select {
+  max-width:100%
 }
 .console-input input {
   flex:1;
