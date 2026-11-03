@@ -1,1 +1,33 @@
-<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>OurBrewbot - Firmware Update</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}h2{color:#e94560;margin:0 0 16px}.card{background:#16213e;border:1px solid #333;border-radius:6px;padding:16px;max-width:480px}p{margin-bottom:12px;font-size:14px;color:#aaa}input[type=file]{color:#e0e0e0;font-size:13px;margin-bottom:16px;display:block}input[type=submit]{background:#e94560;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px}input[type=submit]:hover{background:#c73650}a{color:#53d8fb;text-decoration:none;font-size:13px}input{font-size:16px;min-height:44px;max-width:100%}input[type=file]{width:100%;font-size:16px}a{display:inline-block;min-height:44px;padding:8px 0}</style></head><body><h2>Firmware Update</h2><div class='card'><p>Select a firmware .bin file and click Upload. The device will reboot automatically after a successful update.</p><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='firmware' accept='.bin'><input type='submit' value='Upload Firmware'></form></div><p style='margin-top:12px'><a href='/'>&#8592; Cancel</a></p></body></html>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width,initial-scale=1'>
+  <title>OurBrewbot - Firmware Update</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:16px}
+    h2{color:#e94560;margin:0 0 16px}
+    .card{background:#16213e;border:1px solid #333;border-radius:6px;padding:16px;max-width:480px}
+    p{margin-bottom:12px;font-size:14px;color:#aaa}
+    input[type=file]{color:#e0e0e0;font-size:13px;margin-bottom:16px;display:block}
+    input[type=submit]{background:#e94560;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px}
+    input[type=submit]:hover{background:#c73650}
+    a{color:#53d8fb;text-decoration:none;font-size:13px}
+    input{font-size:16px;min-height:44px;max-width:100%}
+    input[type=file]{width:100%;font-size:16px}
+    a{display:inline-block;min-height:44px;padding:8px 0}
+  </style>
+</head>
+<body>
+  <h2>Firmware Update</h2>
+  <div class='card'>
+    <p>Select a firmware .bin file and click Upload. The device will reboot automatically after a successful update.</p>
+    <form method='POST' action='/update' enctype='multipart/form-data'>
+      <input type='file' name='firmware' accept='.bin'>
+      <input type='submit' value='Upload Firmware'>
+    </form>
+  </div>
+  <p style='margin-top:12px'><a href='/'>&#8592; Cancel</a></p>
+</body>
+</html>
