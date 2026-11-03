@@ -1039,6 +1039,9 @@ input[type=checkbox] {
   background:#302632;
   color:var(--text)
 }
+.profile-choice .slot-label {
+  display:block
+}
 .profile-choice small {
   display:block;
   font-size:10px;
