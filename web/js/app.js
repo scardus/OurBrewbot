@@ -94,48 +94,72 @@ function updateAge() {
     : '<i></i> Controller online';
 }
 
-// Keep the small fixed action list here; substantial operations have named helpers above.
-// Route a data-action button to its UI operation or explicit controller request.
-async function handleAction(target) {
-  const actionName=target.dataset.action,index=+target.dataset.id,value=target.dataset.value;
-  if (saving && !['close-modal','close-editor'].includes(actionName)) return;
-  if (actionName==='edit-ferm') openFerm(index);
-  else if (actionName==='close-editor') $('#editor').close();
-  else if (actionName==='refresh'||actionName==='reconnect') await refreshForms();
-  else if (actionName==='pause') { state.refreshPaused=!state.refreshPaused; render(); }
-  else if (actionName==='discard-form') discardForm(target.closest('form'));
-  else if (actionName==='select-profile') { state.selectedProfile=index; render(); }
-  else if (actionName==='copy-profile') chooseProfileCopy();
-  else if (actionName==='copy-confirm') copyProfile();
-  else if (actionName.startsWith('step-')) editProfileStep(actionName,index);
-  else if (actionName==='profile-control') controlProfile(index,value);
-  else if (actionName==='sensor-tab'||actionName==='system-tab') {
-    state.activeConsole=null;
-    if (actionName==='sensor-tab') state.sensorTab=value;
-    else state.systemTab=value;
-    await loadRoute();
-  } else if (actionName==='clear-sensor') clearSensor(target.dataset.kind,index);
-  else if (actionName==='plug-preset') applyPreset(target.closest('form'));
-  else if (actionName==='plug-test'||actionName==='rf-test') {
-    testPlug(actionName==='rf-test'?+$('#rf-plug').value:state.plugs[index].index,value);
-  } else if (actionName==='test-service'||actionName==='test-mqtt'||actionName==='discover') {
-    let path='/mqtt/discover';
-    if (actionName==='test-service') path='/brewservices/test';
-    else if (actionName==='test-mqtt') path='/mqtt/test';
-    const reply=await post(path,actionName==='test-service'?{index}:{});
-    toast(reply.msg);
-  } else if (actionName==='open-rf') { state.systemTab='rf'; location.hash='system'; await loadRoute(); }
-  else if (actionName==='export') await exportConfig();
-  else if (actionName==='import') $('#import-file').click();
-  else if (actionName==='file-view') await viewFile(index);
-  else if (actionName==='console-start') { state.activeConsole=value; lastConsolePoll=0; }
-  else if (actionName==='console-stop') state.activeConsole=null;
-  else if (actionName==='rf-clear') $('#rf-output').textContent='';
-  else if (actionName==='ble-clear') $('#ble-output').textContent='';
-  else if (actionName==='ble-send') await sendBle(value);
-  else if (actionName==='update-check') {
-    Object.assign(state.controller,await post('/update/check',{}, {timeout:30000}));
+// Post a command and show the controller's reply.
+async function postAndShowReply(path,body) {
+  const reply=await post(path,body);
+  toast(reply.msg);
+}
+
+// Switch to another tab of the current view, stopping any running diagnostics console.
+function selectTab(tabField,value) {
+  state.activeConsole=null;
+  state[tabField]=value;
+  return loadRoute();
+}
+
+// What each data-action button does. Each handler receives the button's data-id as a number,
+// its data-value, and the button itself. Substantial operations are named functions in their feature files.
+const actionHandlers = {
+  // Page controls.
+  refresh:()=>refreshForms(),
+  reconnect:()=>refreshForms(),
+  pause:()=>{ state.refreshPaused=!state.refreshPaused; render(); },
+  'close-modal':()=>$('#modal').close(),
+  'discard-form':(index,value,button)=>discardForm(button.closest('form')),
+  // Fermenters.
+  'edit-ferm':index=>openFerm(index),
+  'close-editor':()=>$('#editor').close(),
+  'profile-control':(index,value)=>controlProfile(index,value),
+  debug:index=>showDebug(index),
+  // Profiles.
+  'select-profile':index=>{ state.selectedProfile=index; render(); },
+  'copy-profile':()=>chooseProfileCopy(),
+  'copy-confirm':()=>copyProfile(),
+  'step-add':index=>editProfileStep('step-add',index),
+  'step-up':index=>editProfileStep('step-up',index),
+  'step-down':index=>editProfileStep('step-down',index),
+  'step-delete':index=>editProfileStep('step-delete',index),
+  // Sensors.
+  'sensor-tab':(index,value)=>selectTab('sensorTab',value),
+  'clear-sensor':(index,value,button)=>clearSensor(button.dataset.kind,index),
+  // Smart plugs.
+  'plug-preset':(index,value,button)=>applyPreset(button.closest('form')),
+  'plug-test':(index,value)=>testPlug(state.plugs[index].index,value),
+  // Reporting.
+  'test-service':index=>postAndShowReply('/brewservices/test',{index}),
+  'test-mqtt':()=>postAndShowReply('/mqtt/test',{}),
+  discover:()=>postAndShowReply('/mqtt/discover',{}),
+  // System.
+  'system-tab':(index,value)=>selectTab('systemTab',value),
+  'open-rf':()=>{ state.systemTab='rf'; location.hash='system'; return loadRoute(); },
+  export:()=>exportConfig(),
+  import:()=>$('#import-file').click(),
+  'file-view':index=>viewFile(index),
+  'console-start':(index,value)=>{ state.activeConsole=value; lastConsolePoll=0; },
+  'console-stop':()=>{ state.activeConsole=null; },
+  'rf-test':(index,value)=>testPlug(+$('#rf-plug').value,value),
+  'rf-clear':()=>{ $('#rf-output').textContent=''; },
+  'ble-clear':()=>{ $('#ble-output').textContent=''; },
+  'ble-send':(index,value)=>sendBle(value),
+  'update-check':async()=>{
+    Object.assign(state.controller,await post('/update/check',{},{timeout:30000}));
     $('#update-result').innerHTML=updateResult(state.controller);
-  } else if (actionName==='close-modal') $('#modal').close();
-  else if (actionName==='debug') await showDebug(index);
+  }
+};
+
+// Run a data-action button's handler. While a save runs, a dialog can still be closed but nothing else can start.
+async function handleAction(button) {
+  const name=button.dataset.action;
+  if (saving && name!=='close-modal' && name!=='close-editor') return;
+  await actionHandlers[name](+button.dataset.id,button.dataset.value,button);
 }

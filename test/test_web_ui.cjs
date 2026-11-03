@@ -565,6 +565,8 @@ test('every action a view can render is handled, and every handler is still used
   for (const match of sources.matchAll(/data-action="([a-z-]+)"/g)) rendered.add(match[1]);
   for (const match of sources.matchAll(/\b(?:btn|tabBar)\(.*?,'([a-z-]+)'/g)) rendered.add(match[1]);
   assert.deepEqual([...rendered].sort(),Object.keys(actionEffects).sort());
+  const handlers=JSON.parse(ui().run('JSON.stringify(Object.keys(actionHandlers))'));
+  assert.deepEqual(handlers.sort(),Object.keys(actionEffects).sort());
 });
 
 test('the shared action handler carries out every action',async()=>{
