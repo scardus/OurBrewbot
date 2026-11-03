@@ -79,9 +79,6 @@ $('#log-download').onclick=()=>{
   download('ourbrewbot.log',logLines.map(l=>l[0]+' '+l[1]+' '+l[2]).join('\n'),'text/plain');
 };
 
-// Clear the active editor selection when the drawer is dismissed.
-$('#editor').addEventListener('cancel',()=>{state.editorId=null;});
-
 // Ask the browser to warn before leaving a tab with unsaved drafts.
 window.addEventListener('beforeunload',event=>{
   if (drafts.size || profileDrafts.size) { event.preventDefault(); event.returnValue=''; }

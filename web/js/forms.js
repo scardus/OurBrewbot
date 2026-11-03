@@ -139,7 +139,7 @@ async function saveFormChecked(form) {
     catch (error) { error.unknown=true; error.message='Save acknowledged, but the confirmation read failed. Refresh before saving again. '+error.message; throw error; }
     drafts.delete(key);
     if (kind==='profile') profileDrafts.delete(index);
-    if (kind==='ferm') { $('#editor').close(); state.editorId=null; }
+    if (kind==='ferm') $('#editor').close();
     if (!drafts.size && !profileDrafts.size) state.unitChanged=false;
     render();
     toast(reply.msg || 'Saved.');

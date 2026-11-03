@@ -26,7 +26,6 @@ function render() {
       ${icon(key)}<span>${label}</span>
       ${key==='dashboard'?`<span class="nav-count">${state.fermenters.length}</span>`:''}</a>`).join('');
   $('#crumb').textContent=navItems.find(n=>n[0]===state.route)[1];
-  $('#unit-toggle').textContent='°'+state.unit;
   const renderers={dashboard:dashboard,profiles:profiles,sensors:sensors,plugs:plugs,reporting:reporting,system:system};
   const offline=state.scenario==='offline'?`<div class="notice error">${icon('info')}<div>
     <strong>Controller is unreachable.</strong><br>Showing the last received readings. Your unsaved edits are safe.
@@ -96,7 +95,7 @@ async function action(target) {
   const actionName=target.dataset.action,index=+target.dataset.id,value=target.dataset.value;
   if (saving && !['close-modal','close-editor'].includes(actionName)) return;
   if (actionName==='edit-ferm') openFerm(index);
-  else if (actionName==='close-editor') { $('#editor').close(); state.editorId=null; }
+  else if (actionName==='close-editor') $('#editor').close();
   else if (actionName==='refresh'||actionName==='reconnect') await refreshForms();
   else if (actionName==='pause') { state.paused=!state.paused; render(); }
   else if (actionName==='discard-form') discardForm(target.closest('form'));

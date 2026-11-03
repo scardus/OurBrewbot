@@ -81,7 +81,6 @@ function fermCard(f) {
 
 // Open a fermenter's settings drawer and restore any unsaved browser draft.
 function openFerm(id) {
-  state.editorId=id;
   const f=state.fermenters[id],profile=state.profiles[f.profile-1],running=f.running||f.paused;
   const profileChoices=[[0,'Standard temperature control'],...state.profiles.map((p,i)=>[i+1,p.name])];
   const gravityLimits='min="0.990" max="1.200" step="0.0001" required';

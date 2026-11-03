@@ -22,16 +22,12 @@ const paths = {
   system:'<circle cx="12" cy="12" r="3"/><path d="m9 3 1 2h4l1-2 3 2-1 2 2 3h2v4h-2l-2 3 1 2-3 2-1-2h-4l-1 2-3-2 1-2-2-3H3v-4h2l2-3-1-2Z"/>',
   refresh:'<path d="M20 7v5h-5M4 17v-5h5M5 8a7 7 0 0 1 12-3l3 3M4 16l3 3a7 7 0 0 0 12-3"/>',
   arrow:'<path d="M5 12h14m-5-5 5 5-5 5"/>',
-  check:'<path d="m5 12 4 4L19 6"/>',
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/>',
-  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/>',
-  drop:'<path d="M12 3c-2 4-7 8-7 12a7 7 0 0 0 14 0c0-4-5-8-7-12Z"/>',
   shield:'<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/><path d="m8 12 3 3 5-6"/>',
   file:'<path d="M14 3H5v18h14V8Zm0 0v5h5M8 12h8m-8 4h6"/>',
   pause:'<path d="M8 5v14M16 5v14"/>',
   play:'<path d="m8 4 12 8-12 8Z"/>',
-  close:'<path d="m6 6 12 12M6 18 18 6"/>',
-  download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>'
+  close:'<path d="m6 6 12 12M6 18 18 6"/>'
 };
 
 // Build the requested inline SVG icon, falling back to the information icon.

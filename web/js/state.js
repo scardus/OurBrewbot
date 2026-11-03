@@ -3,7 +3,7 @@
 // Device data and unsaved edits live only in this browser tab.
 const state = {
   route:'dashboard', unit:'C', paused:false, scenario:'normal', ready:false,
-  sensorTab:'probes', systemTab:'overview', profile:0, editorId:null,
+  sensorTab:'probes', systemTab:'overview', profile:0,
   logPaused:false, lastUpdated:0, controller:{}, health:{}, debug:{Overrides:[]},
   fermenters:[], profiles:[], probes:[], tilts:[], ispindels:[], plugs:[],
   services:[], mqtt:{}, global:{}, syslog:{}, files:[]

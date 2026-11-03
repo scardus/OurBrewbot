@@ -1317,14 +1317,6 @@ input[type=checkbox] {
   font-size:9px;
   white-space:nowrap
 }
-.log-latest {
-  margin-left:auto;
-  color:#65768d;
-  font:9px ui-monospace,monospace;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis
-}
 .log-tools {
   display:flex;
   gap:8px;
@@ -1462,9 +1454,6 @@ input[type=checkbox] {
   }
   .system-layout {
     grid-template-columns:1fr
-  }
-  .log-latest {
-    display:none
   }
 
 }

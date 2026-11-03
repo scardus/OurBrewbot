@@ -89,7 +89,6 @@ const systemPanels={
           ${btn('Import configuration…','import','ghost')}
         </div>
         <input type="file" id="import-file" accept=".json" hidden>
-        <p id="backup-result" class="review-caption" role="status"></p>
       </article>
       <article class="card panel"><h2>LittleFS files</h2>
         <div class="file-list">${files}</div>
