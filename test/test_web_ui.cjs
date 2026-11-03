@@ -166,6 +166,24 @@ test('dashboard includes paused profiles in its running count',()=>{
   assert.match(run('dashboardView()'),/Running profiles<\/div>\s*<div[^>]*>1<\/div>/);
 });
 
+test('the dashboard menu item counts the fermenters that are powered on, and follows polling',()=>{
+  const {run,context}=ui();
+  const elements={};
+  const count={textContent:''};
+  context.document={querySelectorAll:selector=>selector==='.nav-count'?[count]:[],querySelector:selector=>{
+    if (selector.startsWith('form')) return null;
+    return elements[selector]??={classList:{remove:()=>{}},setAttribute:()=>{},dataset:{},querySelector:()=>null,querySelectorAll:()=>[]};
+  }};
+  context.location={hash:'#profiles'};
+  run(`profilesView=()=>'';
+    state.fermenters=[{power:true},{power:false},{power:false},{power:false}];
+    render();`);
+  assert.match(elements['#navigation'].innerHTML,/<span class="nav-count"[^>]*>1<\/span>/);
+  // The profiles view polls fermenters without redrawing, so the number updates on its own.
+  run('state.fermenters[1].power=true; updateLiveReadings();');
+  assert.equal(count.textContent,2);
+});
+
 function saveFixture() {
   const fixture=ui();
   const inputs=Object.entries({name:'Profile',host:'broker',port:'1883',username:'',password:'',baseTopic:'new-topic'})
