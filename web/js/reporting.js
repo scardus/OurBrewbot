@@ -1,10 +1,10 @@
 'use strict';
 
 // Build service-reporting and MQTT configuration forms with their explicit test actions.
-function reporting() {
+function reportingView() {
   const m=state.mqtt;
   const mqttButtons=btn('Test connection','test-mqtt','secondary')+btn('Publish discovery','discover','ghost');
-  return title('KEEP YOUR BREW CONNECTED','Reporting',
+  return pageTitle('KEEP YOUR BREW CONNECTED','Reporting',
     'Choose where your readings go. Enable each service per fermenter.')+
     `<div class="grid">${state.services.map(serviceCard).join('')}</div>
     <article class="card panel" style="margin-top:18px">
@@ -27,7 +27,7 @@ function reporting() {
           'Allow commands from your broker to change controller settings.')}
         ${toggle('Publish log messages','logEnabled',m.logEnabled)}
         ${toggle('Clear saved password','clearPassword',false,'Only tick this to explicitly remove the saved password.')}
-        ${actions('Save MQTT settings',mqttButtons)}
+        ${formActions('Save MQTT settings',mqttButtons)}
       </form>
     </article>`;
 }
@@ -44,7 +44,7 @@ function serviceCard(s,i) {
         ${field('Service ID / stream key','serviceId',s.serviceId,'password','maxlength="47"')}
         ${field('Device name','deviceName',s.deviceName,'text','maxlength="31"')}
       </div>
-      ${actions('Save service',btn('Test connection','test-service','secondary',`data-id="${i}"`))}
+      ${formActions('Save service',btn('Test connection','test-service','secondary',`data-id="${i}"`))}
     </form>
   </article>`;
 }

@@ -31,7 +31,7 @@ function mountForms(root=document) {
       const index=+key.split('-')[1];
       profileFormValues.set(form,clone(profileDrafts.get(index)||state.profiles[index]));
     }
-    if (drafts.has(key)) applyData(form,drafts.get(key));
+    if (formDrafts.has(key)) applyData(form,formDrafts.get(key));
     updateDirty(form);
   }
 }
@@ -47,7 +47,7 @@ function updateDirty(form) {
   const save=$('[data-save]',form);
   if (save) save.disabled=!changed || saving;
   form.dataset.dirty=String(changed);
-  if (changed) drafts.set(key,formData(form)); else drafts.delete(key);
+  if (changed) formDrafts.set(key,formData(form)); else formDrafts.delete(key);
   if (unknownForms.has(key)) form.dataset.unknown='true';
 }
 
@@ -124,7 +124,7 @@ async function saveFormChecked(form) {
   } else if (key==='global') {
     path='/controller'; refresh='controller'; body={Unit:data.unit==='C'?1:2,Resolution:+data.resolution,
       AlarmDwellSec:+data.alarm,MdnsEnabled:data.mdns,UpdateCheck:data.updates,CrashReports:data.crashes};
-    if (data.unit!==state.unit && drafts.size>1) { saveError(form,'Save or discard other drafts before changing units.'); return; }
+    if (data.unit!==state.unit && formDrafts.size>1) { saveError(form,'Save or discard other drafts before changing units.'); return; }
   } else if (key==='debug-mode') {
     path='/debug'; refresh='debug'; body={DebugMode:data.enabled};
   } else if (key==='syslog') {
@@ -137,10 +137,10 @@ async function saveFormChecked(form) {
     const reply=await post(path,body);
     try { await fetchData(refresh); }
     catch (error) { error.unknown=true; error.message='Save acknowledged, but the confirmation read failed. Refresh before saving again. '+error.message; throw error; }
-    drafts.delete(key);
+    formDrafts.delete(key);
     if (kind==='profile') profileDrafts.delete(index);
     if (kind==='ferm') $('#editor').close();
-    if (!drafts.size && !profileDrafts.size) state.unitChanged=false;
+    if (!formDrafts.size && !profileDrafts.size) state.unitChanged=false;
     render();
     toast(reply.msg || 'Saved.');
   } catch (error) {
@@ -170,16 +170,16 @@ async function refreshForms() {
 // Discard a form's browser draft and restore its saved values and unit state.
 function discardForm(form) {
   const key=form.dataset.form,oldUnit=form.dataset.unit;
-  drafts.delete(key);
+  formDrafts.delete(key);
   if (key.startsWith('profile-')) {
-    profileDrafts.delete(state.profile);
+    profileDrafts.delete(state.selectedProfile);
     render();
   } else {
     applyData(form,formBaselines.get(form));
     updateDirty(form);
     saveError(form,'');
   }
-  if (!drafts.size && !profileDrafts.size) state.unitChanged=false;
+  if (!formDrafts.size && !profileDrafts.size) state.unitChanged=false;
   if (oldUnit!==state.unit) {
     render();
     if (key.startsWith('ferm-')) openFerm(+key.split('-')[1]);

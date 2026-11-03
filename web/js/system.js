@@ -1,10 +1,10 @@
 'use strict';
 
 // Build the System tabs and the currently selected diagnostics panel.
-function system() {
+function systemView() {
   const tabs=[['overview','Controller'],['settings','Settings'],['files','Files & backup'],
     ['rf','RF sniffer'],['ble','BLE console'],['update','Firmware']];
-  return title('LOOK AFTER YOUR CONTROLLER','System & diagnostics',
+  return pageTitle('LOOK AFTER YOUR CONTROLLER','System & diagnostics',
     'Settings, maintenance and tools for your brew room.')+`
     <div class="tabs" role="tablist" aria-label="System section">${tabs.map(([key,label])=>`
       <button role="tab" aria-selected="${state.systemTab===key}" class="${state.systemTab===key?'active':''}"
@@ -19,9 +19,9 @@ const systemPanels={
       ['Firmware','FirmwareVersion'],['WiFi network','WiFiSSID'],['IP address','IP'],['mDNS name','mDNSName'],
       ['Signal strength','RSSI'],['Free heap','FreeHeap'],['Uptime','Uptime'],
       ['Chip ID','ChipId'],['Reset reason','resetReason']
-    ].map(([label,field])=>`
+    ].map(([label,key])=>`
       <div class="list-row">
-        <span>${esc(label)}</span><strong data-controller="${field}">${esc(controllerValue(field))}</strong>
+        <span>${esc(label)}</span><strong data-controller="${key}">${esc(controllerValue(key))}</strong>
       </div>`).join('');
     const links=[
       ['/reboot','Restart controller'],['/reset','Reset configuration'],['/config','Reset WiFi'],
@@ -52,13 +52,13 @@ const systemPanels={
           ${toggle('mDNS discovery','mdns',g.mdns)}
           ${toggle('Check for firmware updates','updates',g.updates)}
           ${toggle('Send crash reports','crashes',g.crashes)}
-          ${actions()}
+          ${formActions()}
         </form>
       </article>
       <article class="card panel"><h2>Debug mode</h2>
         <form data-form="debug-mode">
           ${toggle('Enable debug mode','enabled',g.debug,'Shows runtime sensor overrides in fermenter settings.')}
-          ${actions('Apply debug mode')}
+          ${formActions('Apply debug mode')}
         </form>
       </article>
       <article class="card panel"><h2>Remote syslog</h2>
@@ -70,7 +70,7 @@ const systemPanels={
             ${select('Facility','facility',s.facility,facilities)}
             ${select('Minimum level','level',s.minLevel,levels)}
           </div>
-          ${actions()}
+          ${formActions()}
         </form>
       </article>
     </div>`;
@@ -79,7 +79,7 @@ const systemPanels={
   files() {
     const files=state.files.map((f,i)=>`
       <button class="file-row" data-action="file-view" data-id="${i}">
-        <span>${icon('file')} ${esc(f.name)}</span><small>${finite(f.size)} B</small>
+        <span>${icon('file')} ${esc(f.name)}</span><small>${toFinite(f.size)} B</small>
       </button>`).join('');
     return `<div class="system-layout">
       <article class="card panel"><h2>Configuration backup</h2>
@@ -142,7 +142,7 @@ const systemPanels={
     const c=state.controller;
     return `<div class="system-layout">
       <article class="card panel"><h2>Firmware update</h2>
-        <p class="subtitle">Current firmware: ${esc(shown(c.FirmwareVersion))}. The standalone uploader accepts a local
+        <p class="subtitle">Current firmware: ${esc(orDash(c.FirmwareVersion))}. The standalone uploader accepts a local
           .bin file and remains usable if the main controls fail to load.</p>
         <a class="button secondary" style="display:inline-block;margin-top:20px"
           href="/update">Open firmware uploader</a>
@@ -157,12 +157,12 @@ const systemPanels={
 };
 
 // Format controller and reset information with the appropriate units.
-function controllerValue(field) {
-  const value=field==='resetReason'?state.health.resetReason:state.controller[field];
-  if (field==='RSSI') return shown(value)+' dBm';
-  if (field==='FreeHeap') return shown(value)+' bytes';
-  if (field==='Uptime') return shown(value)+' min';
-  return shown(value);
+function controllerValue(key) {
+  const value=key==='resetReason'?state.health.resetReason:state.controller[key];
+  if (key==='RSSI') return orDash(value)+' dBm';
+  if (key==='FreeHeap') return orDash(value)+' bytes';
+  if (key==='Uptime') return orDash(value)+' min';
+  return orDash(value);
 }
 
 // Summarize the controller's latest release-check state.
@@ -170,7 +170,7 @@ function updateDescription(c) {
   if (c.UpdateCheckError) return c.UpdateCheckError;
   if (!c.UpdateChecked) return 'No completed check.';
   if (c.UpdateAvailable) return 'Available version: '+c.LatestVersion;
-  return 'No newer release found. Last check age: '+shown(c.LastUpdateCheck)+' min';
+  return 'No newer release found. Last check age: '+orDash(c.LastUpdateCheck)+' min';
 }
 
 // Build escaped release-check text and a validated release-notes link.
@@ -252,14 +252,14 @@ async function viewFile(index) {
 async function sendBle(command) {
   if (!command || command.length>64) { toast('Enter an AT command of at most 64 characters.'); return; }
   await post('/ble/sniff/send',{cmd:command});
-  state.console='ble';
+  state.activeConsole='ble';
 }
 
 let lastConsolePoll=0,consoleBusy=false;
 
 // Poll the active RF or BLE console at its own interval and bound the displayed output.
 async function pollConsole() {
-  const kind=state.console;
+  const kind=state.activeConsole;
   if (!kind || consoleBusy || saving || document.hidden || state.route!=='system' || state.systemTab!==kind) return;
   if (Date.now()-lastConsolePoll<(kind==='rf'?500:300)) return;
   consoleBusy=true;
@@ -272,6 +272,6 @@ async function pollConsole() {
       output.textContent+='\nCode '+data.code+' ('+data.hex+') · '+data.bits+' bits · '+data.delay+' µs · protocol '+data.protocol;
     }
     if (output.textContent.length>12000) output.textContent=output.textContent.slice(-12000);
-  } catch (error) { toast(error.message); state.console=null; }
+  } catch (error) { toast(error.message); state.activeConsole=null; }
   finally { consoleBusy=false; lastConsolePoll=Date.now(); }
 }

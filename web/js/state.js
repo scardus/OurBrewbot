@@ -2,14 +2,14 @@
 
 // Device data and unsaved edits live only in this browser tab.
 const state = {
-  route:'dashboard', unit:'C', paused:false, scenario:'normal', ready:false,
-  sensorTab:'probes', systemTab:'overview', profile:0,
+  route:'dashboard', unit:'C', refreshPaused:false, offline:false, ready:false,
+  sensorTab:'probes', systemTab:'overview', selectedProfile:0,
   logPaused:false, lastUpdated:0, controller:{}, health:{}, debug:{Overrides:[]},
   fermenters:[], profiles:[], probes:[], tilts:[], ispindels:[], plugs:[],
   services:[], mqtt:{}, global:{}, syslog:{}, files:[]
 };
 
-const drafts = new Map();
+const formDrafts = new Map();
 
 const formBaselines = new WeakMap();
 
@@ -42,30 +42,30 @@ let logMore = false;
 let saving = false;
 
 // Convert a value to a finite number, using the fallback for invalid input.
-const finite = (value, fallback=0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const toFinite = (value, fallback=0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 // Format a Celsius temperature in the selected display unit.
-const temp = value => value == null ? '—' : (state.unit === 'F' ? value*1.8+32 : value).toFixed(1);
+const formatTemp = value => value == null ? '—' : (state.unit === 'F' ? value*1.8+32 : value).toFixed(1);
 
 // Convert a Celsius temperature difference into the display unit.
-const delta = value => state.unit === 'F' ? +(value*1.8).toFixed(2) : value;
+const deltaToUnit = value => state.unit === 'F' ? +(value*1.8).toFixed(2) : value;
 
 // Convert an absolute temperature from the display unit to Celsius.
-const toC = value => state.unit === 'F' ? (value-32)/1.8 : value;
+const tempToC = value => state.unit === 'F' ? (value-32)/1.8 : value;
 
 // Convert a temperature difference from the display unit to Celsius.
-const deltaC = value => state.unit === 'F' ? value/1.8 : value;
+const deltaToC = value => state.unit === 'F' ? value/1.8 : value;
 
 // Normalize a sensor temperature to Celsius or mark it as unavailable.
-const sensorTemp = value => value == null || +value===-127 || toC(finite(value,-127))<=-100 ? null : toC(+value);
+const sensorTemp = value => value == null || +value===-127 || tempToC(toFinite(value,-127))<=-100 ? null : tempToC(+value);
 
 // Format a received value for display, using a dash when it is missing.
-const shown = value => value == null ? '—' : String(value);
+const orDash = value => value == null ? '—' : String(value);
 
 // Store controller settings and block existing drafts after a unit change.
 function setController(data) {
   const unit = data.Unit === 2 ? 'F' : 'C';
-  if (state.ready && unit !== state.unit && (drafts.size || profileDrafts.size)) {
+  if (state.ready && unit !== state.unit && (formDrafts.size || profileDrafts.size)) {
     state.unitChanged = true;
     toast('The controller temperature unit changed. Discard and review drafts before saving.');
   }
@@ -84,13 +84,13 @@ function setFermenters(data) {
   state.fermenters = data.map(f => ({raw:f, id:+f.Fermenter, name:f.FermenterName,
     beer:f.BeerName, yeast:f.YeastName, status:f.StatusStr, alarmActive:!!f.Alarm,
     power:!!f.Power, tempControl:!!f.TempControl, beerTemp:sensorTemp(f.BeerTemp),
-    ambient:sensorTemp(f.AmbientTemp), sg:finite(f.SG), og:finite(f.OG,1.05),
-    tg:finite(f.TG,1.01), floor:toC(+f.FloorTemp), ceiling:toC(+f.CeilingTemp),
-    hysteresis:deltaC(+f.Hysteresis), alarm:deltaC(+f.AlarmTolerance),
+    ambient:sensorTemp(f.AmbientTemp), sg:toFinite(f.SG), og:toFinite(f.OG,1.05),
+    tg:toFinite(f.TG,1.01), floor:tempToC(+f.FloorTemp), ceiling:tempToC(+f.CeilingTemp),
+    hysteresis:deltaToC(+f.Hysteresis), alarm:deltaToC(+f.AlarmTolerance),
     delay:+f.CompressorDelay, profile:+f.ProfileNo, running:!!f.ProfileRunning,
     step:+f.CurrentStep, hour:+f.CurrentHour, paused:!!f.ProfilePaused,
     liveTest:!!f.LiveTest, brewfather:!!(f.BrewServices&2), brewers:!!(f.BrewServices&1),
-    mqtt:!!(f.BrewServices&8), abv:finite(f.EstABV), attenuation:finite(f.Attenuation),
+    mqtt:!!(f.BrewServices&8), abv:toFinite(f.EstABV), attenuation:toFinite(f.Attenuation),
     source:f.BeerTempSource, gravity:f.GravitySource}));
   updateProfileLocks();
 }
@@ -100,7 +100,7 @@ function setProfiles(data) {
   state.profiles = data.profiles.map(p => ({name:p.name, used:'',
     // The runner stops at the first empty slot, even if later slots contain data.
     steps:p.steps.slice(0,profileStepCount(p.steps))
-      .map(s => ({type:+s.stepType, start:toC(+s.startTemp), end:toC(+s.endTemp),
+      .map(s => ({type:+s.stepType, start:tempToC(+s.startTemp), end:tempToC(+s.endTemp),
         trigger:+s.sgTrigger, days:+s.days}))}));
   updateProfileLocks();
 }
@@ -121,18 +121,18 @@ function updateProfileLocks() {
 // Normalize probe, Tilt or iSpindel replies for display and editing.
 function setSensors(kind, data) {
   if (kind==='probes') state.probes = data.probes.map(p => ({...p, fn:+p.function,
-    temp:sensorTemp(p.temperature), adjust:deltaC(+p.tempAdjust)}));
+    temp:sensorTemp(p.temperature), adjust:deltaToC(+p.tempAdjust)}));
   if (kind==='tilts') {
     const names=['Red','Green','Black','Purple','Orange','Blue','Yellow','Pink'];
     state.tilts = names.map((name,i) => {
       const p=data.tilts.find(t => +t.colour===i) || {};
       return {...p, index:i, name, fn:p.function===2?2:99, fermenter:p.fermenter??99,
-        temp:sensorTemp(p.temperature), sg:finite(p.sg), adjust:deltaC(finite(p.tempAdjust)),
-        sgAdjust:finite(p.sgAdjust), active:!!p.active};
+        temp:sensorTemp(p.temperature), sg:toFinite(p.sg), adjust:deltaToC(toFinite(p.tempAdjust)),
+        sgAdjust:toFinite(p.sgAdjust), active:!!p.active};
     });
   }
   if (kind==='ispindels') state.ispindels = data.ispindels.map(p => ({...p,
-    fn:p.function===2?2:99, temp:sensorTemp(p.temperature), adjust:deltaC(+p.tempAdjust)}));
+    fn:p.function===2?2:99, temp:sensorTemp(p.temperature), adjust:deltaToC(+p.tempAdjust)}));
 }
 
 // Translate saved plug function numbers into editable roles and fermenter assignments.

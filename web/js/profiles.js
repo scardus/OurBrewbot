@@ -20,15 +20,15 @@ const stepHelp=[
 ];
 
 // Build the profile selector and selected draft editor, locking profiles that are in use.
-function profiles() {
-  const saved=state.profiles[state.profile];
-  const profile=profileDrafts.get(state.profile)||saved;
+function profilesView() {
+  const saved=state.profiles[state.selectedProfile];
+  const profile=profileDrafts.get(state.selectedProfile)||saved;
   const locked=!!saved.used;
   const stepCount=profile.steps.length;
-  return title('MAKE A PLAN FOR YOUR BREW','Fermentation profiles','Build a clear path from pitch to pour.')+`
+  return pageTitle('MAKE A PLAN FOR YOUR BREW','Fermentation profiles','Build a clear path from pitch to pour.')+`
     <div class="profile-layout">
       <div class="profile-list">${state.profiles.map((p,i)=>`
-        <button class="profile-choice ${i===state.profile?'active':''}" data-action="select-profile" data-id="${i}">
+        <button class="profile-choice ${i===state.selectedProfile?'active':''}" data-action="select-profile" data-id="${i}">
           <span class="slot-label">PROFILE ${i+1}</span><strong>${esc(p.name)}</strong>
           <small>${(profileDrafts.get(i)||p).steps.length} steps${profileDrafts.has(i)?' · unsaved':''}</small>
           ${p.used?badge('In use','quiet'):badge('Available','good')}
@@ -37,9 +37,9 @@ function profiles() {
         ${locked?`<div class="notice info">${icon('info')}<div><strong>Running on ${esc(saved.used)}.</strong>
           Copy it to an available slot to make changes.</div></div>`:''}
         <div class="panel-header">
-          <div><div class="slot-label">PROFILE ${state.profile+1}</div><h2>${esc(profile.name)}</h2></div>
+          <div><div class="slot-label">PROFILE ${state.selectedProfile+1}</div><h2>${esc(profile.name)}</h2></div>
           ${btn('Copy to slot…','copy-profile','secondary')}</div>
-        <form data-form="profile-${state.profile}">
+        <form data-form="profile-${state.selectedProfile}">
           ${field('Profile name','name',profile.name,'text',`maxlength="31" ${locked?'disabled':''}`)}
           <div class="profile-preview"><div class="plot-heading">TEMPERATURE PLAN · °${state.unit} · step order</div>
             ${profilePlot(profile)}
@@ -49,7 +49,7 @@ function profiles() {
           <div class="step-list">${profile.steps.map((step,i)=>profileStep(step,i,stepCount,locked)).join('')}</div>
           <div style="margin-top:13px">${btn('+ Add step','step-add','ghost',locked||stepCount>=15?'disabled':'')}</div>
           ${locked?'<p class="review-caption">Copy this profile to an available slot to edit it.</p>':
-            actions('Save profile')}
+            formActions('Save profile')}
         </form>
       </div>
     </div>`;
@@ -67,8 +67,8 @@ function profileStep(step,i,count,locked) {
   const limitValue=condition?step.trigger:step.days;
   return `<div class="step-row"><span class="step-index">${String(i+1).padStart(2,'0')}</span>
     ${select('Step type','type-'+i,step.type,stepNames.map((name,value)=>[value,name]),disabled)}
-    ${field('Start °'+state.unit,'start-'+i,temp(step.start),'number',`step="0.1" required ${startDisabled}`)}
-    ${field('End °'+state.unit,'end-'+i,temp(step.end),'number',`step="0.1" required ${disabled}`)}
+    ${field('Start °'+state.unit,'start-'+i,formatTemp(step.start),'number',`step="0.1" required ${startDisabled}`)}
+    ${field('End °'+state.unit,'end-'+i,formatTemp(step.end),'number',`step="0.1" required ${disabled}`)}
     ${fields.includes('d')||condition?
       field(limitLabel,limitName,limitValue,'number',`step="any" min="0" required ${disabled}`):''}
     <div class="step-buttons">
@@ -104,7 +104,7 @@ function profilePlot(profile) {
     ${[0,1,2].map(i=>{
       const v=low+(high-low)*i/2;
       return `<line x1="40" x2="467" y1="${y(v)}" y2="${y(v)}" stroke="#2b3749" stroke-dasharray="3 5"/>
-        <text x="4" y="${y(v)+3}" fill="#7e8da2" font-size="9">${temp(v)}°</text>`;
+        <text x="4" y="${y(v)+3}" fill="#7e8da2" font-size="9">${formatTemp(v)}°</text>`;
     }).join('')}
     ${segments.map((segment,i)=>`
       ${segment.type===2?`<rect x="${40+i*width}" y="${y(Math.max(segment.start,segment.end))}"
@@ -123,7 +123,7 @@ function profileValues(p) { return JSON.stringify({name:p.name,steps:p.steps}); 
 
 // Read the profile draft while preserving untouched temperature precision.
 function captureProfile() {
-  const index=state.profile;
+  const index=state.selectedProfile;
   const form=$(`form[data-form="profile-${index}"]`);
   const profile=clone(profileFormValues.get(form)||profileDrafts.get(index)||state.profiles[index]);
   if (!form) return profile;
@@ -131,8 +131,8 @@ function captureProfile() {
   profile.name=data.name;
   profile.steps.forEach((step,n)=>{
     step.type=+data['type-'+n];
-    if (data['start-'+n]!==baseline['start-'+n]) step.start=toC(+data['start-'+n]);
-    if (data['end-'+n]!==baseline['end-'+n]) step.end=toC(+data['end-'+n]);
+    if (data['start-'+n]!==baseline['start-'+n]) step.start=tempToC(+data['start-'+n]);
+    if (data['end-'+n]!==baseline['end-'+n]) step.end=tempToC(+data['end-'+n]);
     if (data['days-'+n]!==undefined) step.days=+data['days-'+n];
     if (data['trigger-'+n]!==undefined) step.trigger=+data['trigger-'+n];
   });
@@ -142,8 +142,8 @@ function captureProfile() {
 // Keep a profile draft only while it differs from the saved profile.
 function profileChanged() {
   const profile=captureProfile();
-  if (profileValues(profile)===profileValues(state.profiles[state.profile])) profileDrafts.delete(state.profile);
-  else profileDrafts.set(state.profile,profile);
+  if (profileValues(profile)===profileValues(state.profiles[state.selectedProfile])) profileDrafts.delete(state.selectedProfile);
+  else profileDrafts.set(state.selectedProfile,profile);
 }
 
 // Update the visible profile form's unsaved-change state after rendering.
@@ -173,29 +173,29 @@ function chooseProfileCopy() {
 // Copy the selected profile draft into a different editable slot without saving it.
 function copyProfile() {
   const destination=+$('[name="copy-slot"]').value;
-  if (destination<0 || destination===state.profile || state.profiles[destination].used) {
+  if (destination<0 || destination===state.selectedProfile || state.profiles[destination].used) {
     toast('Choose a different editable slot.'); return;
   }
-  if (profileDrafts.has(destination) || drafts.has('profile-'+destination)) {
+  if (profileDrafts.has(destination) || formDrafts.has('profile-'+destination)) {
     toast('Save or discard the destination draft first.'); return;
   }
-  const profile=clone(profileDrafts.get(state.profile)||state.profiles[state.profile]);
+  const profile=clone(profileDrafts.get(state.selectedProfile)||state.profiles[state.selectedProfile]);
   profile.used='';
   profileDrafts.set(destination,profile);
-  state.profile=destination;
+  state.selectedProfile=destination;
   $('#modal').close();
   render();
 }
 
 // Add, remove or reorder a step in an unlocked profile draft.
 function editProfileStep(actionName,index) {
-  if (state.profiles[state.profile].used) return;
+  if (state.profiles[state.selectedProfile].used) return;
   const profile=captureProfile(),steps=profile.steps;
   if (actionName==='step-add' && steps.length<15) steps.push({type:1,start:19,end:19,days:1,trigger:0});
   if (actionName==='step-delete') steps.splice(index,1);
   if (actionName==='step-up'&&index>0) [steps[index-1],steps[index]]=[steps[index],steps[index-1]];
   if (actionName==='step-down'&&index<steps.length-1) [steps[index],steps[index+1]]=[steps[index+1],steps[index]];
-  profileDrafts.set(state.profile,profile);
-  drafts.delete('profile-'+state.profile);
+  profileDrafts.set(state.selectedProfile,profile);
+  formDrafts.delete('profile-'+state.selectedProfile);
   render();
 }

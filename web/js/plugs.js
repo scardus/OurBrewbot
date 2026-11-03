@@ -1,8 +1,8 @@
 'use strict';
 
 // Build the smart-plug view and its link to the RF sniffer.
-function plugs() {
-  return title('HEAT WHEN NEEDED. COOL WHEN NEEDED.','Smart plugs',
+function plugsView() {
+  return pageTitle('HEAT WHEN NEEDED. COOL WHEN NEEDED.','Smart plugs',
     'Configure your RF plugs, then test each saved assignment.',btn('Open RF sniffer','open-rf','secondary'))+
     `<div class="grid">${state.plugs.map(plugCard).join('')}</div>`;
 }
@@ -34,7 +34,7 @@ function plugCard(p,i) {
         <div class="fields">
           ${field('Manufacturer','manufacturer',p.manufacturer,'text','maxlength="23"')}
           ${field('Model','model',p.model,'text','maxlength="23"')}
-          ${select('Preset','preset','',[['','Choose a preset'],...plugPresets.map((preset,n)=>[n,preset.n])])}
+          ${select('Preset','preset','',[['','Choose a preset'],...plugPresets.map((preset,n)=>[n,preset.name])])}
           ${select('Remote button','remote',0,[[0,'Button 1'],[1,'Button 2'],[2,'Button 3'],[3,'Button 4']])}
         </div>
         <div style="margin-top:10px">
@@ -48,7 +48,7 @@ function plugCard(p,i) {
           ${field('Pulse length (µs)','delay',p.delay,'number','min="1" max="65535" step="1" required')}
         </div>
       </details>
-      ${actions('Save plug')}
+      ${formActions('Save plug')}
       <div class="two-col-actions" style="margin-top:12px">
         ${btn('Test on','plug-test','small secondary',`data-id="${i}" data-value="on"`)}
         ${btn('Test off','plug-test','small ghost',`data-id="${i}" data-value="off"`)}
@@ -84,8 +84,8 @@ function applyPreset(form) {
   const d=formData(form),preset=plugPresets[+d.preset];
   if (d.preset==='' || !preset) return;
   const button=+d.remote;
-  const values={manufacturer:preset.m,model:preset.n,onCode:preset.c[button*2],offCode:preset.c[button*2+1],
-    protocol:1,bits:24,delay:preset.d};
+  const values={manufacturer:preset.manufacturer,model:preset.name,onCode:preset.codes[button*2],
+    offCode:preset.codes[button*2+1],protocol:1,bits:24,delay:preset.delay};
   for (const [name,value] of Object.entries(values)) form.elements[name].value=value;
   updateDirty(form);
   toast('Preset applied to draft. Save to store it.');

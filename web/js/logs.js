@@ -27,10 +27,10 @@ async function pollLogs() {
     const reply=await request('/logs?boot='+encodeURIComponent(logBoot)+'&after='+logAfter,{text:true},true);
     const boot=reply.headers.get('X-Log-Boot')||'';
     if (logBoot && logBoot!==boot) addLog('Controller restarted. Log cursor reset.','warning');
-    const lost=finite(reply.headers.get('X-Log-Lost'));
+    const lost=toFinite(reply.headers.get('X-Log-Lost'));
     if (lost) addLog(lost+' controller log lines were missed.','warning');
     logBoot=boot;
-    logAfter=finite(reply.headers.get('X-Log-Next'),logAfter);
+    logAfter=toFinite(reply.headers.get('X-Log-Next'),logAfter);
     logMore=reply.headers.get('X-Log-More')==='1';
     for (const line of reply.data.split('\n')) {
       const match=/^(\d)\s+(\S+)\s+(.*)$/.exec(line);

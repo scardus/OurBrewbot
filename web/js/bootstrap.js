@@ -14,7 +14,7 @@ document.addEventListener('change',event=>{
   if (form) {
     if (form.dataset.form.startsWith('profile-')) {
       profileChanged();
-      if (event.target.name.startsWith('type-')) { drafts.delete(form.dataset.form); render(); }
+      if (event.target.name.startsWith('type-')) { formDrafts.delete(form.dataset.form); render(); }
     } else updateDirty(form);
   }
   if (event.target.id==='import-file' && event.target.files[0]) {
@@ -36,7 +36,7 @@ document.addEventListener('submit',event=>{
 // Delegate action-button clicks to the shared action handler.
 document.addEventListener('click',event=>{
   const target=event.target.closest('[data-action]');
-  if (target) action(target).catch(error=>toast(error.message));
+  if (target) handleAction(target).catch(error=>toast(error.message));
 });
 
 // Toggle mobile navigation and keep its accessibility state in sync.
@@ -81,12 +81,12 @@ $('#log-download').onclick=()=>{
 
 // Ask the browser to warn before leaving a tab with unsaved drafts.
 window.addEventListener('beforeunload',event=>{
-  if (drafts.size || profileDrafts.size) { event.preventDefault(); event.returnValue=''; }
+  if (formDrafts.size || profileDrafts.size) { event.preventDefault(); event.returnValue=''; }
 });
 
 // Load the newly selected route and stop the previous diagnostics console.
 window.addEventListener('hashchange',()=>{
-  state.console=null;
+  state.activeConsole=null;
   const requested=location.hash.slice(1).split('/')[0];
   state.route=navItems.some(n=>n[0]===requested)?requested:'dashboard';
   if (state.ready) loadRoute();

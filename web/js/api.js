@@ -36,7 +36,7 @@ async function pumpRequests() {
     job.resolve({data, headers:response.headers});
   } catch (cause) {
     if (!cause.server && (cause.name==='AbortError' || cause instanceof TypeError)) {
-      state.scenario='offline';
+      state.offline=true;
       const error=new Error(job.options.method==='POST'
         ? 'Result unknown: the request may have reached the controller. Read its state before saving again.'
         : 'Controller unreachable. Your last readings and drafts are retained.');
@@ -113,7 +113,7 @@ async function loadRoute(force=false) {
       received=true;
     }
     if (generation!==routeGeneration) return;
-    if (received) { state.scenario='normal'; state.lastUpdated=Date.now(); }
+    if (received) { state.offline=false; state.lastUpdated=Date.now(); }
     render();
     updateLiveReadings();
     return true;
@@ -127,7 +127,7 @@ async function loadRoute(force=false) {
 
 // Poll the visible view without replacing editing forms or overlapping refreshes.
 async function refreshVisible() {
-  if (pollBusy || saving || state.paused || document.hidden || !state.ready) return;
+  if (pollBusy || saving || state.refreshPaused || document.hidden || !state.ready) return;
   pollBusy=true;
   try {
     let names=[];
@@ -136,7 +136,7 @@ async function refreshVisible() {
     else if (state.route==='plugs') names=['smartplugs'];
     else if (state.route==='system') names=['controller'];
     for (const name of names) await fetchData(name,true);
-    if (names.length) { state.scenario='normal'; state.lastUpdated=Date.now(); }
+    if (names.length) { state.offline=false; state.lastUpdated=Date.now(); }
     // Never replace an editing form during a poll. Live text has separate nodes.
     if (state.route==='dashboard' && !$('#sidebar').classList.contains('open') && !$('#modal').open) render();
     else updateLiveReadings();

@@ -46,7 +46,7 @@ test('rerendering keeps each horizontal selector in place within the same view',
     context.document={querySelectorAll:()=>[],querySelector:name=>
       name==='#main'?main:name.startsWith('form')?null:other};
     context.location={hash:'#'+route};
-    run("profiles=()=>''; system=()=>''; render();");
+    run("profilesView=()=>''; systemView=()=>''; render();");
     assert.equal(scroller.scrollLeft,expected,route+' from '+previous);
     assert.equal(main.dataset.route,route);
   }
@@ -163,7 +163,7 @@ test('held profile steps ignore stale Start in the drawn line and axis',()=>{
 test('dashboard includes paused profiles in its running count',()=>{
   const {run}=ui();
   run(`state.fermenters=[{name:'Vessel',profile:1,running:false,paused:true}]; fermCard=()=>'';`);
-  assert.match(run('dashboard()'),/Running profiles<\/div>\s*<div[^>]*>1<\/div>/);
+  assert.match(run('dashboardView()'),/Running profiles<\/div>\s*<div[^>]*>1<\/div>/);
 });
 
 function saveFixture() {
@@ -182,7 +182,7 @@ test('a failed confirmation read retains the profile draft until a successful re
   const {run,form}=saveFixture();
   form.dataset.form='profile-0';
   run(`state.profiles=[{name:'Original',steps:[]}]; profileDrafts.set(0,{name:'Draft',steps:[]});
-    drafts.set('profile-0',{}); captureProfile=()=>profileDrafts.get(0);
+    formDrafts.set('profile-0',{}); captureProfile=()=>profileDrafts.get(0);
     fetchData=async name=>{if(name==='profiles') throw new Error('Read failed');};`);
   await run('saveForm(form)');
   assert.match(form.error,/Save acknowledged/);
@@ -192,11 +192,11 @@ test('a failed confirmation read retains the profile draft until a successful re
 
 test('a successful save keeps another draft blocked after a unit change',async()=>{
   const {run,form}=saveFixture();
-  run(`drafts.set('mqtt',{}); drafts.set('probe-0',{adjust:'0.7'});
+  run(`formDrafts.set('mqtt',{}); formDrafts.set('probe-0',{adjust:'0.7'});
     fetchData=async()=>{state.unitChanged=true; state.unit='F';};`);
   await run('saveForm(form)');
   assert.equal(run('state.unitChanged'),true);
-  assert.equal(run("drafts.has('probe-0')"),true);
+  assert.equal(run("formDrafts.has('probe-0')"),true);
   form.dataset.form='probe-0';
   form.dataset.dirty='true';
   await run('saveForm(form)');
@@ -217,7 +217,7 @@ test('connection age updates preserve the visible status dot',()=>{
   context.document={querySelectorAll:()=>[],querySelector:()=>connection};
   run('updateAge()');
   assert.match(connection.innerHTML,/<i><\/i> Controller online/);
-  run("state.scenario='offline'; updateAge()");
+  run("state.offline=true; updateAge()");
   assert.match(connection.innerHTML,/<i[^>]*><\/i> Connection lost/);
 });
 
@@ -228,7 +228,7 @@ test('controller polling updates visible values without replacing settings forms
   const unit={},connection={};
   context.document={querySelectorAll:selector=>selector==='[data-controller]'?nodes:[],
     querySelector:selector=>{
-      if (selector==='#unit-toggle') return unit;
+      if (selector==='#unit-label') return unit;
       if (selector==='#connection') return connection;
       throw new Error('Unexpected form or page access: '+selector);
     }};
@@ -344,9 +344,9 @@ test('standalone RF tests wait for a poll without losing or duplicating the clic
 
 test('unit changes retain drafts and block their conversion without review',()=>{
   const {run}=ui();
-  run("state.ready=true; drafts.set('ferm-0',{floor:'18'}); setController({Unit:2});");
+  run("state.ready=true; formDrafts.set('ferm-0',{floor:'18'}); setController({Unit:2});");
   assert.equal(run('state.unitChanged'),true);
-  assert.equal(run("drafts.get('ferm-0').floor"),'18');
+  assert.equal(run("formDrafts.get('ferm-0').floor"),'18');
 });
 
 test('paused profiles remain locked for editing',()=>{
@@ -514,7 +514,7 @@ test('invalid saves show their message and send nothing',async()=>{
     ['plug-0',{...plugFields,fermenter:'99'},plugSetup,/Choose a fermenter/],
     ['plug-0',{...plugFields,delay:'65000'},plugSetup,/exceed the firmware limit/],
     ['mqtt',{...mqttFields,baseTopic:'bad/#'},'',/Base topic/],
-    ['global',{unit:'F',resolution:'11',alarm:'60',mdns:true,updates:true,crashes:true},"drafts.set('a',{}); drafts.set('b',{});",/other drafts/],
+    ['global',{unit:'F',resolution:'11',alarm:'60',mdns:true,updates:true,crashes:true},"formDrafts.set('a',{}); formDrafts.set('b',{});",/other drafts/],
     ['profile-0',{name:'New'},profileSetup+"state.profiles[0].used='Vessel';",/running/]
   ];
   for (const [key,fields,setup,message] of cases) {
@@ -550,10 +550,10 @@ const actionEffects={
   export:{called:'exportConfig'},'file-view':{called:'viewFile'},'ble-send':{called:'sendBle'},debug:{called:'showDebug'},
   'test-service':{posted:'/brewservices/test'},'test-mqtt':{posted:'/mqtt/test'},discover:{posted:'/mqtt/discover'},
   'update-check':{posted:'/update/check'},
-  pause:{state:'state.paused',equals:true},'select-profile':{state:'state.profile',equals:1},
+  pause:{state:'state.refreshPaused',equals:true},'select-profile':{state:'state.selectedProfile',equals:1},
   'sensor-tab':{state:'state.sensorTab',equals:'chosen'},'system-tab':{state:'state.systemTab',equals:'chosen'},
-  'open-rf':{state:'state.systemTab',equals:'rf'},'console-start':{state:'state.console',equals:'chosen'},
-  'console-stop':{state:'state.console',equals:null},
+  'open-rf':{state:'state.systemTab',equals:'rf'},'console-start':{state:'state.activeConsole',equals:'chosen'},
+  'console-stop':{state:'state.activeConsole',equals:null},
   'close-editor':{closed:'#editor'},'close-modal':{closed:'#modal'},import:{clicked:'#import-file'},
   'rf-clear':{emptied:'#rf-output'},'ble-clear':{emptied:'#ble-output'}
 };
@@ -579,14 +579,14 @@ test('the shared action handler carries out every action',async()=>{
     })};
     bootstrapHandlers(context);
     context.target={dataset:{action:name,id:'1',value:'chosen'},closest:()=>({})};
-    run(`state.console='old'; state.plugs=[{index:0},{index:1}]; state.controller={}; calls=[]; posts=[];
+    run(`state.activeConsole='old'; state.plugs=[{index:0},{index:1}]; state.controller={}; calls=[]; posts=[];
       loadRoute=async()=>{}; render=()=>{}; updateResult=()=>'';
       for (const name of ['openFerm','chooseProfileCopy','copyProfile','editProfileStep','controlProfile','clearSensor','applyPreset',
         'testPlug','discardForm','refreshForms','exportConfig','viewFile','sendBle','showDebug']) {
         globalThis[name]=()=>{calls.push(name);};
       }
       request=async path=>{posts.push(path); return {data:{status:'ok',msg:'Done'}};};`);
-    await run('action(target)');
+    await run('handleAction(target)');
     if (effect.called) assert.deepEqual(JSON.parse(run('JSON.stringify(calls)')),[effect.called],name);
     if (effect.posted) assert.deepEqual(JSON.parse(run('JSON.stringify(posts)')),[effect.posted],name);
     if ('state' in effect) assert.equal(run(effect.state),effect.equals,name);
@@ -602,9 +602,9 @@ test('while saving, only the close actions still respond',async()=>{
     const closed=[];
     context.document={querySelector:selector=>({close:()=>closed.push(selector)})};
     context.target={dataset:{action:name},closest:()=>({})};
-    run('saving=true; state.paused=false; openFerm=()=>{throw new Error("ran while saving");};');
-    await run('action(target)');
-    assert.equal(run('state.paused'),false,name);
+    run('saving=true; state.refreshPaused=false; openFerm=()=>{throw new Error("ran while saving");};');
+    await run('handleAction(target)');
+    assert.equal(run('state.refreshPaused'),false,name);
     assert.equal(closed.length>0,name==='close-modal'||name==='close-editor',name);
   }
 });

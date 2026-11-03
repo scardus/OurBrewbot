@@ -13,7 +13,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => htmlEscapes[c]
 // Copy JSON-compatible data so draft edits cannot change saved state.
 const clone = value => JSON.parse(JSON.stringify(value));
 
-const paths = {
+const iconPaths = {
   dashboard:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   profiles:'<path d="M3 18h4V12h5V7h5V3h4M3 3v18h18"/>',
   sensors:'<path d="M10 14.5V5a2 2 0 0 1 4 0v9.5a5 5 0 1 1-4 0Z"/><path d="M12 10v8M17 5h3M17 9h2"/>',
@@ -31,7 +31,7 @@ const paths = {
 };
 
 // Build the requested inline SVG icon, falling back to the information icon.
-const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.info}</svg>`;
+const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${iconPaths[name] || iconPaths.info}</svg>`;
 
 // Build a labelled status badge with the requested appearance.
 const badge = (label,kind='good') => `<span class="badge ${kind}"><i></i>${esc(label)}</span>`;
@@ -61,7 +61,7 @@ function toggle(label,name,checked,help='') {
 }
 
 // Build the shared save, discard and validation-message controls.
-function actions(label='Save changes',extras='') {
+function formActions(label='Save changes',extras='') {
   return `<div class="form-actions"><div class="form-error" role="alert"></div>
     <button type="submit" class="button" data-save>${label}</button>${extras}
     <button type="button" class="button ghost" data-action="discard-form">Discard</button>
@@ -69,7 +69,7 @@ function actions(label='Save changes',extras='') {
 }
 
 // Build a page heading, description and optional action controls.
-function title(kicker,name,description,buttons='') {
+function pageTitle(kicker,name,description,buttons='') {
   return `<div class="page-title"><div><p class="eyebrow">${kicker}</p><h1>${name}</h1>
     <p class="subtitle">${description}</p></div><div class="title-actions">${buttons}</div></div>`;
 }

@@ -1,19 +1,19 @@
 'use strict';
 
 // Build the overview totals and fermenter cards from the latest browser state.
-function dashboard() {
+function dashboardView() {
   const active=state.fermenters.filter(f => f.power).length;
   const alarms=state.fermenters.filter(f => f.alarmActive).length;
   const running=state.fermenters.filter(f => f.running||f.paused).length;
   const controlling=state.fermenters.some(f => f.power&&f.tempControl);
   const c=state.controller;
-  const uptime=finite(c.Uptime)+Math.floor((Date.now()-(state.controllerReadAt||Date.now()))/60000);
+  const uptime=toFinite(c.Uptime)+Math.floor((Date.now()-(state.controllerReadAt||Date.now()))/60000);
   const uptimeText=Math.floor(uptime/1440)+'d '+Math.floor(uptime%1440/60)+'h '+uptime%60+'m';
   const overview=[
     ['Active fermenters',active+' / 4',(4-active)+' powered off'],
     ['Temperature control',alarms?'Check alarms':controlling?'Enabled':'Off',alarms+' active alarms'],
     ['Running profiles',running,'Includes paused profiles'],
-    ['Controller uptime',uptimeText,'WiFi signal '+shown(c.RSSI)+' dBm']
+    ['Controller uptime',uptimeText,'WiFi signal '+orDash(c.RSSI)+' dBm']
   ].map(([label,value,caption])=>`
     <div class="overview-item">
       <div class="overview-top">${esc(label)}</div>
@@ -22,9 +22,9 @@ function dashboard() {
     </div>`).join('');
   const buttons=`
     <span class="refresh-label"><i class="pulse-dot"></i><span data-age></span></span>
-    ${btn(icon(state.paused?'play':'pause'),'pause','ghost','aria-label="Pause or resume refresh"')}
+    ${btn(icon(state.refreshPaused?'play':'pause'),'pause','ghost','aria-label="Pause or resume refresh"')}
     ${btn(icon('refresh')+'Refresh','refresh','secondary')}`;
-  return title('FERMENTATION, AT A GLANCE','Dashboard','Readings and control for your fermenters.',buttons)+`
+  return pageTitle('FERMENTATION, AT A GLANCE','Dashboard','Readings and control for your fermenters.',buttons)+`
     <div class="overview">${overview}</div>
     <div class="section-heading">
       <h2>Fermenters <small>Live overview</small></h2>
@@ -50,16 +50,16 @@ function fermCard(f) {
       </div>
       <div class="readings">
         <div><div class="reading-label">Beer temperature</div>
-          <div class="reading-number primary">${temp(f.beerTemp)}<small>°${state.unit}</small></div>
+          <div class="reading-number primary">${formatTemp(f.beerTemp)}<small>°${state.unit}</small></div>
           <div class="reading-source">${esc(f.source)}</div></div>
         <div><div class="reading-label">Gravity</div>
           <div class="reading-number">${f.sg>0?f.sg.toFixed(4):'—'}</div>
           <div class="reading-source">${esc(f.gravity)}</div></div>
         <div><div class="reading-label">Ambient</div>
-          <div class="reading-number">${temp(f.ambient)}<small>°${state.unit}</small></div>
+          <div class="reading-number">${formatTemp(f.ambient)}<small>°${state.unit}</small></div>
           <div class="reading-source">${f.ambient==null?'No reading':'Ambient temperature'}</div></div>
       </div>
-      <div class="band"><span>Target band</span><strong>${temp(f.floor)} – ${temp(f.ceiling)} °${state.unit}</strong>
+      <div class="band"><span>Target band</span><strong>${formatTemp(f.floor)} – ${formatTemp(f.ceiling)} °${state.unit}</strong>
         <span>Temp control ${f.tempControl?'on':'off'}</span></div>
       ${profile?`<div class="profile-line"><strong>${esc(profile.name)}</strong>
         <span>${running?(f.paused?'Paused · ':'')+'Step '+(f.step+1)+' of '+profile.steps.length:
@@ -95,7 +95,7 @@ function openFerm(id) {
     <form data-form="ferm-${id}" id="ferm-form" style="display:contents">
       <div class="editor-scroll">
         <div class="editor-summary">
-          <div><small>Beer temperature</small><strong>${temp(f.beerTemp)} °${state.unit}</strong></div>
+          <div><small>Beer temperature</small><strong>${formatTemp(f.beerTemp)} °${state.unit}</strong></div>
           ${badge(f.alarmActive?'Alarm · '+f.status:f.status,f.alarmActive?'warn':'good')}</div>
         <section class="editor-section"><h3>Batch details</h3><div class="fields">
           ${field('Fermenter name','name',f.name,'text','maxlength="31"')}
@@ -106,11 +106,11 @@ function openFerm(id) {
           ${field('Target gravity','tg',f.tg.toFixed(4),'number',gravityLimits)}
         </div></section>
         <section class="editor-section"><h3>Temperature control</h3><div class="fields">
-          ${field('Floor (°'+state.unit+')','floor',temp(f.floor),'number','step="0.1" required')}
-          ${field('Ceiling (°'+state.unit+')','ceiling',temp(f.ceiling),'number','step="0.1" required')}
-          ${field('Hysteresis (°'+state.unit+')','hysteresis',delta(f.hysteresis),'number',
+          ${field('Floor (°'+state.unit+')','floor',formatTemp(f.floor),'number','step="0.1" required')}
+          ${field('Ceiling (°'+state.unit+')','ceiling',formatTemp(f.ceiling),'number','step="0.1" required')}
+          ${field('Hysteresis (°'+state.unit+')','hysteresis',deltaToUnit(f.hysteresis),'number',
             'min="0" step="0.01" required','The target band must be at least twice this value.')}
-          ${field('Alarm tolerance (°'+state.unit+')','alarm',delta(f.alarm),'number','min="0" step="0.1" required')}
+          ${field('Alarm tolerance (°'+state.unit+')','alarm',deltaToUnit(f.alarm),'number','min="0" step="0.1" required')}
           ${field('Compressor delay (minutes)','delay',f.delay,'number','min="0" max="1440" step="1" required')}
         </div>
           ${toggle('Power','power',f.power,'Turning this off stops heating and cooling.')}
@@ -162,8 +162,8 @@ function fermenterPayload(form,data,index) {
   body.BrewServices=(raw.BrewServices&~reportingBits)|
     (data.brewers?1:0)|(data.brewfather?2:0)|(data.mqtt?8:0);
   // Match Config.h::checkTempBand() and the alarm bounds in WebAPI.cpp.
-  const ceiling=toC(body.CeilingTemp),floor=toC(body.FloorTemp),hysteresis=deltaC(body.Hysteresis);
-  if (deltaC(body.AlarmTolerance)<0 || deltaC(body.AlarmTolerance)>10) {
+  const ceiling=tempToC(body.CeilingTemp),floor=tempToC(body.FloorTemp),hysteresis=deltaToC(body.Hysteresis);
+  if (deltaToC(body.AlarmTolerance)<0 || deltaToC(body.AlarmTolerance)>10) {
     throw new Error('Alarm tolerance must be 0–10 °C (0–18 °F).');
   }
   if (floor < -20 || ceiling>50 || floor>=ceiling || hysteresis<0 || hysteresis>10 || ceiling-floor+1e-6<2*hysteresis) {
@@ -196,8 +196,8 @@ async function showDebug(id) {
     <form data-debug="${id}" data-unit="${state.unit}">
       ${toggle('Enable overrides','enabled',override.Enabled)}
       <div class="fields">
-        ${field('Beer temperature'+unit,'beer',override.BeerTemp??temp(f.beerTemp),'number','step="0.1" required')}
-        ${field('Ambient temperature'+unit,'ambient',override.AmbientTemp??temp(f.ambient),'number',
+        ${field('Beer temperature'+unit,'beer',override.BeerTemp??formatTemp(f.beerTemp),'number','step="0.1" required')}
+        ${field('Ambient temperature'+unit,'ambient',override.AmbientTemp??formatTemp(f.ambient),'number',
           'step="0.1" required')}
         ${field('Specific gravity','sg',override.SG??f.sg,'number','step="0.0001" required')}
       </div>
