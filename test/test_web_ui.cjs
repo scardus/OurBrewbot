@@ -435,8 +435,7 @@ async function saveThrough(key,fields,setup='') {
     fetchData=async name=>{reads.push(name);};
     request=async(path,options)=>{posts.push({path,body:JSON.parse(options.body)}); return {data:{status:'ok',msg:'Saved'}};};`);
   run(setup);
-  // The form's submit handler reports a rejected save in the same way.
-  await run('saveForm(form).catch(error=>saveError(form,error.message))');
+  await run('saveForm(form)');
   return {posts:JSON.parse(run('JSON.stringify(posts)')),reads:JSON.parse(run('JSON.stringify(reads)')),error:form.error};
 }
 

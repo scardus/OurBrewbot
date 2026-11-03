@@ -155,6 +155,15 @@ const systemPanels={
   }
 };
 
+// Build the global settings JSON. Changing units would invalidate any other open draft.
+function globalPayload(data) {
+  if (data.unit!==state.unit && formDrafts.size>1) {
+    throw new Error('Save or discard other drafts before changing units.');
+  }
+  return {Unit:unitCode(data.unit),Resolution:+data.resolution,AlarmDwellSec:+data.alarm,
+    MdnsEnabled:data.mdns,UpdateCheck:data.updates,CrashReports:data.crashes};
+}
+
 // Format controller and reset information with the appropriate units.
 function controllerValue(key) {
   const value=key==='resetReason'?state.health.resetReason:state.controller[key];

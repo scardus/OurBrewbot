@@ -40,7 +40,8 @@ function profilesView() {
   return pageTitle('MAKE A PLAN FOR YOUR BREW','Fermentation profiles','Build a clear path from pitch to pour.')+`
     <div class="profile-layout">
       <div class="profile-list">${state.profiles.map((p,i)=>`
-        <button class="profile-choice ${i===state.selectedProfile?'active':''}" data-action="select-profile" data-id="${i}">
+        <button class="profile-choice ${i===state.selectedProfile?'active':''}"
+          data-action="select-profile" data-id="${i}">
           <span class="slot-label">PROFILE ${i+1}</span><strong>${esc(p.name)}</strong>
           <small>${(profileDrafts.get(i)||p).steps.length} steps${profileDrafts.has(i)?' · unsaved':''}</small>
           ${p.used?badge('In use','quiet'):badge('Available','good')}
@@ -57,9 +58,13 @@ function profilesView() {
             ${profilePlot(profile)}
             <p class="review-caption">Solid: timed step. Dashed: condition-dependent step. Shaded: free-rise band.
               This shows step order, not predicted completion times.</p></div>
-          <div class="section-heading"><h3>Profile steps</h3><span class="subtle">${stepCount} of ${MAX_PROFILE_STEPS} slots</span></div>
+          <div class="section-heading">
+            <h3>Profile steps</h3><span class="subtle">${stepCount} of ${MAX_PROFILE_STEPS} slots</span>
+          </div>
           <div class="step-list">${profile.steps.map((step,i)=>profileStep(step,i,stepCount,locked)).join('')}</div>
-          <div style="margin-top:13px">${btn('+ Add step','step-add','ghost',locked||stepCount>=MAX_PROFILE_STEPS?'disabled':'')}</div>
+          <div style="margin-top:13px">
+            ${btn('+ Add step','step-add','ghost',locked||stepCount>=MAX_PROFILE_STEPS?'disabled':'')}
+          </div>
           ${locked?'<p class="review-caption">Copy this profile to an available slot to edit it.</p>':
             formActions('Save profile')}
         </form>
@@ -150,7 +155,8 @@ function captureProfile() {
 // Keep a profile draft only while it differs from the saved profile.
 function profileChanged() {
   const profile=captureProfile();
-  if (profileValues(profile)===profileValues(state.profiles[state.selectedProfile])) profileDrafts.delete(state.selectedProfile);
+  const saved=state.profiles[state.selectedProfile];
+  if (profileValues(profile)===profileValues(saved)) profileDrafts.delete(state.selectedProfile);
   else profileDrafts.set(state.selectedProfile,profile);
 }
 
@@ -166,6 +172,16 @@ function profilePayload(index, profile) {
     endTemp:tempToUnit(step.end),sgTrigger:step.trigger,days:step.days}));
   while (steps.length<MAX_PROFILE_STEPS) steps.push({stepType:0,startTemp:0,endTemp:0,sgTrigger:0,days:0});
   return {index,name:profile.name,steps};
+}
+
+// Refuse to save a profile that started running since it was drawn, then build its JSON.
+// Returns nothing if another save started during the read.
+async function checkedProfilePayload(form,index) {
+  await fetchData('fermenters');
+  if (saving) return null;
+  checkFormUnits(form);
+  if (state.profiles[index].used) throw new Error('This profile is running and cannot be edited.');
+  return profilePayload(index,captureProfile());
 }
 
 // Open the destination selector for copying a profile into another draft slot.

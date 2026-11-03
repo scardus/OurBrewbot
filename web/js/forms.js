@@ -43,7 +43,10 @@ function updateDirty(form) {
     ? profileValues(captureProfile())!==profileValues(state.profiles[+key.split('-')[1]])
     : JSON.stringify(formData(form))!==JSON.stringify(formBaselines.get(form));
   const label=$('.saved-label',form);
-  if (label) { label.textContent=changed?'Unsaved changes':'No unsaved changes'; label.classList.toggle('dirty',changed); }
+  if (label) {
+    label.textContent=changed?'Unsaved changes':'No unsaved changes';
+    label.classList.toggle('dirty',changed);
+  }
   const save=$('[data-save]',form);
   if (save) save.disabled=!changed || saving;
   form.dataset.dirty=String(changed);
@@ -63,82 +66,115 @@ function savedNumber(form,data,name,received) {
   return baseline && data[name]===baseline[name] ? received : +data[name];
 }
 
-// Prevent duplicate validation and save attempts for the same form.
+// How each form saves. A form's type is the first part of its key: "ferm-0" is a ferm form.
+// path:      the endpoint the form posts to.
+// refresh:   the endpoint read back afterwards to confirm the save.
+// usesUnits: the form holds temperatures, so the controller's unit is checked before saving.
+// limits:    the longest text the firmware's buffers accept for each field, in UTF-8 bytes.
+// buildBody: validates the form and returns the JSON to post. Throws an error to refuse the save.
+// afterSave: optional clean-up once the save is confirmed.
+const formTypes = {
+  ferm: {path:'/fermenter', refresh:'fermenters', usesUnits:true, limits:{name:31,beer:31,yeast:31},
+    buildBody:(form,data,index)=>fermenterPayload(form,data,index),
+    afterSave:()=>$('#editor').close()},
+  profile: {path:'/profile', refresh:'profiles', usesUnits:true, limits:{name:31},
+    buildBody:(form,data,index)=>checkedProfilePayload(form,index),
+    afterSave:index=>profileDrafts.delete(index)},
+  probe: {path:'/probes', refresh:'probes', usesUnits:true,
+    buildBody:(form,data,index)=>sensorPayload(form,data,'probe',index)},
+  tilt: {path:'/tilt', refresh:'tilts', usesUnits:true,
+    buildBody:(form,data,index)=>sensorPayload(form,data,'tilt',index)},
+  ispindel: {path:'/ispindel/config', refresh:'ispindels', usesUnits:true,
+    buildBody:(form,data,index)=>sensorPayload(form,data,'ispindel',index)},
+  plug: {path:'/smartplug', refresh:'smartplugs', limits:{manufacturer:23,model:23},
+    buildBody:(form,data,index)=>plugPayload(data,index)},
+  service: {path:'/brewservices', refresh:'brewservices', limits:{serviceId:47,deviceName:31},
+    buildBody:(form,data,index)=>({index,enabled:data.enabled,serviceId:data.serviceId,deviceName:data.deviceName})},
+  mqtt: {path:'/mqtt', refresh:'mqtt', limits:{host:63,username:31,password:47,baseTopic:31},
+    buildBody:(form,data)=>mqttPayload(data)},
+  global: {path:'/controller', refresh:'controller',
+    buildBody:(form,data)=>globalPayload(data)},
+  debug: {path:'/debug', refresh:'debug',
+    buildBody:(form,data)=>({DebugMode:data.enabled})},
+  syslog: {path:'/syslog', refresh:'syslog', limits:{host:63},
+    buildBody:(form,data)=>({enabled:data.enabled,host:data.host,port:+data.port,
+      facility:+data.facility,minLevel:+data.level})}
+};
+
+// Prevent duplicate validation and save attempts for the same form, and show why a save was refused.
 async function saveForm(form) {
   if (form.dataset.checking) return;
   form.dataset.checking='true';
   try { await saveFormChecked(form); }
+  catch (error) { saveError(form,error.message); }
   finally { delete form.dataset.checking; }
 }
 
-// Validate and save a changed form, then reread its endpoint before clearing the draft.
+// Validate a changed form and build its JSON, then send it. Throws an error to refuse the save.
 async function saveFormChecked(form) {
   if (saving || form.dataset.dirty!=='true' || !form.reportValidity()) return;
-  if (state.unitChanged) { saveError(form,'Controller units changed. Discard all drafts and refresh before saving.'); return; }
+  if (state.unitChanged) throw new Error('Controller units changed. Discard all drafts and refresh before saving.');
   if (form.dataset.unknown) {
-    saveError(form,'Read the current controller state using Refresh before explicitly saving again.'); return;
+    throw new Error('Read the current controller state using Refresh before explicitly saving again.');
   }
-  if (['ferm','profile','probe','tilt','ispindel'].includes(form.dataset.form.split('-')[0])) {
+  const key=form.dataset.form,[kind,slot]=key.split('-'),index=+slot;
+  const type=formTypes[kind];
+  if (type.usesUnits) {
     await fetchData('controller');
     if (saving) return;
-    if (state.unitChanged || (form.dataset.unit && form.dataset.unit!==state.unit)) { saveError(form,'Controller units changed. Discard and review drafts before saving.'); return; }
+    checkFormUnits(form);
   }
+  checkNumberFields(form);
+  const data=formData(form);
+  checkTextLimits(data,type.limits);
+  const body=await type.buildBody(form,data,index);
+  // Building a profile reads the controller, so another save may have started meanwhile.
+  if (!body) return;
+  await sendSave(form,type,body,index);
+}
+
+// Refuse a save if the controller's unit changed after the form was drawn.
+function checkFormUnits(form) {
+  if (state.unitChanged || (form.dataset.unit && form.dataset.unit!==state.unit)) {
+    throw new Error('Controller units changed. Discard and review drafts before saving.');
+  }
+}
+
+// Refuse a save if a numeric field holds something like "1e999".
+function checkNumberFields(form) {
   for (const el of $$('input[type="number"]',form)) {
-    if (!Number.isFinite(Number(el.value))) { saveError(form,'Enter a finite number in every numeric field.'); el.focus(); return; }
-  }
-  const key=form.dataset.form,data=formData(form),[kind,slot]=key.split('-'),index=+slot;
-  let limits={};
-  if (kind==='ferm') limits={name:31,beer:31,yeast:31};
-  else if (kind==='profile') limits={name:31};
-  else if (kind==='plug') limits={manufacturer:23,model:23};
-  else if (kind==='service') limits={serviceId:47,deviceName:31};
-  else if (key==='mqtt') limits={host:63,username:31,password:47,baseTopic:31};
-  else if (key==='syslog') limits={host:63};
-  for (const [name,limit] of Object.entries(limits)) {
-    if (new TextEncoder().encode(data[name]||'').length>limit) {
-      saveError(form,name+' exceeds the controller limit of '+limit+' UTF-8 bytes.'); return;
+    if (!Number.isFinite(Number(el.value))) {
+      el.focus();
+      throw new Error('Enter a finite number in every numeric field.');
     }
   }
-  let path,body,refresh;
-  if (kind==='ferm') {
-    path='/fermenter'; refresh='fermenters';
-    body=fermenterPayload(form,data,index);
-  } else if (kind==='profile') {
-    await fetchData('fermenters');
-    if (saving) return;
-    if (state.unitChanged || form.dataset.unit!==state.unit) { saveError(form,'Controller units changed. Discard and review drafts before saving.'); return; }
-    if (state.profiles[index].used) { saveError(form,'This profile is running and cannot be edited.'); return; }
-    path='/profile'; refresh='profiles'; body=profilePayload(index,captureProfile());
-  } else if (['probe','tilt','ispindel'].includes(kind)) {
-    path=kind==='probe'?'/probes':kind==='tilt'?'/tilt':'/ispindel/config';
-    refresh=kind==='probe'?'probes':kind==='tilt'?'tilts':'ispindels';
-    body=sensorPayload(form,data,kind,index);
-  } else if (kind==='plug') {
-    path='/smartplug'; refresh='smartplugs';
-    body=plugPayload(data,index);
-  } else if (kind==='service') {
-    path='/brewservices'; refresh='brewservices'; body={index,enabled:data.enabled,serviceId:data.serviceId,deviceName:data.deviceName};
-  } else if (key==='mqtt') {
-    path='/mqtt'; refresh='mqtt'; body=mqttPayload(data);
-  } else if (key==='global') {
-    path='/controller'; refresh='controller'; body={Unit:unitCode(data.unit),Resolution:+data.resolution,
-      AlarmDwellSec:+data.alarm,MdnsEnabled:data.mdns,UpdateCheck:data.updates,CrashReports:data.crashes};
-    if (data.unit!==state.unit && formDrafts.size>1) { saveError(form,'Save or discard other drafts before changing units.'); return; }
-  } else if (key==='debug-mode') {
-    path='/debug'; refresh='debug'; body={DebugMode:data.enabled};
-  } else if (key==='syslog') {
-    path='/syslog'; refresh='syslog'; body={enabled:data.enabled,host:data.host,port:+data.port,facility:+data.facility,minLevel:+data.level};
-  } else return;
+}
+
+// Refuse a save if any text is too long for the firmware's buffers.
+function checkTextLimits(data,limits={}) {
+  for (const [name,limit] of Object.entries(limits)) {
+    if (new TextEncoder().encode(data[name]||'').length>limit) {
+      throw new Error(name+' exceeds the controller limit of '+limit+' UTF-8 bytes.');
+    }
+  }
+}
+
+// Post a validated form, then reread its endpoint before clearing the draft.
+async function sendSave(form,type,body,index) {
+  const key=form.dataset.form;
   saving=true;
   $('[data-save]',form).disabled=true;
   saveError(form,'Saving…');
   try {
-    const reply=await post(path,body);
-    try { await fetchData(refresh); }
-    catch (error) { error.unknown=true; error.message='Save acknowledged, but the confirmation read failed. Refresh before saving again. '+error.message; throw error; }
+    const reply=await post(type.path,body);
+    try { await fetchData(type.refresh); }
+    catch (error) {
+      error.unknown=true;
+      error.message='Save acknowledged, but the confirmation read failed. Refresh before saving again. '+error.message;
+      throw error;
+    }
     formDrafts.delete(key);
-    if (kind==='profile') profileDrafts.delete(index);
-    if (kind==='ferm') $('#editor').close();
+    if (type.afterSave) type.afterSave(index);
     if (!formDrafts.size && !profileDrafts.size) state.unitChanged=false;
     render();
     toast(reply.msg || 'Saved.');
@@ -155,10 +191,8 @@ async function saveFormChecked(form) {
 async function refreshForms() {
   if (!await loadRoute(true)) return;
   const names=routeData();
-  const endpoints={ferm:'fermenters',profile:'profiles',probe:'probes',tilt:'tilts',ispindel:'ispindels',
-    plug:'smartplugs',service:'brewservices',global:'controller',mqtt:'mqtt',syslog:'syslog',debug:'debug'};
   for (const key of unknownForms) {
-    if (names.includes(endpoints[key.split('-')[0]])) unknownForms.delete(key);
+    if (names.includes(formTypes[key.split('-')[0]].refresh)) unknownForms.delete(key);
   }
   for (const form of $$('form[data-unknown]')) {
     if (!unknownForms.has(form.dataset.form)) delete form.dataset.unknown;

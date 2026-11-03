@@ -29,7 +29,7 @@ document.addEventListener('change',event=>{
 document.addEventListener('submit',event=>{
   event.preventDefault();
   const form=event.target;
-  if (form.dataset.form) saveForm(form).catch(error=>saveError(form,error.message));
+  if (form.dataset.form) saveForm(form);
   else if (form.id==='ble-form') sendBle(form.elements.cmd.value).catch(error=>toast(error.message));
   else if (form.dataset.debug!==undefined) saveDebug(form).catch(error=>toast(error.message));
 });
