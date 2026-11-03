@@ -171,7 +171,7 @@ function saveFixture() {
   const inputs=Object.entries({name:'Profile',host:'broker',port:'1883',username:'',password:'',baseTopic:'new-topic'})
     .map(([name,value])=>({name,value,type:'text'}));
   const button={disabled:false};
-  const form={dataset:{form:'mqtt',dirty:'true',unit:'C'},reportValidity:()=>true,
+  const form={dataset:{form:'mqtt',dirty:'true',unit:'C'},elements:[],
     querySelectorAll:selector=>selector==='[name]'?inputs:[],querySelector:()=>button};
   fixture.context.form=form;
   fixture.run('request=async()=>({data:{status:"ok"}}); render=()=>{}; saveError=(form,message)=>{form.error=message;};');
@@ -391,7 +391,7 @@ test('a lost POST reply is not retried',async()=>{
 
 test('uncertain saves require a fresh read before another explicit submission',async()=>{
   const {run,context}=ui();
-  context.form={dataset:{form:'mqtt',dirty:'true',unknown:'true'},reportValidity:()=>true};
+  context.form={dataset:{form:'mqtt',dirty:'true',unknown:'true'},elements:[]};
   run("saveError=(form,message)=>{form.error=message;};");
   await run('saveForm(form)');
   assert.match(context.form.error,/Refresh/);
@@ -426,7 +426,7 @@ async function saveThrough(key,fields,setup='') {
   const {run,context}=ui();
   const inputs=Object.entries(fields).map(([name,value])=>
     typeof value==='boolean'?{name,checked:value,type:'checkbox'}:{name,value,type:'text'});
-  const form={dataset:{form:key,dirty:'true',unit:'C'},reportValidity:()=>true,
+  const form={dataset:{form:key,dirty:'true',unit:'C'},elements:[],
     querySelectorAll:selector=>selector==='[name]'?inputs:[],querySelector:()=>({disabled:false})};
   context.form=form;
   context.document={querySelectorAll:()=>[],querySelector:selector=>
@@ -488,6 +488,22 @@ test('the route ignores anything after a slash, at start-up as well as on naviga
   // Run only the start-up block, without registering handlers or timers.
   await vm.runInContext(source.slice(source.indexOf('\n(async()=>{')),context);
   assert.equal(run('state.route'),'system');
+});
+
+test('a value finer than its step can be saved, but empty and out-of-range values cannot',()=>{
+  const {run,context}=ui();
+  const check=validity=>{
+    const field={willValidate:true,validity:{valid:false,...validity},reported:false,reportValidity(){this.reported=true;}};
+    context.form={elements:[field]};
+    return {allowed:run('fieldsAreValid(form)'),reported:field.reported};
+  };
+  assert.deepEqual(check({stepMismatch:true}),{allowed:true,reported:false});
+  assert.deepEqual(check({stepMismatch:true,rangeOverflow:true}),{allowed:false,reported:true});
+  assert.deepEqual(check({rangeUnderflow:true}),{allowed:false,reported:true});
+  assert.deepEqual(check({valueMissing:true}),{allowed:false,reported:true});
+  assert.deepEqual(check({badInput:true}),{allowed:false,reported:true});
+  context.form={elements:[{willValidate:false,validity:{valid:false,valueMissing:true}},{willValidate:true,validity:{valid:true}}]};
+  assert.equal(run('fieldsAreValid(form)'),true);
 });
 
 test('every form saves to its endpoint with the expected body and confirmation reads',async()=>{

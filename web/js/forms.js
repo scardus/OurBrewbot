@@ -25,6 +25,7 @@ function applyData(form,data) {
 function mountForms(root=document) {
   for (const form of $$('form[data-form]',root)) {
     const key=form.dataset.form;
+    form.noValidate=true;
     form.dataset.unit=state.unit;
     formBaselines.set(form,formData(form));
     if (key.startsWith('profile-')) {
@@ -34,6 +35,16 @@ function mountForms(root=document) {
     if (formDrafts.has(key)) applyData(form,formDrafts.get(key));
     updateDirty(form);
   }
+}
+
+// Report the first field that is empty or outside its limits, which match the firmware's.
+// A field's step only sets how far its arrows move: like the old admin page, a saved
+// value such as 0.125, or 0.54 converted to Fahrenheit, must not block the form.
+function fieldsAreValid(form) {
+  const onlyStepWrong=v=>v.stepMismatch && !v.valueMissing && !v.rangeUnderflow && !v.rangeOverflow && !v.badInput;
+  const problem=[...form.elements].find(el=>el.willValidate && !el.validity.valid && !onlyStepWrong(el.validity));
+  if (problem) problem.reportValidity();
+  return !problem;
 }
 
 // Track form drafts and update save availability and unsaved-change labels.
@@ -112,7 +123,7 @@ async function saveForm(form) {
 
 // Validate a changed form and build its JSON, then send it. Throws an error to refuse the save.
 async function saveFormChecked(form) {
-  if (saving || form.dataset.dirty!=='true' || !form.reportValidity()) return;
+  if (saving || form.dataset.dirty!=='true' || !fieldsAreValid(form)) return;
   if (state.unitChanged) throw new Error('Controller units changed. Discard all drafts and refresh before saving.');
   if (form.dataset.unknown) {
     throw new Error('Read the current controller state using Refresh before explicitly saving again.');

@@ -194,7 +194,7 @@ async function showDebug(id) {
   const f=state.fermenters[id],override=state.debug.Overrides.find(v=>+v.Fermenter===f.id)||{};
   const unit=' (°'+state.unit+')';
   showModal(`<h2>Debug overrides · ${esc(f.name)}</h2><p>Runtime only; resets on reboot.</p>
-    <form data-debug="${id}" data-unit="${state.unit}">
+    <form data-debug="${id}" data-unit="${state.unit}" novalidate>
       ${toggle('Enable overrides','enabled',override.Enabled)}
       <div class="fields">
         ${field('Beer temperature'+unit,'beer',override.BeerTemp??formatTemp(f.beerTemp),'number','step="0.1" required')}
@@ -209,7 +209,7 @@ async function showDebug(id) {
 // Validate and apply runtime sensor overrides without retrying an uncertain result.
 async function saveDebug(form) {
   const button=$('button[type="submit"]',form);
-  if (button.disabled || form.dataset.unknown) return;
+  if (button.disabled || form.dataset.unknown || !fieldsAreValid(form)) return;
   button.disabled=true;
   try {
     await fetchData('controller');
