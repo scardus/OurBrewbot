@@ -80,7 +80,7 @@ async function fetchData(name, background=false) {
   else if (name==='fs/files') state.files=value.files;
   else if (name==='debug') {
     if (value.TempUnit && value.TempUnit!==state.unit) {
-      setController({...state.controller,Unit:value.TempUnit==='F'?2:1});
+      setController({...state.controller,Unit:unitCode(value.TempUnit)});
     }
     state.debug=value;
     state.global.debug=!!value.DebugMode;

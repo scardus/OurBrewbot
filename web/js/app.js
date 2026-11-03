@@ -13,10 +13,16 @@ function closeNav() {
   $('#menu-toggle').setAttribute('aria-expanded','false');
 }
 
+// Read the view name from the page address, falling back to the dashboard.
+function currentRoute() {
+  const requested=location.hash.slice(1).split('/')[0];
+  return navItems.some(item=>item[0]===requested)?requested:'dashboard';
+}
+
 // Render the selected route while restoring drafts and horizontal scroll positions.
 function render() {
-  const requested=location.hash.slice(1).split('/')[0];
-  state.route=navItems.some(item=>item[0]===requested)?requested:'dashboard';
+  state.route=currentRoute();
+  const routeLabel=navItems.find(item=>item[0]===state.route)[1];
   const main=$('#main');
   const sameView=main.dataset.route===state.route;
   // Replacing the view must not move a horizontal list the user has scrolled.
@@ -26,7 +32,7 @@ function render() {
     <a href="#${key}" class="nav-item ${state.route===key?'active':''}" ${state.route===key?'aria-current="page"':''}>
       ${icon(key)}<span>${label}</span>
       ${key==='dashboard'?`<span class="nav-count">${state.fermenters.length}</span>`:''}</a>`).join('');
-  $('#crumb').textContent=navItems.find(n=>n[0]===state.route)[1];
+  $('#crumb').textContent=routeLabel;
   const renderers={dashboard:dashboardView,profiles:profilesView,sensors:sensorsView,plugs:plugsView,
     reporting:reportingView,system:systemView};
   const offline=state.offline?`<div class="notice error">${icon('info')}<div>
@@ -41,7 +47,7 @@ function render() {
   markProfileDraft();
   closeNav();
   updateAge();
-  document.title=navItems.find(item=>item[0]===state.route)[1]+' · OurBrewbot';
+  document.title=routeLabel+' · OurBrewbot';
 }
 
 // Update live text and status badges without replacing editing forms.
@@ -52,15 +58,12 @@ function updateLiveReadings() {
   $$('[data-plug-status]').forEach(node=>{
     const plug=state.plugs[+node.dataset.plugStatus];
     if (!plug) return;
-    let label=plug.state?'On':'Off';
-    if (plug.role==='none') label='Unassigned';
-    node.innerHTML=badge(label,plug.state?'good':'quiet');
+    node.innerHTML=plugStatusBadge(plug);
   });
   $$('[data-sensor-status]').forEach(node=>{
     const [kind,index]=node.dataset.sensorStatus.split('.'),sensor=state[kind]?.[+index];
     if (!sensor) return;
-    if (kind==='tilts') node.innerHTML=badge(sensor.active?'Reading received':'Not detected',sensor.active?'good':'quiet');
-    if (kind==='ispindels') node.innerHTML=badge(sensor.fresh?'Fresh':'No recent report',sensor.fresh?'good':'warn');
+    node.innerHTML=sensorStatusBadge(kind,sensor);
   });
   $$('[data-live]').forEach(node=>{
     const [kind,index,name]=node.dataset.live.split('.');
@@ -69,7 +72,7 @@ function updateLiveReadings() {
     let reading=orDash(sensor[name]);
     if (name==='temp') reading=formatTemp(sensor.temp)+' °'+state.unit;
     else if (name==='detail') reading=spindelDetail(sensor);
-    else if (name==='sg') reading=sensor.sg>0?(+sensor.sg).toFixed(4):'—';
+    else if (name==='sg') reading=formatGravity(sensor.sg);
     else if (name==='battery') reading=toFinite(sensor.battery).toFixed(2);
     node.textContent=reading;
   });

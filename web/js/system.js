@@ -7,9 +7,7 @@ function systemView() {
     ['rf','RF sniffer'],['ble','BLE console'],['update','Firmware']];
   return pageTitle('LOOK AFTER YOUR CONTROLLER','System & diagnostics',
     'Settings, maintenance and tools for your brew room.')+`
-    <div class="tabs" role="tablist" aria-label="System section">${tabs.map(([key,label])=>`
-      <button role="tab" aria-selected="${state.systemTab===key}" class="${state.systemTab===key?'active':''}"
-        data-action="system-tab" data-value="${key}">${label}</button>`).join('')}</div>
+    ${tabBar('System section','system-tab',tabs,state.systemTab)}
     ${systemPanels[state.systemTab]()}`;
 }
 
@@ -256,6 +254,7 @@ async function sendBle(command) {
   state.activeConsole='ble';
 }
 
+const MAX_CONSOLE_CHARS = 12000;
 let lastConsolePoll=0,consoleBusy=false;
 
 // Poll the active RF or BLE console at its own interval and bound the displayed output.
@@ -270,9 +269,10 @@ async function pollConsole() {
     if (!output) return;
     if (kind==='ble' && data.data) output.textContent+=data.data;
     if (kind==='rf' && data.received) {
-      output.textContent+='\nCode '+data.code+' ('+data.hex+') · '+data.bits+' bits · '+data.delay+' µs · protocol '+data.protocol;
+      output.textContent+='\nCode '+data.code+' ('+data.hex+') · '+data.bits+' bits · '+data.delay+' µs · '+
+        'protocol '+data.protocol;
     }
-    if (output.textContent.length>12000) output.textContent=output.textContent.slice(-12000);
+    if (output.textContent.length>MAX_CONSOLE_CHARS) output.textContent=output.textContent.slice(-MAX_CONSOLE_CHARS);
   } catch (error) { toast(error.message); state.activeConsole=null; }
   finally { consoleBusy=false; lastConsolePoll=Date.now(); }
 }

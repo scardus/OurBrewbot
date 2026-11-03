@@ -8,6 +8,12 @@ function plugsView() {
     `<div class="grid">${state.plugs.map(plugCard).join('')}</div>`;
 }
 
+// Build a plug's status badge.
+function plugStatusBadge(plug) {
+  if (plug.role==='none') return badge('Unassigned','quiet');
+  return plug.state?badge('On','good'):badge('Off','quiet');
+}
+
 // Build one plug's assignment, RF settings, preset choices and explicit test controls.
 function plugCard(p,i) {
   const fermenter=state.fermenters[p.fermenter]?.name||('Fermenter '+p.fermenter);
@@ -15,17 +21,11 @@ function plugCard(p,i) {
   if (p.role==='none') name='Unassigned plug';
   else if (p.role==='aux1') name='Auxiliary 1';
   else if (p.role==='aux2') name='Auxiliary 2';
-  let status=p.state?'On':'Off';
-  let statusKind=p.state?'good':'quiet';
-  if (p.role==='none') {
-    status='Unassigned';
-    statusKind='quiet';
-  }
   const roles=[['none','Unassigned'],['hot','Heater'],['cold','Cooler'],['aux1','Auxiliary 1'],['aux2','Auxiliary 2']];
   return `<article class="card panel plug-card">
     <div class="panel-header"><div><div class="slot-label">PLUG ${String(p.index).padStart(2,'0')}</div>
       <h2>${esc(name)}</h2><p>${p.role==='none'?'Available slot':esc(p.manufacturer+' · '+p.model)}</p></div>
-      <span data-plug-status="${i}">${badge(status,statusKind)}</span></div>
+      <span data-plug-status="${i}">${plugStatusBadge(p)}</span></div>
     <form data-form="plug-${i}">
       <div class="fields">
         ${select('Role','role',p.role,roles)}
@@ -62,12 +62,14 @@ function plugCard(p,i) {
 // Validate RF timings and translate a plug draft into the firmware's save contract.
 function plugPayload(data,index) {
   const role=data.role,fermenter=+data.fermenter;
-  if ((role==='hot'||role==='cold') && fermenter===99) throw new Error('Choose a fermenter for this heater or cooler.');
-  let plugFunction=99;
+  if ((role==='hot'||role==='cold') && fermenter===UNASSIGNED) {
+    throw new Error('Choose a fermenter for this heater or cooler.');
+  }
+  let plugFunction=UNASSIGNED;
   if (role==='hot') plugFunction=fermenter*2;
   else if (role==='cold') plugFunction=fermenter*2+1;
-  else if (role==='aux1') plugFunction=8;
-  else if (role==='aux2') plugFunction=9;
+  else if (role==='aux1') plugFunction=PLUG_AUX1;
+  else if (role==='aux2') plugFunction=PLUG_AUX2;
   // Config.h::checkRfSettings() mirrors rc-switch's twelve protocols:
   // worst-case bit pulses, sync pulses, ten repeats, maximum burst 2000 ms.
   const protocolPulses=[[4,32],[3,11],[15,101],[4,7],[3,20],[3,24],[7,64],[23,133],[23,137],[4,19],[3,37],[3,37]];

@@ -32,7 +32,15 @@ const iconPaths = {
 };
 
 // Build the requested inline SVG icon, falling back to the information icon.
-const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${iconPaths[name] || iconPaths.info}</svg>`;
+const icon = name =>
+  `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${iconPaths[name] || iconPaths.info}</svg>`;
+
+// Build a row of tabs for the shared click handler, highlighting the current one.
+function tabBar(description,action,tabs,current) {
+  return `<div class="tabs" role="tablist" aria-label="${description}">${tabs.map(([key,label])=>`
+    <button role="tab" aria-selected="${current===key}" class="${current===key?'active':''}"
+      data-action="${action}" data-value="${key}">${label}</button>`).join('')}</div>`;
+}
 
 // Build a labelled status badge with the requested appearance.
 const badge = (label,kind='good') => `<span class="badge ${kind}"><i></i>${esc(label)}</span>`;
@@ -76,7 +84,7 @@ function pageTitle(kicker,name,description,buttons='') {
 }
 
 // List fermenter choices together with the unassigned option.
-const fermOptions = () => [[99,'Unassigned'],...state.fermenters.map(f=>[f.id,f.name])];
+const fermOptions = () => [[UNASSIGNED,'Unassigned'],...state.fermenters.map(f=>[f.id,f.name])];
 
 // Show a temporary message, replacing any previous dismissal timer.
 function toast(text) {

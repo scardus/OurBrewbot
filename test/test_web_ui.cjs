@@ -564,7 +564,7 @@ test('every action a view can render is handled, and every handler is still used
     .map(file=>fs.readFileSync(file,'utf8')).join('\n');
   const rendered=new Set();
   for (const match of sources.matchAll(/data-action="([a-z-]+)"/g)) rendered.add(match[1]);
-  for (const match of sources.matchAll(/\bbtn\(.*?,'([a-z-]+)'/g)) rendered.add(match[1]);
+  for (const match of sources.matchAll(/\b(?:btn|tabBar)\(.*?,'([a-z-]+)'/g)) rendered.add(match[1]);
   assert.deepEqual([...rendered].sort(),Object.keys(actionEffects).sort());
 });
 

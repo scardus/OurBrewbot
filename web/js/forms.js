@@ -121,7 +121,7 @@ async function saveFormChecked(form) {
   } else if (key==='mqtt') {
     path='/mqtt'; refresh='mqtt'; body=mqttPayload(data);
   } else if (key==='global') {
-    path='/controller'; refresh='controller'; body={Unit:data.unit==='C'?1:2,Resolution:+data.resolution,
+    path='/controller'; refresh='controller'; body={Unit:unitCode(data.unit),Resolution:+data.resolution,
       AlarmDwellSec:+data.alarm,MdnsEnabled:data.mdns,UpdateCheck:data.updates,CrashReports:data.crashes};
     if (data.unit!==state.unit && formDrafts.size>1) { saveError(form,'Save or discard other drafts before changing units.'); return; }
   } else if (key==='debug-mode') {

@@ -46,9 +46,9 @@ function profilesView() {
             ${profilePlot(profile)}
             <p class="review-caption">Solid: timed step. Dashed: condition-dependent step. Shaded: free-rise band.
               This shows step order, not predicted completion times.</p></div>
-          <div class="section-heading"><h3>Profile steps</h3><span class="subtle">${stepCount} of 15 slots</span></div>
+          <div class="section-heading"><h3>Profile steps</h3><span class="subtle">${stepCount} of ${MAX_PROFILE_STEPS} slots</span></div>
           <div class="step-list">${profile.steps.map((step,i)=>profileStep(step,i,stepCount,locked)).join('')}</div>
-          <div style="margin-top:13px">${btn('+ Add step','step-add','ghost',locked||stepCount>=15?'disabled':'')}</div>
+          <div style="margin-top:13px">${btn('+ Add step','step-add','ghost',locked||stepCount>=MAX_PROFILE_STEPS?'disabled':'')}</div>
           ${locked?'<p class="review-caption">Copy this profile to an available slot to edit it.</p>':
             formActions('Save profile')}
         </form>
@@ -153,13 +153,11 @@ function markProfileDraft() {
   if (form) updateDirty(form);
 }
 
-// Build the existing profile JSON contract with temperatures and all fifteen slots.
+// Build the profile JSON the controller expects: temperatures in its unit, and every step slot filled.
 function profilePayload(index, profile) {
-  // Convert a stored Celsius profile temperature into the controller's selected unit.
-  const display=value=>state.unit==='F'?value*1.8+32:value;
-  const steps=profile.steps.map(step=>({stepType:step.type,startTemp:display(step.start),
-    endTemp:display(step.end),sgTrigger:step.trigger,days:step.days}));
-  while (steps.length<15) steps.push({stepType:0,startTemp:0,endTemp:0,sgTrigger:0,days:0});
+  const steps=profile.steps.map(step=>({stepType:step.type,startTemp:tempToUnit(step.start),
+    endTemp:tempToUnit(step.end),sgTrigger:step.trigger,days:step.days}));
+  while (steps.length<MAX_PROFILE_STEPS) steps.push({stepType:0,startTemp:0,endTemp:0,sgTrigger:0,days:0});
   return {index,name:profile.name,steps};
 }
 
@@ -192,7 +190,7 @@ function copyProfile() {
 function editProfileStep(actionName,index) {
   if (state.profiles[state.selectedProfile].used) return;
   const profile=captureProfile(),steps=profile.steps;
-  if (actionName==='step-add' && steps.length<15) steps.push({type:1,start:19,end:19,days:1,trigger:0});
+  if (actionName==='step-add' && steps.length<MAX_PROFILE_STEPS) steps.push({type:1,start:19,end:19,days:1,trigger:0});
   if (actionName==='step-delete') steps.splice(index,1);
   if (actionName==='step-up'&&index>0) [steps[index-1],steps[index]]=[steps[index],steps[index-1]];
   if (actionName==='step-down'&&index<steps.length-1) [steps[index],steps[index+1]]=[steps[index+1],steps[index]];

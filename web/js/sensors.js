@@ -2,9 +2,16 @@
 // The sensors view for probes, Tilts and iSpindels.
 
 const fnOptions = [
-  [99,'Unassigned'],[2,'Beer temperature'],[3,'Ambient temperature'],[4,'Tilt probe'],
+  [UNASSIGNED,'Unassigned'],[FUNCTION_BEER_TEMP,'Beer temperature'],[3,'Ambient temperature'],[4,'Tilt probe'],
   [5,'iSpindel probe'],[6,'Air probe'],[7,'Control temperature']
 ];
+
+// Build a Tilt or iSpindel's status badge. Probes have no status to show.
+function sensorStatusBadge(kind,sensor) {
+  if (kind==='tilts') return badge(sensor.active?'Reading received':'Not detected',sensor.active?'good':'quiet');
+  if (kind==='ispindels') return badge(sensor.fresh?'Fresh':'No recent report',sensor.fresh?'good':'warn');
+  return '';
+}
 
 // Build a labelled sensor value that polling can update independently of its form.
 function sensorReading(label, key, value) {
@@ -16,27 +23,22 @@ function sensorsView() {
   const kind=state.sensorTab;
   const slots=state[kind];
   const tabs=[['probes','Temperature probes'],['tilts','Tilts'],['ispindels','iSpindels']];
-  const controls=`<div class="tabs" role="tablist" aria-label="Sensor type">${tabs.map(([key,label])=>`
-    <button role="tab" aria-selected="${kind===key}" class="${kind===key?'active':''}"
-      data-action="sensor-tab" data-value="${key}">${label}</button>`).join('')}</div>`;
+  const controls=tabBar('Sensor type','sensor-tab',tabs,kind);
   const cards=slots.map((s,i)=>{
     const name=s.name || (kind==='probes'?'Probe '+s.index:'Empty slot '+i);
     const key=kind+'.'+i;
     const formKind=kind==='probes'?'probe':kind==='tilts'?'tilt':'ispindel';
     const detail=kind==='probes'?s.address:kind==='tilts'?(s.isPro?'Tilt Pro':'Tilt'):'ID '+orDash(s.id);
-    const status=kind==='tilts'?badge(s.active?'Reading received':'Not detected',s.active?'good':'quiet'):
-      kind==='ispindels'?badge(s.fresh?'Fresh':'No recent report',s.fresh?'good':'warn'):'';
-    const sg=s.sg>0?(+s.sg).toFixed(4):'—';
-    const fnChoices=kind==='probes'?fnOptions:[[2,'Beer temperature'],[99,'Not used']];
+    const fnChoices=kind==='probes'?fnOptions:[[FUNCTION_BEER_TEMP,'Beer temperature'],[UNASSIGNED,'Not used']];
     const unitNote='The device reports its own gravity unit; it can reset this selection on its next report.';
     return `<article class="card panel">
       <div class="panel-header">
         <div><div class="slot-label">${esc(kind)} · ${i}</div><h2>${esc(name)}</h2><p>${esc(detail)}</p></div>
-        <span data-sensor-status="${key}">${status}</span>
+        <span data-sensor-status="${key}">${sensorStatusBadge(kind,s)}</span>
       </div>
       <div class="sensor-reading">
         ${sensorReading('Temperature',key+'.temp',formatTemp(s.temp)+' °'+state.unit)}
-        ${kind==='probes'?'':sensorReading('Specific gravity',key+'.sg',sg)}
+        ${kind==='probes'?'':sensorReading('Specific gravity',key+'.sg',formatGravity(s.sg))}
         ${kind==='ispindels'?sensorReading('Battery (V)',key+'.battery',toFinite(s.battery).toFixed(2)):''}
       </div>
       ${kind==='ispindels'?`<p class="review-caption" data-live="${key}.detail">${esc(spindelDetail(s))}</p>`:''}

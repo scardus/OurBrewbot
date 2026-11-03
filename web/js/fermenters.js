@@ -5,13 +5,13 @@
 function dashboardView() {
   const active=state.fermenters.filter(f => f.power).length;
   const alarms=state.fermenters.filter(f => f.alarmActive).length;
-  const running=state.fermenters.filter(f => f.running||f.paused).length;
+  const running=state.fermenters.filter(profileActive).length;
   const controlling=state.fermenters.some(f => f.power&&f.tempControl);
   const c=state.controller;
   const uptime=toFinite(c.Uptime)+Math.floor((Date.now()-(state.controllerReadAt||Date.now()))/60000);
   const uptimeText=Math.floor(uptime/1440)+'d '+Math.floor(uptime%1440/60)+'h '+uptime%60+'m';
   const overview=[
-    ['Active fermenters',active+' / 4',(4-active)+' powered off'],
+    ['Active fermenters',active+' / '+FERMENTER_COUNT,(FERMENTER_COUNT-active)+' powered off'],
     ['Temperature control',alarms?'Check alarms':controlling?'Enabled':'Off',alarms+' active alarms'],
     ['Running profiles',running,'Includes paused profiles'],
     ['Controller uptime',uptimeText,'WiFi signal '+orDash(c.RSSI)+' dBm']
@@ -40,7 +40,7 @@ function dashboardView() {
 function fermCard(f) {
   const cls=!f.power?'off':f.status==='Heating'?'heating':f.status==='Cooling'?'cooling':'holding';
   const profile=state.profiles[f.profile-1];
-  const running=f.running||f.paused;
+  const running=profileActive(f);
   const status=f.alarmActive?'Alarm · '+f.status:!f.power?'Powered off':f.status;
   const kind=f.alarmActive?'warn':!f.power?'quiet':f.status==='Heating'?'warm':f.status==='Cooling'?'':'good';
   return `<article class="card ferm-card ${cls}">
@@ -54,7 +54,7 @@ function fermCard(f) {
           <div class="reading-number primary">${formatTemp(f.beerTemp)}<small>°${state.unit}</small></div>
           <div class="reading-source">${esc(f.source)}</div></div>
         <div><div class="reading-label">Gravity</div>
-          <div class="reading-number">${f.sg>0?f.sg.toFixed(4):'—'}</div>
+          <div class="reading-number">${formatGravity(f.sg)}</div>
           <div class="reading-source">${esc(f.gravity)}</div></div>
         <div><div class="reading-label">Ambient</div>
           <div class="reading-number">${formatTemp(f.ambient)}<small>°${state.unit}</small></div>
@@ -82,7 +82,7 @@ function fermCard(f) {
 
 // Open a fermenter's settings drawer and restore any unsaved browser draft.
 function openFerm(id) {
-  const f=state.fermenters[id],profile=state.profiles[f.profile-1],running=f.running||f.paused;
+  const f=state.fermenters[id],profile=state.profiles[f.profile-1],running=profileActive(f);
   const profileChoices=[[0,'Standard temperature control'],...state.profiles.map((p,i)=>[i+1,p.name])];
   const gravityLimits='min="0.990" max="1.200" step="0.0001" required';
   const mainLabel=!running?'Start':f.paused?'Resume':'Pause';
@@ -159,9 +159,9 @@ function fermenterPayload(form,data,index) {
     ProfileNo:+data.profile,LiveTest:data.liveTest};
   // Config.h defines HTTP reporting at bits 0/1 and MQTT at bit 3.
   // Preserve any bits outside the three checkboxes instead of erasing them.
-  const reportingBits=1|2|8;
+  const reportingBits=REPORT_BREWERS|REPORT_BREWFATHER|REPORT_MQTT;
   body.BrewServices=(raw.BrewServices&~reportingBits)|
-    (data.brewers?1:0)|(data.brewfather?2:0)|(data.mqtt?8:0);
+    (data.brewers?REPORT_BREWERS:0)|(data.brewfather?REPORT_BREWFATHER:0)|(data.mqtt?REPORT_MQTT:0);
   // Match Config.h::checkTempBand() and the alarm bounds in WebAPI.cpp.
   const ceiling=tempToC(body.CeilingTemp),floor=tempToC(body.FloorTemp),hysteresis=deltaToC(body.Hysteresis);
   if (deltaToC(body.AlarmTolerance)<0 || deltaToC(body.AlarmTolerance)>10) {

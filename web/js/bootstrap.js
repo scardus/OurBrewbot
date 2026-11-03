@@ -88,8 +88,7 @@ window.addEventListener('beforeunload',event=>{
 // Load the newly selected route and stop the previous diagnostics console.
 window.addEventListener('hashchange',()=>{
   state.activeConsole=null;
-  const requested=location.hash.slice(1).split('/')[0];
-  state.route=navItems.some(n=>n[0]===requested)?requested:'dashboard';
+  state.route=currentRoute();
   if (state.ready) loadRoute();
   window.scrollTo(0,0);
 });
@@ -100,10 +99,12 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 // Schedule reading, log and console polling while the tab is visible and ready.
+// Logs are read quickly while the controller has more waiting, and more often with the drawer open.
+const READINGS_POLL_MS = 10000;
 setInterval(()=>{
   if (document.hidden || !state.ready) return;
   updateAge();
-  if (Date.now()-lastPoll>=10000) refreshVisible();
+  if (Date.now()-lastPoll>=READINGS_POLL_MS) refreshVisible();
   const delay=logMore?250:$('#log-content').hidden?3000:1000;
   if (Date.now()-lastLogPoll>=delay) pollLogs();
   pollConsole();

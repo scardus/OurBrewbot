@@ -1,10 +1,12 @@
 'use strict';
 // The controller log drawer.
 
-// Append a log entry while retaining at most two thousand entries in the browser.
+const MAX_LOG_LINES = 2000;
+
+// Append a log entry while retaining a limited number of entries in the browser.
 function addLog(text,level='info',timestamp='') {
   logLines.push([timestamp,level,text]);
-  if (logLines.length>2000) logLines.splice(0,logLines.length-2000);
+  if (logLines.length>MAX_LOG_LINES) logLines.splice(0,logLines.length-MAX_LOG_LINES);
 }
 
 // Apply log search and level filters, following new entries only when already at the end.
