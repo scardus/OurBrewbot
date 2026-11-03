@@ -106,7 +106,7 @@ const systemPanels={
         ${btn('Stop listening','console-stop','ghost')}
         ${btn('Clear','rf-clear','ghost')}
       </div>
-      <div class="console" id="rf-output">Receiver polling is stopped.</div>
+      <div class="console" id="rf-output" data-empty="${consoleMessage('rf')}"></div>
       <h3>Test a configured plug</h3>
       <div class="console-input">
         <select id="rf-plug" aria-label="Configured plug">${plugChoices}</select>
@@ -128,7 +128,7 @@ const systemPanels={
       <div class="command-buttons">
         ${commands.map(c=>btn(c,'ble-send','small secondary',`data-value="${c}"`)).join('')}
       </div>
-      <div class="console" id="ble-output">Console polling is stopped.</div>
+      <div class="console" id="ble-output" data-empty="${consoleMessage('ble')}"></div>
       <form id="ble-form" class="console-input">
         <input name="cmd" maxlength="64" required placeholder="Enter AT command…" aria-label="AT command">
         <button class="button" type="submit">Send</button>
@@ -256,11 +256,26 @@ async function viewFile(index) {
   $('#download-file').onclick=()=>download(file.name,text,'text/plain');
 }
 
+// The status a console shows until it has output. The stylesheet displays it from data-empty.
+function consoleMessage(kind) {
+  if (state.activeConsole===kind) return kind==='rf'?'Listening for RF codes…':'Waiting for replies…';
+  return kind==='rf'?'Receiver polling is stopped.':'Console polling is stopped.';
+}
+
+// Update the status of whichever console is on screen after polling starts or stops.
+function updateConsoleMessage() {
+  for (const kind of ['rf','ble']) {
+    const output=$('#'+kind+'-output');
+    if (output) output.dataset.empty=consoleMessage(kind);
+  }
+}
+
 // Validate and send an AT command, then select BLE console polling.
 async function sendBle(command) {
   if (!command || command.length>64) { toast('Enter an AT command of at most 64 characters.'); return; }
   await post('/ble/sniff/send',{cmd:command});
   state.activeConsole='ble';
+  updateConsoleMessage();
 }
 
 const MAX_CONSOLE_CHARS = 12000;
@@ -278,10 +293,10 @@ async function pollConsole() {
     if (!output) return;
     if (kind==='ble' && data.data) output.textContent+=data.data;
     if (kind==='rf' && data.received) {
-      output.textContent+='\nCode '+data.code+' ('+data.hex+') · '+data.bits+' bits · '+data.delay+' µs · '+
+      output.textContent+=(output.textContent?'\n':'')+'Code '+data.code+' ('+data.hex+') · '+data.bits+' bits · '+data.delay+' µs · '+
         'protocol '+data.protocol;
     }
     if (output.textContent.length>MAX_CONSOLE_CHARS) output.textContent=output.textContent.slice(-MAX_CONSOLE_CHARS);
-  } catch (error) { toast(error.message); state.activeConsole=null; }
+  } catch (error) { toast(error.message); state.activeConsole=null; updateConsoleMessage(); }
   finally { consoleBusy=false; lastConsolePoll=Date.now(); }
 }

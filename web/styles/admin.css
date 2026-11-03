@@ -1256,6 +1256,9 @@ input[type=checkbox] {
   white-space:pre-wrap;
   overflow-wrap:anywhere
 }
+.console:empty::before {
+  content:attr(data-empty)
+}
 .console-input {
   display:flex;
   gap:8px

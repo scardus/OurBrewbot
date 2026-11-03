@@ -506,6 +506,25 @@ test('a value finer than its step can be saved, but empty and out-of-range value
   assert.equal(run('fieldsAreValid(form)'),true);
 });
 
+test('a console says whether it is polling, and its first RF code starts on the first line',async()=>{
+  const {run,context}=ui();
+  const elements={'#rf-output':{dataset:{},textContent:''}};
+  context.document={addEventListener:()=>{},hidden:false,querySelector:selector=>elements[selector]||null};
+  bootstrapHandlers(context);
+  run("state.route='system'; state.systemTab='rf'; state.plugs=[];");
+  assert.match(run('systemPanels.rf()'),/id="rf-output" data-empty="Receiver polling is stopped\."><\/div>/);
+  context.target={dataset:{action:'console-start',value:'rf'}};
+  await run('handleAction(target)');
+  assert.equal(elements['#rf-output'].dataset.empty,'Listening for RF codes…');
+  context.fetch=async()=>({ok:true,status:200,headers:{},text:async()=>
+    '{"received":true,"code":1,"hex":"1","bits":24,"delay":410,"protocol":1}'});
+  await run('pollConsole()');
+  assert.match(elements['#rf-output'].textContent,/^Code 1 /);
+  context.target={dataset:{action:'console-stop'}};
+  await run('handleAction(target)');
+  assert.equal(elements['#rf-output'].dataset.empty,'Receiver polling is stopped.');
+});
+
 test('every form saves to its endpoint with the expected body and confirmation reads',async()=>{
   const emptySteps=Array.from({length:14},()=>({stepType:0,startTemp:0,endTemp:0,sgTrigger:0,days:0}));
   const cases=[
@@ -630,7 +649,7 @@ test('the shared action handler carries out every action',async()=>{
     const elements={};
     context.location={hash:''};
     context.document={addEventListener:()=>{},querySelectorAll:()=>[],querySelector:selector=>elements[selector]||=({
-      value:'0',textContent:'old',closed:false,clicked:false,innerHTML:'',
+      value:'0',textContent:'old',closed:false,clicked:false,innerHTML:'',dataset:{},
       close(){this.closed=true;},click(){this.clicked=true;}
     })};
     bootstrapHandlers(context);
