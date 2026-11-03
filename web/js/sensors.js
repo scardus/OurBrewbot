@@ -12,21 +12,21 @@ const trackerFunctions = [[FUNCTION_BEER_TEMP,'Beer temperature'],[UNASSIGNED,'N
 const sensorTypes = {
   probes: {
     tabLabel:'Temperature probes', formKind:'probe', functionLabel:'Function', functions:fnOptions,
-    hasGravity:false, clearable:false,
+    hasGravity:false, clearable:false, onePerFermenter:false,
     emptyName:s=>'Probe '+s.index,
     detail:s=>s.address,
     status:()=>''
   },
   tilts: {
     tabLabel:'Tilts', formKind:'tilt', functionLabel:'Temperature reading', functions:trackerFunctions,
-    hasGravity:true, clearable:true,
+    hasGravity:true, clearable:true, onePerFermenter:true,
     emptyName:(s,i)=>'Empty slot '+i,
     detail:s=>s.isPro?'Tilt Pro':'Tilt',
     status:s=>badge(s.active?'Reading received':'Not detected',s.active?'good':'quiet')
   },
   ispindels: {
     tabLabel:'iSpindels', formKind:'ispindel', functionLabel:'Temperature reading', functions:trackerFunctions,
-    hasGravity:true, clearable:true,
+    hasGravity:true, clearable:true, onePerFermenter:true,
     emptyName:(s,i)=>'Empty slot '+i,
     detail:s=>'ID '+orDash(s.id),
     status:s=>badge(s.fresh?'Fresh':'No recent report',s.fresh?'good':'warn')
@@ -46,8 +46,22 @@ function sensorsView() {
   return pageTitle('GOOD DATA, BETTER CONTROL','Sensors','Assign each sensor and fine-tune its readings.')+
     tabBar('Sensor type','sensor-tab',tabs,kind)+
     (kind==='tilts'?'<p class="notice info">Eight colours can be detected; up to four Tilts can be configured.</p>':'')+
+    sharedFermenterNotices(kind,slots)+
     (slots.length?`<div class="grid">${slots.map((sensor,i)=>sensorCard(kind,sensor,i)).join('')}</div>`:
       '<p class="empty-state">No detected or configured sensors returned by the controller.</p>');
+}
+
+// Warn about a fermenter that already has several Tilts or iSpindels. The firmware refuses new ones,
+// but an older version or an imported file can have saved them, and only one of them is used.
+function sharedFermenterNotices(kind,slots) {
+  const type=sensorTypes[kind];
+  if (!type.onePerFermenter) return '';
+  return state.fermenters.map(f=>{
+    const sharing=slots.filter(s=>+s.fermenter===f.id);
+    if (sharing.length<2) return '';
+    const names=sharing.map(s=>s.name || type.emptyName(s,s.index)).join(', ');
+    return `<p class="notice error">${esc(f.name)} has ${sharing.length} ${type.tabLabel}: ${esc(names)}. Only one is used, so unassign the others.</p>`;
+  }).join('');
 }
 
 // Build one sensor's readings and its settings form. Only iSpindels have a battery and a gravity unit.

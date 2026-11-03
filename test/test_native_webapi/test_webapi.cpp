@@ -2502,6 +2502,117 @@ static void test_tilt_post_allows_a_fifth_tilt_left_unassigned(void) {
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
 }
 
+static void test_tilt_post_refuses_a_fermenter_another_tilt_is_on(void) {
+  g_tilts[TILT_RED].colour    = TILT_RED;
+  g_tilts[TILT_RED].fermenter = 2;
+  postBody("{\"colour\":1,\"fermenter\":2,\"sgAdjust\":0.001}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Tilt Red is already on this fermenter"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_GREEN].colour);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[TILT_GREEN].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_tilts[TILT_GREEN].sgAdjust);
+}
+
+static void test_tilt_post_moves_a_tilt_to_a_free_fermenter(void) {
+  g_tilts[TILT_RED].colour    = TILT_RED;
+  g_tilts[TILT_RED].fermenter = 2;
+  postBody("{\"colour\":0,\"fermenter\":3}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(3, g_tilts[TILT_RED].fermenter);
+  // Its old fermenter is free for another Tilt
+  httpRespReset();
+  postBody("{\"colour\":1,\"fermenter\":2}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(2, g_tilts[TILT_GREEN].fermenter);
+}
+
+static void test_tilts_already_sharing_a_fermenter_can_still_be_edited(void) {
+  g_tilts[TILT_RED].colour      = TILT_RED;
+  g_tilts[TILT_RED].fermenter   = 2;
+  g_tilts[TILT_GREEN].colour    = TILT_GREEN;
+  g_tilts[TILT_GREEN].fermenter = 2;
+  postBody("{\"colour\":1,\"fermenter\":2,\"sgAdjust\":0.001}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_FLOAT(0.001f, g_tilts[TILT_GREEN].sgAdjust);
+}
+
+static void test_several_tilts_can_be_unassigned(void) {
+  g_tilts[TILT_RED].colour    = TILT_RED;
+  g_tilts[TILT_RED].fermenter = PROBE_UNASSIGNED;
+  g_tilts[TILT_RED].function  = PROBE_FN_BEER;
+  postBody("{\"colour\":1,\"function\":2,\"fermenter\":99}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+}
+
+static void test_a_tilt_and_an_ispindel_can_share_a_fermenter(void) {
+  // Tilt over iSpindel is a deliberate priority, not a clash
+  g_iSpindels[0].fermenter = 2;
+  postBody("{\"colour\":0,\"fermenter\":2}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  httpRespReset();
+  g_iSpindels[0].fermenter = PROBE_UNASSIGNED;
+  postBody("{\"index\":0,\"fermenter\":2}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+}
+
+static void test_ispindel_post_refuses_a_fermenter_another_ispindel_is_on(void) {
+  strlcpy(g_iSpindels[0].name, "Spindel A", sizeof(g_iSpindels[0].name));
+  g_iSpindels[0].fermenter   = 2;
+  g_iSpindels[1].fermenter   = PROBE_UNASSIGNED;
+  g_iSpindels[1].collectData = false;
+  g_iSpindels[1].sgAdjust    = 0.0f;
+  postBody("{\"index\":1,\"fermenter\":2,\"collectData\":true,\"sgAdjust\":0.001}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("iSpindel Spindel A is already on this fermenter"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[1].fermenter);
+  TEST_ASSERT_FALSE(g_iSpindels[1].collectData);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[1].sgAdjust);
+}
+
+static void test_ispindel_refusal_sends_a_worst_case_name_whole(void) {
+  // The longest name, and a quote that has to be escaped in the reply
+  strlcpy(g_iSpindels[0].name, "\"2345678901234567890123", sizeof(g_iSpindels[0].name));
+  TEST_ASSERT_EQUAL_UINT(23, strlen(g_iSpindels[0].name));
+  g_iSpindels[0].fermenter = 2;
+  g_iSpindels[1].fermenter = PROBE_UNASSIGNED;
+  postBody("{\"index\":1,\"fermenter\":2}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  JsonDocument doc;
+  respJson(doc);
+  TEST_ASSERT_EQUAL_STRING("error", doc["status"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("iSpindel \"2345678901234567890123 is already on this fermenter - unassign it first",
+                           doc["msg"].as<const char*>());
+}
+
+static void test_ispindels_already_sharing_a_fermenter_can_still_be_edited(void) {
+  g_iSpindels[0].fermenter = 2;
+  g_iSpindels[1].fermenter = 2;
+  postBody("{\"index\":1,\"fermenter\":2,\"sgAdjust\":0.001}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_FLOAT(0.001f, g_iSpindels[1].sgAdjust);
+}
+
+static void test_several_ispindels_can_be_unassigned(void) {
+  g_iSpindels[0].fermenter = PROBE_UNASSIGNED;
+  g_iSpindels[1].fermenter = 2;
+  postBody("{\"index\":1,\"fermenter\":99}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[1].fermenter);
+}
+
 static void test_ispindel_payload_converts_temp_adjust_as_a_span(void) {
   g_globalConfig.unit = UNIT_FAHRENHEIT;
   g_iSpindels[0].tempAdjust = 0.5f;
@@ -2980,6 +3091,15 @@ int main(int, char**) {
   RUN_TEST(test_tilt_post_refuses_a_fifth_set_up_tilt);
   RUN_TEST(test_tilt_post_still_edits_one_of_four_set_up_tilts);
   RUN_TEST(test_tilt_post_allows_a_fifth_tilt_left_unassigned);
+  RUN_TEST(test_tilt_post_refuses_a_fermenter_another_tilt_is_on);
+  RUN_TEST(test_tilt_post_moves_a_tilt_to_a_free_fermenter);
+  RUN_TEST(test_tilts_already_sharing_a_fermenter_can_still_be_edited);
+  RUN_TEST(test_several_tilts_can_be_unassigned);
+  RUN_TEST(test_a_tilt_and_an_ispindel_can_share_a_fermenter);
+  RUN_TEST(test_ispindel_post_refuses_a_fermenter_another_ispindel_is_on);
+  RUN_TEST(test_ispindel_refusal_sends_a_worst_case_name_whole);
+  RUN_TEST(test_ispindels_already_sharing_a_fermenter_can_still_be_edited);
+  RUN_TEST(test_several_ispindels_can_be_unassigned);
   RUN_TEST(test_ispindel_payload_converts_temp_adjust_as_a_span);
   RUN_TEST(test_ispindel_config_post_converts_temp_adjust_from_fahrenheit);
   RUN_TEST(test_celsius_mode_leaves_temp_adjust_untouched);

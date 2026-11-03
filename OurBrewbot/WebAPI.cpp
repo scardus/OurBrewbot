@@ -1026,6 +1026,31 @@ void handleiSpindels(ESP8266WebServer& server) {
 }
 
 // ============================================================
+// ONE TILT OR ISPINDEL PER FERMENTER
+// A fermenter only uses one of each, so a second one would be silently ignored.
+// Only a move onto a fermenter is refused: Tilts or iSpindels that already
+// share one (from an older version or an imported file) can still be edited.
+// ============================================================
+
+// The fermenter a POST asks for, or the current one if it names none or an invalid one
+static uint8_t requestedFermenter(JsonDocument& doc, uint8_t current) {
+  if (doc["fermenter"].isNull()) return current;
+  uint8_t v = doc["fermenter"];
+  return (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) ? v : current;
+}
+
+// sendErr() can't be used here: an iSpindel's name can hold JSON-special characters
+static void sendFermenterTaken(ESP8266WebServer& server, const char* type, const char* name) {
+  // "iSpindel " 9 + name 23 + the rest 49 + terminator 1
+  char msg[82];
+  snprintf_P(msg, sizeof(msg), PSTR("%s %s is already on this fermenter - unassign it first"), type, name);
+  JsonDocument doc;
+  doc["status"] = "error";
+  doc["msg"]    = msg;
+  sendJsonDoc(server, doc, 400);
+}
+
+// ============================================================
 // ISPINDEL CONFIG — POST /ispindel/config
 // Body: {"index":0,"collectData":true,"fermenter":0}
 // Clear: {"index":0,"_clear":true}
@@ -1059,8 +1084,19 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     return;
   }
 
+  // Checked first, so a refused save leaves the iSpindel as it was
+  uint8_t fermenter = requestedFermenter(doc, g_iSpindels[idx].fermenter);
+  if (fermenter != PROBE_UNASSIGNED && fermenter != g_iSpindels[idx].fermenter) {
+    for (int i = 0; i < MAX_ISPINDELS; i++) {
+      if (i != idx && g_iSpindels[i].fermenter == fermenter) {
+        sendFermenterTaken(server, "iSpindel", g_iSpindels[i].name);
+        return;
+      }
+    }
+  }
+
   if (!doc["collectData"].isNull()) g_iSpindels[idx].collectData = doc["collectData"];
-  if (!doc["fermenter"].isNull())   { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_iSpindels[idx].fermenter = v; }
+  g_iSpindels[idx].fermenter = fermenter;
   if (!doc["unit"].isNull())        g_iSpindels[idx].unit        = doc["unit"];
   if (!doc["function"].isNull())    { uint8_t v = doc["function"]; g_iSpindels[idx].function = (v == PROBE_FN_BEER) ? PROBE_FN_BEER : PROBE_UNASSIGNED; }
   if (!doc["tempAdjust"].isNull())  g_iSpindels[idx].tempAdjust  = toCelsiusTempDelta((float)doc["tempAdjust"]);
@@ -1844,7 +1880,7 @@ void handleTiltPost(ESP8266WebServer& server) {
   TiltConfig tilt = g_tilts[colour];
   tilt.colour = (uint8_t)colour;
   if (!doc["function"].isNull())   tilt.function   = doc["function"];
-  if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) tilt.fermenter = v; }
+  tilt.fermenter = requestedFermenter(doc, tilt.fermenter);
   if (!doc["tempAdjust"].isNull()) tilt.tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
   if (!doc["sgAdjust"].isNull())   tilt.sgAdjust   = doc["sgAdjust"];
 
@@ -1855,6 +1891,14 @@ void handleTiltPost(ESP8266WebServer& server) {
   if (newlySetUp && countSetUpTilts() >= MAX_TILT_SLOTS) {
     sendErr(server, 400, F("Only 4 Tilts can be set up - clear one first"));
     return;
+  }
+  if (tilt.fermenter != PROBE_UNASSIGNED && tilt.fermenter != g_tilts[colour].fermenter) {
+    for (int i = 0; i < MAX_TILTS; i++) {
+      if (i != colour && g_tilts[i].fermenter == tilt.fermenter) {
+        sendFermenterTaken(server, "Tilt", getTiltColourName(i));
+        return;
+      }
+    }
   }
   g_tilts[colour] = tilt;
   sendSaveResult(server, saveTiltConfig(), F("Tilt updated"));
