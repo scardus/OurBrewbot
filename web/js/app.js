@@ -63,7 +63,7 @@ function updateLiveReadings() {
   $$('[data-sensor-status]').forEach(node=>{
     const [kind,index]=node.dataset.sensorStatus.split('.'),sensor=state[kind]?.[+index];
     if (!sensor) return;
-    node.innerHTML=sensorStatusBadge(kind,sensor);
+    node.innerHTML=sensorTypes[kind].status(sensor);
   });
   $$('[data-live]').forEach(node=>{
     const [kind,index,name]=node.dataset.live.split('.');

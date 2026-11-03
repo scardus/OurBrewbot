@@ -6,12 +6,32 @@ const fnOptions = [
   [5,'iSpindel probe'],[6,'Air probe'],[7,'Control temperature']
 ];
 
-// Build a Tilt or iSpindel's status badge. Probes have no status to show.
-function sensorStatusBadge(kind,sensor) {
-  if (kind==='tilts') return badge(sensor.active?'Reading received':'Not detected',sensor.active?'good':'quiet');
-  if (kind==='ispindels') return badge(sensor.fresh?'Fresh':'No recent report',sensor.fresh?'good':'warn');
-  return '';
-}
+const trackerFunctions = [[FUNCTION_BEER_TEMP,'Beer temperature'],[UNASSIGNED,'Not used']];
+
+// What differs between the three sensor types. The keys match state.sensorTab.
+const sensorTypes = {
+  probes: {
+    tabLabel:'Temperature probes', formKind:'probe', functionLabel:'Function', functions:fnOptions,
+    hasGravity:false, clearable:false,
+    emptyName:s=>'Probe '+s.index,
+    detail:s=>s.address,
+    status:()=>''
+  },
+  tilts: {
+    tabLabel:'Tilts', formKind:'tilt', functionLabel:'Temperature reading', functions:trackerFunctions,
+    hasGravity:true, clearable:true,
+    emptyName:(s,i)=>'Empty slot '+i,
+    detail:s=>s.isPro?'Tilt Pro':'Tilt',
+    status:s=>badge(s.active?'Reading received':'Not detected',s.active?'good':'quiet')
+  },
+  ispindels: {
+    tabLabel:'iSpindels', formKind:'ispindel', functionLabel:'Temperature reading', functions:trackerFunctions,
+    hasGravity:true, clearable:true,
+    emptyName:(s,i)=>'Empty slot '+i,
+    detail:s=>'ID '+orDash(s.id),
+    status:s=>badge(s.fresh?'Fresh':'No recent report',s.fresh?'good':'warn')
+  }
+};
 
 // Build a labelled sensor value that polling can update independently of its form.
 function sensorReading(label, key, value) {
@@ -22,43 +42,48 @@ function sensorReading(label, key, value) {
 function sensorsView() {
   const kind=state.sensorTab;
   const slots=state[kind];
-  const tabs=[['probes','Temperature probes'],['tilts','Tilts'],['ispindels','iSpindels']];
-  const controls=tabBar('Sensor type','sensor-tab',tabs,kind);
-  const cards=slots.map((s,i)=>{
-    const name=s.name || (kind==='probes'?'Probe '+s.index:'Empty slot '+i);
-    const key=kind+'.'+i;
-    const formKind=kind==='probes'?'probe':kind==='tilts'?'tilt':'ispindel';
-    const detail=kind==='probes'?s.address:kind==='tilts'?(s.isPro?'Tilt Pro':'Tilt'):'ID '+orDash(s.id);
-    const fnChoices=kind==='probes'?fnOptions:[[FUNCTION_BEER_TEMP,'Beer temperature'],[UNASSIGNED,'Not used']];
-    const unitNote='The device reports its own gravity unit; it can reset this selection on its next report.';
-    return `<article class="card panel">
-      <div class="panel-header">
-        <div><div class="slot-label">${esc(kind)} · ${i}</div><h2>${esc(name)}</h2><p>${esc(detail)}</p></div>
-        <span data-sensor-status="${key}">${sensorStatusBadge(kind,s)}</span>
-      </div>
-      <div class="sensor-reading">
-        ${sensorReading('Temperature',key+'.temp',formatTemp(s.temp)+' °'+state.unit)}
-        ${kind==='probes'?'':sensorReading('Specific gravity',key+'.sg',formatGravity(s.sg))}
-        ${kind==='ispindels'?sensorReading('Battery (V)',key+'.battery',toFinite(s.battery).toFixed(2)):''}
-      </div>
-      ${kind==='ispindels'?`<p class="review-caption" data-live="${key}.detail">${esc(spindelDetail(s))}</p>`:''}
-      <form data-form="${formKind}-${i}">
-        <div class="fields">
-          ${select(kind==='probes'?'Function':'Temperature reading','fn',s.fn,fnChoices)}
-          ${select('Fermenter','fermenter',s.fermenter,fermOptions())}
-          ${kind==='ispindels'?select('Device gravity unit','unit',s.unit,[[0,'Specific gravity'],[1,'Plato']]):''}
-          ${field('Temperature adjustment (°'+state.unit+')','adjust',deltaToUnit(s.adjust),'number','step="0.1" required')}
-          ${kind==='probes'?'':field('Gravity adjustment','sgAdjust',s.sgAdjust,'number','step="0.0001" required')}
-        </div>
-        ${kind==='ispindels'&&s.gravityUnit?`<p class="review-caption">${unitNote}</p>`:''}
-        ${formActions('Save changes',kind==='probes'?'':btn('Clear slot','clear-sensor','ghost',`data-kind="${kind}" data-id="${i}"`))}
-      </form>
-    </article>`;
-  }).join('');
-  return pageTitle('GOOD DATA, BETTER CONTROL','Sensors','Assign each sensor and fine-tune its readings.')+controls+
+  const tabs=Object.entries(sensorTypes).map(([key,type])=>[key,type.tabLabel]);
+  return pageTitle('GOOD DATA, BETTER CONTROL','Sensors','Assign each sensor and fine-tune its readings.')+
+    tabBar('Sensor type','sensor-tab',tabs,kind)+
     (kind==='tilts'?'<p class="notice info">Eight colours can be detected; up to four Tilts can be configured.</p>':'')+
-    (slots.length?`<div class="grid">${cards}</div>`:
+    (slots.length?`<div class="grid">${slots.map((sensor,i)=>sensorCard(kind,sensor,i)).join('')}</div>`:
       '<p class="empty-state">No detected or configured sensors returned by the controller.</p>');
+}
+
+// Build one sensor's readings and its settings form. Only iSpindels have a battery and a gravity unit.
+function sensorCard(kind,s,i) {
+  const type=sensorTypes[kind];
+  const isSpindel=kind==='ispindels';
+  const key=kind+'.'+i;
+  const clearButton=type.clearable?btn('Clear slot','clear-sensor','ghost',`data-kind="${kind}" data-id="${i}"`):'';
+  const unitNote='The device reports its own gravity unit; it can reset this selection on its next report.';
+  return `<article class="card panel">
+    <div class="panel-header">
+      <div>
+        <div class="slot-label">${esc(kind)} · ${i}</div>
+        <h2>${esc(s.name || type.emptyName(s,i))}</h2>
+        <p>${esc(type.detail(s))}</p>
+      </div>
+      <span data-sensor-status="${key}">${type.status(s)}</span>
+    </div>
+    <div class="sensor-reading">
+      ${sensorReading('Temperature',key+'.temp',formatTemp(s.temp)+' °'+state.unit)}
+      ${type.hasGravity?sensorReading('Specific gravity',key+'.sg',formatGravity(s.sg)):''}
+      ${isSpindel?sensorReading('Battery (V)',key+'.battery',toFinite(s.battery).toFixed(2)):''}
+    </div>
+    ${isSpindel?`<p class="review-caption" data-live="${key}.detail">${esc(spindelDetail(s))}</p>`:''}
+    <form data-form="${type.formKind}-${i}">
+      <div class="fields">
+        ${select(type.functionLabel,'fn',s.fn,type.functions)}
+        ${select('Fermenter','fermenter',s.fermenter,fermOptions())}
+        ${isSpindel?select('Device gravity unit','unit',s.unit,[[0,'Specific gravity'],[1,'Plato']]):''}
+        ${field('Temperature adjustment (°'+state.unit+')','adjust',deltaToUnit(s.adjust),'number','step="0.1" required')}
+        ${type.hasGravity?field('Gravity adjustment','sgAdjust',s.sgAdjust,'number','step="0.0001" required'):''}
+      </div>
+      ${isSpindel&&s.gravityUnit?`<p class="review-caption">${unitNote}</p>`:''}
+      ${formActions('Save changes',clearButton)}
+    </form>
+  </article>`;
 }
 
 // Summarize an iSpindel's extra readings and the age of its last report.
