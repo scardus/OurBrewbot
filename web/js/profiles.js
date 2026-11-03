@@ -1,23 +1,34 @@
 'use strict';
 // The profiles view, the profile editor and its drafts.
 
-const stepNames=[
-  'Temperature over time','Time at temperature','Free rise','Specific gravity','Attenuation',
-  'Temperature reached','Gravity reached','Attenuation reached','Time and gravity','Time and attenuation'
-];
-
-// Completion rules from Profile.cpp.
-const stepHelp=[
-  'Ramp from Start to End over Days. Advance after Days and when temperature reaches End within the fermenter control band.',
-  'Ramp from Start to End over Days. Advance after Days; reaching End is not a completion condition.',
-  'Use Start and End as the lower and upper limits. The controller widens a narrow band to twice the fermenter hysteresis. Advance after Days.',
-  'Hold End. Advance after Minimum days when valid gravity is at or below the target.',
-  'Hold End. Advance after Minimum days when attenuation is at or above the target percentage.',
-  'Hold End. Advance when temperature reaches End within the fermenter control band, without a time condition.',
-  'Hold End. Advance when valid gravity is at or below the target, without a time condition.',
-  'Hold End. Advance when attenuation is at or above the target percentage, without a time condition.',
-  'Ramp from Start to End over Days. Advance after Days when valid gravity is at or below the target.',
-  'Ramp from Start to End over Days. Advance after Days when attenuation is at or above the target percentage.'
+// The firmware's step types, in step-type number order. The rules come from Profile.cpp:
+// usesStart: the step ramps or bands from Start. Without it, the step holds End and ignores Start.
+// usesDays:  the step has a time condition, in Days.
+// target:    the reading that can complete the step: 'gravity', 'attenuation' or null.
+// line:      how the preview draws it: 'solid' timed, 'dashed' condition-dependent, or a free-rise 'band'.
+const stepTypes=[
+  {name:'Temperature over time',usesStart:true,usesDays:true,target:null,line:'dashed',
+    help:'Ramp from Start to End over Days. Advance after Days and when temperature reaches End '+
+      'within the fermenter control band.'},
+  {name:'Time at temperature',usesStart:true,usesDays:true,target:null,line:'solid',
+    help:'Ramp from Start to End over Days. Advance after Days; reaching End is not a completion condition.'},
+  {name:'Free rise',usesStart:true,usesDays:true,target:null,line:'band',
+    help:'Use Start and End as the lower and upper limits. The controller widens a narrow band '+
+      'to twice the fermenter hysteresis. Advance after Days.'},
+  {name:'Specific gravity',usesStart:false,usesDays:true,target:'gravity',line:'dashed',
+    help:'Hold End. Advance after Minimum days when valid gravity is at or below the target.'},
+  {name:'Attenuation',usesStart:false,usesDays:true,target:'attenuation',line:'dashed',
+    help:'Hold End. Advance after Minimum days when attenuation is at or above the target percentage.'},
+  {name:'Temperature reached',usesStart:false,usesDays:false,target:null,line:'dashed',
+    help:'Hold End. Advance when temperature reaches End within the fermenter control band, without a time condition.'},
+  {name:'Gravity reached',usesStart:false,usesDays:false,target:'gravity',line:'dashed',
+    help:'Hold End. Advance when valid gravity is at or below the target, without a time condition.'},
+  {name:'Attenuation reached',usesStart:false,usesDays:false,target:'attenuation',line:'dashed',
+    help:'Hold End. Advance when attenuation is at or above the target percentage, without a time condition.'},
+  {name:'Time and gravity',usesStart:true,usesDays:true,target:'gravity',line:'dashed',
+    help:'Ramp from Start to End over Days. Advance after Days when valid gravity is at or below the target.'},
+  {name:'Time and attenuation',usesStart:true,usesDays:true,target:'attenuation',line:'dashed',
+    help:'Ramp from Start to End over Days. Advance after Days when attenuation is at or above the target percentage.'}
 ];
 
 // Build the profile selector and selected draft editor, locking profiles that are in use.
@@ -58,20 +69,18 @@ function profilesView() {
 
 // Build the fields, controls and help text relevant to one profile step type.
 function profileStep(step,i,count,locked) {
-  const fields=['sed','sed','sed','egd','egd','e','eg','eg','segd','segd'][step.type];
-  const condition=fields.includes('g');
-  const attenuation=[4,7,9].includes(step.type);
+  const type=stepTypes[step.type];
   const disabled=locked?'disabled':'';
-  const startDisabled=locked||!fields.includes('s')?'disabled':'';
-  const limitLabel=condition?(attenuation?'Attenuation %':'Gravity target'):'Days';
-  const limitName=(condition?'trigger-':'days-')+i;
-  const limitValue=condition?step.trigger:step.days;
+  const startDisabled=locked||!type.usesStart?'disabled':'';
+  const targetLabel=type.target==='attenuation'?'Attenuation %':'Gravity target';
   return `<div class="step-row"><span class="step-index">${String(i+1).padStart(2,'0')}</span>
-    ${select('Step type','type-'+i,step.type,stepNames.map((name,value)=>[value,name]),disabled)}
+    ${select('Step type','type-'+i,step.type,stepTypes.map(({name},value)=>[value,name]),disabled)}
     ${field('Start °'+state.unit,'start-'+i,formatTemp(step.start),'number',`step="0.1" required ${startDisabled}`)}
     ${field('End °'+state.unit,'end-'+i,formatTemp(step.end),'number',`step="0.1" required ${disabled}`)}
-    ${fields.includes('d')||condition?
-      field(limitLabel,limitName,limitValue,'number',`step="any" min="0" required ${disabled}`):''}
+    ${type.target?
+      field(targetLabel,'trigger-'+i,step.trigger,'number',`step="any" min="0" required ${disabled}`):''}
+    ${!type.target&&type.usesDays?
+      field('Days','days-'+i,step.days,'number',`step="any" min="0" required ${disabled}`):''}
     <div class="step-buttons">
       <button type="button" class="icon-button" data-action="step-up" data-id="${i}"
         aria-label="Move step ${i+1} up" ${locked||i===0?'disabled':''}>↑</button>
@@ -80,20 +89,18 @@ function profileStep(step,i,count,locked) {
       <button type="button" class="icon-button" data-action="step-delete" data-id="${i}"
         aria-label="Delete step ${i+1}" ${disabled}>×</button>
     </div>
-    ${condition&&fields.includes('d')?
+    ${type.target&&type.usesDays?
       field('Minimum days','days-'+i,step.days,'number',`min="0" step="any" required ${disabled}`):''}
-    <details class="step-help"><summary>Step behaviour</summary><p>${esc(stepHelp[step.type])}</p></details>
+    <details class="step-help"><summary>Step behaviour</summary><p>${esc(type.help)}</p></details>
   </div>`;
 }
 
 // Draw the profile's temperature sequence, including held steps and free-rise bands.
 function profilePlot(profile) {
   if (!profile.steps.length) return '<p class="empty-state">Add a step to preview the profile.</p>';
-  // Profile.cpp::stepRamps() uses Start only for types 0, 1, 8 and 9.
-  // Free Rise uses a band; every other type holds End, ignoring stale Start.
   const segments=profile.steps.map(step=>({
-    type:step.type,end:step.end,
-    start:[0,1,2,8,9].includes(step.type)?step.start:step.end
+    line:stepTypes[step.type].line,end:step.end,
+    start:stepTypes[step.type].usesStart?step.start:step.end
   }));
   const values=segments.flatMap(segment=>[segment.start,segment.end]);
   const low=Math.min(...values)-3,high=Math.max(...values)+3;
@@ -108,11 +115,11 @@ function profilePlot(profile) {
         <text x="4" y="${y(v)+3}" fill="#7e8da2" font-size="9">${formatTemp(v)}°</text>`;
     }).join('')}
     ${segments.map((segment,i)=>`
-      ${segment.type===2?`<rect x="${40+i*width}" y="${y(Math.max(segment.start,segment.end))}"
+      ${segment.line==='band'?`<rect x="${40+i*width}" y="${y(Math.max(segment.start,segment.end))}"
         width="${width-4}" height="${Math.max(1,Math.abs(y(segment.start)-y(segment.end)))}"
         fill="#ed7182" fill-opacity="0.25" stroke="#ed7182"/>`:
         `<line x1="${40+i*width}" x2="${40+(i+1)*width-4}" y1="${y(segment.start)}" y2="${y(segment.end)}"
-          stroke="#ed7182" stroke-width="2.5" ${[1].includes(segment.type)?'':'stroke-dasharray="5 4"'}/>
+          stroke="#ed7182" stroke-width="2.5" ${segment.line==='solid'?'':'stroke-dasharray="5 4"'}/>
         <circle cx="${40+i*width}" cy="${y(segment.start)}" r="3" fill="#ed7182"/>`}
       <text x="${40+i*width+width/2}" y="116" fill="#8d9cb1" font-size="9"
         text-anchor="middle">Step ${i+1}</text>`).join('')}

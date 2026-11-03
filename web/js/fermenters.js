@@ -68,7 +68,7 @@ function fermCard(f) {
         <div class="segments">${profile.steps.map((s,i)=>
           `<span class="${running?(i<f.step?'done':i===f.step?'current':''):''}"></span>`).join('')}</div>
         <div class="profile-caption">
-          <span>${running?esc(stepNames[profile.steps[f.step]?.type]||'Profile step'):
+          <span>${running?esc(stepTypes[profile.steps[f.step]?.type]?.name||'Profile step'):
             'Start from fermenter settings'}</span>
           <span>${running?'Hour '+f.hour+' in this step':''}</span>
         </div>`:
