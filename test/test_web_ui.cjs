@@ -420,3 +420,191 @@ test('a lost reboot reply does not roll back successfully imported files',async(
   assert.deepEqual(JSON.parse(run('JSON.stringify(calls)')),['/fs/save?name=%2FjsonGlobal.txt','/reboot']);
   assert.equal(run('saving'),false);
 });
+
+// Send one form through the real save flow and report what reached the controller.
+async function saveThrough(key,fields,setup='') {
+  const {run,context}=ui();
+  const inputs=Object.entries(fields).map(([name,value])=>
+    typeof value==='boolean'?{name,checked:value,type:'checkbox'}:{name,value,type:'text'});
+  const form={dataset:{form:key,dirty:'true',unit:'C'},reportValidity:()=>true,
+    querySelectorAll:selector=>selector==='[name]'?inputs:[],querySelector:()=>({disabled:false})};
+  context.form=form;
+  context.document={querySelectorAll:()=>[],querySelector:selector=>
+    selector.startsWith('form')?null:{close:()=>{}}};
+  run(`posts=[]; reads=[]; render=()=>{}; saveError=(form,message)=>{form.error=message;};
+    fetchData=async name=>{reads.push(name);};
+    request=async(path,options)=>{posts.push({path,body:JSON.parse(options.body)}); return {data:{status:'ok',msg:'Saved'}};};`);
+  run(setup);
+  // The form's submit handler reports a rejected save in the same way.
+  await run('saveForm(form).catch(error=>saveError(form,error.message))');
+  return {posts:JSON.parse(run('JSON.stringify(posts)')),reads:JSON.parse(run('JSON.stringify(reads)')),error:form.error};
+}
+
+const fermenterFields={name:'Vessel',beer:'Beer',yeast:'Yeast',og:'1.05',tg:'1.01',floor:'18',ceiling:'20',hysteresis:'0.5',
+  alarm:'2',delay:'10',power:true,tempControl:false,profile:'1',liveTest:false,brewers:true,brewfather:false,mqtt:true};
+const fermenterSetup="state.fermenters=[{id:0,raw:{BrewServices:4}}];";
+const profileSetup=`state.profiles=[{name:'Old',used:'',steps:[]}];
+  profileDrafts.set(0,{name:'New',steps:[{type:1,start:20,end:21,trigger:0,days:2}]});`;
+const plugSetup="state.plugs=[{index:7}];";
+const plugFields={role:'hot',fermenter:'1',manufacturer:'Make',model:'Model',onCode:'11',offCode:'22',protocol:'1',bits:'24',delay:'300'};
+const mqttFields={enabled:true,host:'broker',port:'1883',username:'user',password:'',baseTopic:'topic',
+  haDiscovery:true,allowControl:false,logEnabled:false,clearPassword:false};
+const serviceFields={enabled:true,serviceId:'key',deviceName:'device'};
+const syslogFields={enabled:true,host:'server',port:'514',facility:'16',level:'6'};
+
+test('every form saves to its endpoint with the expected body and confirmation reads',async()=>{
+  const emptySteps=Array.from({length:14},()=>({stepType:0,startTemp:0,endTemp:0,sgTrigger:0,days:0}));
+  const cases=[
+    {key:'ferm-0',fields:fermenterFields,setup:fermenterSetup,path:'/fermenter',reads:['controller','fermenters'],
+      body:{Fermenter:0,FermenterName:'Vessel',BeerName:'Beer',YeastName:'Yeast',OG:1.05,TG:1.01,CeilingTemp:20,FloorTemp:18,
+        Hysteresis:0.5,AlarmTolerance:2,CompressorDelay:10,Power:true,TempControl:false,ProfileNo:1,LiveTest:false,BrewServices:13}},
+    {key:'profile-0',fields:{name:'New'},setup:profileSetup,path:'/profile',reads:['controller','fermenters','profiles'],
+      body:{index:0,name:'New',steps:[{stepType:1,startTemp:20,endTemp:21,sgTrigger:0,days:2},...emptySteps]}},
+    {key:'probe-0',fields:{fn:'2',fermenter:'1',adjust:'0.5'},setup:'state.probes=[{index:3,tempAdjust:0}];',path:'/probes',
+      reads:['controller','probes'],body:{function:2,fermenter:1,tempAdjust:0.5,index:3}},
+    {key:'tilt-2',fields:{fn:'2',fermenter:'1',adjust:'0.5',sgAdjust:'0.001'},setup:'state.tilts=[{},{},{tempAdjust:0,sgAdjust:0}];',
+      path:'/tilt',reads:['controller','tilts'],body:{function:2,fermenter:1,tempAdjust:0.5,colour:2,sgAdjust:0.001}},
+    {key:'ispindel-0',fields:{fn:'99',fermenter:'0',unit:'1',adjust:'0.5',sgAdjust:'0.001'},setup:'state.ispindels=[{index:4,tempAdjust:0,sgAdjust:0}];',
+      path:'/ispindel/config',reads:['controller','ispindels'],body:{function:99,fermenter:0,tempAdjust:0.5,index:4,sgAdjust:0.001,unit:1}},
+    {key:'plug-0',fields:plugFields,setup:plugSetup,path:'/smartplug',reads:['smartplugs'],
+      body:{index:7,manufacturer:'Make',model:'Model',onCode:11,offCode:22,protocol:1,bits:24,delay:300,function:2,fermenter:1}},
+    {key:'service-1',fields:serviceFields,path:'/brewservices',reads:['brewservices'],
+      body:{index:1,enabled:true,serviceId:'key',deviceName:'device'}},
+    {key:'mqtt',fields:mqttFields,path:'/mqtt',reads:['mqtt'],
+      body:{enabled:true,host:'broker',port:1883,username:'user',baseTopic:'topic',haDiscovery:true,allowControl:false,logEnabled:false}},
+    {key:'global',fields:{unit:'C',resolution:'11',alarm:'60',mdns:true,updates:false,crashes:true},path:'/controller',reads:['controller'],
+      body:{Unit:1,Resolution:11,AlarmDwellSec:60,MdnsEnabled:true,UpdateCheck:false,CrashReports:true}},
+    {key:'debug-mode',fields:{enabled:true},path:'/debug',reads:['debug'],body:{DebugMode:true}},
+    {key:'syslog',fields:syslogFields,path:'/syslog',reads:['syslog'],
+      body:{enabled:true,host:'server',port:514,facility:16,minLevel:6}}
+  ];
+  for (const {key,fields,setup,path:endpoint,reads,body} of cases) {
+    const result=await saveThrough(key,fields,setup);
+    assert.equal(result.error,'Saving…',key);
+    assert.deepEqual(result.posts,[{path:endpoint,body}],key);
+    assert.deepEqual(result.reads,reads,key);
+  }
+});
+
+test('text longer than the firmware buffer is refused before anything is sent',async()=>{
+  const cases=[
+    ['ferm-0','name',fermenterFields,fermenterSetup,31],['ferm-0','beer',fermenterFields,fermenterSetup,31],
+    ['ferm-0','yeast',fermenterFields,fermenterSetup,31],['profile-0','name',{name:'New'},profileSetup,31],
+    ['plug-0','manufacturer',plugFields,plugSetup,23],['plug-0','model',plugFields,plugSetup,23],
+    ['service-0','serviceId',serviceFields,'',47],['service-0','deviceName',serviceFields,'',31],
+    ['mqtt','host',mqttFields,'',63],['mqtt','username',mqttFields,'',31],['mqtt','password',mqttFields,'',47],
+    ['mqtt','baseTopic',mqttFields,'',31],['syslog','host',syslogFields,'',63]
+  ];
+  for (const [key,name,fields,setup,limit] of cases) {
+    const accepted=await saveThrough(key,{...fields,[name]:'x'.repeat(limit)},setup);
+    assert.equal(accepted.posts.length,1,key+' '+name+' at the limit');
+    const refused=await saveThrough(key,{...fields,[name]:'x'.repeat(limit+1)},setup);
+    assert.match(refused.error,new RegExp('limit of '+limit+' UTF-8 bytes'),key+' '+name);
+    assert.equal(refused.posts.length,0,key+' '+name);
+  }
+  // The limit counts bytes, not characters: two bytes each, so 32 bytes in total.
+  const multibyte=await saveThrough('mqtt',{...mqttFields,username:'é'.repeat(16)});
+  assert.match(multibyte.error,/limit of 31/);
+});
+
+test('invalid saves show their message and send nothing',async()=>{
+  const cases=[
+    ['ferm-0',{...fermenterFields,floor:'30'},fermenterSetup,/Temperature band/],
+    ['ferm-0',{...fermenterFields,alarm:'11'},fermenterSetup,/Alarm tolerance/],
+    ['plug-0',{...plugFields,fermenter:'99'},plugSetup,/Choose a fermenter/],
+    ['plug-0',{...plugFields,delay:'65000'},plugSetup,/exceed the firmware limit/],
+    ['mqtt',{...mqttFields,baseTopic:'bad/#'},'',/Base topic/],
+    ['global',{unit:'F',resolution:'11',alarm:'60',mdns:true,updates:true,crashes:true},"drafts.set('a',{}); drafts.set('b',{});",/other drafts/],
+    ['profile-0',{name:'New'},profileSetup+"state.profiles[0].used='Vessel';",/running/]
+  ];
+  for (const [key,fields,setup,message] of cases) {
+    const result=await saveThrough(key,fields,setup);
+    assert.match(result.error,message);
+    assert.equal(result.posts.length,0,key);
+  }
+});
+
+test('refreshing clears an uncertain save only when that form was reread',async()=>{
+  const endpoints={'ferm-0':'fermenters','profile-0':'profiles','probe-0':'probes','tilt-0':'tilts','ispindel-0':'ispindels',
+    'plug-0':'smartplugs','service-0':'brewservices',global:'controller',mqtt:'mqtt',syslog:'syslog','debug-mode':'debug'};
+  for (const [key,endpoint] of Object.entries(endpoints)) {
+    const {run,context}=ui();
+    context.document={querySelectorAll:()=>[]};
+    run(`loadRoute=async()=>true; unknownForms.add('${key}');`);
+    run("routeData=()=>['nothing-relevant'];");
+    await run('refreshForms()');
+    assert.equal(run(`unknownForms.has('${key}')`),true,key);
+    run(`routeData=()=>['${endpoint}'];`);
+    await run('refreshForms()');
+    assert.equal(run(`unknownForms.has('${key}')`),false,key);
+  }
+});
+
+// Each action, and how to tell that the shared handler really carried it out.
+const actionEffects={
+  'edit-ferm':{called:'openFerm'},'copy-profile':{called:'chooseProfileCopy'},'copy-confirm':{called:'copyProfile'},
+  'step-add':{called:'editProfileStep'},'step-up':{called:'editProfileStep'},'step-down':{called:'editProfileStep'},
+  'step-delete':{called:'editProfileStep'},'profile-control':{called:'controlProfile'},'clear-sensor':{called:'clearSensor'},
+  'plug-preset':{called:'applyPreset'},'plug-test':{called:'testPlug'},'rf-test':{called:'testPlug'},
+  'discard-form':{called:'discardForm'},refresh:{called:'refreshForms'},reconnect:{called:'refreshForms'},
+  export:{called:'exportConfig'},'file-view':{called:'viewFile'},'ble-send':{called:'sendBle'},debug:{called:'showDebug'},
+  'test-service':{posted:'/brewservices/test'},'test-mqtt':{posted:'/mqtt/test'},discover:{posted:'/mqtt/discover'},
+  'update-check':{posted:'/update/check'},
+  pause:{state:'state.paused',equals:true},'select-profile':{state:'state.profile',equals:1},
+  'sensor-tab':{state:'state.sensorTab',equals:'chosen'},'system-tab':{state:'state.systemTab',equals:'chosen'},
+  'open-rf':{state:'state.systemTab',equals:'rf'},'console-start':{state:'state.console',equals:'chosen'},
+  'console-stop':{state:'state.console',equals:null},
+  'close-editor':{closed:'#editor'},'close-modal':{closed:'#modal'},import:{clicked:'#import-file'},
+  'rf-clear':{emptied:'#rf-output'},'ble-clear':{emptied:'#ble-output'}
+};
+
+test('every action a view can render is handled, and every handler is still used',()=>{
+  const root=path.join(__dirname,'../web');
+  const sources=[...fs.readdirSync(path.join(root,'js')).map(name=>path.join(root,'js',name)),path.join(root,'pages/admin.html')]
+    .map(file=>fs.readFileSync(file,'utf8')).join('\n');
+  const rendered=new Set();
+  for (const match of sources.matchAll(/data-action="([a-z-]+)"/g)) rendered.add(match[1]);
+  for (const match of sources.matchAll(/\bbtn\(.*?,'([a-z-]+)'/g)) rendered.add(match[1]);
+  assert.deepEqual([...rendered].sort(),Object.keys(actionEffects).sort());
+});
+
+test('the shared action handler carries out every action',async()=>{
+  for (const [name,effect] of Object.entries(actionEffects)) {
+    const {run,context}=ui();
+    const elements={};
+    context.location={hash:''};
+    context.document={addEventListener:()=>{},querySelectorAll:()=>[],querySelector:selector=>elements[selector]||=({
+      value:'0',textContent:'old',closed:false,clicked:false,innerHTML:'',
+      close(){this.closed=true;},click(){this.clicked=true;}
+    })};
+    bootstrapHandlers(context);
+    context.target={dataset:{action:name,id:'1',value:'chosen'},closest:()=>({})};
+    run(`state.console='old'; state.plugs=[{index:0},{index:1}]; state.controller={}; calls=[]; posts=[];
+      loadRoute=async()=>{}; render=()=>{}; updateResult=()=>'';
+      for (const name of ['openFerm','chooseProfileCopy','copyProfile','editProfileStep','controlProfile','clearSensor','applyPreset',
+        'testPlug','discardForm','refreshForms','exportConfig','viewFile','sendBle','showDebug']) {
+        globalThis[name]=()=>{calls.push(name);};
+      }
+      request=async path=>{posts.push(path); return {data:{status:'ok',msg:'Done'}};};`);
+    await run('action(target)');
+    if (effect.called) assert.deepEqual(JSON.parse(run('JSON.stringify(calls)')),[effect.called],name);
+    if (effect.posted) assert.deepEqual(JSON.parse(run('JSON.stringify(posts)')),[effect.posted],name);
+    if ('state' in effect) assert.equal(run(effect.state),effect.equals,name);
+    if (effect.closed) assert.equal(elements[effect.closed].closed,true,name);
+    if (effect.clicked) assert.equal(elements[effect.clicked].clicked,true,name);
+    if (effect.emptied) assert.equal(elements[effect.emptied].textContent,'',name);
+  }
+});
+
+test('while saving, only the close actions still respond',async()=>{
+  for (const name of Object.keys(actionEffects)) {
+    const {run,context}=ui();
+    const closed=[];
+    context.document={querySelector:selector=>({close:()=>closed.push(selector)})};
+    context.target={dataset:{action:name},closest:()=>({})};
+    run('saving=true; state.paused=false; openFerm=()=>{throw new Error("ran while saving");};');
+    await run('action(target)');
+    assert.equal(run('state.paused'),false,name);
+    assert.equal(closed.length>0,name==='close-modal'||name==='close-editor',name);
+  }
+});
