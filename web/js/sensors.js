@@ -38,13 +38,16 @@ function sensorReading(label, key, value) {
   return `<div><span data-live="${key}">${esc(value)}</span><small>${esc(label)}</small></div>`;
 }
 
+// The Sensors page tabs: one per sensor type, then the local pressure sensor.
+const sensorTabs = () => [...Object.entries(sensorTypes).map(([key,type])=>[key,type.tabLabel]),['pressure','Pressure']];
+
 // Build the selected sensor tab with current readings, assignments and calibration forms.
 function sensorsView() {
   const kind=state.sensorTab;
+  if (kind==='pressure') return pressureView();
   const slots=state[kind];
-  const tabs=Object.entries(sensorTypes).map(([key,type])=>[key,type.tabLabel]);
   return pageTitle('GOOD DATA, BETTER CONTROL','Sensors','Assign each sensor and fine-tune its readings.')+
-    tabBar('Sensor type','sensor-tab',tabs,kind)+
+    tabBar('Sensor type','sensor-tab',sensorTabs(),kind)+
     (kind==='tilts'?'<p class="notice info">Eight colours can be detected; up to four Tilts can be configured.</p>':'')+
     sharedFermenterNotices(kind,slots)+
     (slots.length?`<div class="grid">${slots.map((sensor,i)=>sensorCard(kind,sensor,i)).join('')}</div>`:
@@ -130,4 +133,117 @@ function clearSensor(kind,index) {
     await fetchData(tilt?'tilts':'ispindels');
     render();
   });
+}
+
+// Pressure has one local input and a capture workflow rather than sensor slots.
+// Each reading state has a name and a badge style, in the order of
+// PressureReadingState in the firmware's PressureCalc.h, whose number the API
+// sends as the state.
+const pressureStates = [
+  {name:'Unavailable', badge:'quiet'},
+  {name:'Below range', badge:'warn'},
+  {name:'Calibrated', badge:'good'},
+  {name:'Estimate', badge:''},
+  {name:'ADC limit', badge:'warn'}
+];
+const describePressureState = status => pressureStates[status]||pressureStates[0];
+const formatPressure = psi => psi==null?'—':Number(psi).toFixed(1);
+
+// The sensor card's status badge: its reading state, or that no fermenter has it.
+function pressureBadge(p) {
+  if (p.fermenter==null || +p.fermenter===UNASSIGNED) return badge('Not assigned','quiet');
+  const described=describePressureState(p.state);
+  return badge(described.name,described.badge);
+}
+
+// The calibration card's status badge: whether a capture is running or failed.
+function pressureCaptureBadge(p) {
+  if (p.failed) return badge('Capture failed','warn');
+  if (p.active) return badge('Capturing '+p.samples+' / '+p.samplesNeeded);
+  return badge('Ready','quiet');
+}
+
+// The calibration points as text, such as "0 PSI = 160, 15 PSI = 250".
+const pressurePoints = points => (points||[]).map(x=>x.psi+' PSI = '+x.raw).join(', ')||'None';
+
+// Laid out like the other sensor tabs: the sensor's card, then its calibration card.
+function pressureView() {
+  const p=state.pressure;
+  return pageTitle('GOOD DATA, BETTER CONTROL','Sensors','Assign each sensor and fine-tune its readings.')+
+    tabBar('Sensor type','sensor-tab',sensorTabs(),'pressure')+
+    `<p class="notice info">Calibrate with a reference gauge: capture 0 PSI first, then up to four higher pressures,
+      holding each steady for about 45 seconds. Readings above the highest point are estimates.
+      This is a monitor only; it doesn't control a pressure relief valve.</p>
+    <div class="grid">
+    <article class="card panel">
+      <div class="panel-header">
+        <div>
+          <div class="slot-label">pressure · 0</div>
+          <h2>Local pressure sensor</h2>
+          <p>Pink socket · A0</p>
+        </div>
+        <span data-pressure-status>${pressureBadge(p)}</span>
+      </div>
+      <div class="sensor-reading">
+        <div><span data-pressure-psi>${formatPressure(p.psi)} PSI</span><small>Pressure</small></div>
+        <div><span data-pressure-raw>${orDash(p.raw)}</span><small>ADC reading</small></div>
+      </div>
+      <form data-form="pressure">
+        <div class="fields">
+          ${select('Fermenter','fermenter',p.fermenter??UNASSIGNED,fermOptions())}
+        </div>
+        ${formActions('Save changes')}
+      </form>
+    </article>
+    <article class="card panel">
+      <div class="panel-header">
+        <div>
+          <div class="slot-label">pressure · calibration</div>
+          <h2>Calibration</h2>
+          <p data-pressure-saved>Saved: ${esc(pressurePoints(p.points))}</p>
+        </div>
+        <span data-pressure-capture>${pressureCaptureBadge(p)}</span>
+      </div>
+      <div class="sensor-reading">
+        <div><span data-pressure-count>${(p.draft||[]).length}</span><small>New points</small></div>
+      </div>
+      <p class="review-caption" data-pressure-draft>New: ${esc(pressurePoints(p.draft))}</p>
+      <form data-form="pressurepoint">
+        <div class="fields">
+          ${field('Reference pressure (PSI)','psi','','number','min="0" max="100" step="0.1" required')}
+        </div>
+        ${formActions('Capture point')}
+      </form>
+      <div class="two-col-actions" style="margin-top:12px">
+        ${btn('Apply new points','pressure-apply','small secondary')}
+        ${btn('Discard new points','pressure-cancel','small ghost')}
+      </div>
+    </article>
+  </div>`;
+}
+
+// Polling updates these readings without replacing the reference-pressure form.
+function updatePressureReadings() {
+  if (state.route!=='sensors' || state.sensorTab!=='pressure') return;
+  const p=state.pressure;
+  const reading=$('[data-pressure-psi]');
+  if (!reading) return;
+  reading.textContent=formatPressure(p.psi)+' PSI';
+  $('[data-pressure-raw]').textContent=orDash(p.raw);
+  $('[data-pressure-status]').innerHTML=pressureBadge(p);
+  $('[data-pressure-capture]').innerHTML=pressureCaptureBadge(p);
+  $('[data-pressure-saved]').textContent='Saved: '+pressurePoints(p.points);
+  $('[data-pressure-count]').textContent=(p.draft||[]).length;
+  $('[data-pressure-draft]').textContent='New: '+pressurePoints(p.draft);
+}
+
+// Actions are never retried automatically; always reread progress afterwards.
+async function pressureCommand(action) {
+  if (saving) return;
+  saving=true;
+  try { await postAndShowReply('/pressure',{action}); }
+  finally {
+    try { await fetchData('pressure'); updatePressureReadings(); }
+    finally { saving=false; }
+  }
 }

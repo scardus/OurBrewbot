@@ -39,7 +39,7 @@ New/Updated Features:
 The update check and crash reports can each be switched off — see [Contacting ourbrewbot.com](#contacting-ourbrewbotcom).
 
 Not yet implemented / tested:
-- Pressure sensor - __Untested - No hardware__
+- Local pressure sensor - readings and two-to-five-point calibration; __not yet verified with sensor hardware__ - see [Local Pressure Sensor](#local-pressure-sensor)
 - Aux 1 / Aux 2 smart plug roles - __Not implemented__ - from the original firmware; a plug can be given the role, but nothing switches it
 
 ---
@@ -192,6 +192,12 @@ The untouched original files are kept in the `orig` folder, and `orig/conversion
 
 ---
 
+## Local Pressure Sensor
+
+In Sensors > Pressure, assign the local sensor to a fermenter, then capture atmospheric zero and at least one higher pressure measured with a reference gauge. Each capture takes about 45 seconds; apply the completed points to save them, or discard the draft to keep the previous calibration. Readings above the highest calibration point are labelled estimates; this monitor does not control a relief valve, and the original wiring and chosen sender must be checked before connection.
+
+---
+
 ## Contacting ourbrewbot.com
 
 The controller runs entirely on your own network. It only contacts ourbrewbot.com for two things, and both can be switched off in the admin page on the **System Settings** tab, under **Global Settings**:
@@ -241,6 +247,8 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 | POST   | /mqtt/test         | Test MQTT connection          |
 | GET    | /probes            | All temperature probes        |
 | POST   | /probes            | Update probe config           |
+| GET    | /pressure          | Local pressure reading, assignment, calibration and capture progress |
+| POST   | /pressure          | Assign the pressure sensor, or capture, apply or cancel calibration points |
 | POST   | /profile           | Update fermentation profile   |
 | GET    | /profiles          | Fermentation profile config   |
 | GET    | /reboot            | Asks to confirm a reboot (page with a button) |
@@ -325,6 +333,8 @@ OurBrewbot/
   Config.h/.cpp        All data structures and JSON serialisation
   Fermenter.h/.cpp     Temperature control loop (heating/cooling/hysteresis state machine)
   Temperatures.h/.cpp  DS18B20 probe management
+  Pressure.h/.cpp      Local pressure sensor - A0 readings, fermenter assignment and calibration capture
+  PressureCalc.h/.cpp  Pressure conversion and calibration checks (split out so it can be unit tested)
   SmartPlugs.h/.cpp    RF smart plug control
   Profile.h/.cpp       Fermentation profile runner
   Reports.h/.cpp       Brewfather / Brewer's Friend reporting

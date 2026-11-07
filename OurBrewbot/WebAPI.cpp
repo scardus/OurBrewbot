@@ -1789,7 +1789,7 @@ void handleFsFileSave(ESP8266WebServer& server) {
     "/jsonGlobal.txt", "/jsonFermenter.txt", "/jsonProbe.txt",
     "/jsonSmartPlugs.txt", "/jsonProfile.txt", "/jsonProfileSteps.txt",
     "/jsonTilt.txt", "/jsoniSpindel.txt",
-    "/jsonBrewServices.txt", "/jsonMqtt.txt", "/jsonSyslog.txt"
+    "/jsonBrewServices.txt", "/jsonMqtt.txt", "/jsonSyslog.txt", FILE_PRESSURE
   };
   String name = server.arg("name");
   bool ok = false;

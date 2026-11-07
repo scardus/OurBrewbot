@@ -556,6 +556,10 @@ p {
   gap:12px;
   margin-bottom:21px
 }
+/* A fermenter with the pressure sensor shows Pressure as a fourth reading */
+.readings.with-pressure {
+  grid-template-columns:1.3fr 1fr 1fr 1fr
+}
 .reading-label {
   font-size:10px;
   color:var(--muted);
@@ -1459,6 +1463,10 @@ input[type=checkbox] {
   .readings {
     gap:9px
   }
+  /* Four readings don't fit a narrow card, so Pressure wraps to a second row */
+  .readings.with-pressure {
+    grid-template-columns:1.3fr 1fr 1fr
+  }
   .overview-item {
     padding:15px 17px
   }
@@ -1616,7 +1624,7 @@ input[type=checkbox] {
   .card-header {
     margin-bottom:23px
   }
-  .readings {
+  .readings,.readings.with-pressure {
     grid-template-columns:1.35fr 1fr 1fr;
     gap:9px
   }

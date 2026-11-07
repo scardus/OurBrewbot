@@ -12,7 +12,7 @@ const state = {
   // The latest controller data, tidied by the set functions below.
   controller:{}, health:{}, debug:{Overrides:[]}, global:{},
   fermenters:[], profiles:[], probes:[], tilts:[], ispindels:[], plugs:[],
-  services:[], mqtt:{}, syslog:{}, files:[]
+  services:[], mqtt:{}, syslog:{}, files:[], pressure:{}
 };
 
 // Unsaved edits. A form's key is its data-form attribute, such as "ferm-0", "profile-2" or "mqtt".
@@ -120,6 +120,7 @@ function setFermenters(data) {
     step:+f.CurrentStep, hour:+f.CurrentHour, paused:!!f.ProfilePaused,
     liveTest:!!f.LiveTest, brewfather:!!(f.BrewServices&REPORT_BREWFATHER), brewers:!!(f.BrewServices&REPORT_BREWERS),
     mqtt:!!(f.BrewServices&REPORT_MQTT), abv:toFinite(f.EstABV), attenuation:toFinite(f.Attenuation),
+    pressure:f.Pressure, pressureState:f.PressureState, pressureAssigned:!!f.PressureAssigned,
     source:f.BeerTempSource, gravity:f.GravitySource}));
   updateProfileLocks();
 }

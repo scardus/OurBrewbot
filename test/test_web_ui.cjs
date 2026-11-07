@@ -658,6 +658,7 @@ test('refreshing clears an uncertain save only when that form was reread',async(
 
 // Each action, and how to tell that the shared handler really carried it out.
 const actionEffects={
+  'pressure-apply':{called:'pressureCommand'},'pressure-cancel':{called:'pressureCommand'},
   'edit-ferm':{called:'openFerm'},'copy-profile':{called:'chooseProfileCopy'},'copy-confirm':{called:'copyProfile'},
   'step-add':{called:'editProfileStep'},'step-up':{called:'editProfileStep'},'step-down':{called:'editProfileStep'},
   'step-delete':{called:'editProfileStep'},'profile-control':{called:'controlProfile'},'clear-sensor':{called:'clearSensor'},
@@ -699,7 +700,7 @@ test('the shared action handler carries out every action',async()=>{
     context.target={dataset:{action:name,id:'1',value:'chosen'},closest:()=>({})};
     run(`state.activeConsole='old'; state.plugs=[{index:0},{index:1}]; state.controller={}; calls=[]; posts=[];
       loadRoute=async()=>{}; render=()=>{}; updateResult=()=>'';
-      for (const name of ['openFerm','chooseProfileCopy','copyProfile','editProfileStep','controlProfile','clearSensor','applyPreset',
+      for (const name of ['pressureCommand','openFerm','chooseProfileCopy','copyProfile','editProfileStep','controlProfile','clearSensor','applyPreset',
         'testPlug','discardForm','refreshForms','exportConfig','viewFile','sendBle','showDebug']) {
         globalThis[name]=()=>{calls.push(name);};
       }
@@ -725,4 +726,58 @@ test('while saving, only the close actions still respond',async()=>{
     assert.equal(run('state.refreshPaused'),false,name);
     assert.equal(closed.length>0,name==='close-modal'||name==='close-editor',name);
   }
+});
+
+test('pressure readings distinguish zero, unavailable and extrapolated pressure',()=>{
+  const {run}=ui();
+  assert.equal(run('formatPressure(null)'),'—');
+  assert.equal(run('formatPressure(0)'),'0.0');
+  assert.equal(run('describePressureState(0).name'),'Unavailable');
+  assert.equal(run('describePressureState(3).name'),'Estimate');
+  assert.equal(run('describePressureState(4).name'),'ADC limit');
+  assert.equal(run('describePressureState(9).name'),'Unavailable');
+});
+
+test('the pressure tab is laid out like the other sensor tabs',()=>{
+  const {run}=ui();
+  run('state.pressure={fermenter:0,state:2,psi:7.25,raw:204,active:true,samples:3,samplesNeeded:10,'+
+    'points:[{psi:0,raw:160},{psi:15,raw:250}],draft:[{psi:0,raw:161}]}');
+  const html=run('pressureView()');
+  assert.equal(html.indexOf(run("pageTitle('GOOD DATA, BETTER CONTROL','Sensors','Assign each sensor and fine-tune its readings.')")),0);
+  assert.match(html,/<p class="notice info">Calibrate with a reference gauge/);
+  assert.equal((html.match(/<div class="fields">/g)||[]).length,2);
+  assert.match(html,/<span data-pressure-psi>7\.3 PSI<\/span><small>Pressure<\/small>/);
+  assert.match(html,/Saved: 0 PSI = 160, 15 PSI = 250/);
+  assert.match(html,/Capturing 3 \/ 10/);
+});
+
+test('pressure forms submit only the selected assignment or reference pressure',()=>{
+  const {run}=ui();
+  assert.equal(run('JSON.stringify(formTypes.pressure.buildBody(null,{fermenter:"2"}))'),
+    JSON.stringify({action:'assign',fermenter:2}));
+  assert.equal(run('JSON.stringify(formTypes.pressurepoint.buildBody(null,{psi:"0"}))'),
+    JSON.stringify({action:'capture',psi:0}));
+});
+
+test('a fermenter with the pressure sensor shows pressure alongside its other readings',()=>{
+  const {run}=ui();
+  run(`var card=extra=>fermCard(Object.assign({id:0,name:'F1',beer:'Stout',yeast:'S-04',power:true,status:'Idle',
+    beerTemp:20,sg:1.05,ambient:19,floor:18,ceiling:21,tempControl:true,profile:0,abv:1,attenuation:2,
+    source:'Probe',gravity:'Tilt',pressureAssigned:false},extra));`);
+  const plain=run('card({})');
+  assert.doesNotMatch(plain,/with-pressure|Pressure/);
+  const fitted=run('card({pressureAssigned:true,pressure:24.84,pressureState:3})');
+  assert.match(fitted,/class="readings with-pressure"/);
+  assert.match(fitted,/<div class="reading-label">Pressure<\/div>\s*<div class="reading-number">24\.8<small>PSI<\/small><\/div>\s*<div class="reading-source">Estimate<\/div>/);
+  assert.match(run('card({pressureAssigned:true,pressure:null,pressureState:4})'),/—<small>PSI<\/small><\/div>\s*<div class="reading-source">ADC limit/);
+});
+
+test('the pressure tab uses the shared fermenter choices and sensor tabs',()=>{
+  const {run}=ui();
+  run('state.pressure={fermenter:UNASSIGNED,state:0,psi:null,samples:0,samplesNeeded:10,points:[],draft:[]}');
+  const html=run('pressureView()');
+  assert.match(html,/<option value="99" selected>Unassigned<\/option>/);
+  assert.equal(run('sensorTabs().map(([key])=>key).at(-1)'),'pressure');
+  assert.equal(run('JSON.stringify(formTypes.pressure.buildBody(null,{fermenter:String(UNASSIGNED)}))'),
+    JSON.stringify({action:'assign',fermenter:99}));
 });
