@@ -105,3 +105,7 @@ void buildProfileJson(JsonDocument& doc, int profileIndex);
 void buildControllerJson(JsonDocument& doc);
 void buildUpdateStatusJson(JsonDocument& doc);
 void buildBoardInfoJson(JsonDocument& doc);
+
+// Local pressure monitoring and calibration.
+void handlePressure(ESP8266WebServer& server);
+void handlePressurePost(ESP8266WebServer& server);

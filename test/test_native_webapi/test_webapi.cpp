@@ -195,6 +195,11 @@ ESP8266WebServer g_webServer;
 // ---- stack depth check: reads the ESP8266 loop stack, nothing to do here ----
 void stackCheck(uint8_t, const char*) {}
 
+// ---- the pressure sensor's A0 input, settable per test, counting reads ----
+static int s_pressureAdc = 160;
+static unsigned s_pressureReads = 0;
+int analogRead(uint8_t) { s_pressureReads++; return s_pressureAdc; }
+#include "../../OurBrewbot/Pressure.cpp"
 #include "../../OurBrewbot/WebAPI.cpp"
 #include "../../OurBrewbot/WebAdmin.cpp"
 
@@ -267,6 +272,9 @@ void setUp(void) {
     g_fermenterDebugOverrides[i] = FermenterDebugOverride{};
   }
 
+  pressureResetRuntime();
+  g_pressureCalibration = {};
+  s_pressureAdc = 160;
   srv.clearArgs();
   s_logCalls        = 0;
   s_ringLastSeq     = 0;
@@ -824,17 +832,24 @@ static void fillWorstFermenters(void) {
     g_fermenterDebugOverrides[i].sg          = 1.0123457f;
   }
   for (int p = 0; p < MAX_PROFILES; p++) FILL_WORST(g_profiles[p].profileName);
+  // Only one fermenter can have the pressure sensor; give it the longest
+  // reading text. No real conversion prints 13 characters, so set it directly.
+  g_fermenters[0].psiCollect = true;
+  s_reading     = {PRESSURE_ABOVE_RANGE, 1022, LONG_FLOAT};
+  s_readingAt   = s_millis;
+  s_haveReading = true;
 }
 
 static void test_fermenters_get_sends_worst_case_names_whole(void) {
   fillWorstFermenters();
-  // The data above reaches 940 bytes per fermenter, close to the 979-byte
-  // ceiling the handler's buffer is sized for. If it drops well below that
-  // (a field was shortened or the fill stopped working), this test no longer
-  // proves the buffer is big enough - fix the fill, not this number.
+  // The data above reaches 1007 bytes for fermenter 0, which has the pressure
+  // sensor, close to the 1047-byte ceiling the handler's buffer is sized for.
+  // If it drops well below that (a field was shortened or the fill stopped
+  // working), this test no longer proves the buffer is big enough - fix the
+  // fill, not this number.
   JsonDocument one;
   buildFermenterJson(one, 0);
-  TEST_ASSERT_GREATER_OR_EQUAL_UINT(900, measureJson(one));
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT(1000, measureJson(one));
   handleFermenters(srv);
 
   JsonDocument doc;
@@ -2895,6 +2910,158 @@ static void test_logs_nothing_new_is_an_empty_200(void) {
   TEST_ASSERT_EQUAL_STRING("0", httpRespHeader("X-Log-More"));
 }
 
+// ---- Local pressure API and runtime ----
+
+static void test_pressure_api_never_reports_unavailable_as_zero(void) {
+  httpRespReset();
+  handlePressure(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["psi"].isNull());
+  postBody("{\"action\":\"assign\",\"fermenter\":0}");
+  handlePressurePost(srv);
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_FALSE(doc["psi"].isNull());
+  TEST_ASSERT_EQUAL_FLOAT(0, doc["psi"].as<float>());
+  s_millis += 120000;
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["psi"].isNull());
+  s_pressureAdc = 1023;
+  pressureLoop();
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["psi"].isNull());
+  TEST_ASSERT_EQUAL(PRESSURE_ADC_LIMIT, doc["state"].as<int>());
+}
+
+static void test_pressure_capture_apply_and_cancel_preserve_working_calibration(void) {
+  g_fermenters[0].psiCollect = true;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_BUSY, pressureBeginPoint(5));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  s_pressureAdc = 280;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(20));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_UINT8(0, g_pressureCalibration.count);
+  postBody("{\"action\":\"apply\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureCalibration.count);
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  postBody("{\"action\":\"cancel\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_FALSE(g_pressureCapture.active);
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureCalibration.count);
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_EQUAL_UINT16(280, g_pressureCalibration.points[1].raw);
+}
+
+static void test_only_the_assigned_fermenter_reports_pressure(void) {
+  g_fermenters[0].psiCollect = true;
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+  JsonDocument assigned;
+  buildFermenterJson(assigned, 0);
+  TEST_ASSERT_TRUE(assigned["PressureAssigned"].as<bool>());
+  TEST_ASSERT_EQUAL(PRESSURE_IN_RANGE, assigned["PressureState"].as<int>());
+  TEST_ASSERT_EQUAL_FLOAT(0, assigned["Pressure"].as<float>());
+  JsonDocument other;
+  buildFermenterJson(other, 1);
+  TEST_ASSERT_FALSE(other["PressureAssigned"].as<bool>());
+  TEST_ASSERT_FALSE(other["PressureState"].is<int>());
+  TEST_ASSERT_FALSE(other["Pressure"].is<float>());
+}
+
+static void test_pressure_api_uses_the_unassigned_value_for_no_fermenter(void) {
+  handlePressure(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_INT(PROBE_UNASSIGNED, doc["fermenter"].as<int>());
+  TEST_ASSERT_EQUAL_INT(PRESSURE_CAPTURE_SAMPLES, doc["samplesNeeded"].as<int>());
+  g_fermenters[2].psiCollect = true;
+  httpRespReset();
+  postBody("{\"action\":\"assign\",\"fermenter\":99}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_fermenters[2].psiCollect);
+  httpRespReset();
+  postBody("{\"action\":\"assign\",\"fermenter\":-1}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+}
+
+static void test_pressure_capture_refusals_say_what_to_fix(void) {
+  postBody("{\"action\":\"capture\",\"psi\":0}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Assign the pressure sensor to a fermenter first"));
+  g_fermenters[0].psiCollect = true;
+  httpRespReset();
+  postBody("{\"action\":\"capture\",\"psi\":5}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Start at 0 PSI"));
+  s_pressureAdc = 1023;
+  httpRespReset();
+  postBody("{\"action\":\"capture\",\"psi\":0}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("The sensor input is at its limit"));
+  TEST_ASSERT_FALSE(g_pressureCapture.active);
+}
+
+static void test_live_pressure_reading_averages_without_blocking_across_wrap(void) {
+  uint16_t raw = 999;
+  uint32_t start = 0xfffffff0u;
+  s_pressureReads = 0;
+  for (int i = 0; i < 10; i++) {
+    s_millis = start + i * 10;
+    s_pressureAdc = 160 + i;
+    TEST_ASSERT_EQUAL(i == 9, pressureReadRaw(raw));
+    if (i < 9) {
+      TEST_ASSERT_FALSE(pressureReadRaw(raw));
+      TEST_ASSERT_EQUAL_UINT16(999, raw);
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT16(165, raw);
+  TEST_ASSERT_EQUAL_UINT(10, s_pressureReads);
+}
+
+static void test_live_pressure_reading_does_not_average_away_saturation(void) {
+  uint16_t raw = 999;
+  TEST_ASSERT_FALSE(pressureReadRaw(raw));
+  s_millis += 10;
+  s_pressureAdc = 1023;
+  TEST_ASSERT_TRUE(pressureReadRaw(raw));
+  TEST_ASSERT_EQUAL_UINT16(1023, raw);
+  s_pressureAdc = 200;
+  for (int i = 0; i < 10; i++) {
+    s_millis += 10;
+    TEST_ASSERT_EQUAL(i == 9, pressureReadRaw(raw));
+  }
+  TEST_ASSERT_EQUAL_UINT16(200, raw);
+}
+
+static void test_cancelling_a_live_pressure_reading_starts_the_average_again(void) {
+  uint16_t raw = 999;
+  s_pressureAdc = 500;
+  for (int i = 0; i < 5; i++) { s_millis += 10; pressureReadRaw(raw); }
+  pressureCancelReading();
+  s_pressureAdc = 200;
+  for (int i = 0; i < 10; i++) {
+    s_millis += 10;
+    TEST_ASSERT_EQUAL(i == 9, pressureReadRaw(raw));
+  }
+  TEST_ASSERT_EQUAL_UINT16(200, raw);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -3127,5 +3294,14 @@ int main(int, char**) {
   RUN_TEST(test_logs_reply_uses_the_whole_response_buffer);
   RUN_TEST(test_logs_nothing_new_is_an_empty_200);
 
+  // Local pressure API and runtime
+  RUN_TEST(test_pressure_api_never_reports_unavailable_as_zero);
+  RUN_TEST(test_pressure_capture_apply_and_cancel_preserve_working_calibration);
+  RUN_TEST(test_only_the_assigned_fermenter_reports_pressure);
+  RUN_TEST(test_pressure_api_uses_the_unassigned_value_for_no_fermenter);
+  RUN_TEST(test_pressure_capture_refusals_say_what_to_fix);
+  RUN_TEST(test_live_pressure_reading_averages_without_blocking_across_wrap);
+  RUN_TEST(test_live_pressure_reading_does_not_average_away_saturation);
+  RUN_TEST(test_cancelling_a_live_pressure_reading_starts_the_average_again);
   return UNITY_END();
 }

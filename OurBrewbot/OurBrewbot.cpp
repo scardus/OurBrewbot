@@ -50,6 +50,7 @@
 #include "Fermenter.h"
 #include "Profile.h"
 #include "Temperatures.h"
+#include "Pressure.h"
 #include "SmartPlugs.h"
 #include "Tilt.h"
 #include "iSpindel.h"
@@ -238,6 +239,7 @@ void setup() {
 // MAIN LOOP
 // ============================================================
 void loop() {
+  pressureLoop();
   uptimeTick();   // first, every pass - keeps uptimeSeconds() counting past the millis() wrap
   unsigned long now = millis();
   doubleResetLoop();   // forgets a reset button press after 10 s
