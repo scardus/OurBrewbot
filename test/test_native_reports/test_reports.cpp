@@ -352,6 +352,22 @@ void test_payload_sends_pressure_to_brewers_friend_as_psi(void) {
   TEST_ASSERT_TRUE(bodyHas("\"psi\":7.5"));
 }
 
+void test_payload_sends_pressure_to_brewfather_with_its_unit(void) {
+  enableService(BF, "abc");
+  enableService(BFR, "def");
+  readPressure(F, 205);
+
+  reportBrewService(F, BFR);
+  TEST_ASSERT_TRUE(bodyHas("\"pressure\":7.5"));
+  TEST_ASSERT_TRUE(bodyHas("\"pressure_unit\":\"PSI\""));
+  TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+
+  // Brewer's Friend takes PSI only, so it gets no unit field.
+  reportBrewService(F, BF);
+  TEST_ASSERT_TRUE(bodyHas("\"psi\":7.5"));
+  TEST_ASSERT_FALSE(bodyHas("\"pressure_unit\":"));
+}
+
 void test_payload_sends_pressure_only_for_the_fermenter_with_the_sensor(void) {
   enableService(BF, "abc");
   readPressure(F, 205);
@@ -429,6 +445,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_payload_uses_per_service_key_names);
   RUN_TEST(test_payload_sends_og_only_to_brewers_friend);
   RUN_TEST(test_payload_sends_pressure_to_brewers_friend_as_psi);
+  RUN_TEST(test_payload_sends_pressure_to_brewfather_with_its_unit);
   RUN_TEST(test_payload_sends_pressure_only_for_the_fermenter_with_the_sensor);
   RUN_TEST(test_payload_leaves_out_pressure_without_a_usable_reading);
   RUN_TEST(test_payload_names_the_fermenter_not_the_device);

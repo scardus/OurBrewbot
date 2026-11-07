@@ -52,6 +52,7 @@ struct BrewServiceDef {
   const char* idleState;   // state value when neither heating nor cooling
   bool        sendOg;      // include the OG field (Brewer's Friend only)
   const char* pressureKey; // JSON key for the pressure in PSI, or nullptr if not sent
+  bool        sendPressureUnit; // include "pressure_unit": "PSI" (Brewfather only)
 };
 
 // Indexed by service slot: 0=Brewer's Friend, 1=Brewfather (BREW_SERVICE_xxx - 1).
@@ -59,9 +60,9 @@ struct BrewServiceDef {
 // preserved as-is.
 static const BrewServiceDef kBrewServiceDefs[MAX_BREW_SERVICES] = {
   { "BrewersFriend", "http://log.brewersfriend.com/stream/%s",
-    "ambient",  "RSSI", "heat_state",   "off", true,  "psi"   },
+    "ambient",  "RSSI", "heat_state",   "off", true,  "psi",      false },
   { "Brewfather",    "http://log.brewfather.net/stream?id=%s",
-    "aux_temp", "rssi", "device_state", "on",  false, nullptr },
+    "aux_temp", "rssi", "device_state", "on",  false, "pressure", true  },
 };
 
 // ============================================================
@@ -154,8 +155,10 @@ void reportBrewService(uint8_t i, uint8_t svcIndex) {
   // there is a usable value. Otherwise it is left out, never sent as 0.
   if (svc.pressureKey && g_fermenters[i].psiCollect) {
     PressureReading pressure = pressureCurrentReading();
-    if (pressure.state == PRESSURE_IN_RANGE || pressure.state == PRESSURE_ABOVE_RANGE)
+    if (pressure.state == PRESSURE_IN_RANGE || pressure.state == PRESSURE_ABOVE_RANGE) {
       doc[svc.pressureKey] = pressure.psi;
+      if (svc.sendPressureUnit) doc["pressure_unit"] = "PSI";
+    }
   }
   doc["beer"]           = g_fermenters[i].beerName;
   doc["comment"]        = g_fermenters[i].yeastName;

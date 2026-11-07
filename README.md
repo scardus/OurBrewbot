@@ -194,7 +194,7 @@ The untouched original files are kept in the `orig` folder, and `orig/conversion
 
 ## Local Pressure Sensor
 
-In Sensors > Pressure, assign the local sensor to a fermenter, then capture atmospheric zero and at least one higher pressure measured with a reference gauge. Each capture takes about 45 seconds; apply the completed points to save them, or discard the draft to keep the previous calibration. Readings above the highest calibration point are labelled estimates; this monitor does not control a relief valve, and the original wiring and chosen sender must be checked before connection. If the fermenter reports to Brewer's Friend, its pressure is sent too, whenever there is a usable reading.
+In Sensors > Pressure, assign the local sensor to a fermenter, then capture atmospheric zero and at least one higher pressure measured with a reference gauge. Each capture takes about 45 seconds; apply the completed points to save them, or discard the draft to keep the previous calibration. Readings above the highest calibration point are labelled estimates; this monitor does not control a relief valve, and the original wiring and chosen sender must be checked before connection. If the fermenter reports to Brewfather or Brewer's Friend, its pressure is sent too, whenever there is a usable reading.
 
 ---
 
