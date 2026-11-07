@@ -44,6 +44,7 @@ BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 GlobalConfig      g_globalConfig;
 bool g_fermenterDebugMode = false;
 FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
+PressureCalibration g_pressureCalibration = {};
 
 // ---- millis(), settable per test ----
 static uint32_t s_millis = 0;
@@ -66,9 +67,15 @@ void smartPlugForceOff(uint8_t) {}
 void allPlugsForceOff() {}
 void processProfiles() {}
 
+// ---- the pressure sensor's A0 input, settable per test ----
+static int s_pressureAdc = 160;
+int analogRead(uint8_t) { return s_pressureAdc; }
+
 // The code under test, plus the reading/conversion sources its payload uses.
 #include "../../OurBrewbot/Temperatures.cpp"
 #include "../../OurBrewbot/Fermenter.cpp"
+#include "../../OurBrewbot/PressureCalc.cpp"
+#include "../../OurBrewbot/Pressure.cpp"
 #include "../../OurBrewbot/Reports.cpp"
 
 // ---- test fixture ----
@@ -94,6 +101,9 @@ void setUp(void) {
   WiFi.rssi      = -60;
   httpTestReset();
   s_millis = 0;
+  pressureResetRuntime();
+  g_pressureCalibration = {};
+  s_pressureAdc = 160;
 }
 
 void tearDown(void) {}
@@ -325,6 +335,46 @@ void test_payload_sends_og_only_to_brewers_friend(void) {
   TEST_ASSERT_FALSE(bodyHas("\"og\":"));
 }
 
+// Give fermenter `f` the pressure sensor, calibrated 0-20 PSI over 160-280,
+// and take one live reading of `adc` through the real sampling loop.
+static void readPressure(uint8_t f, int adc) {
+  g_fermenters[f].psiCollect = true;
+  g_pressureCalibration = {2, {{0, 160}, {20, 280}}};
+  s_pressureAdc = adc;
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }
+}
+
+void test_payload_sends_pressure_to_brewers_friend_as_psi(void) {
+  enableService(BF, "abc");
+  readPressure(F, 205);   // 45 counts above zero = 7.5 PSI
+
+  reportBrewService(F, BF);
+  TEST_ASSERT_TRUE(bodyHas("\"psi\":7.5"));
+}
+
+void test_payload_sends_pressure_only_for_the_fermenter_with_the_sensor(void) {
+  enableService(BF, "abc");
+  readPressure(F, 205);
+
+  reportBrewService(1, BF);
+  TEST_ASSERT_TRUE(bodyHas("\"heat_state\":"));   // body really was built
+  TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+}
+
+void test_payload_leaves_out_pressure_without_a_usable_reading(void) {
+  enableService(BF, "abc");
+  readPressure(F, 1023);  // input at the ADC limit: the true pressure is unknown
+  reportBrewService(F, BF);
+  TEST_ASSERT_TRUE(bodyHas("\"heat_state\":"));
+  TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+
+  pressureResetRuntime();
+  g_pressureCalibration = {};
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }   // not calibrated
+  reportBrewService(F, BF);
+  TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+}
+
 void test_payload_names_the_fermenter_not_the_device(void) {
   // The service rate-limits per "name", so each fermenter reports under its
   // own name and the device name goes in device_source.
@@ -378,6 +428,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_payload_idle_state_differs_per_service);
   RUN_TEST(test_payload_uses_per_service_key_names);
   RUN_TEST(test_payload_sends_og_only_to_brewers_friend);
+  RUN_TEST(test_payload_sends_pressure_to_brewers_friend_as_psi);
+  RUN_TEST(test_payload_sends_pressure_only_for_the_fermenter_with_the_sensor);
+  RUN_TEST(test_payload_leaves_out_pressure_without_a_usable_reading);
   RUN_TEST(test_payload_names_the_fermenter_not_the_device);
   RUN_TEST(test_payload_url_is_built_per_service);
   RUN_TEST(test_report_skipped_for_unconfigured_or_bad_slot);

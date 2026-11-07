@@ -21,6 +21,7 @@
 #include "Reports.h"
 #include "Fermenter.h"
 #include "Temperatures.h"
+#include "Pressure.h"
 #include "Log.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
@@ -50,6 +51,7 @@ struct BrewServiceDef {
   const char* stateKey;    // JSON key for the heating/cooling state
   const char* idleState;   // state value when neither heating nor cooling
   bool        sendOg;      // include the OG field (Brewer's Friend only)
+  const char* pressureKey; // JSON key for the pressure in PSI, or nullptr if not sent
 };
 
 // Indexed by service slot: 0=Brewer's Friend, 1=Brewfather (BREW_SERVICE_xxx - 1).
@@ -57,9 +59,9 @@ struct BrewServiceDef {
 // preserved as-is.
 static const BrewServiceDef kBrewServiceDefs[MAX_BREW_SERVICES] = {
   { "BrewersFriend", "http://log.brewersfriend.com/stream/%s",
-    "ambient",  "RSSI", "heat_state",   "off", true  },
+    "ambient",  "RSSI", "heat_state",   "off", true,  "psi"   },
   { "Brewfather",    "http://log.brewfather.net/stream?id=%s",
-    "aux_temp", "rssi", "device_state", "on",  false },
+    "aux_temp", "rssi", "device_state", "on",  false, nullptr },
 };
 
 // ============================================================
@@ -148,6 +150,13 @@ void reportBrewService(uint8_t i, uint8_t svcIndex) {
   doc["gravity_unit"]   = "G";
   if (g_fermenters[i].tg > 0.0f) doc["gravity_target"] = g_fermenters[i].tg;
   if (svc.sendOg && g_fermenters[i].og > 0.0f) doc["og"] = g_fermenters[i].og;
+  // Pressure goes only with the fermenter that has the sensor, and only when
+  // there is a usable value. Otherwise it is left out, never sent as 0.
+  if (svc.pressureKey && g_fermenters[i].psiCollect) {
+    PressureReading pressure = pressureCurrentReading();
+    if (pressure.state == PRESSURE_IN_RANGE || pressure.state == PRESSURE_ABOVE_RANGE)
+      doc[svc.pressureKey] = pressure.psi;
+  }
   doc["beer"]           = g_fermenters[i].beerName;
   doc["comment"]        = g_fermenters[i].yeastName;
   doc["hysteresis"]     = g_fermenters[i].hysteresis;
