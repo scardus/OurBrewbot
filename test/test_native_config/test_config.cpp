@@ -1427,6 +1427,19 @@ static void test_pressure_import_restore_keeps_the_active_calibration(void) {
   TEST_ASSERT_EQUAL_UINT8(0, g_pressureCalibration.count);
 }
 
+static void test_failed_pressure_save_is_retried_and_then_left_alone(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  fsTestSetFull(true);
+  TEST_ASSERT_FALSE(savePressureConfig());
+  fsTestSetFull(false);
+  configPeriodicSave();
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_EQUAL_UINT16(280, g_pressureCalibration.points[1].raw);
+  fsTestClearWriteCount();
+  configPeriodicSave();
+  TEST_ASSERT_EQUAL_INT(0, fsTestWriteCount());
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -1562,6 +1575,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_failed_correction_save_while_loading_is_tried_again);
 
   // Local pressure persistence
+  RUN_TEST(test_failed_pressure_save_is_retried_and_then_left_alone);
   RUN_TEST(test_pressure_round_trip_and_corrupt_primary_recovery);
   RUN_TEST(test_missing_pressure_config_disables_legacy_assignments);
   RUN_TEST(test_a_second_pressure_assignment_is_cleared_and_logged);

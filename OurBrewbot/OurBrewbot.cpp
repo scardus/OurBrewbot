@@ -239,10 +239,10 @@ void setup() {
 // MAIN LOOP
 // ============================================================
 void loop() {
-  pressureLoop();
   uptimeTick();   // first, every pass - keeps uptimeSeconds() counting past the millis() wrap
   unsigned long now = millis();
   doubleResetLoop();   // forgets a reset button press after 10 s
+  pressureLoop();      // advances local ADC readings without waiting
 
   // Handle web server requests, BLE sniff mode timeout, mDNS, and MQTT client loop.
   // checkpoint() drops a one-byte breadcrumb to RTC so a hardware-watchdog reset
