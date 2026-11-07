@@ -101,6 +101,7 @@ String g_rebootReason = "Power on";
 UpdateStatus g_updateStatus;
 
 // The code under test, plus the modules its payloads genuinely depend on.
+#include "../../OurBrewbot/PressureCalc.cpp"
 #include "../../OurBrewbot/Config.cpp"
 #include "../../OurBrewbot/OriginalConfig.cpp"
 #include "../../OurBrewbot/Temperatures.cpp"

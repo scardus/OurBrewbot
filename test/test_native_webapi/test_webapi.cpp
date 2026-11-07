@@ -183,6 +183,7 @@ FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
 ESP8266WebServer g_webServer;
 
 // The code under test, plus the modules its payloads genuinely depend on.
+#include "../../OurBrewbot/PressureCalc.cpp"
 #include "../../OurBrewbot/Config.cpp"
 #include "../../OurBrewbot/OriginalConfig.cpp"
 #include "../../OurBrewbot/Temperatures.cpp"

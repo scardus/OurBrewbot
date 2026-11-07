@@ -61,6 +61,7 @@ void logMsgImpl(uint8_t, PGM_P fmt, ...) {
 
 // The code under test.
 #include "../../OurBrewbot/TextSafe.cpp"
+#include "../../OurBrewbot/PressureCalc.cpp"
 #include "../../OurBrewbot/Config.cpp"
 #include "../../OurBrewbot/OriginalConfig.cpp"
 
@@ -68,6 +69,7 @@ void logMsgImpl(uint8_t, PGM_P fmt, ...) {
 
 void setUp(void) {
   fsTestReset();
+  g_pressureCalibration = {};
   espTestSetResetReason(REASON_DEFAULT_RST);
   g_espFreeHeap = 24000;
   memset(&g_globalConfig, 0, sizeof(g_globalConfig));
@@ -1381,6 +1383,50 @@ static void test_a_normal_mount_logs_no_boot_problem(void) {
   TEST_ASSERT_EQUAL_STRING("", s_lastLog);
 }
 
+// ---- Local pressure persistence ----
+
+static void test_pressure_round_trip_and_corrupt_primary_recovery(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  TEST_ASSERT_TRUE(savePressureConfig());
+  fsTestWrite(FILE_PRESSURE, "{");
+  g_pressureCalibration = {};
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureCalibration.count);
+  TEST_ASSERT_EQUAL_UINT16(280, g_pressureCalibration.points[1].raw);
+}
+
+static void test_missing_pressure_config_disables_legacy_assignments(void) {
+  g_fermenters[0].psiCollect = true;
+  TEST_ASSERT_FALSE(loadPressureConfig());
+  TEST_ASSERT_FALSE(g_fermenters[0].psiCollect);
+  TEST_ASSERT_EQUAL_UINT8(0, g_pressureCalibration.count);
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "Fermenter 1: pressure sensor unassigned - no usable pressure settings file"));
+}
+
+static void test_a_second_pressure_assignment_is_cleared_and_logged(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  TEST_ASSERT_TRUE(savePressureConfig());
+  g_fermenters[0].psiCollect = true;
+  g_fermenters[2].psiCollect = true;
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_TRUE(g_fermenters[0].psiCollect);
+  TEST_ASSERT_FALSE(g_fermenters[2].psiCollect);
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "Fermenter 3: pressure sensor unassigned - only one fermenter can have it"));
+}
+
+static void test_pressure_import_restore_keeps_the_active_calibration(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  configImportBeforeWrite();
+  fsTestWrite(FILE_PRESSURE, "{\"points\":[]}");
+  configImportRestore();
+  g_pressureCalibration = {};
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_EQUAL_UINT16(280, g_pressureCalibration.points[1].raw);
+  resetAllConfig();
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_EQUAL_UINT8(0, g_pressureCalibration.count);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -1515,5 +1561,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_correction_made_while_loading_is_saved_by_the_periodic_save);
   RUN_TEST(test_a_failed_correction_save_while_loading_is_tried_again);
 
+  // Local pressure persistence
+  RUN_TEST(test_pressure_round_trip_and_corrupt_primary_recovery);
+  RUN_TEST(test_missing_pressure_config_disables_legacy_assignments);
+  RUN_TEST(test_a_second_pressure_assignment_is_cleared_and_logged);
+  RUN_TEST(test_pressure_import_restore_keeps_the_active_calibration);
   return UNITY_END();
 }

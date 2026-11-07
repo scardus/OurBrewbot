@@ -26,6 +26,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include "PressureCalc.h"
 
 // ============================================================
 // SYSTEM LIMITS
@@ -172,6 +173,8 @@ enum TiltColour {
 #define FILE_BREWSVC_BKP    "/jsonBrewServicesbkup.txt"
 #define FILE_MQTT           "/jsonMqtt.txt"
 #define FILE_MQTT_BKP       "/jsonMqttbkup.txt"
+#define FILE_PRESSURE       "/jsonLocalPressure.txt"
+#define FILE_PRESSURE_BKP   "/jsonLocalPressurebkup.txt"
 #define FILE_SYSLOG         "/jsonSyslog.txt"
 #define FILE_SYSLOG_BKP     "/jsonSyslogbkup.txt"
 #define FILE_REBOOT         "/jsonReBoot.txt"
@@ -519,6 +522,7 @@ extern iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
 extern BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 extern MqttConfig        g_mqttConfig;
 extern SyslogConfig      g_syslogConfig;
+extern PressureCalibration g_pressureCalibration;
 
 // ============================================================
 // FUNCTION DECLARATIONS
@@ -552,7 +556,7 @@ void configPeriodicSave();
 enum ConfigFile : uint8_t {
   CFG_FILE_GLOBAL, CFG_FILE_FERMENTER, CFG_FILE_PROBE, CFG_FILE_SMARTPLUGS,
   CFG_FILE_PROFILE, CFG_FILE_STEPS, CFG_FILE_TILT, CFG_FILE_ISPINDEL,
-  CFG_FILE_BREWSVC, CFG_FILE_MQTT, CFG_FILE_SYSLOG,
+  CFG_FILE_BREWSVC, CFG_FILE_MQTT, CFG_FILE_SYSLOG, CFG_FILE_PRESSURE,
 };
 
 // Call after changing a setting in memory without saving it, such as profile
@@ -585,6 +589,9 @@ bool loadBrewServiceConfig();
 bool saveBrewServiceConfig();
 bool loadMqttConfig();
 bool saveMqttConfig();
+// The local sensor uses a separate file so original pressure settings survive.
+bool loadPressureConfig();
+bool savePressureConfig();
 bool loadSyslogConfig();
 bool saveSyslogConfig();
 
