@@ -31,7 +31,7 @@ function render() {
   $('#navigation').innerHTML=navItems.map(([key,label])=>`
     <a href="#${key}" class="nav-item ${state.route===key?'active':''}" ${state.route===key?'aria-current="page"':''}>
       ${icon(key)}<span>${label}</span>
-      ${key==='dashboard'?`<span class="nav-count">${state.fermenters.length}</span>`:''}</a>`).join('');
+      ${key==='dashboard'?`<span class="nav-count" title="Active fermenters">${activeFermenterCount()}</span>`:''}</a>`).join('');
   $('#crumb').textContent=routeLabel;
   $('.footer-version').textContent=state.controller.FirmwareVersion||'';
   const renderers={dashboard:dashboardView,profiles:profilesView,sensors:sensorsView,plugs:plugsView,
@@ -53,6 +53,9 @@ function render() {
 
 // Update live text and status badges without replacing editing forms.
 function updateLiveReadings() {
+  $$('.nav-count').forEach(node=>{
+    node.textContent=activeFermenterCount();
+  });
   $$('[data-controller]').forEach(node=>{
     node.textContent=controllerValue(node.dataset.controller);
   });

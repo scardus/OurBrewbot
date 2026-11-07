@@ -1,9 +1,14 @@
 'use strict';
 // The dashboard, fermenter cards, settings drawer and debug overrides.
 
+// Count the fermenters that are powered on, for the dashboard and its menu item.
+function activeFermenterCount() {
+  return state.fermenters.filter(f => f.power).length;
+}
+
 // Build the overview totals and fermenter cards from the latest browser state.
 function dashboardView() {
-  const active=state.fermenters.filter(f => f.power).length;
+  const active=activeFermenterCount();
   const alarms=state.fermenters.filter(f => f.alarmActive).length;
   const running=state.fermenters.filter(profileActive).length;
   const controlling=state.fermenters.some(f => f.power&&f.tempControl);
