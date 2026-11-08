@@ -792,3 +792,68 @@ test('the pressure switch uses the shared toggle and shows local readings withou
   assert.match(run('pressureBadge(state.pressure)'),/Disabled/);
   assert.match(run('pressureView()'),/Enable pressure sensor/);
 });
+
+
+test('capture time stays an estimate and stops claiming progress without fresh controller data',()=>{
+  const {run}=ui();
+  run('state.pressureReadAt=1000; var p={active:true,remainingMs:45000};');
+  assert.equal(run('pressureCaptureTime(p,6000)'),'About 40 seconds remaining');
+  run('p.remainingMs=5000');
+  assert.match(run('pressureCaptureTime(p,6000)'),/confirm completion/);
+  assert.match(run('pressureCaptureTime(p,12000)'),/not confirmed/);
+  run('state.pressureReadFailed=true');
+  assert.match(run('pressureCaptureTime(p,2000)'),/not confirmed/);
+  run('state.refreshPaused=true');
+  assert.match(run('pressureCaptureTime(p,2000)'),/Capture continues/);
+});
+
+test('capture outcomes identify the pressure and keep completed points visible',()=>{
+  const {run}=ui();
+  run('var p={enabled:true,active:true,capturePsi:15,draft:[{psi:0,raw:160}]};');
+  assert.match(run('pressureCaptureMessage(p)'),/point 2 at 15 PSI/);
+  run('p.active=false; p.failed=true; p.failure=2');
+  assert.match(run('pressureCaptureMessage(p)'),/did not increase/);
+  assert.match(run('pressureCaptureMessage(p)'),/Completed new points are kept/);
+  run('p.failure=1');
+  assert.match(run('pressureCaptureMessage(p)'),/reached its limit/);
+  run('p.failed=false; p.draft.push({psi:15,raw:250})');
+  assert.match(run('pressureCaptureMessage(p)'),/15 PSI point captured. 2 new points have not been applied/);
+});
+
+test('returning to the pressure tab rereads controller state even when previously loaded',async()=>{
+  const {run}=ui();
+  run("state.route='sensors'; state.sensorTab='pressure'; loaded.add('pressure'); var reads=[]; fetchData=async name=>reads.push(name); render=()=>{}; updateLiveReadings=()=>{};");
+  await run('loadRoute()');
+  assert.equal(run('JSON.stringify(reads)'),JSON.stringify(['pressure']));
+});
+
+test('a failed pressure poll retains data but marks capture progress unconfirmed',async()=>{
+  const {run}=ui();
+  run("state.pressure={active:true}; request=async()=>{throw new Error('offline');};");
+  await assert.rejects(run("fetchData('pressure')"),/offline/);
+  assert.equal(run('state.pressure.active'),true);
+  assert.equal(run('state.pressureReadFailed'),true);
+  run('request=async()=>({data:{active:false,draft:[{psi:0,raw:160}]}});');
+  await run("fetchData('pressure')");
+  assert.equal(run('state.pressureReadFailed'),false);
+  assert.equal(run('state.pressureReadAt>0'),true);
+});
+
+
+test('capture progress updates separate nodes and never completes an active capture by time alone',()=>{
+  const {run,context}=ui();
+  const nodes=Object.fromEntries(['message','timing','time','progress','samples'].map(key=>['[data-pressure-'+key+']',{}]));
+  context.document={querySelector:selector=>nodes[selector]};
+  run("state.route='sensors'; state.sensorTab='pressure'; state.pressure={enabled:true,active:true,capturePsi:0,samples:9,samplesNeeded:10,remainingMs:0,draft:[]}; state.pressureReadAt=Date.now(); updatePressureProgress();");
+  assert.equal(nodes['[data-pressure-progress]'].value,9);
+  assert.equal(nodes['[data-pressure-timing]'].hidden,false);
+  assert.match(nodes['[data-pressure-time]'].textContent,/confirm completion/);
+  assert.equal(run('state.pressure.active'),true);
+  run('state.pressure.active=false; state.pressure.draft=[{psi:0,raw:160}]; updatePressureProgress();');
+  assert.equal(nodes['[data-pressure-progress]'].hidden,true);
+  assert.equal(nodes['[data-pressure-timing]'].hidden,true);
+  assert.match(nodes['[data-pressure-message]'].textContent,/point captured/);
+  assert.equal(nodes['[data-pressure-message]'].className,'review-caption');
+  run('state.pressure.failed=true; state.pressure.failure=2; updatePressureProgress();');
+  assert.equal(nodes['[data-pressure-message]'].className,'notice error');
+});

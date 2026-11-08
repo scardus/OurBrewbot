@@ -95,7 +95,7 @@ window.addEventListener('hashchange',()=>{
 
 // Refresh stale readings when the browser tab becomes visible again.
 document.addEventListener('visibilitychange',()=>{
-  if (!document.hidden) { lastPoll=0; lastLogPoll=0; refreshVisible(); }
+  if (!document.hidden) { state.pressureReadAt=0; lastPoll=0; lastLogPoll=0; refreshVisible(); }
 });
 
 // Schedule reading, log and console polling while the tab is visible and ready.
@@ -104,7 +104,9 @@ const READINGS_POLL_MS = 10000;
 setInterval(()=>{
   if (document.hidden || !state.ready) return;
   updateAge();
-  if (Date.now()-lastPoll>=READINGS_POLL_MS) refreshVisible();
+  updatePressureProgress();
+  const readingsDelay=state.route==='sensors' && state.sensorTab==='pressure' && state.pressure.active?2000:READINGS_POLL_MS;
+  if (Date.now()-lastPoll>=readingsDelay) refreshVisible();
   const delay=logMore?250:$('#log-content').hidden?3000:1000;
   if (Date.now()-lastLogPoll>=delay) pollLogs();
   pollConsole();

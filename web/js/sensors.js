@@ -160,7 +160,50 @@ function pressureBadge(p) {
 function pressureCaptureBadge(p) {
   if (p.failed) return badge('Capture failed','warn');
   if (p.active) return badge('Capturing '+p.samples+' / '+p.samplesNeeded);
-  return badge('Ready','quiet');
+  const count=(p.draft||[]).length;
+  return badge(count?count+' new points':(p.points||[]).length?'Current calibration':'Not calibrated','quiet');
+}
+
+// Keep the outcome visible after a capture ends, including after returning to this tab.
+function pressureCaptureMessage(p) {
+  const count=(p.draft||[]).length;
+  if (!p.enabled) return 'Enable the pressure sensor to calibrate it and check its reading.';
+  if (p.failed) {
+    const reason=p.failure===1?'The sensor input reached its limit. Check the wiring and pressure.':
+      p.failure===2?'The sensor reading did not increase. Check the reference pressure and try again.':'The point could not be captured. Try again.';
+    return 'Capture at '+p.capturePsi+' PSI failed. '+reason+' Completed new points are kept.';
+  }
+  if (p.active) return 'Capturing point '+(count+1)+' at '+p.capturePsi+' PSI. Hold the pressure steady.';
+  if (count) return p.draft[count-1].psi+' PSI point captured. '+count+' new '+(count===1?'point has':'points have')+' not been applied.';
+  return (p.points||[]).length?'Current calibration is in use.':'Capture atmospheric zero first.';
+}
+
+// Estimate time only while controller updates are fresh. A clock reaching zero is not success.
+function pressureCaptureTime(p,now=Date.now()) {
+  if (!p.active) return '';
+  if (state.refreshPaused) return 'Refresh paused. Capture continues on the controller; resume to see progress.';
+  if (!state.pressureReadAt || state.pressureReadFailed || now-state.pressureReadAt>10000)
+    return 'Progress not confirmed. Waiting for the controller.';
+  const seconds=Math.ceil(Math.max(0,p.remainingMs-(now-state.pressureReadAt))/1000);
+  return seconds>0?'About '+seconds+' seconds remaining':'Waiting for the controller to confirm completion.';
+}
+
+// Called by the existing UI timer; these nodes are separate from the editing form.
+function updatePressureProgress() {
+  if (state.route!=='sensors' || state.sensorTab!=='pressure') return;
+  const message=$('[data-pressure-message]');
+  if (!message) return;
+  const p=state.pressure;
+  message.textContent=pressureCaptureMessage(p);
+  // A failed capture is shown as an error notice, like a failed command.
+  message.className=p.failed?'notice error':'review-caption';
+  $('[data-pressure-timing]').hidden=!p.active;
+  $('[data-pressure-time]').textContent=pressureCaptureTime(p);
+  const progress=$('[data-pressure-progress]');
+  progress.hidden=!p.active;
+  progress.max=p.samplesNeeded||10;
+  progress.value=p.active?Math.min(p.samples||0,progress.max-1):0;
+  $('[data-pressure-samples]').textContent=p.active?p.samples+' of '+p.samplesNeeded+' samples collected':'';
 }
 
 // The calibration points as text, such as "0 PSI = 160, 15 PSI = 250".
@@ -209,8 +252,11 @@ function pressureView() {
         <div><span data-pressure-count>${(p.draft||[]).length}</span><small>New points</small></div>
       </div>
       <p class="review-caption" data-pressure-draft>New: ${esc(pressurePoints(p.draft))}</p>
+      <p class="${p.failed?'notice error':'review-caption'}" style="margin-top:16px" data-pressure-message role="status">${esc(pressureCaptureMessage(p))}</p>
+      <progress class="pressure-progress" data-pressure-progress aria-label="Calibration samples collected" hidden></progress>
+      <p class="review-caption" data-pressure-timing hidden><span data-pressure-time></span><br><span data-pressure-samples></span></p>
       <form data-form="pressurepoint">
-        <div class="fields">
+        <div class="fields" style="margin-top:18px">
           ${field('Reference pressure (PSI)','psi','','number','min="0" max="100" step="0.1" required')}
         </div>
         ${formActions('Capture point')}
@@ -236,6 +282,7 @@ function updatePressureReadings() {
   $('[data-pressure-saved]').textContent='Saved: '+pressurePoints(p.points);
   $('[data-pressure-count]').textContent=(p.draft||[]).length;
   $('[data-pressure-draft]').textContent='New: '+pressurePoints(p.draft);
+  updatePressureProgress();
 }
 
 // Actions are never retried automatically; always reread progress afterwards.

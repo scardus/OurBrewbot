@@ -12,7 +12,7 @@ const state = {
   // The latest controller data, tidied by the set functions below.
   controller:{}, health:{}, debug:{Overrides:[]}, global:{},
   fermenters:[], profiles:[], probes:[], tilts:[], ispindels:[], plugs:[],
-  services:[], mqtt:{}, syslog:{}, files:[], pressure:{}
+  services:[], mqtt:{}, syslog:{}, files:[], pressure:{}, pressureReadAt:0, pressureReadFailed:false
 };
 
 // Unsaved edits. A form's key is its data-form attribute, such as "ferm-0", "profile-2" or "mqtt".
