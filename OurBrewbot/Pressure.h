@@ -37,7 +37,15 @@ enum PressureBeginResult : uint8_t {
 
 extern PressureCalibration g_pressureDraft;
 extern PressureCapture g_pressureCapture;
-extern bool g_pressureCaptureFailed;
+// Sent by the API as a number, like PressureReadingState.
+enum PressureCaptureFailure : uint8_t {
+  PRESSURE_CAPTURE_NO_FAILURE,
+  PRESSURE_CAPTURE_ADC_LIMIT,
+  PRESSURE_CAPTURE_NOT_INCREASING,
+};
+
+extern PressureCaptureFailure g_pressureCaptureFailure;
+extern float g_pressureCapturePsi;
 
 // Return the assigned fermenter, or -1 when no fermenter has the sensor.
 int pressureFermenter();

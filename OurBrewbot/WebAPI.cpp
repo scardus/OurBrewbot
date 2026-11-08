@@ -1978,7 +1978,18 @@ void handlePressure(ESP8266WebServer& server) {
   doc["active"] = g_pressureCapture.active;
   doc["samples"] = g_pressureCapture.samples;
   doc["samplesNeeded"] = PRESSURE_CAPTURE_SAMPLES;
-  doc["failed"] = g_pressureCaptureFailed;
+  doc["failed"] = g_pressureCaptureFailure != PRESSURE_CAPTURE_NO_FAILURE;
+  doc["failure"] = (unsigned)g_pressureCaptureFailure;
+  doc["capturePsi"] = g_pressureCapturePsi;
+  doc["durationMs"] = (PRESSURE_CAPTURE_SAMPLES - 1) * PRESSURE_CAPTURE_INTERVAL_MS;
+  uint32_t remainingMs = 0;
+  if (g_pressureCapture.active) {
+    uint32_t elapsed = (uint32_t)(millis() - g_pressureCapture.lastSampleMs);
+    // A delayed loop still needs the later samples; don't count them as taken.
+    if (elapsed > PRESSURE_CAPTURE_INTERVAL_MS) elapsed = PRESSURE_CAPTURE_INTERVAL_MS;
+    remainingMs = (PRESSURE_CAPTURE_SAMPLES - g_pressureCapture.samples) * PRESSURE_CAPTURE_INTERVAL_MS - elapsed;
+  }
+  doc["remainingMs"] = remainingMs;
   JsonArray points = doc["points"].to<JsonArray>();
   for (uint8_t i = 0; i < g_pressureCalibration.count; i++) {
     JsonObject point = points.add<JsonObject>();

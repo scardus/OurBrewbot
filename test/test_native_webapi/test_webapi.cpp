@@ -3011,6 +3011,71 @@ static void test_pressure_api_uses_the_unassigned_value_for_no_fermenter(void) {
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
 }
 
+static void test_pressure_progress_survives_wrap_and_waits_for_actual_samples(void) {
+  s_millis = 0xfffff000u;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  s_millis += 2000;
+  handlePressure(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["active"].as<bool>());
+  TEST_ASSERT_EQUAL_UINT32(45000, doc["durationMs"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_UINT32(43000, doc["remainingMs"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_UINT(1, doc["samples"].as<unsigned>());
+  // Even a long delay hasn't taken any more samples until the loop runs.
+  s_millis += 60000;
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_UINT32(40000, doc["remainingMs"].as<uint32_t>());
+  pressureLoop();
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_UINT(2, doc["samples"].as<unsigned>());
+  for (int i = 0; i < 8; i++) { s_millis += 5000; pressureLoop(); }
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_FALSE(doc["active"].as<bool>());
+  TEST_ASSERT_EQUAL_UINT32(0, doc["remainingMs"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_UINT(1, doc["draft"].size());
+}
+
+static void test_failed_pressure_point_keeps_completed_points_and_can_be_retried(void) {
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  JsonDocument doc;
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["failed"].as<bool>());
+  TEST_ASSERT_EQUAL(PRESSURE_CAPTURE_NOT_INCREASING, doc["failure"].as<unsigned>());
+  TEST_ASSERT_EQUAL_FLOAT(15, doc["capturePsi"].as<float>());
+  TEST_ASSERT_EQUAL_UINT(1, doc["draft"].size());
+  s_pressureAdc = 250;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  s_pressureAdc = 1023;
+  s_millis += 5000;
+  pressureLoop();
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_FALSE(doc["active"].as<bool>());
+  TEST_ASSERT_EQUAL(PRESSURE_CAPTURE_ADC_LIMIT, doc["failure"].as<unsigned>());
+  TEST_ASSERT_EQUAL_UINT(1, doc["draft"].size());
+  s_pressureAdc = 250;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_FALSE(doc["failed"].as<bool>());
+  TEST_ASSERT_EQUAL_UINT(2, doc["draft"].size());
+  TEST_ASSERT_EQUAL_UINT8(0, g_pressureCalibration.count);
+}
+
 static void test_switching_pressure_off_stops_capture_and_hides_fermenter_readings(void) {
   g_pressureCalibration = {2, {{0,160}, {20,280}}};
   g_fermenters[0].psiCollect = true;
@@ -3354,6 +3419,8 @@ int main(int, char**) {
   RUN_TEST(test_pressure_api_uses_the_unassigned_value_for_no_fermenter);
   RUN_TEST(test_pressure_capture_refusals_say_what_to_fix);
   RUN_TEST(test_pressure_assignment_requires_applied_calibration);
+  RUN_TEST(test_pressure_progress_survives_wrap_and_waits_for_actual_samples);
+  RUN_TEST(test_failed_pressure_point_keeps_completed_points_and_can_be_retried);
   RUN_TEST(test_switching_pressure_off_stops_capture_and_hides_fermenter_readings);
   RUN_TEST(test_live_pressure_reading_averages_without_blocking_across_wrap);
   RUN_TEST(test_live_pressure_reading_does_not_average_away_saturation);
