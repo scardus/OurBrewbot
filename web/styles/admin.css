@@ -724,6 +724,9 @@ p {
   align-items:flex-start;
   gap:10px
 }
+.notice[hidden] {
+  display:none
+}
 .notice.info {
   color:var(--blue);
   background:#1b2b3c;

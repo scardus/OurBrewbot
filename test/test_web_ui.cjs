@@ -752,12 +752,10 @@ test('the pressure tab is laid out like the other sensor tabs',()=>{
   assert.match(html,/Capturing 3 \/ 10/);
 });
 
-test('pressure forms submit only the selected assignment or reference pressure',()=>{
+test('pressure settings submit the selected assignment and sensor switch',()=>{
   const {run}=ui();
   assert.equal(run('JSON.stringify(formTypes.pressure.buildBody(null,{fermenter:"2",enabled:true}))'),
     JSON.stringify({action:'assign',fermenter:2,enabled:true}));
-  assert.equal(run('JSON.stringify(formTypes.pressurepoint.buildBody(null,{psi:"0"}))'),
-    JSON.stringify({action:'capture',psi:0}));
 });
 
 test('a fermenter with the pressure sensor shows pressure alongside its other readings',()=>{
@@ -818,7 +816,7 @@ test('capture outcomes identify the pressure and keep completed points visible',
   run('p.failure=1');
   assert.match(run('pressureCaptureMessage(p)'),/reached its limit/);
   run('p.failed=false; p.draft.push({psi:15,raw:250})');
-  assert.match(run('pressureCaptureMessage(p)'),/15 PSI point captured. 2 new points have not been applied/);
+  assert.match(run('pressureCaptureMessage(p)'),/15 PSI point captured. Apply the new points/);
 });
 
 test('returning to the pressure tab rereads controller state even when previously loaded',async()=>{
@@ -876,4 +874,93 @@ test('pressure point lists distinguish empty, completed and incomplete points an
   assert.match(run('pressureView()'),/data-pressure-replace hidden>Applying new points replaces the whole current calibration/);
   run('state.pressure.draft=[{psi:0,raw:160}]');
   assert.match(run('pressureView()'),/data-pressure-replace >Applying new points/);
+});
+
+
+// Small DOM fixture for the pressure command controls, separate from settings-form drafts.
+function pressureControlsUI() {
+  const env=ui();
+  const input={value:'0',validity:{valid:true},willValidate:true};
+  const elements=[input]; elements.psi=input;
+  const form={dataset:{},elements};
+  const settings={dataset:{dirty:'false'},elements:{fermenter:{},enabled:{checked:true}}};
+  const nodes={
+    'form[data-pressure-point]':form,'form[data-form="pressure"]':settings,
+    '[data-pressure-start]':{},'[data-action="pressure-apply"]':{},'[data-action="pressure-cancel"]':{},
+    '[data-save]':{},'[data-pressure-assignment]':{},'[data-pressure-result]':{}
+  };
+  settings.querySelector=key=>nodes[key];
+  env.context.document={querySelector:key=>nodes[key]};
+  env.context.captureForm=form;
+  env.run("state.route='sensors'; state.sensorTab='pressure'; state.pressureReadAt=Date.now(); state.pressure={enabled:true,fermenter:99,points:[],draft:[],active:false};");
+  return {...env,input,form,settings,nodes};
+}
+
+test('pressure controls guide zero, higher points, retry, apply and switching off during capture',()=>{
+  const {run,input,settings,nodes}=pressureControlsUI();
+  run('updatePressureControls()');
+  assert.equal(nodes['[data-pressure-start]'].disabled,false); // zero needs no dirty settings form
+  assert.equal(input.readOnly,true);
+  assert.equal(settings.elements.fermenter.disabled,true);
+  assert.equal(nodes['[data-action="pressure-apply"]'].disabled,true);
+  run('state.pressure.draft=[{psi:0,raw:160}]; updatePressureControls();');
+  assert.equal(input.value,'');
+  assert.equal(nodes['[data-pressure-start]'].disabled,true);
+  input.value='15'; run("state.pressureReference='15'; updatePressureControls(); updatePressureControls();");
+  assert.equal(input.value,'15');
+  assert.equal(nodes['[data-pressure-start]'].disabled,false);
+  run('state.pressure.active=true; state.pressure.capturePsi=15; updatePressureControls();');
+  assert.equal(input.disabled,true);
+  assert.equal(nodes['[data-action="pressure-cancel"]'].textContent,'Cancel capture and discard new points');
+  settings.dataset.dirty='true'; settings.elements.enabled.checked=false;
+  run('updatePressureControls()');
+  assert.equal(nodes['[data-save]'].disabled,false);
+  run('state.pressure.active=false; state.pressure.failed=true; updatePressureControls();');
+  assert.equal(nodes['[data-pressure-start]'].disabled,false);
+  assert.equal(nodes['[data-pressure-start]'].textContent,'Retry point');
+  assert.equal(nodes['[data-pressure-start]'].className,'button'); // capture is the next step
+  run('state.pressure.failed=false; state.pressure.draft.push({psi:15,raw:250}); updatePressureControls();');
+  assert.equal(nodes['[data-action="pressure-apply"]'].disabled,false);
+  assert.equal(nodes['[data-action="pressure-apply"]'].className,'button'); // now apply is
+  assert.equal(nodes['[data-pressure-start]'].className,'button secondary');
+  run('state.pressure.draft.push({psi:20,raw:280},{psi:30,raw:340},{psi:40,raw:400}); updatePressureControls();');
+  assert.equal(nodes['[data-pressure-start]'].disabled,true);
+});
+
+test('zero capture is submitted once without an assignment or a dirty form',async()=>{
+  const {run}=pressureControlsUI();
+  run("var posts=[]; request=async(path,options)=>{if(options.method==='POST'){posts.push(JSON.parse(options.body));return {data:{msg:'Started'}};}return {data:{enabled:true,active:true,capturePsi:0,samples:1,draft:[]}};}; updatePressureReadings=()=>{};");
+  await run('capturePressurePoint(captureForm)');
+  assert.equal(run('JSON.stringify(posts)'),JSON.stringify([{action:'capture',psi:0}]));
+  await run('capturePressurePoint(captureForm)');
+  assert.equal(run('posts.length'),1);
+});
+
+test('a lost capture reply is reread without retry and a failed read blocks another attempt',async()=>{
+  const {run}=pressureControlsUI();
+  run("var posts=0; request=async(path,options)=>{if(options.method==='POST')posts++;throw new Error('Connection lost');}; updatePressureReadings=()=>{};");
+  await run('capturePressurePoint(captureForm)');
+  assert.equal(run('posts'),1);
+  assert.equal(run('state.pressureReadFailed'),true);
+  assert.match(run('state.pressureResult'),/Progress not confirmed/);
+  await run('capturePressurePoint(captureForm)');
+  assert.equal(run('posts'),1);
+});
+
+test('a failed flash save shows the error while reading back the calibration already in use',async()=>{
+  const {run}=pressureControlsUI();
+  run("state.pressure.draft=[{psi:0,raw:160},{psi:15,raw:250}]; var posts=0; request=async(path,options)=>{if(options.method==='POST'){posts++;throw new Error('In use, but not saved to flash yet');}return {data:{enabled:true,points:[{psi:0,raw:160},{psi:15,raw:250}],draft:[]}};}; updatePressureReadings=()=>{};");
+  await run("pressureCommand('apply')");
+  assert.equal(run('posts'),1);
+  assert.equal(run('state.pressure.points.length'),2);
+  assert.equal(run('state.pressure.draft.length'),0);
+  assert.equal(run('state.pressureResultError'),true);
+  assert.match(run('state.pressureResult'),/not saved to flash/);
+  assert.match(run('pressureCaptureMessage(state.pressure)'),/Current calibration is in use/);
+});
+
+test('saving the sensor switch invalidates cached fermenter cards',()=>{
+  const {run}=ui();
+  run("loaded.add('fermenters'); formTypes.pressure.afterSave();");
+  assert.equal(run("loaded.has('fermenters')"),false);
 });

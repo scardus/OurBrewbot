@@ -3,10 +3,14 @@
 
 // Track typed form edits in browser drafts without saving to the controller.
 document.addEventListener('input',event=>{
+  if (event.target.closest('form[data-pressure-point]')) {
+    state.pressureReference=event.target.value; updatePressureControls(); return;
+  }
   const form=event.target.closest('form[data-form]');
   if (!form) return;
   if (form.dataset.form.startsWith('profile-')) profileChanged();
   updateDirty(form);
+  if (form.dataset.form==='pressure') updatePressureControls();
 });
 
 // Update changed controls, rebuild profile fields when needed and accept an import file.
@@ -17,6 +21,7 @@ document.addEventListener('change',event=>{
       profileChanged();
       if (event.target.name.startsWith('type-')) { formDrafts.delete(form.dataset.form); render(); }
     } else updateDirty(form);
+    if (form.dataset.form==='pressure') updatePressureControls();
   }
   if (event.target.id==='import-file' && event.target.files[0]) {
     const file=event.target.files[0];
@@ -29,7 +34,8 @@ document.addEventListener('change',event=>{
 document.addEventListener('submit',event=>{
   event.preventDefault();
   const form=event.target;
-  if (form.dataset.form) saveForm(form);
+  if (form.hasAttribute('data-pressure-point')) capturePressurePoint(form).catch(error=>showPressureResult(error.message,true));
+  else if (form.dataset.form) saveForm(form);
   else if (form.id==='ble-form') sendBle(form.elements.cmd.value).catch(error=>toast(error.message));
   else if (form.dataset.debug!==undefined) saveDebug(form).catch(error=>toast(error.message));
 });
@@ -105,6 +111,7 @@ setInterval(()=>{
   if (document.hidden || !state.ready) return;
   updateAge();
   updatePressureProgress();
+  updatePressureControls();
   const readingsDelay=state.route==='sensors' && state.sensorTab==='pressure' && state.pressure.active?2000:READINGS_POLL_MS;
   if (Date.now()-lastPoll>=readingsDelay) refreshVisible();
   const delay=logMore?250:$('#log-content').hidden?3000:1000;

@@ -174,8 +174,13 @@ function pressureCaptureMessage(p) {
     return 'Capture at '+p.capturePsi+' PSI failed. '+reason+' Completed new points are kept.';
   }
   if (p.active) return 'Capturing point '+(count+1)+' at '+p.capturePsi+' PSI. Hold the pressure steady.';
-  if (count) return p.draft[count-1].psi+' PSI point captured. '+count+' new '+(count===1?'point has':'points have')+' not been applied.';
-  return (p.points||[]).length?'Current calibration is in use.':'Capture atmospheric zero first.';
+  // The lists above already show which points are new, so only say what to do next.
+  if (count) {
+    const next=count===1?'Set a higher pressure and enter the reference gauge reading.':
+      count<5?'Apply the new points, or capture another higher pressure.':'Five points is the most; apply the new points when ready.';
+    return p.draft[count-1].psi+' PSI point captured. '+next;
+  }
+  return (p.points||[]).length?'Current calibration is in use. To recalibrate, capture atmospheric zero first.':'Capture atmospheric zero first.';
 }
 
 // Estimate time only while controller updates are fresh. A clock reaching zero is not success.
@@ -194,7 +199,8 @@ function updatePressureProgress() {
   const message=$('[data-pressure-message]');
   if (!message) return;
   const p=state.pressure;
-  message.textContent=pressureCaptureMessage(p);
+  const text=pressureCaptureMessage(p);
+  if (message.textContent!==text) message.textContent=text;
   // A failed capture is shown as an error notice, like a failed command.
   message.className=p.failed?'notice error':'review-caption';
   $('[data-pressure-timing]').hidden=!p.active;
@@ -228,7 +234,7 @@ function pressureView() {
   return pageTitle('GOOD DATA, BETTER CONTROL','Sensors','Assign each sensor and fine-tune its readings.')+
     tabBar('Sensor type','sensor-tab',sensorTabs(),'pressure')+
     `<p class="notice info">Calibrate with a reference gauge: capture 0 PSI first, then up to four higher pressures,
-      holding each steady for about 45 seconds. Readings above the highest point are estimates.
+      holding each steady for about 45 seconds. Apply the points and check the reading before assigning a fermenter. Readings above the highest point are estimates.
       This is a monitor only; it doesn't control a pressure relief valve.</p>
     <div class="grid">
     <article class="card panel">
@@ -249,6 +255,7 @@ function pressureView() {
         <div class="fields" style="margin-top:18px">
           ${select('Fermenter','fermenter',p.fermenter??UNASSIGNED,fermOptions())}
         </div>
+        <p class="review-caption" data-pressure-assignment>Apply a calibration before assigning a fermenter.</p>
         ${formActions('Save changes')}
       </form>
     </article>
@@ -269,16 +276,17 @@ function pressureView() {
       <p class="${p.failed?'notice error':'review-caption'}" style="margin-top:16px" data-pressure-message role="status">${esc(pressureCaptureMessage(p))}</p>
       <progress class="pressure-progress" data-pressure-progress aria-label="Calibration samples collected" hidden></progress>
       <p class="review-caption" data-pressure-timing hidden><span data-pressure-time></span><br><span data-pressure-samples></span></p>
-      <form data-form="pressurepoint">
+      <form data-pressure-point novalidate>
         <div class="fields" style="margin-top:18px">
-          ${field('Reference pressure (PSI)','psi','','number','min="0" max="100" step="0.1" required')}
+          ${field('Reference pressure (PSI)','psi',p.active||p.failed?p.capturePsi:(p.draft||[]).length?state.pressureReference:0,'number','min="0" max="100" step="0.1" required')}
         </div>
-        ${formActions('Capture point')}
+        <div class="form-actions">
+          <button type="submit" class="button" data-pressure-start>Capture point</button>
+          ${btn('Apply new points','pressure-apply')}
+          ${btn('Discard new points','pressure-cancel','ghost')}
+        </div>
       </form>
-      <div class="two-col-actions" style="margin-top:12px">
-        ${btn('Apply new points','pressure-apply','small secondary')}
-        ${btn('Discard new points','pressure-cancel','small ghost')}
-      </div>
+      <p data-pressure-result role="status" class="notice ${state.pressureResultError?'error':'info'}" style="margin-top:16px" ${state.pressureResult?'':'hidden'}>${esc(state.pressureResult)}</p>
     </article>
   </div>`;
 }
@@ -297,15 +305,101 @@ function updatePressureReadings() {
   $('[data-pressure-draft]').innerHTML=pressurePoints(p.draft,'No new points captured.',p);
   $('[data-pressure-replace]').hidden=!pressureHasNewPoints(p);
   updatePressureProgress();
+  updatePressureControls();
 }
 
-// Actions are never retried automatically; always reread progress afterwards.
-async function pressureCommand(action) {
+// Actions depend on controller state, not the settings form's dirty flag.
+function pressureActions(p) {
+  const count=(p.draft||[]).length;
+  return {
+    capture:!!p.enabled && !p.active && count<5,
+    apply:!!p.enabled && !p.active && count>=2,
+    cancel:!!p.active || count>0 || !!p.failed,
+    assign:(p.points||[]).length>=2 && !p.active && count===0
+  };
+}
+
+// Update availability without redrawing the form or replacing a reference being typed.
+function updatePressureControls() {
+  if (state.route!=='sensors' || state.sensorTab!=='pressure') return;
+  const form=$('form[data-pressure-point]');
+  if (!form) return;
+  const p=state.pressure,actions=pressureActions(p),count=(p.draft||[]).length;
+  const input=form.elements.psi;
+  if (form.dataset.points!==String(count)) {
+    if (form.dataset.points!==undefined) input.value=count?state.pressureReference:'0';
+    form.dataset.points=String(count);
+  }
+  if (!count) input.value='0';
+  if (p.active) input.value=String(p.capturePsi);
+  input.readOnly=count===0;
+  input.disabled=saving || !p.enabled || !!p.active || count>=5;
+  input.min=count?p.draft[count-1].psi:0;
+  const psi=Number(input.value);
+  const valid=input.value.trim()!=='' && Number.isFinite(psi) && psi<=100 && (count?psi>p.draft[count-1].psi:psi===0);
+  const unconfirmed=!state.pressureReadAt || state.pressureReadFailed;
+  const start=$('[data-pressure-start]'),apply=$('[data-action="pressure-apply"]');
+  start.disabled=saving || unconfirmed || !actions.capture || !valid;
+  start.textContent=p.active?'Capturing point…':p.failed?'Retry point':count?'Capture point':'Capture 0 PSI';
+  apply.disabled=saving || unconfirmed || !actions.apply;
+  // Highlight the next step: Apply once enough points exist, otherwise Capture.
+  const applyNext=actions.apply && !p.failed;
+  start.className=applyNext?'button secondary':'button';
+  apply.className=applyNext?'button':'button secondary';
+  const cancel=$('[data-action="pressure-cancel"]');
+  cancel.disabled=saving || unconfirmed || !actions.cancel;
+  cancel.textContent=p.active?'Cancel capture and discard new points':'Discard new points';
+  const settings=$('form[data-form="pressure"]');
+  settings.elements.fermenter.disabled=saving || !actions.assign;
+  $('[data-save]',settings).disabled=saving || settings.dataset.dirty!=='true' ||
+    (!!p.active && settings.elements.enabled.checked);
+  $('[data-pressure-assignment]').textContent=actions.assign?'Assignment is optional. Unassigned sensors still show local readings.':
+    (p.points||[]).length<2?'Apply a calibration before assigning a fermenter.':'Apply or discard new points before changing the assignment.';
+}
+
+// Command feedback remains visible through polling, including an unsuccessful flash save.
+function showPressureResult(message,error=false) {
+  state.pressureResult=message;
+  state.pressureResultError=error;
+  const result=$('[data-pressure-result]');
+  if (!result) return;
+  result.textContent=message;
+  result.className='notice '+(error?'error':'info');
+  result.hidden=!message;
+}
+
+async function capturePressurePoint(form) {
+  if (!fieldsAreValid(form)) return;
+  const p=state.pressure,count=(p.draft||[]).length,psi=Number(form.elements.psi.value);
+  if (!Number.isFinite(psi) || psi>100 || (count?psi<=p.draft[count-1].psi:psi!==0)) {
+    showPressureResult(count?'Enter a reference pressure higher than '+p.draft[count-1].psi+' PSI, up to 100 PSI.':'Capture 0 PSI first.',true);
+    return;
+  }
+  await pressureCommand('capture',psi);
+}
+
+// Never retry a POST automatically. Re-read even after an uncertain reply or a failed flash save.
+async function pressureCommand(action,psi) {
   if (saving) return;
+  const actions=pressureActions(state.pressure);
+  if (!state.pressureReadAt || state.pressureReadFailed) {
+    showPressureResult('Refresh the controller state before trying again.',true); return;
+  }
+  if (!actions[action]) return;
   saving=true;
-  try { await postAndShowReply('/pressure',{action}); }
-  finally {
-    try { await fetchData('pressure'); updatePressureReadings(); }
-    finally { saving=false; }
+  showPressureResult('');
+  updatePressureControls();
+  try {
+    const reply=await post('/pressure',action==='capture'?{action,psi}:{action});
+    if (action==='capture') state.pressureReference='';
+    else { state.pressureReference=''; showPressureResult(reply.msg); }
+  } catch (error) {
+    showPressureResult(error.message,true);
+  } finally {
+    try { await fetchData('pressure'); }
+    catch (error) {
+      showPressureResult((state.pressureResult?state.pressureResult+' ':'')+'Progress not confirmed. Refresh before trying again. '+error.message,true);
+    }
+    finally { saving=false; updatePressureReadings(); }
   }
 }
