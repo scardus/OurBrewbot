@@ -64,6 +64,7 @@ NodeMCU and generic ESP8266 board targets).
 | BLE (ESP TX)   | GPIO12| D6          | HM-10 BT 4.0 RX ← ESP TX |
 | BLE (ESP RX)   | GPIO13| D7          | HM-10 BT 4.0 TX → ESP RX |
 | LED            | GPIO16| D0          | NodeMCU LED_BUILTIN |
+| Pressure Sensor | A0 (ADC) | A0       | Pink Jack (PSI) |
 
 ---
 
