@@ -70,7 +70,12 @@ async function fetchData(name, background=false) {
   // These legacy replies contain temperatures but no unit field. Read the
   // existing controller endpoint first rather than extending their contracts.
   if (['probes','tilts','ispindels','profiles'].includes(name)) await fetchData('controller',background);
-  const value=await get('/'+name,background);
+  let value;
+  try { value=await get('/'+name,background); }
+  catch (error) {
+    if (name==='pressure') state.pressureReadFailed=true;
+    throw error;
+  }
   if (name==='controller') setController(value);
   else if (name==='fermenters') setFermenters(value);
   else if (name==='profiles') setProfiles(value);
@@ -86,6 +91,10 @@ async function fetchData(name, background=false) {
     state.global.debug=!!value.DebugMode;
   }
   else state[name]=value;
+  if (name==='pressure') {
+    state.pressureReadAt=Date.now();
+    state.pressureReadFailed=false;
+  }
   loaded.add(name);
   return value;
 }
@@ -110,7 +119,7 @@ async function loadRoute(force=false) {
   const generation=++routeGeneration;
   let received=false;
   try {
-    for (const name of routeData()) if (force || !loaded.has(name)) {
+    for (const name of routeData()) if (force || name==='pressure' || !loaded.has(name)) {
       await fetchData(name);
       received=true;
     }

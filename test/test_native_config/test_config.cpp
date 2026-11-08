@@ -69,6 +69,7 @@ void logMsgImpl(uint8_t, PGM_P fmt, ...) {
 
 void setUp(void) {
   fsTestReset();
+  g_pressureEnabled = false;
   g_pressureCalibration = {};
   espTestSetResetReason(REASON_DEFAULT_RST);
   g_espFreeHeap = 24000;
@@ -1385,6 +1386,26 @@ static void test_a_normal_mount_logs_no_boot_problem(void) {
 
 // ---- Local pressure persistence ----
 
+static void test_pressure_switch_defaults_off_and_preserves_older_calibrated_files(void) {
+  TEST_ASSERT_FALSE(loadPressureConfig());
+  TEST_ASSERT_FALSE(g_pressureEnabled);
+  fsTestWrite(FILE_PRESSURE, "{\"points\":[{\"psi\":0,\"raw\":160},{\"psi\":20,\"raw\":280}]}");
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_TRUE(g_pressureEnabled);
+  g_pressureEnabled = false;
+  TEST_ASSERT_TRUE(savePressureConfig());
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_FALSE(g_pressureEnabled);
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureCalibration.count);
+  g_pressureCalibration = {};
+  g_pressureEnabled = true;
+  TEST_ASSERT_TRUE(savePressureConfig());
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_TRUE(g_pressureEnabled);  // allowed to calibrate before assignment
+  resetAllConfig();
+  TEST_ASSERT_FALSE(g_pressureEnabled);
+}
+
 static void test_pressure_round_trip_and_corrupt_primary_recovery(void) {
   g_pressureCalibration = {2, {{0,160}, {20,280}}};
   TEST_ASSERT_TRUE(savePressureConfig());
@@ -1401,6 +1422,14 @@ static void test_missing_pressure_config_disables_legacy_assignments(void) {
   TEST_ASSERT_FALSE(g_fermenters[0].psiCollect);
   TEST_ASSERT_EQUAL_UINT8(0, g_pressureCalibration.count);
   TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "Fermenter 1: pressure sensor unassigned - no usable pressure settings file"));
+}
+
+static void test_empty_pressure_calibration_clears_assignment_on_load(void) {
+  TEST_ASSERT_TRUE(savePressureConfig());
+  g_fermenters[0].psiCollect = true;
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_FALSE(g_fermenters[0].psiCollect);
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "pressure calibration is invalid"));
 }
 
 static void test_a_second_pressure_assignment_is_cleared_and_logged(void) {
@@ -1575,10 +1604,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_failed_correction_save_while_loading_is_tried_again);
 
   // Local pressure persistence
+  RUN_TEST(test_pressure_switch_defaults_off_and_preserves_older_calibrated_files);
   RUN_TEST(test_failed_pressure_save_is_retried_and_then_left_alone);
   RUN_TEST(test_pressure_round_trip_and_corrupt_primary_recovery);
   RUN_TEST(test_missing_pressure_config_disables_legacy_assignments);
   RUN_TEST(test_a_second_pressure_assignment_is_cleared_and_logged);
+  RUN_TEST(test_empty_pressure_calibration_clears_assignment_on_load);
   RUN_TEST(test_pressure_import_restore_keeps_the_active_calibration);
   return UNITY_END();
 }

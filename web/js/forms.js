@@ -86,9 +86,8 @@ function savedNumber(form,data,name,received) {
 // afterSave: optional clean-up once the save is confirmed.
 const formTypes = {
   pressure: {path:'/pressure', refresh:'pressure',
-    buildBody:(form,data)=>({action:'assign',fermenter:+data.fermenter})},
-  pressurepoint: {path:'/pressure', refresh:'pressure',
-    buildBody:(form,data)=>({action:'capture',psi:+data.psi})},
+    buildBody:(form,data)=>({action:'assign',fermenter:+data.fermenter,enabled:!!data.enabled}),
+    afterSave:()=>loaded.delete('fermenters')},
   ferm: {path:'/fermenter', refresh:'fermenters', usesUnits:true, limits:{name:31,beer:31,yeast:31},
     buildBody:(form,data,index)=>fermenterPayload(form,data,index),
     afterSave:()=>$('#editor').close()},

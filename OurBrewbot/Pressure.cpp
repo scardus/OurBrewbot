@@ -21,12 +21,12 @@
 
 PressureCalibration g_pressureDraft = {};
 PressureCapture g_pressureCapture = {};
-bool g_pressureCaptureFailed = false;
+PressureCaptureFailure g_pressureCaptureFailure = PRESSURE_CAPTURE_NO_FAILURE;
+float g_pressureCapturePsi = 0;
 
 static PressureReading s_reading = {PRESSURE_UNAVAILABLE, 0, NAN};
 static uint32_t s_readingAt = 0;
 static bool s_haveReading = false;
-static float s_pointPsi = 0;
 static const uint32_t PRESSURE_READ_INTERVAL_MS = 60000UL;
 
 // ============================================================
@@ -84,7 +84,7 @@ int pressureFermenter() {
 }
 
 PressureReading pressureCurrentReading() {
-  if (pressureFermenter() < 0 || !s_haveReading || !pressureReadingFresh(millis(), s_readingAt))
+  if (!g_pressureEnabled || !s_haveReading || !pressureReadingFresh(millis(), s_readingAt))
     return {PRESSURE_UNAVAILABLE, 0, NAN};
   return s_reading;
 }
@@ -93,12 +93,12 @@ void pressureResetRuntime() {
   pressureCancelReading();
   pressureCancelCapture(g_pressureCapture);
   g_pressureDraft = {};
-  g_pressureCaptureFailed = false;
+  g_pressureCaptureFailure = PRESSURE_CAPTURE_NO_FAILURE;
   s_haveReading = false;
 }
 
 PressureBeginResult pressureBeginPoint(float psi) {
-  if (pressureFermenter() < 0) return PRESSURE_BEGIN_NOT_ASSIGNED;
+  if (!g_pressureEnabled) return PRESSURE_BEGIN_DISABLED;
   if (g_pressureCapture.active) return PRESSURE_BEGIN_BUSY;
   if (g_pressureDraft.count >= PRESSURE_MAX_POINTS) return PRESSURE_BEGIN_DRAFT_FULL;
 
@@ -112,26 +112,26 @@ PressureBeginResult pressureBeginPoint(float psi) {
   // With the checks above passed, the only refusal left is a saturated input.
   if (!pressureStartCapture(g_pressureCapture, millis(), analogRead(PIN_PRESSURE)))
     return PRESSURE_BEGIN_ADC_LIMIT;
-  s_pointPsi = psi;
-  g_pressureCaptureFailed = false;
+  g_pressureCapturePsi = psi;
+  g_pressureCaptureFailure = PRESSURE_CAPTURE_NO_FAILURE;
   return PRESSURE_BEGIN_OK;
 }
 
 void pressureLoop() {
-  if (pressureFermenter() < 0) return;
+  if (!g_pressureEnabled) return;
   uint32_t now = millis();
   if (g_pressureCapture.active &&
       (uint32_t)(now - g_pressureCapture.lastSampleMs) >= PRESSURE_CAPTURE_INTERVAL_MS) {
     uint16_t average;
     PressureCaptureResult result = pressureCaptureSample(g_pressureCapture, now,
                                                          analogRead(PIN_PRESSURE), average);
-    if (result == PRESSURE_CAPTURE_CANCELLED) g_pressureCaptureFailed = true;
+    if (result == PRESSURE_CAPTURE_CANCELLED) g_pressureCaptureFailure = PRESSURE_CAPTURE_ADC_LIMIT;
     if (result == PRESSURE_CAPTURE_DONE) {
       // Refuse a point that would reverse the calibration slope. The previous
       // completed draft points remain available so this point can be retried.
       if (g_pressureDraft.count && average <= g_pressureDraft.points[g_pressureDraft.count - 1].raw)
-        g_pressureCaptureFailed = true;
-      else g_pressureDraft.points[g_pressureDraft.count++] = {s_pointPsi, average};
+        g_pressureCaptureFailure = PRESSURE_CAPTURE_NOT_INCREASING;
+      else g_pressureDraft.points[g_pressureDraft.count++] = {g_pressureCapturePsi, average};
     }
   }
   if (!s_haveReading || (uint32_t)(now - s_readingAt) >= PRESSURE_READ_INTERVAL_MS) {

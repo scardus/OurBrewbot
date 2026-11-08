@@ -153,7 +153,7 @@ void reportBrewService(uint8_t i, uint8_t svcIndex) {
   if (svc.sendOg && g_fermenters[i].og > 0.0f) doc["og"] = g_fermenters[i].og;
   // Pressure goes only with the fermenter that has the sensor, and only when
   // there is a usable value. Otherwise it is left out, never sent as 0.
-  if (svc.pressureKey && g_fermenters[i].psiCollect) {
+  if (svc.pressureKey && g_pressureEnabled && g_fermenters[i].psiCollect) {
     PressureReading pressure = pressureCurrentReading();
     if (pressure.state == PRESSURE_IN_RANGE || pressure.state == PRESSURE_ABOVE_RANGE) {
       doc[svc.pressureKey] = pressure.psi;

@@ -28,7 +28,7 @@
 // the user what to fix.
 enum PressureBeginResult : uint8_t {
   PRESSURE_BEGIN_OK,
-  PRESSURE_BEGIN_NOT_ASSIGNED,   // no fermenter has the sensor
+  PRESSURE_BEGIN_DISABLED,       // the sensor is switched off
   PRESSURE_BEGIN_BUSY,           // a capture is already running
   PRESSURE_BEGIN_DRAFT_FULL,     // the draft already has PRESSURE_MAX_POINTS points
   PRESSURE_BEGIN_BAD_PSI,        // not 0 PSI first, not higher than the last point, or over the limit
@@ -37,9 +37,17 @@ enum PressureBeginResult : uint8_t {
 
 extern PressureCalibration g_pressureDraft;
 extern PressureCapture g_pressureCapture;
-extern bool g_pressureCaptureFailed;
+// Sent by the API as a number, like PressureReadingState.
+enum PressureCaptureFailure : uint8_t {
+  PRESSURE_CAPTURE_NO_FAILURE,
+  PRESSURE_CAPTURE_ADC_LIMIT,
+  PRESSURE_CAPTURE_NOT_INCREASING,
+};
 
-// Return the assigned fermenter, or -1 when pressure is disabled.
+extern PressureCaptureFailure g_pressureCaptureFailure;
+extern float g_pressureCapturePsi;
+
+// Return the assigned fermenter, or -1 when no fermenter has the sensor.
 int pressureFermenter();
 // Service the ADC and calibration across loop passes without waiting.
 void pressureLoop();

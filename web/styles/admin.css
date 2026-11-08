@@ -724,6 +724,9 @@ p {
   align-items:flex-start;
   gap:10px
 }
+.notice[hidden] {
+  display:none
+}
 .notice.info {
   color:var(--blue);
   background:#1b2b3c;
@@ -1798,4 +1801,11 @@ input[type=checkbox] {
     font-size:16px
   }
 
+}
+
+/* Capture progress uses the same accent and spacing as the sensor controls. */
+.pressure-progress {
+  width:100%;
+  height:8px;
+  accent-color:var(--accent);
 }
