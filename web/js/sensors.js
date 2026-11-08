@@ -206,8 +206,21 @@ function updatePressureProgress() {
   $('[data-pressure-samples]').textContent=p.active?p.samples+' of '+p.samplesNeeded+' samples collected':'';
 }
 
-// The calibration points as text, such as "0 PSI = 160, 15 PSI = 250".
-const pressurePoints = points => (points||[]).map(x=>x.psi+' PSI = '+x.raw).join(', ')||'None';
+// Use the existing label/value rows so both sets remain readable on a narrow screen.
+function pressurePoints(points,empty,capture=null) {
+  const rows=(points||[]).map(point=>`<div class="list-row">
+    <span>${esc(point.psi)} PSI<small>Reference pressure</small></span>
+    <strong>${esc(point.raw)}<small>Sensor reading (ADC)</small></strong>
+  </div>`).join('');
+  const pending=capture?.active?`<div class="list-row">
+    <span>${esc(capture.capturePsi)} PSI<small>Reference pressure</small></span>
+    ${badge('Capturing - incomplete')}
+  </div>`:'';
+  return rows+pending || `<p class="review-caption">${esc(empty)}</p>`;
+}
+
+// The note about replacing the current set only applies once new points exist.
+const pressureHasNewPoints = p => !!p.active || (p.draft||[]).length>0;
 
 // Laid out like the other sensor tabs: the sensor's card, then its calibration card.
 function pressureView() {
@@ -244,14 +257,15 @@ function pressureView() {
         <div>
           <div class="slot-label">pressure · calibration</div>
           <h2>Calibration</h2>
-          <p data-pressure-saved>Saved: ${esc(pressurePoints(p.points))}</p>
+          <p>Capture two to five reference points.</p>
         </div>
         <span data-pressure-capture>${pressureCaptureBadge(p)}</span>
       </div>
-      <div class="sensor-reading">
-        <div><span data-pressure-count>${(p.draft||[]).length}</span><small>New points</small></div>
-      </div>
-      <p class="review-caption" data-pressure-draft>New: ${esc(pressurePoints(p.draft))}</p>
+      <h3>Current calibration</h3>
+      <div data-pressure-saved>${pressurePoints(p.points,'No calibration applied.')}</div>
+      <h3 style="margin-top:24px">New calibration - not applied</h3>
+      <div data-pressure-draft>${pressurePoints(p.draft,'No new points captured.',p)}</div>
+      <p class="review-caption" data-pressure-replace ${pressureHasNewPoints(p)?'':'hidden'}>Applying new points replaces the whole current calibration. New points are lost if the controller restarts.</p>
       <p class="${p.failed?'notice error':'review-caption'}" style="margin-top:16px" data-pressure-message role="status">${esc(pressureCaptureMessage(p))}</p>
       <progress class="pressure-progress" data-pressure-progress aria-label="Calibration samples collected" hidden></progress>
       <p class="review-caption" data-pressure-timing hidden><span data-pressure-time></span><br><span data-pressure-samples></span></p>
@@ -279,9 +293,9 @@ function updatePressureReadings() {
   $('[data-pressure-raw]').textContent=orDash(p.raw);
   $('[data-pressure-status]').innerHTML=pressureBadge(p);
   $('[data-pressure-capture]').innerHTML=pressureCaptureBadge(p);
-  $('[data-pressure-saved]').textContent='Saved: '+pressurePoints(p.points);
-  $('[data-pressure-count]').textContent=(p.draft||[]).length;
-  $('[data-pressure-draft]').textContent='New: '+pressurePoints(p.draft);
+  $('[data-pressure-saved]').innerHTML=pressurePoints(p.points,'No calibration applied.');
+  $('[data-pressure-draft]').innerHTML=pressurePoints(p.draft,'No new points captured.',p);
+  $('[data-pressure-replace]').hidden=!pressureHasNewPoints(p);
   updatePressureProgress();
 }
 

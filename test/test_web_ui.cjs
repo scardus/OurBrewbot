@@ -747,7 +747,8 @@ test('the pressure tab is laid out like the other sensor tabs',()=>{
   assert.match(html,/<p class="notice info">Calibrate with a reference gauge/);
   assert.equal((html.match(/<div class="fields"[^>]*>/g)||[]).length,2);
   assert.match(html,/<span data-pressure-psi>7\.3 PSI<\/span><small>Pressure<\/small>/);
-  assert.match(html,/Saved: 0 PSI = 160, 15 PSI = 250/);
+  assert.match(html,/<h3>Current calibration<\/h3>/);
+  assert.match(html,/250<small>Sensor reading \(ADC\)/);
   assert.match(html,/Capturing 3 \/ 10/);
 });
 
@@ -856,4 +857,23 @@ test('capture progress updates separate nodes and never completes an active capt
   assert.equal(nodes['[data-pressure-message]'].className,'review-caption');
   run('state.pressure.failed=true; state.pressure.failure=2; updatePressureProgress();');
   assert.equal(nodes['[data-pressure-message]'].className,'notice error');
+});
+
+
+test('pressure point lists distinguish empty, completed and incomplete points and escape values',()=>{
+  const {run}=ui();
+  assert.match(run("pressurePoints([],'No calibration applied.')"),/No calibration applied/);
+  const html=run("pressurePoints([{psi:0,raw:160}],'No new points captured.',{active:true,capturePsi:15})");
+  assert.match(html,/0 PSI/);
+  assert.match(html,/160<small>Sensor reading/);
+  assert.match(html,/15 PSI/);
+  assert.match(html,/Capturing - incomplete/);
+  assert.match(html,/class="badge good"/); // same colour as the card's "Capturing" badge
+  assert.doesNotMatch(html,/No new points/);
+  assert.match(run("pressurePoints([{psi:'<test>',raw:'&'}],'')"),/&lt;test&gt;/);
+  // The replacement note is only shown once there are new points.
+  run('state.pressure={enabled:true,points:[],draft:[]}');
+  assert.match(run('pressureView()'),/data-pressure-replace hidden>Applying new points replaces the whole current calibration/);
+  run('state.pressure.draft=[{psi:0,raw:160}]');
+  assert.match(run('pressureView()'),/data-pressure-replace >Applying new points/);
 });
