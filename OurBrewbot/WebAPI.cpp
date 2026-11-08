@@ -404,8 +404,9 @@ void buildFermenterJson(JsonDocument& doc, uint8_t i) {
   // Only the fermenter with the pressure sensor reports its state and reading.
   // PressureState is a PressureReadingState number (see PressureCalc.h), and
   // Pressure is null whenever there's no usable value - never 0.
-  doc["PressureAssigned"] = g_fermenters[i].psiCollect;
-  if (g_fermenters[i].psiCollect) {
+  bool pressureAssigned = g_pressureEnabled && g_fermenters[i].psiCollect;
+  doc["PressureAssigned"] = pressureAssigned;
+  if (pressureAssigned) {
     PressureReading reading = pressureCurrentReading();
     doc["PressureState"] = (unsigned)reading.state;
     doc["Pressure"]      = nullptr;
@@ -1973,6 +1974,7 @@ void handlePressure(ESP8266WebServer& server) {
   doc["psi"] = nullptr;
   if (reading.state == PRESSURE_IN_RANGE || reading.state == PRESSURE_ABOVE_RANGE)
     doc["psi"] = reading.psi;
+  doc["enabled"] = g_pressureEnabled;
   doc["active"] = g_pressureCapture.active;
   doc["samples"] = g_pressureCapture.samples;
   doc["samplesNeeded"] = PRESSURE_CAPTURE_SAMPLES;
@@ -2001,25 +2003,35 @@ void handlePressurePost(ESP8266WebServer& server) {
     sendOk(server, F("Calibration draft discarded"));
     return;
   }
-  if (g_pressureCapture.active) {
+  // Switching off also discards the unfinished calibration, as cancellation does.
+  bool switchingOff = !strcmp(action, "assign") && doc["enabled"].is<bool>() && !doc["enabled"].as<bool>();
+  if (g_pressureCapture.active && !switchingOff) {
     sendErr(server, 409, F("Calibration is running - cancel it first"));
     return;
   }
   if (!strcmp(action, "assign")) {
     if (!doc["fermenter"].is<int>()) { sendErr(server, 400, F("Invalid fermenter")); return; }
-    // A fermenter number, or PROBE_UNASSIGNED to switch the sensor off.
+    // A fermenter number, or PROBE_UNASSIGNED for local readings only.
     int index = doc["fermenter"];
     if (index != PROBE_UNASSIGNED && (index < 0 || index >= MAX_FERMENTERS)) {
       sendErr(server, 400, F("Invalid fermenter"));
       return;
     }
+    if (!doc["enabled"].isNull() && !doc["enabled"].is<bool>()) {
+      sendErr(server, 400, F("Invalid pressure sensor switch"));
+      return;
+    }
+    if (index != PROBE_UNASSIGNED && !pressureCalibrationValid(g_pressureCalibration)) {
+      sendErr(server, 400, F("Apply a valid pressure calibration before assigning a fermenter"));
+      return;
+    }
+    g_pressureEnabled = doc["enabled"] | g_pressureEnabled;
     for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenters[i].psiCollect = (i == index);
     pressureResetRuntime();
-    // Create the new-format file even before calibration so this explicit
-    // assignment can be distinguished from old, unused pressure flags at boot.
+    // The sensor switch and calibration are stored separately from assignment.
     bool saved = savePressureConfig();
     saved &= saveFermenterConfig();
-    sendSaveResult(server, saved, F("Pressure assignment saved"));
+    sendSaveResult(server, saved, F("Pressure sensor settings saved"));
   } else if (!strcmp(action, "capture")) {
     PressureBeginResult result = doc["psi"].is<float>() ? pressureBeginPoint(doc["psi"].as<float>())
                                                         : PRESSURE_BEGIN_BAD_PSI;
@@ -2027,8 +2039,8 @@ void handlePressurePost(ESP8266WebServer& server) {
       case PRESSURE_BEGIN_OK:
         sendOk(server, F("Calibration capture started"));
         break;
-      case PRESSURE_BEGIN_NOT_ASSIGNED:
-        sendErr(server, 400, F("Assign the pressure sensor to a fermenter first"));
+      case PRESSURE_BEGIN_DISABLED:
+        sendErr(server, 400, F("Enable the pressure sensor before capturing a point"));
         break;
       case PRESSURE_BEGIN_BUSY:
         sendErr(server, 409, F("Calibration is running - cancel it first"));

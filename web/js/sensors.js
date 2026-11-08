@@ -149,9 +149,9 @@ const pressureStates = [
 const describePressureState = status => pressureStates[status]||pressureStates[0];
 const formatPressure = psi => psi==null?'—':Number(psi).toFixed(1);
 
-// The sensor card's status badge: its reading state, or that no fermenter has it.
+// The sensor card's status badge: its reading state, independently of assignment.
 function pressureBadge(p) {
-  if (p.fermenter==null || +p.fermenter===UNASSIGNED) return badge('Not assigned','quiet');
+  if (!p.enabled) return badge('Disabled','quiet');
   const described=describePressureState(p.state);
   return badge(described.name,described.badge);
 }
@@ -189,7 +189,8 @@ function pressureView() {
         <div><span data-pressure-raw>${orDash(p.raw)}</span><small>ADC reading</small></div>
       </div>
       <form data-form="pressure">
-        <div class="fields">
+        ${toggle('Enable pressure sensor','enabled',!!p.enabled,'Disabling it discards new calibration points but keeps the current calibration and assignment.')}
+        <div class="fields" style="margin-top:18px">
           ${select('Fermenter','fermenter',p.fermenter??UNASSIGNED,fermOptions())}
         </div>
         ${formActions('Save changes')}

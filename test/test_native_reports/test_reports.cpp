@@ -45,6 +45,7 @@ GlobalConfig      g_globalConfig;
 bool g_fermenterDebugMode = false;
 FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
 PressureCalibration g_pressureCalibration = {};
+bool g_pressureEnabled = false;
 
 // ---- millis(), settable per test ----
 static uint32_t s_millis = 0;
@@ -102,6 +103,7 @@ void setUp(void) {
   httpTestReset();
   s_millis = 0;
   pressureResetRuntime();
+  g_pressureEnabled = true;
   g_pressureCalibration = {};
   s_pressureAdc = 160;
 }
@@ -368,6 +370,20 @@ void test_payload_sends_pressure_to_brewfather_with_its_unit(void) {
   TEST_ASSERT_FALSE(bodyHas("\"pressure_unit\":"));
 }
 
+void test_switching_pressure_off_omits_it_from_both_services(void) {
+  enableService(BF, "abc");
+  enableService(BFR, "def");
+  readPressure(F, 205);
+  g_pressureEnabled = false;
+  for (uint8_t service = BF; service <= BFR; service++) {
+    reportBrewService(F, service);
+    TEST_ASSERT_TRUE(bodyHas("\"name\":"));
+    TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+    TEST_ASSERT_FALSE(bodyHas("\"pressure\":"));
+    TEST_ASSERT_FALSE(bodyHas("\"pressure_unit\":"));
+  }
+}
+
 void test_payload_sends_pressure_only_for_the_fermenter_with_the_sensor(void) {
   enableService(BF, "abc");
   readPressure(F, 205);
@@ -385,6 +401,7 @@ void test_payload_leaves_out_pressure_without_a_usable_reading(void) {
   TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
 
   pressureResetRuntime();
+  g_pressureEnabled = true;
   g_pressureCalibration = {};
   for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }   // not calibrated
   reportBrewService(F, BF);
@@ -447,6 +464,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_payload_sends_pressure_to_brewers_friend_as_psi);
   RUN_TEST(test_payload_sends_pressure_to_brewfather_with_its_unit);
   RUN_TEST(test_payload_sends_pressure_only_for_the_fermenter_with_the_sensor);
+  RUN_TEST(test_switching_pressure_off_omits_it_from_both_services);
   RUN_TEST(test_payload_leaves_out_pressure_without_a_usable_reading);
   RUN_TEST(test_payload_names_the_fermenter_not_the_device);
   RUN_TEST(test_payload_url_is_built_per_service);

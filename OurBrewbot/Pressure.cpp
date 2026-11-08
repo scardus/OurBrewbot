@@ -84,7 +84,7 @@ int pressureFermenter() {
 }
 
 PressureReading pressureCurrentReading() {
-  if (pressureFermenter() < 0 || !s_haveReading || !pressureReadingFresh(millis(), s_readingAt))
+  if (!g_pressureEnabled || !s_haveReading || !pressureReadingFresh(millis(), s_readingAt))
     return {PRESSURE_UNAVAILABLE, 0, NAN};
   return s_reading;
 }
@@ -98,7 +98,7 @@ void pressureResetRuntime() {
 }
 
 PressureBeginResult pressureBeginPoint(float psi) {
-  if (pressureFermenter() < 0) return PRESSURE_BEGIN_NOT_ASSIGNED;
+  if (!g_pressureEnabled) return PRESSURE_BEGIN_DISABLED;
   if (g_pressureCapture.active) return PRESSURE_BEGIN_BUSY;
   if (g_pressureDraft.count >= PRESSURE_MAX_POINTS) return PRESSURE_BEGIN_DRAFT_FULL;
 
@@ -118,7 +118,7 @@ PressureBeginResult pressureBeginPoint(float psi) {
 }
 
 void pressureLoop() {
-  if (pressureFermenter() < 0) return;
+  if (!g_pressureEnabled) return;
   uint32_t now = millis();
   if (g_pressureCapture.active &&
       (uint32_t)(now - g_pressureCapture.lastSampleMs) >= PRESSURE_CAPTURE_INTERVAL_MS) {

@@ -745,7 +745,7 @@ test('the pressure tab is laid out like the other sensor tabs',()=>{
   const html=run('pressureView()');
   assert.equal(html.indexOf(run("pageTitle('GOOD DATA, BETTER CONTROL','Sensors','Assign each sensor and fine-tune its readings.')")),0);
   assert.match(html,/<p class="notice info">Calibrate with a reference gauge/);
-  assert.equal((html.match(/<div class="fields">/g)||[]).length,2);
+  assert.equal((html.match(/<div class="fields"[^>]*>/g)||[]).length,2);
   assert.match(html,/<span data-pressure-psi>7\.3 PSI<\/span><small>Pressure<\/small>/);
   assert.match(html,/Saved: 0 PSI = 160, 15 PSI = 250/);
   assert.match(html,/Capturing 3 \/ 10/);
@@ -753,8 +753,8 @@ test('the pressure tab is laid out like the other sensor tabs',()=>{
 
 test('pressure forms submit only the selected assignment or reference pressure',()=>{
   const {run}=ui();
-  assert.equal(run('JSON.stringify(formTypes.pressure.buildBody(null,{fermenter:"2"}))'),
-    JSON.stringify({action:'assign',fermenter:2}));
+  assert.equal(run('JSON.stringify(formTypes.pressure.buildBody(null,{fermenter:"2",enabled:true}))'),
+    JSON.stringify({action:'assign',fermenter:2,enabled:true}));
   assert.equal(run('JSON.stringify(formTypes.pressurepoint.buildBody(null,{psi:"0"}))'),
     JSON.stringify({action:'capture',psi:0}));
 });
@@ -779,5 +779,16 @@ test('the pressure tab uses the shared fermenter choices and sensor tabs',()=>{
   assert.match(html,/<option value="99" selected>Unassigned<\/option>/);
   assert.equal(run('sensorTabs().map(([key])=>key).at(-1)'),'pressure');
   assert.equal(run('JSON.stringify(formTypes.pressure.buildBody(null,{fermenter:String(UNASSIGNED)}))'),
-    JSON.stringify({action:'assign',fermenter:99}));
+    JSON.stringify({action:'assign',fermenter:99,enabled:false}));
+});
+
+
+test('the pressure switch uses the shared toggle and shows local readings without assignment',()=>{
+  const {run}=ui();
+  run('state.pressure={enabled:true,fermenter:99,state:2,psi:7.5,raw:205}');
+  assert.match(run('pressureView()'),/class="toggle-row"/);
+  assert.match(run('pressureBadge(state.pressure)'),/Calibrated/);
+  run('state.pressure.enabled=false');
+  assert.match(run('pressureBadge(state.pressure)'),/Disabled/);
+  assert.match(run('pressureView()'),/Enable pressure sensor/);
 });

@@ -523,6 +523,7 @@ extern BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 extern MqttConfig        g_mqttConfig;
 extern SyslogConfig      g_syslogConfig;
 extern PressureCalibration g_pressureCalibration;
+extern bool g_pressureEnabled;
 
 // ============================================================
 // FUNCTION DECLARATIONS
