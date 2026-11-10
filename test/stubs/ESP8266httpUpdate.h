@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <Arduino.h>   // String, for getErrorString()
 
 class UpdaterStub {
 public:
@@ -38,6 +39,7 @@ public:
   bool end(bool /*evenIfRemaining*/ = false) { return error == 0; }
   bool hasError() { return error != 0; }
   int  getError() { return error; }
+  String getErrorString() { return String(error ? "Flash Write Failed" : "No Error"); }
   template <typename T> void printError(T&) {}
 };
 

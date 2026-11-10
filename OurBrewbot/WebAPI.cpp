@@ -237,7 +237,7 @@ void setupWebServer(ESP8266WebServer& server) {
         holdPlugsOff(false);   // no restart is coming: the control loop takes over again
         String err = "Update FAILED: ";
         if (otaUploadRefused())     err += F("this is not a complete OurBrewbot firmware file");
-        else if (Update.hasError()) err += Update.getError();
+        else if (Update.hasError()) err += Update.getErrorString();
         else                        err += F("no firmware file was received");
         otaUploadClear();   // so the next request isn't answered with this one's result
         server.send(500, "text/html", err);
@@ -937,15 +937,14 @@ void handleOTAUpload(ESP8266WebServer& server) {
     firmwareCheckStart(s_otaCheck);
     s_otaInstalled = false;
     s_otaRefused   = false;
+    // If begin() or a write() fails, the updater keeps the reason, and
+    // Update.end(true) below then fails too and logs it. Logging each failed
+    // write would add a line for every chunk of the file.
     uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-    if (!Update.begin(maxSketchSpace)) {
-      Update.printError(Serial);
-    }
+    Update.begin(maxSketchSpace);
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     firmwareCheckAdd(s_otaCheck, upload.buf, upload.currentSize);
-    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-      Update.printError(Serial);
-    }
+    Update.write(upload.buf, upload.currentSize);
   } else if (upload.status == UPLOAD_FILE_END) {
     if (!firmwareCheckPassed(s_otaCheck)) {
       // Cut short or damaged. Update.end() without "true" throws the upload
@@ -962,10 +961,15 @@ void handleOTAUpload(ESP8266WebServer& server) {
       // nothing in the firmware.
       logMsgL(SYSLOG_NOTICE, "[OTA] Update success: %u bytes", (unsigned)upload.totalSize);
     } else {
-      Update.printError(Serial);
+      // The updater's reason used to go to the serial port only, so a failed
+      // update couldn't be diagnosed from syslog
+      logMsgL(SYSLOG_WARNING, "[OTA] Update failed: %s (%u bytes)",
+              Update.getErrorString().c_str(), (unsigned)upload.totalSize);
     }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     // The connection dropped mid-upload: no restart is coming
+    logMsgL(SYSLOG_WARNING, "[OTA] Upload cut off after %u bytes - nothing installed",
+            (unsigned)upload.totalSize);
     Update.end();
     holdPlugsOff(false);
   }
@@ -1921,8 +1925,8 @@ void handleSyslogConfig(ESP8266WebServer& server) {
 void handleSyslogConfigPost(ESP8266WebServer& server) {
   JsonDocument doc;
   if (!parseJsonBody(server, doc)) return;
-  if (!doc["enabled"].isNull())  g_syslogConfig.enabled  = doc["enabled"];
-  if (doc["host"].is<const char*>()) copyText(g_syslogConfig.host, doc["host"].as<const char*>(), sizeof(g_syslogConfig.host));
+  // The port is checked before anything else is changed, so a refused request
+  // leaves the settings as they were (it used to apply "enabled" and "host" first)
   if (!doc["port"].isNull()) {
     uint32_t port = doc["port"];
     if (port < 1 || port > 65535) {
@@ -1931,6 +1935,8 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
     }
     g_syslogConfig.port = (uint16_t)port;
   }
+  if (!doc["enabled"].isNull())  g_syslogConfig.enabled  = doc["enabled"];
+  if (doc["host"].is<const char*>()) copyText(g_syslogConfig.host, doc["host"].as<const char*>(), sizeof(g_syslogConfig.host));
   if (!doc["facility"].isNull()) { uint8_t v = doc["facility"]; if (v <= 23) g_syslogConfig.facility = v; }
   if (!doc["minLevel"].isNull()) { uint8_t v = doc["minLevel"]; if (v <= 7)  g_syslogConfig.minLevel = v; }
   bool saved = saveSyslogConfig();

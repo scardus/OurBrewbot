@@ -246,6 +246,8 @@ void setUp(void) {
   s_rfSniffLastPoll = 0;
   s_restarts       = 0;
   s_lastForgetWiFi = false;
+  Update.error     = 0;
+  otaUploadClear();
 
   memset(&g_updateStatus, 0, sizeof(g_updateStatus));
   s_updateChecks = 0;
@@ -1462,6 +1464,29 @@ static void test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces(void) {
   TEST_ASSERT_EQUAL_STRING("home/brew bot/12345678901234567", g_mqttConfig.baseTopic);
 }
 
+// A bad port used to be refused only after "enabled" and "host" had already
+// been changed in RAM, so the rejected request still half-applied
+static void test_a_refused_syslog_port_changes_nothing(void) {
+  g_syslogConfig.enabled = false;
+  strlcpy(g_syslogConfig.host, "old.example", sizeof(g_syslogConfig.host));
+  g_syslogConfig.port = 514;
+  postBody("{\"enabled\":true,\"host\":\"new.example\",\"port\":70000}");
+  handleSyslogConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_syslogConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("old.example", g_syslogConfig.host);
+  TEST_ASSERT_EQUAL_UINT16(514, g_syslogConfig.port);
+}
+
+static void test_a_valid_syslog_save_applies_every_field(void) {
+  postBody("{\"enabled\":true,\"host\":\"new.example\",\"port\":1514}");
+  handleSyslogConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(g_syslogConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("new.example", g_syslogConfig.host);
+  TEST_ASSERT_EQUAL_UINT16(1514, g_syslogConfig.port);
+}
+
 static void test_fs_save_rejects_an_empty_body(void) {
   srv.setArg("name", "/jsonGlobal.txt");
   srv.setBody("");
@@ -1977,6 +2002,39 @@ static void test_an_aborted_ota_upload_releases_the_plugs(void) {
   srv.testUpload().status = UPLOAD_FILE_ABORTED;
   handleOTAUpload(srv);
   TEST_ASSERT_FALSE(s_plugsHeldOff);
+}
+
+// The updater's reason for a failure used to go to the serial port only. It
+// is now logged once when the upload ends - not once for every failed chunk.
+static void test_a_failed_firmware_install_is_logged_once(void) {
+  makeTestImage();
+  Update.error = 4;   // flash write failed
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  s_logCalls = 0;
+  const size_t chunk = TEST_IMAGE_SIZE / 4;
+  for (size_t sent = 0; sent < TEST_IMAGE_SIZE; sent += chunk) {
+    size_t n = (TEST_IMAGE_SIZE - sent < chunk) ? TEST_IMAGE_SIZE - sent : chunk;
+    srv.testUpload().status      = UPLOAD_FILE_WRITE;
+    srv.testUpload().buf         = g_testImage + sent;
+    srv.testUpload().currentSize = n;
+    handleOTAUpload(srv);
+  }
+  srv.testUpload().totalSize = TEST_IMAGE_SIZE;
+  srv.testUpload().status    = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+  TEST_ASSERT_FALSE(otaUploadInstalled());
+  TEST_ASSERT_FALSE(otaUploadRefused());   // the file was fine; flashing it failed
+  TEST_ASSERT_EQUAL_INT(1, s_logCalls);
+}
+
+static void test_a_cut_off_upload_is_logged(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  s_logCalls = 0;
+  srv.testUpload().status = UPLOAD_FILE_ABORTED;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_logCalls);
 }
 
 // ============================================================
@@ -3001,6 +3059,8 @@ int main(int, char**) {
   RUN_TEST(test_mqtt_post_saves_a_new_password);
   RUN_TEST(test_mqtt_post_with_an_empty_password_clears_it);
   RUN_TEST(test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces);
+  RUN_TEST(test_a_refused_syslog_port_changes_nothing);
+  RUN_TEST(test_a_valid_syslog_save_applies_every_field);
   RUN_TEST(test_fs_save_rejects_an_empty_body);
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);
   RUN_TEST(test_fs_save_writes_a_whitelisted_file);
@@ -3047,6 +3107,8 @@ int main(int, char**) {
   RUN_TEST(test_ota_upload_start_switches_every_plug_off_and_holds_them);
   RUN_TEST(test_ota_upload_chunks_do_not_switch_the_plugs_again);
   RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
+  RUN_TEST(test_a_failed_firmware_install_is_logged_once);
+  RUN_TEST(test_a_cut_off_upload_is_logged);
   RUN_TEST(test_a_complete_firmware_file_is_installed);
   RUN_TEST(test_a_cut_short_firmware_file_is_refused);
   RUN_TEST(test_clearing_the_upload_result_forgets_a_refused_upload);
