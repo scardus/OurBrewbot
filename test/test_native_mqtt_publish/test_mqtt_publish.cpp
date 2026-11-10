@@ -1382,6 +1382,33 @@ void test_inbound_rejected_value_is_not_stored(void) {
   assertNotPublished(F0_BASE "/profile_no");
 }
 
+// A running profile keeps its number; the stored one is published again so
+// HA's select goes back to it
+void test_inbound_profile_change_refused_while_a_profile_runs(void) {
+  g_mqttConfig.allowControl = true;
+  g_fermenters[F0].profileNo      = 1;
+  g_fermenters[F0].profileRunning = true;
+  mqttTestInject(BASE "/Fermenter0/profile_no/set", "2");
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F0].profileNo);
+  assertPayload(F0_BASE "/profile_no", "1");
+}
+
+void test_inbound_profile_change_refused_while_a_profile_is_paused(void) {
+  g_mqttConfig.allowControl = true;
+  g_fermenters[F0].profileNo     = 1;
+  g_fermenters[F0].profilePaused = true;
+  mqttTestInject(BASE "/Fermenter0/profile_no/set", "0");
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F0].profileNo);
+}
+
+void test_inbound_profile_change_applies_when_no_profile_runs(void) {
+  g_mqttConfig.allowControl = true;
+  g_fermenters[F0].profileNo = 1;
+  mqttTestInject(BASE "/Fermenter0/profile_no/set", "2");
+  TEST_ASSERT_EQUAL_UINT8(2, g_fermenters[F0].profileNo);
+  assertPayload(F0_BASE "/profile_no", "2");
+}
+
 void test_inbound_name_is_stored_as_valid_utf8(void) {
   // An MQTT payload is raw bytes. A name is stored the same way as one from
   // the WebUI: an invalid byte becomes '?', so it can't break the JSON the
@@ -1681,6 +1708,9 @@ int main(int, char**) {
   RUN_TEST(test_inbound_command_ignored_when_control_is_disabled);
   RUN_TEST(test_inbound_switch_command_applies_and_echoes);
   RUN_TEST(test_inbound_rejected_value_is_not_stored);
+  RUN_TEST(test_inbound_profile_change_refused_while_a_profile_runs);
+  RUN_TEST(test_inbound_profile_change_refused_while_a_profile_is_paused);
+  RUN_TEST(test_inbound_profile_change_applies_when_no_profile_runs);
   RUN_TEST(test_inbound_name_is_stored_as_valid_utf8);
   RUN_TEST(test_inbound_all_off_powers_every_fermenter_off);
   RUN_TEST(test_inbound_reboot_switches_the_plugs_off_first);

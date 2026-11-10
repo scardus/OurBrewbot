@@ -290,6 +290,16 @@ void profileAddTenMinutes(uint8_t i) {
   }
 }
 
+// A running or paused profile keeps its number until it is stopped. Changing
+// it used to carry the old profile's step and hour over into a different
+// profile, and choosing 0 (Standard) left the profile "running" with its
+// temperatures frozen. The same number is always allowed: the WebUI sends it
+// with every fermenter save.
+bool profileNoChangeAllowed(uint8_t i, uint8_t profileNo) {
+  if (profileNo == g_fermenters[i].profileNo) return true;
+  return !g_fermenters[i].profileRunning && !g_fermenters[i].profilePaused;
+}
+
 void stopProfile(uint8_t i) {
   logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile stopped", i, g_fermenters[i].fermenterName);
   finishProfile(i);   // the same clean state as a profile that ran to the end

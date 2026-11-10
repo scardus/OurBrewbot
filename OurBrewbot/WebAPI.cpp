@@ -515,13 +515,23 @@ void handleFermenter(ESP8266WebServer& server) {
       fc.alarmTolerance = v;
     }
 
-    if (!doc["Power"].isNull())           fc.power           = doc["Power"];
+    if (!doc["ProfileNo"].isNull()) {
+      int v = doc["ProfileNo"];
+      if (v >= 0 && v <= MAX_PROFILES) {
+        if (!profileNoChangeAllowed(idx, (uint8_t)v)) {
+          sendErr(server, 400, F("Stop the running profile before choosing another"));
+          return;
+        }
+        fc.profileNo = (uint8_t)v;
+      }
+    }
+
+    if (!doc["Power"].isNull())         fc.power           = doc["Power"];
     if (!doc["TempControl"].isNull())     fc.tempControl     = doc["TempControl"];
     if (doc["BeerName"].is<const char*>())      copyText(fc.beerName,      doc["BeerName"].as<const char*>(),      sizeof(fc.beerName));
     if (doc["FermenterName"].is<const char*>()) copyText(fc.fermenterName, doc["FermenterName"].as<const char*>(), sizeof(fc.fermenterName));
     if (doc["YeastName"].is<const char*>())     copyText(fc.yeastName,     doc["YeastName"].as<const char*>(),     sizeof(fc.yeastName));
     if (!doc["BrewServices"].isNull())    fc.brewServices    = doc["BrewServices"];
-    if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"]; if (v >= 0 && v <= MAX_PROFILES) fc.profileNo = (uint8_t)v; }
     if (!doc["LiveTest"].isNull())        fc.liveTest        = doc["LiveTest"];
 
     // Single commit point: nothing above this line is visible to the

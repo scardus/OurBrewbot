@@ -184,6 +184,23 @@ test('the dashboard menu item counts the fermenters that are powered on, and fol
   assert.equal(count.textContent,2);
 });
 
+test('the profile dropdown is locked while a profile runs or is paused, as the firmware requires',()=>{
+  const {run,context}=ui();
+  const elements={};
+  context.document={querySelectorAll:()=>[],querySelector:selector=>
+    elements[selector]??={open:true,showModal:()=>{},querySelector:()=>null,querySelectorAll:()=>[]}};
+  run(`mountForms=()=>{}; state.global={debug:false}; state.profiles=[{name:'Lager',steps:[{}]}];
+    state.fermenters=[{name:'Vessel',beer:'Beer',yeast:'',beerTemp:20,status:'Idle',alarmActive:false,
+      og:1.05,tg:1.01,floor:18,ceiling:20,hysteresis:0.5,alarm:3,delay:10,power:true,tempControl:true,
+      liveTest:false,brewfather:false,brewers:false,mqtt:false,profile:1,running:false,paused:false,step:0,hour:0}];`);
+  const profileSelect=()=>elements['#editor-content'].innerHTML.match(/<select name="profile"[^>]*>/)[0];
+  for (const [running,paused,locked] of [[false,false,false],[true,false,true],[false,true,true]]) {
+    run(`state.fermenters[0].running=${running}; state.fermenters[0].paused=${paused}; openFerm(0);`);
+    assert.equal(profileSelect().includes('disabled'),locked,'running='+running+' paused='+paused);
+    assert.equal(elements['#editor-content'].innerHTML.includes('Stop the profile to choose another.'),locked);
+  }
+});
+
 function saveFixture() {
   const fixture=ui();
   const inputs=Object.entries({name:'Profile',host:'broker',port:'1883',username:'',password:'',baseTopic:'new-topic'})

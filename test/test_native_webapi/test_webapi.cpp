@@ -1115,6 +1115,48 @@ static void test_profile_resume_rejected_when_nothing_is_paused(void) {
   TEST_ASSERT_TRUE(bodyContains("No paused profile to resume"));
 }
 
+// A running profile keeps its number. Changing it used to carry the step and
+// hour over into another profile, and 0 froze the temperatures mid-run.
+static void test_fermenter_save_refuses_another_profile_while_one_runs(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  postBody("{\"Fermenter\":0,\"ProfileNo\":0,\"BeerName\":\"Changed\"}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Stop the running profile"));
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F0].profileNo);
+  TEST_ASSERT_EQUAL_STRING("", g_fermenters[F0].beerName);   // nothing else applied either
+}
+
+static void test_fermenter_save_refuses_another_profile_while_one_is_paused(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  pauseProfile(F0);
+  postBody("{\"Fermenter\":0,\"ProfileNo\":2}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F0].profileNo);
+}
+
+// The WebUI sends ProfileNo with every save, so the running one must pass
+static void test_fermenter_save_with_the_running_profile_is_accepted(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  postBody("{\"Fermenter\":0,\"ProfileNo\":1,\"BeerName\":\"Changed\"}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("Changed", g_fermenters[F0].beerName);
+  TEST_ASSERT_TRUE(g_fermenters[F0].profileRunning);
+}
+
+static void test_fermenter_save_changes_the_profile_when_none_runs(void) {
+  g_fermenters[F0].profileNo = 1;
+  postBody("{\"Fermenter\":0,\"ProfileNo\":2}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(2, g_fermenters[F0].profileNo);
+}
+
 static void test_profile_resume_rejected_when_already_running(void) {
   giveProfileOneStep(0);
   startProfile(F0, 1);
@@ -3026,6 +3068,10 @@ int main(int, char**) {
   RUN_TEST(test_profile_pause_holds_the_step);
   RUN_TEST(test_profile_resume_restarts_a_paused_profile);
   RUN_TEST(test_profile_resume_rejected_when_nothing_is_paused);
+  RUN_TEST(test_fermenter_save_refuses_another_profile_while_one_runs);
+  RUN_TEST(test_fermenter_save_refuses_another_profile_while_one_is_paused);
+  RUN_TEST(test_fermenter_save_with_the_running_profile_is_accepted);
+  RUN_TEST(test_fermenter_save_changes_the_profile_when_none_runs);
   RUN_TEST(test_profile_resume_rejected_when_already_running);
   RUN_TEST(test_profile_next_advances_a_running_profile);
   RUN_TEST(test_profile_next_on_a_stopped_profile_is_rejected);
