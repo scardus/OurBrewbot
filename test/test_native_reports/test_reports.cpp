@@ -260,6 +260,19 @@ void test_payload_converts_temperatures_to_display_unit(void) {
   TEST_ASSERT_TRUE(bodyHas("\"temp_unit\":\"F\""));
 }
 
+// The hysteresis is a span, so it converts without the 32 F offset. It used
+// to be sent in Celsius whatever the display unit.
+void test_payload_converts_the_hysteresis_to_display_unit(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  enableService(BF, "abc");
+  subscribeFermenter(F, BF);
+  g_fermenters[F].hysteresis = 0.5f;      // 0.9 F
+
+  reportBrewService(F, BF);
+
+  TEST_ASSERT_TRUE(bodyHas("\"hysteresis\":0.9"));
+}
+
 void test_payload_target_is_the_midpoint_of_the_band(void) {
   enableService(BF, "abc");
   subscribeFermenter(F, BF);
@@ -373,6 +386,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_payload_omits_readings_that_are_unavailable);
   RUN_TEST(test_payload_includes_readings_when_available);
   RUN_TEST(test_payload_converts_temperatures_to_display_unit);
+  RUN_TEST(test_payload_converts_the_hysteresis_to_display_unit);
   RUN_TEST(test_payload_target_is_the_midpoint_of_the_band);
   RUN_TEST(test_payload_maps_controller_status_to_state);
   RUN_TEST(test_payload_idle_state_differs_per_service);

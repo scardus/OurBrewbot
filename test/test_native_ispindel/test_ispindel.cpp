@@ -444,6 +444,22 @@ void test_post_temp_adjust_applied_as_celsius_delta(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 17.83f, g_iSpindels[0].temperature);
 }
 
+// No gravity in the POST: it stays "no reading". The offset used to be added
+// to the 0, so /ispindels and MQTT showed the offset itself as a gravity.
+void test_post_without_gravity_does_not_add_the_gravity_offset(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].sgAdjust = 0.002f;
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0}"));
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].sg);
+}
+
+void test_post_gravity_offset_is_added_to_a_reading(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].sgAdjust = 0.002f;
+  handleiSpindelPost(makeBody("ispindel-1", "C2A080", 20.0f, "C", 1.0500f, "G"));
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.052f, g_iSpindels[0].sg);
+}
+
 void test_post_registration_path_stores_celsius(void) {
   // A brand new device lands in the first free slot - that path must store
   // the converted value too, not the raw one.
@@ -876,6 +892,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_post_with_a_non_numeric_temperature_stores_no_reading);
   RUN_TEST(test_post_of_zero_celsius_is_a_real_reading);
   RUN_TEST(test_post_temp_adjust_applied_as_celsius_delta);
+  RUN_TEST(test_post_without_gravity_does_not_add_the_gravity_offset);
+  RUN_TEST(test_post_gravity_offset_is_added_to_a_reading);
   RUN_TEST(test_post_registration_path_stores_celsius);
   RUN_TEST(test_post_conversion_does_not_disturb_gravity);
 

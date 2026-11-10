@@ -459,7 +459,11 @@ void serviceTilt() {
     // When a second OK+DISC: appears in the buffer, the first record is complete.
     // Save the char at the boundary, null-terminate, parse, then RESTORE before
     // memmove — otherwise the 'O' of the next "OK+DISC:" is clobbered and lost.
-    char* second = strstr(s_bleBuf + 8, "OK+DISC:");
+    // The search starts after the first record's own 8-character marker, so it
+    // only runs once the buffer holds more than that - a shorter buffer ends
+    // before s_bleBuf + 8, and the search would start past the end of the text.
+    char* second = nullptr;
+    if (s_bleBufLen > 8) second = strstr(s_bleBuf + 8, "OK+DISC:");
     if (second) {
       char saved = *second;
       *second = '\0';

@@ -150,7 +150,7 @@ void reportBrewService(uint8_t i, uint8_t svcIndex) {
   if (svc.sendOg && g_fermenters[i].og > 0.0f) doc["og"] = g_fermenters[i].og;
   doc["beer"]           = g_fermenters[i].beerName;
   doc["comment"]        = g_fermenters[i].yeastName;
-  doc["hysteresis"]     = g_fermenters[i].hysteresis;
+  doc["hysteresis"]     = toDisplayTempDelta(g_fermenters[i].hysteresis);  // a span, in the same unit as "temp"
   doc[svc.rssiKey]      = WiFi.RSSI();
   uint8_t st = g_fermenters[i].status;
   doc[svc.stateKey]     = (st == STATUS_HEATING) ? "heating" :
