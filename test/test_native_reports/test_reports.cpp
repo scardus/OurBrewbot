@@ -203,6 +203,39 @@ void test_queue_drains_exactly_one_post_per_pass(void) {
   TEST_ASSERT_EQUAL_INT(6, g_httpTest.postCount);
 }
 
+// During an internet outage every POST fails after its timeouts. The queue
+// used to try each fermenter in turn, stalling the loop each time; now the
+// first failure drops the rest of that service's cycle.
+void test_a_failed_post_drops_the_rest_of_that_services_cycle(void) {
+  enableService(BF, "abc");
+  enableService(BFR, "def");
+  for (int i = 0; i < 3; i++) {
+    g_fermenters[i].power        = true;
+    g_fermenters[i].brewServices = (1 << BF) | (1 << BFR);
+  }
+  queueReports();
+  g_httpTest.nextStatus = -1;              // HTTPC_ERROR_CONNECTION_FAILED
+
+  processReportQueue();                    // Brewer's Friend F0 fails
+  TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
+  processReportQueue();                    // straight on to Brewfather F0
+  TEST_ASSERT_EQUAL_INT(2, g_httpTest.postCount);
+  TEST_ASSERT_EQUAL_STRING("http://log.brewfather.net/stream?id=def", g_httpTest.url);
+  TEST_ASSERT_FALSE(reportsPending());     // both services' cycles dropped
+}
+
+// An HTTP error status is an answer, so the other fermenters still report
+void test_an_http_error_status_keeps_the_rest_of_the_cycle(void) {
+  enableService(BF, "abc");
+  for (int i = 0; i < 2; i++) subscribeFermenter(i, BF);
+  queueReports();
+  g_httpTest.nextStatus = 500;
+
+  processReportQueue();
+  processReportQueue();
+  TEST_ASSERT_EQUAL_INT(2, g_httpTest.postCount);
+}
+
 void test_queue_dropped_entirely_when_wifi_is_down(void) {
   // Matches the pre-stagger behaviour: a cycle without WiFi is skipped, not
   // retried later, so reports can't pile up while the link is down.
@@ -381,6 +414,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_queue_accepts_an_eligible_pair);
 
   RUN_TEST(test_queue_drains_exactly_one_post_per_pass);
+  RUN_TEST(test_a_failed_post_drops_the_rest_of_that_services_cycle);
+  RUN_TEST(test_an_http_error_status_keeps_the_rest_of_the_cycle);
   RUN_TEST(test_queue_dropped_entirely_when_wifi_is_down);
 
   RUN_TEST(test_payload_omits_readings_that_are_unavailable);
