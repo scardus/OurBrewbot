@@ -328,6 +328,38 @@ static int getValidIndex(ESP8266WebServer& server, const JsonDocument& doc,
   return idx;
 }
 
+// Calibration offsets are small corrections to a sensor's reading. A typo
+// such as 10 for 1.0 used to be stored as given, and as the offset moves the
+// control temperature, heating or cooling then ran the wrong way.
+#define MAX_TEMP_ADJUST_C  10.0f    // degrees C either way (18 F)
+#define MAX_SG_ADJUST      0.050f   // gravity either way
+
+// Reads an optional "tempAdjust" (in the display unit) into adjustC, in
+// Celsius. Sends the 400 error and returns false if it is out of range; a
+// missing field leaves adjustC as it was.
+static bool readTempAdjust(ESP8266WebServer& server, const JsonDocument& doc, float& adjustC) {
+  if (doc["tempAdjust"].isNull()) return true;
+  float v = toCelsiusTempDelta((float)doc["tempAdjust"]);   // a span, not absolute
+  if (!isfinite(v) || fabsf(v) > MAX_TEMP_ADJUST_C) {
+    sendErr(server, 400, F("temperature offset out of range (-10 to 10 C)"));
+    return false;
+  }
+  adjustC = v;
+  return true;
+}
+
+// The same for an optional "sgAdjust"
+static bool readSgAdjust(ESP8266WebServer& server, const JsonDocument& doc, float& adjust) {
+  if (doc["sgAdjust"].isNull()) return true;
+  float v = doc["sgAdjust"];
+  if (!isfinite(v) || fabsf(v) > MAX_SG_ADJUST) {
+    sendErr(server, 400, F("gravity offset out of range (-0.050 to 0.050)"));
+    return false;
+  }
+  adjust = v;
+  return true;
+}
+
 // ============================================================
 // ROOT / HOME
 // ============================================================
@@ -662,7 +694,7 @@ void handleController(ESP8266WebServer& server) {
     if (!doc["UpdateCheck"].isNull())   g_globalConfig.updateCheck   = doc["UpdateCheck"];
     if (!doc["CrashReports"].isNull())  g_globalConfig.crashReports  = doc["CrashReports"];
     if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
-    if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
+    if (!doc["BrewService"].isNull())   { uint8_t v = doc["BrewService"]; if (v <= BREW_SERVICE_MQTT) g_globalConfig.brewService = v; }
     if (doc["BrewServiceId"].is<const char*>()) copyText(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
     bool saved = saveGlobalConfig();
     // HA discovery advertises the temperature unit — republish so entities
@@ -1109,12 +1141,18 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     }
   }
 
+  // The calibration offsets are checked before anything is changed too
+  float tempAdjust = g_iSpindels[idx].tempAdjust;
+  float sgAdjust   = g_iSpindels[idx].sgAdjust;
+  if (!readTempAdjust(server, doc, tempAdjust)) return;
+  if (!readSgAdjust(server, doc, sgAdjust))     return;
+
   if (!doc["collectData"].isNull()) g_iSpindels[idx].collectData = doc["collectData"];
   g_iSpindels[idx].fermenter = fermenter;
-  if (!doc["unit"].isNull())        g_iSpindels[idx].unit        = doc["unit"];
+  if (!doc["unit"].isNull())        { uint8_t v = doc["unit"]; if (v == ISPINDEL_UNIT_SG || v == ISPINDEL_UNIT_PLATO) g_iSpindels[idx].unit = v; }
   if (!doc["function"].isNull())    { uint8_t v = doc["function"]; g_iSpindels[idx].function = (v == PROBE_FN_BEER) ? PROBE_FN_BEER : PROBE_UNASSIGNED; }
-  if (!doc["tempAdjust"].isNull())  g_iSpindels[idx].tempAdjust  = toCelsiusTempDelta((float)doc["tempAdjust"]);
-  if (!doc["sgAdjust"].isNull())    g_iSpindels[idx].sgAdjust    = doc["sgAdjust"];
+  g_iSpindels[idx].tempAdjust = tempAdjust;
+  g_iSpindels[idx].sgAdjust   = sgAdjust;
   // Normalize collectData from fermenter when client didn't send it explicitly.
   // Lets the UI omit the toggle entirely; legacy 'collectData=false + fermenter assigned'
   // configs self-heal on first UI save. External scripts that POST collectData win.
@@ -1153,9 +1191,12 @@ void handleProbePost(ESP8266WebServer& server) {
     sendErr(server, 400, F("Invalid probe index"));
     return;
   }
-  if (!doc["function"].isNull())   g_probes[idx].function   = doc["function"];
+  // Checked first, so a refused save leaves the probe as it was
+  float tempAdjust = g_probes[idx].tempAdjust;
+  if (!readTempAdjust(server, doc, tempAdjust)) return;
+  if (!doc["function"].isNull())   { uint8_t v = doc["function"];  if ((v >= PROBE_FN_BEER && v <= PROBE_FN_CONTROL) || v == PROBE_FN_UNASSIGNED) g_probes[idx].function = v; }
   if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_probes[idx].fermenter = v; }
-  if (!doc["tempAdjust"].isNull()) g_probes[idx].tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
+  g_probes[idx].tempAdjust = tempAdjust;
   sendSaveResult(server, saveProbeConfig(), F("Probe updated"));
 }
 
@@ -1893,10 +1934,12 @@ void handleTiltPost(ESP8266WebServer& server) {
   // Marking the colour makes saveTiltConfig() include it.
   TiltConfig tilt = g_tilts[colour];
   tilt.colour = (uint8_t)colour;
-  if (!doc["function"].isNull())   tilt.function   = doc["function"];
+  // Only "beer temperature" or "not used" - the same rule the iSpindel save and
+  // the Tilt loader use, so a Tilt behaves the same before and after a restart
+  if (!doc["function"].isNull())   { uint8_t v = doc["function"]; tilt.function = (v == PROBE_FN_BEER) ? PROBE_FN_BEER : PROBE_UNASSIGNED; }
   tilt.fermenter = requestedFermenter(doc, tilt.fermenter);
-  if (!doc["tempAdjust"].isNull()) tilt.tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
-  if (!doc["sgAdjust"].isNull())   tilt.sgAdjust   = doc["sgAdjust"];
+  if (!readTempAdjust(server, doc, tilt.tempAdjust)) return;
+  if (!readSgAdjust(server, doc, tilt.sgAdjust))     return;
 
   // Only MAX_TILT_SLOTS Tilts fit in the settings file. A fifth used to be
   // dropped from the file without a word and lost at the next restart.

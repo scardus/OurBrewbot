@@ -1682,12 +1682,52 @@ static void test_probe_post_rejects_an_unpopulated_slot(void) {
 
 static void test_probe_post_updates_a_populated_slot(void) {
   strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
-  postBody("{\"index\":0,\"function\":1,\"fermenter\":2,\"tempAdjust\":-0.5}");
+  postBody("{\"index\":0,\"function\":2,\"fermenter\":2,\"tempAdjust\":-0.5}");
   handleProbePost(srv);
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
-  TEST_ASSERT_EQUAL_UINT8(1, g_probes[0].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_probes[0].function);
   TEST_ASSERT_EQUAL_UINT8(2, g_probes[0].fermenter);
   TEST_ASSERT_EQUAL_FLOAT(-0.5f, g_probes[0].tempAdjust);
+}
+
+static void test_probe_post_ignores_an_unknown_function(void) {
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  g_probes[0].function = PROBE_FN_AMBIENT;
+  postBody("{\"index\":0,\"function\":50}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AMBIENT, g_probes[0].function);
+}
+
+// A calibration offset is a small correction. A typo such as 10 for 1.0 used
+// to be stored, and it moves the temperature the fermenter is controlled by.
+static void test_probe_post_refuses_an_offset_over_10_c(void) {
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  g_probes[0].tempAdjust = 0.3f;
+  g_probes[0].function   = PROBE_FN_AMBIENT;
+  g_probes[0].fermenter  = PROBE_UNASSIGNED;
+  postBody("{\"index\":0,\"function\":2,\"fermenter\":1,\"tempAdjust\":10.5}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("temperature offset out of range"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_FLOAT(0.3f, g_probes[0].tempAdjust);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AMBIENT, g_probes[0].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_probes[0].fermenter);
+}
+
+// The limit is 10 C, so 18 F is the largest offset in Fahrenheit
+static void test_probe_offset_limit_is_checked_in_celsius(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  postBody("{\"index\":0,\"tempAdjust\":-18}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -10.0f, g_probes[0].tempAdjust);
+  httpRespReset();
+  postBody("{\"index\":0,\"tempAdjust\":18.5}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
 }
 
 // A fermenter number is either a real slot or the unassigned sentinel; a value
@@ -2555,6 +2595,28 @@ static void test_tilt_post_converts_temp_adjust_from_fahrenheit(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, g_tilts[0].tempAdjust);
 }
 
+static void test_tilt_post_refuses_an_out_of_range_offset(void) {
+  postBody("{\"colour\":0,\"fermenter\":1,\"tempAdjust\":-11}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[0].fermenter);   // nothing applied
+  httpRespReset();
+  postBody("{\"colour\":0,\"fermenter\":1,\"sgAdjust\":0.06}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("gravity offset out of range"));
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[0].fermenter);
+}
+
+// Only "beer temperature" or "not used", as the Tilt loader already treats
+// any other value - so a Tilt no longer changes role at the next restart
+static void test_tilt_post_stores_an_unknown_function_as_not_used(void) {
+  postBody("{\"colour\":0,\"function\":3,\"fermenter\":1}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[0].function);
+}
+
 // The clear path posts a literal zero offset, and zero converts to zero under
 // the span helpers - so clearing a slot works identically in either unit.
 static void test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit(void) {
@@ -2677,6 +2739,35 @@ static void test_ispindel_post_refuses_a_fermenter_another_ispindel_is_on(void) 
   TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[1].fermenter);
   TEST_ASSERT_FALSE(g_iSpindels[1].collectData);
   TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[1].sgAdjust);
+}
+
+static void test_ispindel_post_refuses_an_out_of_range_offset(void) {
+  g_iSpindels[0].fermenter = PROBE_UNASSIGNED;
+  g_iSpindels[0].sgAdjust  = 0.002f;
+  postBody("{\"index\":0,\"fermenter\":2,\"tempAdjust\":0.5,\"sgAdjust\":-0.051}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("gravity offset out of range"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[0].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f,   g_iSpindels[0].tempAdjust);
+  TEST_ASSERT_EQUAL_FLOAT(0.002f, g_iSpindels[0].sgAdjust);
+}
+
+static void test_ispindel_post_accepts_offsets_at_the_limits(void) {
+  postBody("{\"index\":0,\"tempAdjust\":-10,\"sgAdjust\":0.05}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_FLOAT(-10.0f, g_iSpindels[0].tempAdjust);
+  TEST_ASSERT_EQUAL_FLOAT(0.05f,  g_iSpindels[0].sgAdjust);
+}
+
+static void test_ispindel_post_ignores_an_unknown_gravity_unit(void) {
+  g_iSpindels[0].unit = ISPINDEL_UNIT_PLATO;
+  postBody("{\"index\":0,\"unit\":5}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(ISPINDEL_UNIT_PLATO, g_iSpindels[0].unit);
 }
 
 static void test_ispindel_refusal_sends_a_worst_case_name_whole(void) {
@@ -3127,6 +3218,9 @@ int main(int, char**) {
   RUN_TEST(test_probe_post_requires_a_valid_index);
   RUN_TEST(test_probe_post_rejects_an_unpopulated_slot);
   RUN_TEST(test_probe_post_updates_a_populated_slot);
+  RUN_TEST(test_probe_post_ignores_an_unknown_function);
+  RUN_TEST(test_probe_post_refuses_an_offset_over_10_c);
+  RUN_TEST(test_probe_offset_limit_is_checked_in_celsius);
   RUN_TEST(test_probe_post_ignores_an_impossible_fermenter_number);
   RUN_TEST(test_smartplug_post_updates_a_slot);
   RUN_TEST(test_smartplug_post_ignores_an_impossible_bit_count);
@@ -3195,6 +3289,8 @@ int main(int, char**) {
   RUN_TEST(test_probe_temp_adjust_round_trips_through_fahrenheit);
   RUN_TEST(test_tilt_payload_converts_temp_adjust_as_a_span);
   RUN_TEST(test_tilt_post_converts_temp_adjust_from_fahrenheit);
+  RUN_TEST(test_tilt_post_refuses_an_out_of_range_offset);
+  RUN_TEST(test_tilt_post_stores_an_unknown_function_as_not_used);
   RUN_TEST(test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit);
   RUN_TEST(test_tilt_post_refuses_a_fifth_set_up_tilt);
   RUN_TEST(test_tilt_post_still_edits_one_of_four_set_up_tilts);
@@ -3205,6 +3301,9 @@ int main(int, char**) {
   RUN_TEST(test_several_tilts_can_be_unassigned);
   RUN_TEST(test_a_tilt_and_an_ispindel_can_share_a_fermenter);
   RUN_TEST(test_ispindel_post_refuses_a_fermenter_another_ispindel_is_on);
+  RUN_TEST(test_ispindel_post_refuses_an_out_of_range_offset);
+  RUN_TEST(test_ispindel_post_accepts_offsets_at_the_limits);
+  RUN_TEST(test_ispindel_post_ignores_an_unknown_gravity_unit);
   RUN_TEST(test_ispindel_refusal_sends_a_worst_case_name_whole);
   RUN_TEST(test_ispindels_already_sharing_a_fermenter_can_still_be_edited);
   RUN_TEST(test_several_ispindels_can_be_unassigned);

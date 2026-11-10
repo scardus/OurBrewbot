@@ -201,6 +201,17 @@ test('the profile dropdown is locked while a profile runs or is paused, as the f
   }
 });
 
+test('sensor offset fields carry the firmware limits in the display unit',()=>{
+  const {run}=ui();
+  const sensor="{name:'Tilt',fn:99,fermenter:99,adjust:0,sgAdjust:0,temp:20,sg:1.05,active:true}";
+  for (const [unit,limit] of [['C',10],['F',18]]) {
+    run(`state.unit='${unit}'; state.fermenters=[];`);
+    const html=run(`sensorCard('tilts',${sensor},0)`);
+    assert.match(html,new RegExp(`name="adjust"[^>]*min="-${limit}" max="${limit}"`),unit);
+    assert.match(html,/name="sgAdjust"[^>]*min="-0.05" max="0.05"/);
+  }
+});
+
 function saveFixture() {
   const fixture=ui();
   const inputs=Object.entries({name:'Profile',host:'broker',port:'1883',username:'',password:'',baseTopic:'new-topic'})
