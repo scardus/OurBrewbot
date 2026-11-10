@@ -890,6 +890,11 @@ static void mqttMessageCallback(char* topic, byte* payload, unsigned int length)
       logMsg("[MQTT] cmd rejected: profile_no '%s' is not a whole number 0-%d", pl, MAX_PROFILES);
       return;
     }
+    if (!profileNoChangeAllowed(idx, (uint8_t)pno)) {
+      logMsg("[MQTT] cmd rejected: F%d profile_no - stop the running profile first", idx);
+      publishFermenterField(idx, key);   // puts HA's select back to the running profile
+      return;
+    }
     g_fermenters[idx].profileNo = (uint8_t)pno;
   } else {
     return;  // unknown key — ignore silently

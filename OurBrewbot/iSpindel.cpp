@@ -263,8 +263,9 @@ void handleiSpindelPost(const String& body) {
   runTime     = dropIfImpossible(runTime,     0.0f,    3600.0f, "run time",         name, id);
 
   if (matched >= 0) {
-    // Apply calibration offsets
-    sg   += g_iSpindels[matched].sgAdjust;
+    // Apply calibration offsets - only to readings that were received, so a
+    // post with no gravity doesn't show the offset itself as a gravity
+    if (sg > 0.0f) sg += g_iSpindels[matched].sgAdjust;
     if (temp > TEMP_VALID_MIN) temp += g_iSpindels[matched].tempAdjust;
     if (corrGravity > 0.0f) corrGravity += g_iSpindels[matched].sgAdjust;
 

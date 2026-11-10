@@ -40,6 +40,10 @@ void profileAddHour(uint8_t fermenterIndex);
 // Count 10 minutes of a running profile; every sixth call adds an hour
 void profileAddTenMinutes(uint8_t fermenterIndex);
 
+// True if the fermenter's profile number may be set to profileNo: always for
+// its current number, otherwise only while no profile is running or paused
+bool profileNoChangeAllowed(uint8_t fermenterIndex, uint8_t profileNo);
+
 // Stop/pause/resume a profile
 void stopProfile(uint8_t fermenterIndex);
 void pauseProfile(uint8_t fermenterIndex);

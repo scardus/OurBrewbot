@@ -246,6 +246,8 @@ void setUp(void) {
   s_rfSniffLastPoll = 0;
   s_restarts       = 0;
   s_lastForgetWiFi = false;
+  Update.error     = 0;
+  otaUploadClear();
 
   memset(&g_updateStatus, 0, sizeof(g_updateStatus));
   s_updateChecks = 0;
@@ -1113,6 +1115,48 @@ static void test_profile_resume_rejected_when_nothing_is_paused(void) {
   TEST_ASSERT_TRUE(bodyContains("No paused profile to resume"));
 }
 
+// A running profile keeps its number. Changing it used to carry the step and
+// hour over into another profile, and 0 froze the temperatures mid-run.
+static void test_fermenter_save_refuses_another_profile_while_one_runs(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  postBody("{\"Fermenter\":0,\"ProfileNo\":0,\"BeerName\":\"Changed\"}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Stop the running profile"));
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F0].profileNo);
+  TEST_ASSERT_EQUAL_STRING("", g_fermenters[F0].beerName);   // nothing else applied either
+}
+
+static void test_fermenter_save_refuses_another_profile_while_one_is_paused(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  pauseProfile(F0);
+  postBody("{\"Fermenter\":0,\"ProfileNo\":2}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F0].profileNo);
+}
+
+// The WebUI sends ProfileNo with every save, so the running one must pass
+static void test_fermenter_save_with_the_running_profile_is_accepted(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  postBody("{\"Fermenter\":0,\"ProfileNo\":1,\"BeerName\":\"Changed\"}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("Changed", g_fermenters[F0].beerName);
+  TEST_ASSERT_TRUE(g_fermenters[F0].profileRunning);
+}
+
+static void test_fermenter_save_changes_the_profile_when_none_runs(void) {
+  g_fermenters[F0].profileNo = 1;
+  postBody("{\"Fermenter\":0,\"ProfileNo\":2}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(2, g_fermenters[F0].profileNo);
+}
+
 static void test_profile_resume_rejected_when_already_running(void) {
   giveProfileOneStep(0);
   startProfile(F0, 1);
@@ -1462,6 +1506,29 @@ static void test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces(void) {
   TEST_ASSERT_EQUAL_STRING("home/brew bot/12345678901234567", g_mqttConfig.baseTopic);
 }
 
+// A bad port used to be refused only after "enabled" and "host" had already
+// been changed in RAM, so the rejected request still half-applied
+static void test_a_refused_syslog_port_changes_nothing(void) {
+  g_syslogConfig.enabled = false;
+  strlcpy(g_syslogConfig.host, "old.example", sizeof(g_syslogConfig.host));
+  g_syslogConfig.port = 514;
+  postBody("{\"enabled\":true,\"host\":\"new.example\",\"port\":70000}");
+  handleSyslogConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_syslogConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("old.example", g_syslogConfig.host);
+  TEST_ASSERT_EQUAL_UINT16(514, g_syslogConfig.port);
+}
+
+static void test_a_valid_syslog_save_applies_every_field(void) {
+  postBody("{\"enabled\":true,\"host\":\"new.example\",\"port\":1514}");
+  handleSyslogConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(g_syslogConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("new.example", g_syslogConfig.host);
+  TEST_ASSERT_EQUAL_UINT16(1514, g_syslogConfig.port);
+}
+
 static void test_fs_save_rejects_an_empty_body(void) {
   srv.setArg("name", "/jsonGlobal.txt");
   srv.setBody("");
@@ -1615,12 +1682,52 @@ static void test_probe_post_rejects_an_unpopulated_slot(void) {
 
 static void test_probe_post_updates_a_populated_slot(void) {
   strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
-  postBody("{\"index\":0,\"function\":1,\"fermenter\":2,\"tempAdjust\":-0.5}");
+  postBody("{\"index\":0,\"function\":2,\"fermenter\":2,\"tempAdjust\":-0.5}");
   handleProbePost(srv);
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
-  TEST_ASSERT_EQUAL_UINT8(1, g_probes[0].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_probes[0].function);
   TEST_ASSERT_EQUAL_UINT8(2, g_probes[0].fermenter);
   TEST_ASSERT_EQUAL_FLOAT(-0.5f, g_probes[0].tempAdjust);
+}
+
+static void test_probe_post_ignores_an_unknown_function(void) {
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  g_probes[0].function = PROBE_FN_AMBIENT;
+  postBody("{\"index\":0,\"function\":50}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AMBIENT, g_probes[0].function);
+}
+
+// A calibration offset is a small correction. A typo such as 10 for 1.0 used
+// to be stored, and it moves the temperature the fermenter is controlled by.
+static void test_probe_post_refuses_an_offset_over_10_c(void) {
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  g_probes[0].tempAdjust = 0.3f;
+  g_probes[0].function   = PROBE_FN_AMBIENT;
+  g_probes[0].fermenter  = PROBE_UNASSIGNED;
+  postBody("{\"index\":0,\"function\":2,\"fermenter\":1,\"tempAdjust\":10.5}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("temperature offset out of range"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_FLOAT(0.3f, g_probes[0].tempAdjust);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AMBIENT, g_probes[0].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_probes[0].fermenter);
+}
+
+// The limit is 10 C, so 18 F is the largest offset in Fahrenheit
+static void test_probe_offset_limit_is_checked_in_celsius(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  postBody("{\"index\":0,\"tempAdjust\":-18}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -10.0f, g_probes[0].tempAdjust);
+  httpRespReset();
+  postBody("{\"index\":0,\"tempAdjust\":18.5}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
 }
 
 // A fermenter number is either a real slot or the unassigned sentinel; a value
@@ -1977,6 +2084,39 @@ static void test_an_aborted_ota_upload_releases_the_plugs(void) {
   srv.testUpload().status = UPLOAD_FILE_ABORTED;
   handleOTAUpload(srv);
   TEST_ASSERT_FALSE(s_plugsHeldOff);
+}
+
+// The updater's reason for a failure used to go to the serial port only. It
+// is now logged once when the upload ends - not once for every failed chunk.
+static void test_a_failed_firmware_install_is_logged_once(void) {
+  makeTestImage();
+  Update.error = 4;   // flash write failed
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  s_logCalls = 0;
+  const size_t chunk = TEST_IMAGE_SIZE / 4;
+  for (size_t sent = 0; sent < TEST_IMAGE_SIZE; sent += chunk) {
+    size_t n = (TEST_IMAGE_SIZE - sent < chunk) ? TEST_IMAGE_SIZE - sent : chunk;
+    srv.testUpload().status      = UPLOAD_FILE_WRITE;
+    srv.testUpload().buf         = g_testImage + sent;
+    srv.testUpload().currentSize = n;
+    handleOTAUpload(srv);
+  }
+  srv.testUpload().totalSize = TEST_IMAGE_SIZE;
+  srv.testUpload().status    = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+  TEST_ASSERT_FALSE(otaUploadInstalled());
+  TEST_ASSERT_FALSE(otaUploadRefused());   // the file was fine; flashing it failed
+  TEST_ASSERT_EQUAL_INT(1, s_logCalls);
+}
+
+static void test_a_cut_off_upload_is_logged(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  s_logCalls = 0;
+  srv.testUpload().status = UPLOAD_FILE_ABORTED;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_logCalls);
 }
 
 // ============================================================
@@ -2455,6 +2595,28 @@ static void test_tilt_post_converts_temp_adjust_from_fahrenheit(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, g_tilts[0].tempAdjust);
 }
 
+static void test_tilt_post_refuses_an_out_of_range_offset(void) {
+  postBody("{\"colour\":0,\"fermenter\":1,\"tempAdjust\":-11}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[0].fermenter);   // nothing applied
+  httpRespReset();
+  postBody("{\"colour\":0,\"fermenter\":1,\"sgAdjust\":0.06}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("gravity offset out of range"));
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[0].fermenter);
+}
+
+// Only "beer temperature" or "not used", as the Tilt loader already treats
+// any other value - so a Tilt no longer changes role at the next restart
+static void test_tilt_post_stores_an_unknown_function_as_not_used(void) {
+  postBody("{\"colour\":0,\"function\":3,\"fermenter\":1}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[0].function);
+}
+
 // The clear path posts a literal zero offset, and zero converts to zero under
 // the span helpers - so clearing a slot works identically in either unit.
 static void test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit(void) {
@@ -2577,6 +2739,35 @@ static void test_ispindel_post_refuses_a_fermenter_another_ispindel_is_on(void) 
   TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[1].fermenter);
   TEST_ASSERT_FALSE(g_iSpindels[1].collectData);
   TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[1].sgAdjust);
+}
+
+static void test_ispindel_post_refuses_an_out_of_range_offset(void) {
+  g_iSpindels[0].fermenter = PROBE_UNASSIGNED;
+  g_iSpindels[0].sgAdjust  = 0.002f;
+  postBody("{\"index\":0,\"fermenter\":2,\"tempAdjust\":0.5,\"sgAdjust\":-0.051}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("gravity offset out of range"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[0].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f,   g_iSpindels[0].tempAdjust);
+  TEST_ASSERT_EQUAL_FLOAT(0.002f, g_iSpindels[0].sgAdjust);
+}
+
+static void test_ispindel_post_accepts_offsets_at_the_limits(void) {
+  postBody("{\"index\":0,\"tempAdjust\":-10,\"sgAdjust\":0.05}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_FLOAT(-10.0f, g_iSpindels[0].tempAdjust);
+  TEST_ASSERT_EQUAL_FLOAT(0.05f,  g_iSpindels[0].sgAdjust);
+}
+
+static void test_ispindel_post_ignores_an_unknown_gravity_unit(void) {
+  g_iSpindels[0].unit = ISPINDEL_UNIT_PLATO;
+  postBody("{\"index\":0,\"unit\":5}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(ISPINDEL_UNIT_PLATO, g_iSpindels[0].unit);
 }
 
 static void test_ispindel_refusal_sends_a_worst_case_name_whole(void) {
@@ -2968,6 +3159,10 @@ int main(int, char**) {
   RUN_TEST(test_profile_pause_holds_the_step);
   RUN_TEST(test_profile_resume_restarts_a_paused_profile);
   RUN_TEST(test_profile_resume_rejected_when_nothing_is_paused);
+  RUN_TEST(test_fermenter_save_refuses_another_profile_while_one_runs);
+  RUN_TEST(test_fermenter_save_refuses_another_profile_while_one_is_paused);
+  RUN_TEST(test_fermenter_save_with_the_running_profile_is_accepted);
+  RUN_TEST(test_fermenter_save_changes_the_profile_when_none_runs);
   RUN_TEST(test_profile_resume_rejected_when_already_running);
   RUN_TEST(test_profile_next_advances_a_running_profile);
   RUN_TEST(test_profile_next_on_a_stopped_profile_is_rejected);
@@ -3001,6 +3196,8 @@ int main(int, char**) {
   RUN_TEST(test_mqtt_post_saves_a_new_password);
   RUN_TEST(test_mqtt_post_with_an_empty_password_clears_it);
   RUN_TEST(test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces);
+  RUN_TEST(test_a_refused_syslog_port_changes_nothing);
+  RUN_TEST(test_a_valid_syslog_save_applies_every_field);
   RUN_TEST(test_fs_save_rejects_an_empty_body);
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);
   RUN_TEST(test_fs_save_writes_a_whitelisted_file);
@@ -3021,6 +3218,9 @@ int main(int, char**) {
   RUN_TEST(test_probe_post_requires_a_valid_index);
   RUN_TEST(test_probe_post_rejects_an_unpopulated_slot);
   RUN_TEST(test_probe_post_updates_a_populated_slot);
+  RUN_TEST(test_probe_post_ignores_an_unknown_function);
+  RUN_TEST(test_probe_post_refuses_an_offset_over_10_c);
+  RUN_TEST(test_probe_offset_limit_is_checked_in_celsius);
   RUN_TEST(test_probe_post_ignores_an_impossible_fermenter_number);
   RUN_TEST(test_smartplug_post_updates_a_slot);
   RUN_TEST(test_smartplug_post_ignores_an_impossible_bit_count);
@@ -3047,6 +3247,8 @@ int main(int, char**) {
   RUN_TEST(test_ota_upload_start_switches_every_plug_off_and_holds_them);
   RUN_TEST(test_ota_upload_chunks_do_not_switch_the_plugs_again);
   RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
+  RUN_TEST(test_a_failed_firmware_install_is_logged_once);
+  RUN_TEST(test_a_cut_off_upload_is_logged);
   RUN_TEST(test_a_complete_firmware_file_is_installed);
   RUN_TEST(test_a_cut_short_firmware_file_is_refused);
   RUN_TEST(test_clearing_the_upload_result_forgets_a_refused_upload);
@@ -3087,6 +3289,8 @@ int main(int, char**) {
   RUN_TEST(test_probe_temp_adjust_round_trips_through_fahrenheit);
   RUN_TEST(test_tilt_payload_converts_temp_adjust_as_a_span);
   RUN_TEST(test_tilt_post_converts_temp_adjust_from_fahrenheit);
+  RUN_TEST(test_tilt_post_refuses_an_out_of_range_offset);
+  RUN_TEST(test_tilt_post_stores_an_unknown_function_as_not_used);
   RUN_TEST(test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit);
   RUN_TEST(test_tilt_post_refuses_a_fifth_set_up_tilt);
   RUN_TEST(test_tilt_post_still_edits_one_of_four_set_up_tilts);
@@ -3097,6 +3301,9 @@ int main(int, char**) {
   RUN_TEST(test_several_tilts_can_be_unassigned);
   RUN_TEST(test_a_tilt_and_an_ispindel_can_share_a_fermenter);
   RUN_TEST(test_ispindel_post_refuses_a_fermenter_another_ispindel_is_on);
+  RUN_TEST(test_ispindel_post_refuses_an_out_of_range_offset);
+  RUN_TEST(test_ispindel_post_accepts_offsets_at_the_limits);
+  RUN_TEST(test_ispindel_post_ignores_an_unknown_gravity_unit);
   RUN_TEST(test_ispindel_refusal_sends_a_worst_case_name_whole);
   RUN_TEST(test_ispindels_already_sharing_a_fermenter_can_still_be_edited);
   RUN_TEST(test_several_ispindels_can_be_unassigned);

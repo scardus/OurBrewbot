@@ -107,7 +107,8 @@ function openFerm(id) {
           ${field('Fermenter name','name',f.name,'text','maxlength="31"')}
           ${field('Beer name','beer',f.beer,'text','maxlength="31"')}
           ${field('Yeast','yeast',f.yeast,'text','maxlength="31"')}
-          ${select('Fermentation profile','profile',f.profile,profileChoices)}
+          ${select('Fermentation profile','profile',f.profile,profileChoices,running?'disabled':'',
+            running?'Stop the profile to choose another.':'')}
           ${field('Original gravity','og',f.og.toFixed(4),'number',gravityLimits)}
           ${field('Target gravity','tg',f.tg.toFixed(4),'number',gravityLimits)}
         </div></section>

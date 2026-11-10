@@ -26,7 +26,10 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 
-#define HTTP_TIMEOUT_MS  5000   // 5 second timeout — brew services respond in <1 s normally
+// Brew services respond in <1 s normally. The core applies this to the DNS
+// lookup, the connection and the reply separately, so one failed request
+// can hold up the loop for about 15 s.
+#define HTTP_TIMEOUT_MS  5000
 
 // ============================================================
 // SERVICE DEFINITIONS
@@ -66,8 +69,10 @@ static const BrewServiceDef kBrewServiceDefs[MAX_BREW_SERVICES] = {
 // MAIN REPORT DISPATCHER — staggered
 //
 // The 15-min tick queues every eligible service×fermenter pair; the loop then
-// drains ONE blocking POST per pass. Worst-case single-pass stall drops from
-// (services × fermenters × 5 s) to a single 5 s HTTP timeout.
+// drains ONE blocking POST per pass, so the worst single-pass stall is one
+// request rather than every queued one back to back. When a POST fails, the
+// rest of that service's reports for the cycle are dropped: during an
+// internet outage each one would otherwise stall the loop in turn.
 // ============================================================
 
 // Pending-work bitmaps: bit i of s_pendingReports[s] = fermenter i still owes
@@ -105,7 +110,10 @@ void processReportQueue() {
     for (int i = 0; i < MAX_FERMENTERS; i++) {
       if (s_pendingReports[s] & (1 << i)) {
         s_pendingReports[s] &= ~(1 << i);
-        reportBrewService(i, s);   // blocking ≤5 s — the one POST this pass
+        int code = reportBrewService(i, s);   // blocking - the one POST this pass
+        // No answer (DNS, connection or reply failed): the service is out of
+        // reach, so its other fermenters wait for the next cycle
+        if (code < 0) s_pendingReports[s] = 0;
         return;
       }
     }
@@ -116,9 +124,9 @@ void processReportQueue() {
 // BREW SERVICE REPORTER — one fermenter to one service slot
 // ============================================================
 
-void reportBrewService(uint8_t i, uint8_t svcIndex) {
-  if (svcIndex >= MAX_BREW_SERVICES) return;
-  if (strlen(g_brewServices[svcIndex].serviceId) == 0) return;
+int reportBrewService(uint8_t i, uint8_t svcIndex) {
+  if (svcIndex >= MAX_BREW_SERVICES) return 0;   // nothing sent
+  if (strlen(g_brewServices[svcIndex].serviceId) == 0) return 0;
   const BrewServiceDef& svc = kBrewServiceDefs[svcIndex];
 
   WiFiClient client;
@@ -150,7 +158,7 @@ void reportBrewService(uint8_t i, uint8_t svcIndex) {
   if (svc.sendOg && g_fermenters[i].og > 0.0f) doc["og"] = g_fermenters[i].og;
   doc["beer"]           = g_fermenters[i].beerName;
   doc["comment"]        = g_fermenters[i].yeastName;
-  doc["hysteresis"]     = g_fermenters[i].hysteresis;
+  doc["hysteresis"]     = toDisplayTempDelta(g_fermenters[i].hysteresis);  // a span, in the same unit as "temp"
   doc[svc.rssiKey]      = WiFi.RSSI();
   uint8_t st = g_fermenters[i].status;
   doc[svc.stateKey]     = (st == STATUS_HEATING) ? "heating" :
@@ -166,6 +174,7 @@ void reportBrewService(uint8_t i, uint8_t svcIndex) {
     logMsg("[RPT] %s F%d (%s): Error %s", svc.label, i, g_fermenters[i].fermenterName, http.errorToString(code).c_str());
   }
   http.end();
+  return code;
 }
 
 // ============================================================
