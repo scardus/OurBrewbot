@@ -82,11 +82,18 @@ jobs:
       - name: Check web assets
         run: python -m unittest discover -s test -p test_web_assets.py
 
+      - name: Check WebUI behaviour
+        run: node --test test/test_web_ui.cjs
+
       - name: Run static analysis
         run: pio check --fail-on-defect=high
 
       - name: Run native unit tests
         run: pio test -e native
+
+      # The same tests again under the sanitizers, as in platformio-ci.yaml
+      - name: Run native unit tests with sanitizers
+        run: pio test -e native_asan
 
       - name: Build firmware
         run: pio run
