@@ -216,6 +216,9 @@ void test_restart_message_names_the_cause(void) {
   TEST_ASSERT_EQUAL_STRING("The controller restarted unexpectedly. Cause: hardware watchdog.", msg.body);
   TEST_ASSERT_TRUE(build(NOTIFY_RESTART, 0, REASON_SOFT_WDT_RST));
   TEST_ASSERT_EQUAL_STRING("The controller restarted unexpectedly. Cause: software watchdog.", msg.body);
+  // A failed self-check restarts with the "software restart" code
+  TEST_ASSERT_TRUE(build(NOTIFY_RESTART, 0, REASON_SOFT_RESTART));
+  TEST_ASSERT_EQUAL_STRING("The controller restarted unexpectedly. Cause: crash.", msg.body);
   TEST_ASSERT_TRUE(build(NOTIFY_RESTART, 0, 99));
   TEST_ASSERT_EQUAL_STRING("The controller restarted unexpectedly. Cause: unknown.", msg.body);
 }
@@ -620,6 +623,54 @@ void test_switching_sensor_notifications_on_reports_a_sensor_already_lost(void) 
 }
 
 // ============================================================
+// RESTARTS
+// ============================================================
+
+void test_a_restart_after_a_crash_is_reported_with_its_reset_code(void) {
+  notifyRestart(true, REASON_EXCEPTION_RST);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_RESTART, s_queue[0].event.type);
+  TEST_ASSERT_EQUAL_UINT8(REASON_EXCEPTION_RST, s_queue[0].event.detail);
+
+  // A watchdog reset, and a failed self-check (a software restart WITH a crash record)
+  notifyRestart(true, REASON_WDT_RST);
+  notifyRestart(true, REASON_SOFT_RESTART);
+  TEST_ASSERT_EQUAL_UINT8(3, s_queueCount);
+}
+
+void test_the_power_coming_back_on_is_reported(void) {
+  notifyRestart(false, REASON_DEFAULT_RST);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+  TEST_ASSERT_EQUAL_UINT8(REASON_DEFAULT_RST, s_queue[0].event.detail);
+}
+
+void test_a_restart_that_was_asked_for_is_not_reported(void) {
+  notifyRestart(false, REASON_SOFT_RESTART);   // firmware update, or the Restart button
+  notifyRestart(false, REASON_EXT_SYS_RST);    // the reset button
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+}
+
+void test_a_restart_is_not_reported_when_its_box_is_not_ticked(void) {
+  g_notifyConfig.events = NOTIFY_EVT_ALL & ~NOTIFY_EVT_RESTARTS;
+  notifyRestart(true, REASON_EXCEPTION_RST);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+}
+
+void test_a_restart_notification_waits_for_wifi(void) {
+  // It is queued in setup(), often before WiFi has connected
+  WiFi.connected = false;
+  notifyRestart(true, REASON_EXCEPTION_RST);
+  notifyLoop();
+  TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
+
+  WiFi.connected = true;
+  s_uptimeSec += 20;
+  notifyLoop();
+  TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
+  TEST_ASSERT_EQUAL_STRING("The controller restarted unexpectedly. Cause: crash.", g_httpTest.body);
+}
+
+// ============================================================
 // SENDING
 // ============================================================
 
@@ -850,6 +901,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_the_same_index_of_different_sensor_kinds_is_tracked_apart);
   RUN_TEST(test_the_last_sensor_of_each_kind_has_a_tracker);
   RUN_TEST(test_switching_sensor_notifications_on_reports_a_sensor_already_lost);
+
+  RUN_TEST(test_a_restart_after_a_crash_is_reported_with_its_reset_code);
+  RUN_TEST(test_the_power_coming_back_on_is_reported);
+  RUN_TEST(test_a_restart_that_was_asked_for_is_not_reported);
+  RUN_TEST(test_a_restart_is_not_reported_when_its_box_is_not_ticked);
+  RUN_TEST(test_a_restart_notification_waits_for_wifi);
 
   RUN_TEST(test_nothing_waiting_sends_nothing);
   RUN_TEST(test_a_notification_is_posted_as_ntfy_expects);

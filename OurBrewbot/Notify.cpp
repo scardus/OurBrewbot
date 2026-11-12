@@ -226,6 +226,9 @@ static PGM_P restartReasonText(uint8_t resetCode) {
     case REASON_DEFAULT_RST:   return PSTR("power on");
     case REASON_WDT_RST:       return PSTR("hardware watchdog");
     case REASON_EXCEPTION_RST: return PSTR("crash");
+    // A software restart is only reported when a crash record was found
+    // (see notifyRestart()), which is how a failed self-check ends
+    case REASON_SOFT_RESTART:  return PSTR("crash");
     case REASON_SOFT_WDT_RST:  return PSTR("software watchdog");
     case REASON_EXT_SYS_RST:   return PSTR("reset button");
     default:                   return PSTR("unknown");
@@ -515,6 +518,12 @@ void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minute
     if (problemStarted(tracker, PROBLEM_SENT)) notifyEvent(lostEvent, index, 0, minutes);
   } else if (problemOver(tracker)) {
     notifyEvent(backEvent, index);
+  }
+}
+
+void notifyRestart(bool afterCrash, uint8_t resetCode) {
+  if (afterCrash || resetCode == REASON_DEFAULT_RST) {
+    notifyEvent(NOTIFY_RESTART, 0, resetCode);
   }
 }
 

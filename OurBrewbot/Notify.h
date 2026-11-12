@@ -127,6 +127,14 @@ enum NotifySensor : uint8_t {
 // how long the sensor has been quiet (not used for probes).
 void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minutes = 0.0f);
 
+// Call once at boot, after the crash record has been read. Queues "controller
+// restarted" for a restart nobody asked for:
+//  - after a crash or watchdog reset (afterCrash, which is g_lastCrash.valid);
+//  - when the power came back on (resetCode is REASON_DEFAULT_RST).
+// A firmware update, the Restart button and the reset button are not
+// reported. It waits in the queue until WiFi is connected.
+void notifyRestart(bool afterCrash, uint8_t resetCode);
+
 // True when the next notifyLoop() call will send something, and so may block
 // the loop for a few seconds. The Tilt scan checks this, as it does for brew
 // service reports, so it doesn't start a scan that would be starved.

@@ -229,6 +229,10 @@ void setup() {
     crashLogPendingDeferred();
   }
 
+  // Push notification for a restart after a crash or a power cut. Queued
+  // here and sent from loop() once WiFi is connected.
+  notifyRestart(g_lastCrash.valid, (uint8_t)ESP.getResetInfoPtr()->reason);
+
   // MQTT client setup
   initMqtt();
 
