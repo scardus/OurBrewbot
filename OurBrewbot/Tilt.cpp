@@ -69,6 +69,21 @@ static const char* TILT_COLOUR_NAMES[] = {
 // Track missed reads per colour for deregistration logic
 static int s_missedReads[MAX_TILTS] = {0};
 
+// True once a Tilt has been heard since boot. A push notification is only
+// sent for a Tilt that was reporting and then stopped.
+static bool s_tiltHeard[MAX_TILTS] = {false};
+
+// Tell the notifications (see Notify.h) whether each Tilt a fermenter uses is
+// still reporting. Called after every scan, and on every tick while the BLE
+// module isn't answering.
+static void reportTiltsToNotify() {
+  for (int i = 0; i < MAX_TILTS; i++) {
+    if (!s_tiltHeard[i] || g_tilts[i].fermenter >= MAX_FERMENTERS) continue;
+    float quietMinutes = (float)((millis() - g_tilts[i].lastSeen) / 60000UL);
+    notifySensorState(NOTIFY_SENSOR_TILT, i, !g_tilts[i].active, quietMinutes);
+  }
+}
+
 // BLE module state
 static bool s_bleReady = false;
 static bool s_otherBaudsTried = false;   // initBLE() has looked for the HM-10 at other baud rates
@@ -393,6 +408,7 @@ void startTiltScan() {
           }
         }
       }
+      reportTiltsToNotify();
       return;
     }
   }
@@ -525,6 +541,7 @@ void serviceTilt() {
       }
     }
   }
+  reportTiltsToNotify();
 }
 
 void processTiltReading(uint8_t colour, float sg, float tempC, bool isPro) {
@@ -539,6 +556,7 @@ void processTiltReading(uint8_t colour, float sg, float tempC, bool isPro) {
   g_tilts[colour].sg          = sg    + g_tilts[colour].sgAdjust;
   g_tilts[colour].temperature = tempC + g_tilts[colour].tempAdjust;
   g_tilts[colour].active      = true;
+  s_tiltHeard[colour]         = true;
   g_tilts[colour].lastSeen    = millis();
   g_tilts[colour].isPro       = isPro;
   s_missedReads[colour]       = 0;

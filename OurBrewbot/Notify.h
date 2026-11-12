@@ -53,7 +53,7 @@ enum NotifyEvent : uint8_t {
   NOTIFY_ALARM_OVER,        // index = fermenter, detail = 1 if severe, a = temperature, b = ceiling (both in C)
   NOTIFY_ALARM_UNDER,       // index = fermenter, detail = 1 if severe, a = temperature, b = floor (both in C)
   NOTIFY_ALARM_ENDED,       // index = fermenter, a = temperature in C (TEMP_NONE when there is no reading)
-  NOTIFY_PROBE_LOST,        // index = probe, a = minutes without a reading
+  NOTIFY_PROBE_LOST,        // index = probe
   NOTIFY_PROBE_BACK,        // index = probe
   NOTIFY_ISPINDEL_LOST,     // index = iSpindel slot, a = minutes without a report
   NOTIFY_ISPINDEL_BACK,     // index = iSpindel slot
@@ -112,6 +112,20 @@ void notifyLoop();
 // passed. With the alarm off, temp is the current reading, or TEMP_NONE.
 void notifyAlarmState(uint8_t fermenter, bool active, bool overTemp, bool severe,
                       float temp, float limit);
+
+// The kinds of sensor notifySensorState() follows
+enum NotifySensor : uint8_t {
+  NOTIFY_SENSOR_PROBE,      // index = probe
+  NOTIFY_SENSOR_ISPINDEL,   // index = iSpindel slot
+  NOTIFY_SENSOR_TILT,       // index = Tilt colour
+};
+
+// Tell the notifications whether a sensor is reporting. Like
+// notifyAlarmState(), call it on every check: "stopped reporting" is sent at
+// once, and "reporting again" only once the sensor has kept reporting for 10
+// minutes, so a loose connection is one message and not dozens. `minutes` is
+// how long the sensor has been quiet (not used for probes).
+void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minutes = 0.0f);
 
 // True when the next notifyLoop() call will send something, and so may block
 // the loop for a few seconds. The Tilt scan checks this, as it does for brew

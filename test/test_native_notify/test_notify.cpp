@@ -101,8 +101,8 @@ void setUp(void) {
   s_queueCount = 0;
   s_tries      = 0;
   s_lastTryAt  = 0;
-  memset(s_alarmSent, 0, sizeof(s_alarmSent));
-  memset(s_alarmOffSince, 0, sizeof(s_alarmOffSince));
+  memset(s_problemSent, 0, sizeof(s_problemSent));
+  memset(s_problemOffSince, 0, sizeof(s_problemOffSince));
 
   WiFi.connected   = true;
   httpTestReset();
@@ -174,14 +174,14 @@ void test_alarm_ended_without_a_reading_says_so(void) {
 }
 
 void test_probe_messages(void) {
-  TEST_ASSERT_TRUE(build(NOTIFY_PROBE_LOST, 2, 0, 5.0f));
+  TEST_ASSERT_TRUE(build(NOTIFY_PROBE_LOST, 2));
   TEST_ASSERT_EQUAL_STRING("Temperature probe not responding", msg.title);
-  TEST_ASSERT_EQUAL_STRING("Beer Temp has not responded for 5 min.", msg.body);
+  TEST_ASSERT_EQUAL_STRING("Beer Temp is not responding. Its readings are no longer used.", msg.body);
   TEST_ASSERT_EQUAL_UINT8(4, msg.priority);
 
   TEST_ASSERT_TRUE(build(NOTIFY_PROBE_BACK, 2));
   TEST_ASSERT_EQUAL_STRING("Temperature probe responding again", msg.title);
-  TEST_ASSERT_EQUAL_STRING("Beer Temp is reading again.", msg.body);
+  TEST_ASSERT_EQUAL_STRING("Beer Temp is responding again. Its readings are used.", msg.body);
 }
 
 void test_ispindel_messages(void) {
@@ -251,7 +251,7 @@ void test_an_empty_name_is_replaced_by_a_number(void) {
 
   g_probes[2].probeName[0] = '\0';
   TEST_ASSERT_TRUE(build(NOTIFY_PROBE_BACK, 2));
-  TEST_ASSERT_EQUAL_STRING("Probe 3 is reading again.", msg.body);
+  TEST_ASSERT_EQUAL_STRING("Probe 3 is responding again. Its readings are used.", msg.body);
 
   g_iSpindels[1].name[0] = '\0';
   TEST_ASSERT_TRUE(build(NOTIFY_ISPINDEL_BACK, 1));
@@ -317,8 +317,8 @@ void test_headings_fit_their_fields(void) {
 void test_extreme_numbers_are_kept_to_a_fixed_width(void) {
   TEST_ASSERT_TRUE(build(NOTIFY_ALARM_OVER, 0, 0, 3.0e38f, -3.0e38f));
   TEST_ASSERT_EQUAL_STRING("Fermenter 1: 999.90 C is above the -999.9 C limit.", msg.body);
-  TEST_ASSERT_TRUE(build(NOTIFY_PROBE_LOST, 2, 0, 3.0e38f));
-  TEST_ASSERT_EQUAL_STRING("Beer Temp has not responded for 99999 min.", msg.body);
+  TEST_ASSERT_TRUE(build(NOTIFY_ISPINDEL_LOST, 1, 0, 3.0e38f));
+  TEST_ASSERT_EQUAL_STRING("ispindel-4: no report for 99999 min. Its readings are no longer used.", msg.body);
 }
 
 // ============================================================
@@ -436,7 +436,7 @@ void test_alarm_ended_waits_until_the_alarm_has_been_off_ten_minutes(void) {
   s_queueCount = 0;
 
   alarmOff(0);
-  s_uptimeSec += NOTIFY_ALARM_ENDED_S - 1;
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S - 1;
   alarmOff(0);
   TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);   // not yet
 
@@ -461,7 +461,7 @@ void test_an_alarm_flapping_at_its_limit_sends_one_notification(void) {
     s_uptimeSec += 180;                        // on for 3 minutes
     alarmOn(0);
     alarmOff(0);
-    s_uptimeSec += NOTIFY_ALARM_ENDED_S - 1;   // off for just under 10
+    s_uptimeSec += NOTIFY_PROBLEM_OVER_S - 1;  // off for just under 10
     alarmOff(0);
   }
   TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
@@ -471,7 +471,7 @@ void test_an_alarm_flapping_at_its_limit_sends_one_notification(void) {
 void test_a_new_alarm_after_one_has_ended_is_reported_again(void) {
   alarmOn(0);
   alarmOff(0);
-  s_uptimeSec += NOTIFY_ALARM_ENDED_S;
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S;
   alarmOff(0);
   alarmOn(0);
   TEST_ASSERT_EQUAL_UINT8(3, s_queueCount);
@@ -485,7 +485,7 @@ void test_each_fermenter_alarm_is_tracked_on_its_own(void) {
   alarmOn(2);
   TEST_ASSERT_EQUAL_UINT8(2, s_queueCount);
   alarmOff(0);
-  s_uptimeSec += NOTIFY_ALARM_ENDED_S;
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S;
   alarmOff(0);
   alarmOn(2);   // still on: nothing new for fermenter 2
   TEST_ASSERT_EQUAL_UINT8(3, s_queueCount);
@@ -496,7 +496,7 @@ void test_each_fermenter_alarm_is_tracked_on_its_own(void) {
 void test_alarm_ended_carries_no_reading_when_the_fermenter_was_switched_off(void) {
   alarmOn(0);
   notifyAlarmState(0, false, false, false, TEMP_NONE, 0.0f);
-  s_uptimeSec += NOTIFY_ALARM_ENDED_S;
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S;
   notifyAlarmState(0, false, false, false, TEMP_NONE, 0.0f);
   TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_ENDED, s_queue[1].event.type);
   TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, s_queue[1].event.a);
@@ -517,7 +517,7 @@ void test_no_alarm_ended_for_an_alarm_whose_start_was_never_sent(void) {
   alarmOn(0);
   g_notifyConfig.enabled = true;
   alarmOff(0);
-  s_uptimeSec += NOTIFY_ALARM_ENDED_S;
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S;
   alarmOff(0);
   TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
 }
@@ -525,6 +525,98 @@ void test_no_alarm_ended_for_an_alarm_whose_start_was_never_sent(void) {
 void test_an_alarm_for_a_fermenter_that_does_not_exist_is_ignored(void) {
   notifyAlarmState(MAX_FERMENTERS, true, true, true, 30.0f, 22.0f);
   TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+}
+
+// ============================================================
+// SENSOR PROBLEMS
+// ============================================================
+
+void test_a_lost_sensor_is_reported_once_with_the_right_event(void) {
+  notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, 1, true, 46.0f);
+  notifySensorState(NOTIFY_SENSOR_TILT, 3, true, 25.0f);
+  TEST_ASSERT_EQUAL_UINT8(3, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_PROBE_LOST, s_queue[0].event.type);
+  TEST_ASSERT_EQUAL_UINT8(2, s_queue[0].event.index);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ISPINDEL_LOST, s_queue[1].event.type);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queue[1].event.index);
+  TEST_ASSERT_EQUAL_FLOAT(46.0f, s_queue[1].event.a);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_TILT_LOST, s_queue[2].event.type);
+  TEST_ASSERT_EQUAL_UINT8(3, s_queue[2].event.index);
+  TEST_ASSERT_EQUAL_FLOAT(25.0f, s_queue[2].event.a);
+
+  // The checks carry on every few seconds: nothing is repeated
+  for (int n = 0; n < 50; n++) {
+    s_uptimeSec += 5;
+    notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+    notifySensorState(NOTIFY_SENSOR_ISPINDEL, 1, true, 47.0f);
+    notifySensorState(NOTIFY_SENSOR_TILT, 3, true, 26.0f);
+  }
+  TEST_ASSERT_EQUAL_UINT8(3, s_queueCount);
+}
+
+void test_a_sensor_that_was_never_lost_reports_nothing(void) {
+  for (int n = 0; n < 200; n++) {
+    s_uptimeSec += 5;
+    notifySensorState(NOTIFY_SENSOR_PROBE, 0, false);
+  }
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+}
+
+void test_a_sensor_is_reported_back_after_ten_steady_minutes(void) {
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, 1, true, 46.0f);
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, 1, false);
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S - 1;
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, 1, false);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);   // not yet
+
+  s_uptimeSec += 1;
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, 1, false);
+  TEST_ASSERT_EQUAL_UINT8(2, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ISPINDEL_BACK, s_queue[1].event.type);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queue[1].event.index);
+}
+
+void test_a_probe_with_a_loose_wire_sends_one_notification(void) {
+  for (int cycle = 0; cycle < 30; cycle++) {
+    notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+    s_uptimeSec += 60;
+    notifySensorState(NOTIFY_SENSOR_PROBE, 2, false);
+    s_uptimeSec += 120;
+    notifySensorState(NOTIFY_SENSOR_PROBE, 2, false);
+  }
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_PROBE_LOST, s_queue[0].event.type);
+}
+
+void test_the_same_index_of_different_sensor_kinds_is_tracked_apart(void) {
+  // Probe 1, iSpindel 1, Tilt 1 and fermenter 1's alarm are four separate things
+  notifySensorState(NOTIFY_SENSOR_PROBE, 1, true);
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, 1, true, 46.0f);
+  notifySensorState(NOTIFY_SENSOR_TILT, 1, true, 25.0f);
+  alarmOn(1);
+  TEST_ASSERT_EQUAL_UINT8(4, s_queueCount);
+}
+
+void test_the_last_sensor_of_each_kind_has_a_tracker(void) {
+  notifySensorState(NOTIFY_SENSOR_PROBE, MAX_PROBES - 1, true);
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, MAX_ISPINDELS - 1, true, 46.0f);
+  notifySensorState(NOTIFY_SENSOR_TILT, MAX_TILTS - 1, true, 25.0f);
+  TEST_ASSERT_EQUAL_UINT8(3, s_queueCount);
+  // ...and one past the end is ignored
+  notifySensorState(NOTIFY_SENSOR_PROBE, MAX_PROBES, true);
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, MAX_ISPINDELS, true, 46.0f);
+  notifySensorState(NOTIFY_SENSOR_TILT, MAX_TILTS, true, 25.0f);
+  TEST_ASSERT_EQUAL_UINT8(3, s_queueCount);
+}
+
+void test_switching_sensor_notifications_on_reports_a_sensor_already_lost(void) {
+  g_notifyConfig.events = NOTIFY_EVT_ALL & ~NOTIFY_EVT_SENSORS;
+  notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+  g_notifyConfig.events = NOTIFY_EVT_ALL;
+  notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
 }
 
 // ============================================================
@@ -559,12 +651,12 @@ void test_a_notification_is_posted_as_ntfy_expects(void) {
 }
 
 void test_one_notification_is_sent_per_pass_oldest_first(void) {
-  notifyEvent(NOTIFY_PROBE_LOST, 2, 0, 5.0f);
+  notifyEvent(NOTIFY_PROBE_LOST, 2);
   notifyEvent(NOTIFY_PROFILE_FINISHED, 1);
 
   notifyLoop();
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
-  TEST_ASSERT_EQUAL_STRING("Beer Temp has not responded for 5 min.", g_httpTest.body);
+  TEST_ASSERT_EQUAL_STRING("Beer Temp is not responding. Its readings are no longer used.", g_httpTest.body);
 
   notifyLoop();
   TEST_ASSERT_EQUAL_INT(2, g_httpTest.postCount);
@@ -627,7 +719,7 @@ void test_a_notification_is_given_up_on_after_three_tries(void) {
   g_httpTest.nextStatus = 200;
   notifyLoop();
   TEST_ASSERT_EQUAL_INT(4, g_httpTest.postCount);
-  TEST_ASSERT_EQUAL_STRING("Beer Temp is reading again.", g_httpTest.body);
+  TEST_ASSERT_EQUAL_STRING("Beer Temp is responding again. Its readings are used.", g_httpTest.body);
   TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
 }
 
@@ -684,7 +776,7 @@ void test_an_event_that_cannot_be_built_does_not_block_the_queue(void) {
   TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
   notifyLoop();
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
-  TEST_ASSERT_EQUAL_STRING("Beer Temp is reading again.", g_httpTest.body);
+  TEST_ASSERT_EQUAL_STRING("Beer Temp is responding again. Its readings are used.", g_httpTest.body);
 }
 
 // ============================================================
@@ -750,6 +842,14 @@ int main(int argc, char** argv) {
   RUN_TEST(test_switching_alarm_notifications_on_during_an_alarm_reports_it);
   RUN_TEST(test_no_alarm_ended_for_an_alarm_whose_start_was_never_sent);
   RUN_TEST(test_an_alarm_for_a_fermenter_that_does_not_exist_is_ignored);
+
+  RUN_TEST(test_a_lost_sensor_is_reported_once_with_the_right_event);
+  RUN_TEST(test_a_sensor_that_was_never_lost_reports_nothing);
+  RUN_TEST(test_a_sensor_is_reported_back_after_ten_steady_minutes);
+  RUN_TEST(test_a_probe_with_a_loose_wire_sends_one_notification);
+  RUN_TEST(test_the_same_index_of_different_sensor_kinds_is_tracked_apart);
+  RUN_TEST(test_the_last_sensor_of_each_kind_has_a_tracker);
+  RUN_TEST(test_switching_sensor_notifications_on_reports_a_sensor_already_lost);
 
   RUN_TEST(test_nothing_waiting_sends_nothing);
   RUN_TEST(test_a_notification_is_posted_as_ntfy_expects);

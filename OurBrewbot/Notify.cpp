@@ -271,13 +271,13 @@ bool notifyBuildMessage(const NotifyEventData& event, NotifyMessage& msg) {
 
     case NOTIFY_PROBE_LOST:
       if (i >= MAX_PROBES) return false;
-      n = snprintf_P(body, size, PSTR("%s has not responded for %lu min."),
-                     probeName(i), shownMinutes(event.a));
+      n = snprintf_P(body, size, PSTR("%s is not responding. Its readings are no longer used."),
+                     probeName(i));
       break;
 
     case NOTIFY_PROBE_BACK:
       if (i >= MAX_PROBES) return false;
-      n = snprintf_P(body, size, PSTR("%s is reading again."), probeName(i));
+      n = snprintf_P(body, size, PSTR("%s is responding again. Its readings are used."), probeName(i));
       break;
 
     case NOTIFY_ISPINDEL_LOST:
@@ -400,52 +400,121 @@ void notifyEvent(NotifyEvent type, uint8_t index, uint8_t detail, float a, float
 }
 
 // ============================================================
-// TEMPERATURE ALARMS
+// ALARMS AND SENSOR PROBLEMS
+//
+// An alarm or a missing sensor is a "problem" that is either there or not.
+// The code that watches it calls in on every check, and the tracking below
+// turns that into two notifications:
+//  - "started" at once, the first time the problem is seen;
+//  - "over" only once it has stayed away for 10 minutes. A temperature
+//    hovering at its limit, or a probe with a loose wire, comes and goes
+//    every few minutes, and without the wait each flip would be a message.
 // ============================================================
 
-// How long an alarm must stay off before "alarm ended" is sent
-#define NOTIFY_ALARM_ENDED_S  600
+// How long a problem must stay away before the "over" message is sent
+#define NOTIFY_PROBLEM_OVER_S  600
 
-// What has been sent for each fermenter's current alarm
+// What has been sent for a problem that is going on
 enum : uint8_t {
-  ALARM_NOT_SENT    = 0,
-  ALARM_SENT        = 1,   // "alarm started" has been sent
-  ALARM_SENT_SEVERE = 2,   // ...and so has the urgent one for a severe alarm
+  PROBLEM_NOT_SENT    = 0,
+  PROBLEM_SENT        = 1,   // "started" has been sent
+  PROBLEM_SENT_SEVERE = 2,   // ...and so has the urgent one (severe alarms only)
 };
 
-static uint8_t  s_alarmSent[MAX_FERMENTERS]     = {0};
-static uint32_t s_alarmOffSince[MAX_FERMENTERS] = {0};   // uptimeStamp() the alarm went off; 0 = it is on
+// One tracker for each thing that can have a problem: every fermenter's
+// alarm, then every probe, iSpindel and Tilt
+#define TRACK_ALARMS     0
+#define TRACK_PROBES     (TRACK_ALARMS    + MAX_FERMENTERS)
+#define TRACK_ISPINDELS  (TRACK_PROBES    + MAX_PROBES)
+#define TRACK_TILTS      (TRACK_ISPINDELS + MAX_ISPINDELS)
+#define TRACK_COUNT      (TRACK_TILTS     + MAX_TILTS)
+
+static uint8_t  s_problemSent[TRACK_COUNT]     = {0};
+static uint32_t s_problemOffSince[TRACK_COUNT] = {0};   // uptimeStamp() it went away; 0 = it is there
+
+static void forgetProblem(uint8_t tracker) {
+  s_problemSent[tracker]     = PROBLEM_NOT_SENT;
+  s_problemOffSince[tracker] = 0;
+}
+
+// The problem is there. Returns true if "started" should be sent now: the
+// first time, and once more if it has become severe.
+static bool problemStarted(uint8_t tracker, uint8_t level) {
+  s_problemOffSince[tracker] = 0;
+  if (level <= s_problemSent[tracker]) return false;
+  s_problemSent[tracker] = level;
+  return true;
+}
+
+// The problem is not there. Returns true if "over" should be sent now: once,
+// when a problem that was reported has stayed away for 10 minutes.
+static bool problemOver(uint8_t tracker) {
+  if (s_problemSent[tracker] == PROBLEM_NOT_SENT) return false;   // nothing was reported
+  if (s_problemOffSince[tracker] == 0) s_problemOffSince[tracker] = uptimeStamp();
+  if (uptimeSince(s_problemOffSince[tracker]) < NOTIFY_PROBLEM_OVER_S) return false;
+  forgetProblem(tracker);
+  return true;
+}
+
+// True when this kind of event is ticked in the settings
+static bool eventsWanted(uint8_t group) {
+  return g_notifyConfig.enabled && (g_notifyConfig.events & group) != 0;
+}
 
 void notifyAlarmState(uint8_t fermenter, bool active, bool overTemp, bool severe,
                       float temp, float limit) {
   if (fermenter >= MAX_FERMENTERS) return;
-  uint8_t i = fermenter;
+  uint8_t tracker = TRACK_ALARMS + fermenter;
 
   // Alarm notifications are off: forget what was sent, so that switching
   // them on in the middle of an alarm reports that alarm
-  if (!g_notifyConfig.enabled || (g_notifyConfig.events & NOTIFY_EVT_ALARMS) == 0) {
-    s_alarmSent[i]     = ALARM_NOT_SENT;
-    s_alarmOffSince[i] = 0;
+  if (!eventsWanted(NOTIFY_EVT_ALARMS)) {
+    forgetProblem(tracker);
     return;
   }
 
   if (active) {
-    s_alarmOffSince[i] = 0;
-    uint8_t level = severe ? ALARM_SENT_SEVERE : ALARM_SENT;
-    if (level > s_alarmSent[i]) {
-      s_alarmSent[i] = level;
-      notifyEvent(overTemp ? NOTIFY_ALARM_OVER : NOTIFY_ALARM_UNDER, i, severe ? 1 : 0, temp, limit);
+    if (problemStarted(tracker, severe ? PROBLEM_SENT_SEVERE : PROBLEM_SENT)) {
+      notifyEvent(overTemp ? NOTIFY_ALARM_OVER : NOTIFY_ALARM_UNDER, fermenter, severe ? 1 : 0, temp, limit);
     }
+  } else if (problemOver(tracker)) {
+    notifyEvent(NOTIFY_ALARM_ENDED, fermenter, 0, temp);
+  }
+}
+
+void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minutes) {
+  uint8_t     tracker   = 0;
+  NotifyEvent lostEvent = NOTIFY_PROBE_LOST;
+  NotifyEvent backEvent = NOTIFY_PROBE_BACK;
+
+  switch (kind) {
+    case NOTIFY_SENSOR_PROBE:
+      if (index >= MAX_PROBES) return;
+      tracker = TRACK_PROBES + index;
+      break;
+    case NOTIFY_SENSOR_ISPINDEL:
+      if (index >= MAX_ISPINDELS) return;
+      tracker   = TRACK_ISPINDELS + index;
+      lostEvent = NOTIFY_ISPINDEL_LOST;
+      backEvent = NOTIFY_ISPINDEL_BACK;
+      break;
+    case NOTIFY_SENSOR_TILT:
+      if (index >= MAX_TILTS) return;
+      tracker   = TRACK_TILTS + index;
+      lostEvent = NOTIFY_TILT_LOST;
+      backEvent = NOTIFY_TILT_BACK;
+      break;
+  }
+
+  if (!eventsWanted(NOTIFY_EVT_SENSORS)) {
+    forgetProblem(tracker);
     return;
   }
 
-  // The alarm is off. Nothing to end if no start was sent.
-  if (s_alarmSent[i] == ALARM_NOT_SENT) return;
-  if (s_alarmOffSince[i] == 0) s_alarmOffSince[i] = uptimeStamp();
-  if (uptimeSince(s_alarmOffSince[i]) >= NOTIFY_ALARM_ENDED_S) {
-    s_alarmSent[i]     = ALARM_NOT_SENT;
-    s_alarmOffSince[i] = 0;
-    notifyEvent(NOTIFY_ALARM_ENDED, i, 0, temp);
+  if (lost) {
+    if (problemStarted(tracker, PROBLEM_SENT)) notifyEvent(lostEvent, index, 0, minutes);
+  } else if (problemOver(tracker)) {
+    notifyEvent(backEvent, index);
   }
 }
 
