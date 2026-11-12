@@ -26,6 +26,7 @@
 #include "Mqtt.h"
 #include "Crash.h"
 #include "Uptime.h"
+#include "Notify.h"
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
@@ -180,6 +181,9 @@ bool runUpdateCheck() {
     if (strcmp(version, s_announcedVersion) != 0) {
       logMsgL(SYSLOG_NOTICE, "[UPDATE] Firmware %s is available (running %s)", version, FW_VERSION);
       strlcpy(s_announcedVersion, version, sizeof(s_announcedVersion));
+      // Push notification (see Notify.h): once for each new release, like
+      // the log line above. The text names g_updateStatus.latestVersion.
+      notifyEvent(NOTIFY_UPDATE_AVAILABLE);
     } else {
       logMsg("[UPDATE] Firmware %s is still available (running %s)", version, FW_VERSION);
     }
