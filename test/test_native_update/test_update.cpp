@@ -61,6 +61,7 @@ static uint8_t s_lastCheckpoint = 0xFF;
 void checkpoint(uint8_t module) { s_lastCheckpoint = module; }
 
 // The code under test
+#include <NotifyStub.h>   // records what UpdateCheck.cpp reports to the notifications
 #include "../../OurBrewbot/UpdateCheck.cpp"
 
 // ---- test fixture ----
@@ -95,6 +96,7 @@ void setUp(void) {
   s_waitMs = 0;
   s_retriesLeft = UPDATE_MAX_RETRIES;
   s_announcedVersion[0] = '\0';
+  notifyStubReset();
 }
 
 void tearDown(void) {}
@@ -252,6 +254,34 @@ static void test_check_announces_each_new_release_once(void) {
   TEST_ASSERT_EQUAL_INT(2, s_logCount[SYSLOG_NOTICE]);
 }
 
+// ---- what a check tells the notifications (see Notify.h) ----
+
+static void test_check_reports_each_new_release_to_the_notifications_once(void) {
+  httpTestSetReply(200, replyFor("99.0.0"));
+  runUpdateCheck();
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubEvent.count);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_UPDATE_AVAILABLE, g_notifyStubEvent.last.type);
+  // The message text reads the version from here, so it must be set by now
+  TEST_ASSERT_EQUAL_STRING("99.0.0", g_updateStatus.latestVersion);
+
+  runUpdateCheck();   // the next day - same release
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubEvent.count);
+
+  httpTestSetReply(200, replyFor("99.0.1"));
+  runUpdateCheck();   // a newer release again
+  TEST_ASSERT_EQUAL_INT(2, g_notifyStubEvent.count);
+}
+
+static void test_check_reports_nothing_to_the_notifications_when_up_to_date(void) {
+  httpTestSetReply(200, replyFor(FW_VERSION));
+  runUpdateCheck();
+  httpTestSetReply(200, replyFor(OLDER));
+  runUpdateCheck();
+  httpTestSetReply(503, "");
+  runUpdateCheck();
+  TEST_ASSERT_EQUAL_INT(0, g_notifyStubEvent.count);
+}
+
 static void test_check_http_error_fails_with_the_status(void) {
   httpTestSetReply(301, "");   // e.g. the site redirecting to https
   TEST_ASSERT_FALSE(runUpdateCheck());
@@ -395,6 +425,8 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_check_reads_the_configured_url_with_id_and_version);
   RUN_TEST(test_check_reports_a_newer_release);
+  RUN_TEST(test_check_reports_each_new_release_to_the_notifications_once);
+  RUN_TEST(test_check_reports_nothing_to_the_notifications_when_up_to_date);
   RUN_TEST(test_check_same_version_is_up_to_date);
   RUN_TEST(test_check_older_release_is_not_an_update);
   RUN_TEST(test_check_announces_each_new_release_once);

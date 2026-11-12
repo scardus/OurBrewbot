@@ -115,6 +115,10 @@ bool runUpdateCheck() { s_updateChecks++; return true; }
 // Reports.cpp
 int testBrewService(uint8_t) { return 200; }
 
+static int s_notifyTestResult = 200;   // what the test notification "returns"
+static int s_notifyTests      = 0;
+int notifySendTest() { s_notifyTests++; return s_notifyTestResult; }
+
 // Tilt.cpp
 static const char* const TILT_COLOUR_NAMES[] = {
   "Red", "Green", "Black", "Purple", "Orange", "Blue", "Yellow", "Pink"
@@ -186,6 +190,7 @@ ESP8266WebServer g_webServer;
 #include "../../OurBrewbot/Config.cpp"
 #include "../../OurBrewbot/OriginalConfig.cpp"
 #include "../../OurBrewbot/Temperatures.cpp"
+#include <NotifyStub.h>   // records what Fermenter.cpp reports to the notifications
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"
 #include "../../OurBrewbot/TextSafe.cpp"
@@ -263,6 +268,9 @@ void setUp(void) {
   for (int i = 0; i < MAX_BREW_SERVICES; i++) g_brewServices[i] = BrewServiceConfig{};
   memset(&g_mqttConfig, 0, sizeof(g_mqttConfig));
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
+  memset(&g_notifyConfig, 0, sizeof(g_notifyConfig));
+  s_notifyTestResult = 200;
+  s_notifyTests      = 0;
   g_fermenterDebugMode = false;
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     g_fermenterDebugOverrides[i] = FermenterDebugOverride{};
@@ -1527,6 +1535,122 @@ static void test_a_valid_syslog_save_applies_every_field(void) {
   TEST_ASSERT_TRUE(g_syslogConfig.enabled);
   TEST_ASSERT_EQUAL_STRING("new.example", g_syslogConfig.host);
   TEST_ASSERT_EQUAL_UINT16(1514, g_syslogConfig.port);
+}
+
+// ---- /notify ----
+
+static void test_notify_get_reports_each_event_as_its_own_flag(void) {
+  g_notifyConfig.enabled = true;
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  g_notifyConfig.events  = NOTIFY_EVT_ALARMS | NOTIFY_EVT_PROFILE;
+  handleNotifyConfig(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING(
+    "{\"enabled\":true,\"url\":\"http://ntfy.sh/my-topic\",\"alarms\":true,"
+    "\"sensors\":false,\"restarts\":false,\"profile\":true,\"updates\":false}",
+    g_httpResp.body);
+}
+
+static void test_a_valid_notify_save_applies_every_field(void) {
+  postBody("{\"enabled\":true,\"url\":\"http://ntfy.sh/my-topic\",\"alarms\":true,"
+           "\"sensors\":false,\"restarts\":true,\"profile\":false,\"updates\":true}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("http://ntfy.sh/my-topic", g_notifyConfig.url);
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALARMS | NOTIFY_EVT_RESTARTS | NOTIFY_EVT_UPDATES,
+                          g_notifyConfig.events);
+  TEST_ASSERT_NOT_NULL(strstr(fsTestRead(FILE_NOTIFY), "\"url\":\"http://ntfy.sh/my-topic\""));
+}
+
+static void test_a_notify_save_leaves_fields_it_does_not_name_alone(void) {
+  g_notifyConfig.enabled = true;
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  g_notifyConfig.events  = NOTIFY_EVT_ALARMS | NOTIFY_EVT_SENSORS;
+  postBody("{\"sensors\":false}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("http://ntfy.sh/my-topic", g_notifyConfig.url);
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALARMS, g_notifyConfig.events);
+}
+
+static void test_a_refused_notify_url_changes_nothing(void) {
+  g_notifyConfig.enabled = false;
+  strlcpy(g_notifyConfig.url, "http://old.example/topic", sizeof(g_notifyConfig.url));
+  g_notifyConfig.events  = NOTIFY_EVT_ALARMS;
+  postBody("{\"enabled\":true,\"url\":\"https://ntfy.sh/my-topic\",\"updates\":true}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  // The whole message must fit sendStatusMsg()'s buffer
+  TEST_ASSERT_TRUE(bodyContains("(https is not supported)\"}"));
+  TEST_ASSERT_FALSE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("http://old.example/topic", g_notifyConfig.url);
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALARMS, g_notifyConfig.events);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_NOTIFY));
+}
+
+static void test_notify_cannot_be_enabled_without_a_url(void) {
+  postBody("{\"enabled\":true}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("url is required"));
+  TEST_ASSERT_FALSE(g_notifyConfig.enabled);
+}
+
+static void test_notify_url_can_be_cleared_when_switched_off(void) {
+  g_notifyConfig.enabled = true;
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  postBody("{\"enabled\":false,\"url\":\"\"}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("", g_notifyConfig.url);
+}
+
+static void test_notify_test_needs_a_saved_url(void) {
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("No notification URL saved"));
+  TEST_ASSERT_EQUAL_INT(0, s_notifyTests);
+}
+
+static void test_notify_test_reports_a_delivered_message(void) {
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, s_notifyTests);
+  TEST_ASSERT_EQUAL_STRING("{\"status\":\"ok\",\"msg\":\"HTTP 200 - OK\",\"httpCode\":200}", g_httpResp.body);
+}
+
+static void test_notify_test_reports_a_refusal_with_its_http_status(void) {
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  s_notifyTestResult = 403;
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("{\"status\":\"error\",\"msg\":\"HTTP 403 - Failed\",\"httpCode\":403}", g_httpResp.body);
+}
+
+static void test_notify_test_says_when_the_server_never_answered(void) {
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  s_notifyTestResult = -11;   // HTTPClient's "read timeout", the longest code there is
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  // The whole reply must fit the handler's buffer
+  TEST_ASSERT_EQUAL_STRING(
+    "{\"status\":\"error\",\"msg\":\"No reply from the server (error -11)\",\"httpCode\":-11}",
+    g_httpResp.body);
+}
+
+static void test_fs_save_accepts_the_notify_file(void) {
+  srv.setArg("name", "/jsonNotify.txt");
+  srv.setBody("{\"enabled\":false}");
+  handleFsFileSave(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
 }
 
 static void test_fs_save_rejects_an_empty_body(void) {
@@ -3198,6 +3322,17 @@ int main(int, char**) {
   RUN_TEST(test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces);
   RUN_TEST(test_a_refused_syslog_port_changes_nothing);
   RUN_TEST(test_a_valid_syslog_save_applies_every_field);
+  RUN_TEST(test_notify_get_reports_each_event_as_its_own_flag);
+  RUN_TEST(test_a_valid_notify_save_applies_every_field);
+  RUN_TEST(test_a_notify_save_leaves_fields_it_does_not_name_alone);
+  RUN_TEST(test_a_refused_notify_url_changes_nothing);
+  RUN_TEST(test_notify_cannot_be_enabled_without_a_url);
+  RUN_TEST(test_notify_url_can_be_cleared_when_switched_off);
+  RUN_TEST(test_notify_test_needs_a_saved_url);
+  RUN_TEST(test_notify_test_reports_a_delivered_message);
+  RUN_TEST(test_notify_test_reports_a_refusal_with_its_http_status);
+  RUN_TEST(test_notify_test_says_when_the_server_never_answered);
+  RUN_TEST(test_fs_save_accepts_the_notify_file);
   RUN_TEST(test_fs_save_rejects_an_empty_body);
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);
   RUN_TEST(test_fs_save_writes_a_whitelisted_file);

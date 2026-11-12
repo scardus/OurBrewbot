@@ -56,9 +56,13 @@ void logMsgImpl(uint8_t, PGM_P, ...) {}
 // fixed false.
 static bool s_reportsPending = false;
 bool reportsPending() { return s_reportsPending; }
+// notifySendDue() gates it the same way, for a push notification about to be sent
+static bool s_notifySendDue = false;
+bool notifySendDue() { return s_notifySendDue; }
 
 // The functions under test (hexToU16/identifyTiltUuid/decodeTiltReading/
 // parseDiscLine are all file-static), plus everything else in Tilt.cpp.
+#include <NotifyStub.h>   // records what Tilt.cpp reports to the notifications
 #include "../../OurBrewbot/Tilt.cpp"
 
 // ---- test fixture ----
@@ -69,6 +73,8 @@ void setUp(void) {
   // count left over from a previous test would change when a Tilt gets
   // deregistered in the next one.
   for (int i = 0; i < MAX_TILTS; i++) s_missedReads[i] = 0;
+  for (int i = 0; i < MAX_TILTS; i++) s_tiltHeard[i]   = false;
+  notifyStubReset();
   s_millis = 0;
   // Scan-state file-statics, so each scan test starts from "idle, module ready".
   s_scanActive        = false;
@@ -82,6 +88,7 @@ void setUp(void) {
   s_silentScans       = 0;
   g_bleSniffActive    = false;
   s_reportsPending    = false;
+  s_notifySendDue     = false;
   g_bleSerial.reset();
   g_globalConfig = GlobalConfig{};
 }
@@ -371,6 +378,13 @@ void test_startTiltScan_skipped_while_a_cloud_report_is_queued(void) {
   // A queued POST can block the loop for up to 5 s, which would starve the
   // drain; Tilts advertise continuously so the next tick picks them up.
   s_reportsPending = true;
+  startTiltScan();
+  TEST_ASSERT_FALSE(s_scanActive);
+  TEST_ASSERT_EQUAL_STRING("", g_bleSerial.lastPrint());
+}
+
+void test_startTiltScan_skipped_while_a_notification_is_about_to_be_sent(void) {
+  s_notifySendDue = true;
   startTiltScan();
   TEST_ASSERT_FALSE(s_scanActive);
   TEST_ASSERT_EQUAL_STRING("", g_bleSerial.lastPrint());
@@ -676,6 +690,68 @@ void test_serviceTilt_deregisters_a_tilt_after_300_misses(void) {
   TEST_ASSERT_EQUAL_INT(0, s_missedReads[0]);  // counter reset with the slot
 }
 
+// ---- what the end of a scan tells the notifications (see Notify.h) ----
+
+void test_scan_reports_a_tilt_in_use_as_lost_when_it_is_deregistered(void) {
+  g_tilts[0].fermenter = 1;
+  processTiltReading(0, 1.050f, 20.0f, false);   // heard once, so it counts as in use
+  s_missedReads[0] = 299;
+  NotifyStubSensor& sensor = g_notifyStubSensor[NOTIFY_SENSOR_TILT][0];
+
+  beginScan();
+  expireScanWindow();
+  g_tilts[0].lastSeen = millis() - 25UL * 60000UL;   // last heard 25 minutes ago
+  serviceTilt();   // empty scan - the 300th miss
+
+  TEST_ASSERT_FALSE(g_tilts[0].active);
+  TEST_ASSERT_TRUE(sensor.lost);
+  TEST_ASSERT_EQUAL_FLOAT(25.0f, sensor.minutes);
+}
+
+void test_scan_reports_a_tilt_in_use_as_reporting_while_it_is_active(void) {
+  g_tilts[0].fermenter = 1;
+  processTiltReading(0, 1.050f, 20.0f, false);
+  beginScan();
+  expireScanWindow();
+  serviceTilt();   // one miss: far from deregistration
+
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubSensor[NOTIFY_SENSOR_TILT][0].count);
+  TEST_ASSERT_FALSE(g_notifyStubSensor[NOTIFY_SENSOR_TILT][0].lost);
+}
+
+void test_scan_says_nothing_about_a_tilt_not_heard_since_boot(void) {
+  g_tilts[0].fermenter = 1;
+  g_tilts[0].active    = false;
+  beginScan();
+  expireScanWindow();
+  serviceTilt();
+  TEST_ASSERT_EQUAL_INT(0, g_notifyStubSensor[NOTIFY_SENSOR_TILT][0].count);
+}
+
+void test_scan_says_nothing_about_a_tilt_no_fermenter_uses(void) {
+  // A neighbour's Tilt in range is heard, then goes away
+  g_tilts[0].fermenter = PROBE_UNASSIGNED;
+  processTiltReading(0, 1.050f, 20.0f, false);
+  s_missedReads[0] = 299;
+  beginScan();
+  expireScanWindow();
+  serviceTilt();
+  TEST_ASSERT_FALSE(g_tilts[0].active);
+  TEST_ASSERT_EQUAL_INT(0, g_notifyStubSensor[NOTIFY_SENSOR_TILT][0].count);
+}
+
+void test_tilts_are_still_reported_while_the_ble_module_is_not_answering(void) {
+  g_tilts[0].fermenter = 1;
+  processTiltReading(0, 1.050f, 20.0f, false);
+  s_missedReads[0] = 299;
+  s_bleReady = false;
+  test_setMillis(1000000);
+  s_lastBleInitRetry = 1000000;   // retry not due
+  startTiltScan();
+  TEST_ASSERT_FALSE(g_tilts[0].active);
+  TEST_ASSERT_TRUE(g_notifyStubSensor[NOTIFY_SENSOR_TILT][0].lost);
+}
+
 void test_serviceTilt_keeps_a_tilt_that_was_seen_this_scan(void) {
   g_tilts[0].active = true;
   s_missedReads[0]  = 299;   // one scan away from deregistration
@@ -733,6 +809,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_startTiltScan_sends_discovery_command);
   RUN_TEST(test_startTiltScan_skipped_while_sniff_page_owns_the_port);
   RUN_TEST(test_startTiltScan_skipped_while_a_cloud_report_is_queued);
+  RUN_TEST(test_startTiltScan_skipped_while_a_notification_is_about_to_be_sent);
   RUN_TEST(test_startTiltScan_skipped_while_previous_scan_still_draining);
   RUN_TEST(test_startTiltScan_counts_a_miss_when_module_not_ready);
 
@@ -759,6 +836,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_serviceTilt_overflow_shift_keeps_the_newest_bytes);
   RUN_TEST(test_serviceTilt_abandons_scan_when_sniff_page_opens);
   RUN_TEST(test_serviceTilt_deregisters_a_tilt_after_300_misses);
+  RUN_TEST(test_scan_reports_a_tilt_in_use_as_lost_when_it_is_deregistered);
+  RUN_TEST(test_scan_reports_a_tilt_in_use_as_reporting_while_it_is_active);
+  RUN_TEST(test_scan_says_nothing_about_a_tilt_not_heard_since_boot);
+  RUN_TEST(test_scan_says_nothing_about_a_tilt_no_fermenter_uses);
+  RUN_TEST(test_tilts_are_still_reported_while_the_ble_module_is_not_answering);
   RUN_TEST(test_serviceTilt_keeps_a_tilt_that_was_seen_this_scan);
 
   return UNITY_END();

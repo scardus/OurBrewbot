@@ -57,6 +57,7 @@ float getCurrentSG(uint8_t)   { return s_currentSG; }
 float getAttenuation(uint8_t) { return s_attenuation; }
 
 // The function under test, plus everything else in Profile.cpp.
+#include <NotifyStub.h>   // records what Profile.cpp reports to the notifications
 #include "../../OurBrewbot/Profile.cpp"
 
 // ---- test fixture ----
@@ -74,6 +75,7 @@ void setUp(void) {
   s_attenuation  = 0.0f;
   s_millis       = 0;
   s_fermenterUnsaved = false;
+  notifyStubReset();
 }
 
 void tearDown(void) {}
@@ -700,6 +702,70 @@ void test_advance_finishes_when_step_index_past_end(void) {
   assertProfileFinished(F);
 }
 
+// ---- what a step change tells the notifications (see Notify.h) ----
+
+void test_advance_reports_a_completed_step_numbered_from_one(void) {
+  runProfile(F, 1, 0, /*hour=*/24);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);  // complete
+  g_profileSteps[flat(1, 1)] = makeStep(STEP_TIME_OVER_TEMP, 2.0f, 0, 20.0f, 0);  // next
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubEvent.count);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_STEP_COMPLETE, g_notifyStubEvent.last.type);
+  TEST_ASSERT_EQUAL_UINT8(F, g_notifyStubEvent.last.index);
+  TEST_ASSERT_EQUAL_UINT8(1, g_notifyStubEvent.last.detail);   // "step 1 is complete"
+  TEST_ASSERT_EQUAL_FLOAT(2.0f, g_notifyStubEvent.last.a);     // "step 2 has started"
+}
+
+void test_advance_reports_nothing_while_a_step_is_still_running(void) {
+  runProfile(F, 1, 0, /*hour=*/3);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_INT(0, g_notifyStubEvent.count);
+}
+
+void test_advance_reports_the_profile_finishing_as_one_event(void) {
+  // The last step completing is "profile finished", not "step complete" as well
+  runProfile(F, 1, 0, /*hour=*/24);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubEvent.count);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_PROFILE_FINISHED, g_notifyStubEvent.last.type);
+  TEST_ASSERT_EQUAL_UINT8(F, g_notifyStubEvent.last.index);
+}
+
+void test_every_way_a_profile_finishes_by_itself_is_reported(void) {
+  // The last of 15 steps completes
+  uint8_t last = MAX_STEPS_PER_PROFILE - 1;
+  runProfile(F, 1, last, /*hour=*/24);
+  g_profileSteps[flat(1, last)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubEvent.count);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_PROFILE_FINISHED, g_notifyStubEvent.last.type);
+
+  // The current step is empty (the profile was cleared while running)
+  for (int s = 0; s < MAX_PROFILE_STEPS; s++) g_profileSteps[s] = ProfileStep{};
+  runProfile(F, 1, 0, /*hour=*/0);
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_INT(2, g_notifyStubEvent.count);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_PROFILE_FINISHED, g_notifyStubEvent.last.type);
+
+  // The step number is already past the end
+  runProfile(F, 1, MAX_STEPS_PER_PROFILE, /*hour=*/0);
+  advanceProfileStep(F);
+  TEST_ASSERT_EQUAL_INT(3, g_notifyStubEvent.count);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_PROFILE_FINISHED, g_notifyStubEvent.last.type);
+}
+
+void test_steps_moved_on_by_hand_are_not_reported(void) {
+  runProfile(F, 1, 0, /*hour=*/5);
+  g_profileSteps[flat(1, 0)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 18.0f, 0);
+  g_profileSteps[flat(1, 1)] = makeStep(STEP_TIME_OVER_TEMP, 1.0f, 0, 19.0f, 0);
+  TEST_ASSERT_TRUE(nextProfileStep(F));    // on to the last step
+  TEST_ASSERT_FALSE(nextProfileStep(F));   // past the end: the profile finishes
+  stopProfile(F);
+  TEST_ASSERT_EQUAL_INT(0, g_notifyStubEvent.count);
+}
+
 // ---- profile slot addressing: profileNo 1-4 map to step blocks 0/15/30/45 ----
 
 void test_advance_reads_steps_from_its_own_profile_slot(void) {
@@ -939,6 +1005,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_advance_finishes_on_empty_current_step);
   RUN_TEST(test_advance_finishes_when_last_step_completes);
   RUN_TEST(test_advance_finishes_when_step_index_past_end);
+  RUN_TEST(test_advance_reports_a_completed_step_numbered_from_one);
+  RUN_TEST(test_advance_reports_nothing_while_a_step_is_still_running);
+  RUN_TEST(test_advance_reports_the_profile_finishing_as_one_event);
+  RUN_TEST(test_every_way_a_profile_finishes_by_itself_is_reported);
+  RUN_TEST(test_steps_moved_on_by_hand_are_not_reported);
 
   RUN_TEST(test_advance_reads_steps_from_its_own_profile_slot);
   RUN_TEST(test_getProfileTargetTemp_reads_its_own_profile_slot);

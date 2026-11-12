@@ -174,6 +174,8 @@ enum TiltColour {
 #define FILE_MQTT_BKP       "/jsonMqttbkup.txt"
 #define FILE_SYSLOG         "/jsonSyslog.txt"
 #define FILE_SYSLOG_BKP     "/jsonSyslogbkup.txt"
+#define FILE_NOTIFY         "/jsonNotify.txt"
+#define FILE_NOTIFY_BKP     "/jsonNotifybkup.txt"
 #define FILE_REBOOT         "/jsonReBoot.txt"
 #define FILE_REBOOT_BKP     "/jsonReBootbkup.txt"
 #define FILE_DRD            "/DRD.txt"
@@ -491,6 +493,27 @@ struct SyslogConfig {
 };
 
 // ============================================================
+// STRUCT: NotifyConfig
+// Push notifications sent as a plain HTTP POST (see Notify.cpp)
+// ============================================================
+
+// The kinds of event a notification can be sent for. Each is one bit of
+// NotifyConfig.events, and one tick box on the WebUI's Reporting page.
+#define NOTIFY_EVT_ALARMS    0x01   // a temperature alarm starts or ends
+#define NOTIFY_EVT_SENSORS   0x02   // a probe, Tilt or iSpindel stops or resumes reporting
+#define NOTIFY_EVT_RESTARTS  0x04   // the controller restarted after a crash or power cut
+#define NOTIFY_EVT_PROFILE   0x08   // a profile step completes or the profile finishes
+#define NOTIFY_EVT_UPDATES   0x10   // a new firmware release is available
+#define NOTIFY_EVT_ALL       0x1F
+#define NOTIFY_EVT_DEFAULT   (NOTIFY_EVT_ALARMS | NOTIFY_EVT_SENSORS | NOTIFY_EVT_RESTARTS)
+
+struct NotifyConfig {
+  bool    enabled;         // notifications on/off
+  char    url[128];        // where to POST, e.g. "http://ntfy.sh/my-topic" (http:// only)
+  uint8_t events;          // NOTIFY_EVT_xxx bits: which events are sent
+};
+
+// ============================================================
 // STRUCT: MqttConfig
 // ============================================================
 struct MqttConfig {
@@ -519,6 +542,7 @@ extern iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
 extern BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 extern MqttConfig        g_mqttConfig;
 extern SyslogConfig      g_syslogConfig;
+extern NotifyConfig      g_notifyConfig;
 
 // ============================================================
 // FUNCTION DECLARATIONS
@@ -552,7 +576,7 @@ void configPeriodicSave();
 enum ConfigFile : uint8_t {
   CFG_FILE_GLOBAL, CFG_FILE_FERMENTER, CFG_FILE_PROBE, CFG_FILE_SMARTPLUGS,
   CFG_FILE_PROFILE, CFG_FILE_STEPS, CFG_FILE_TILT, CFG_FILE_ISPINDEL,
-  CFG_FILE_BREWSVC, CFG_FILE_MQTT, CFG_FILE_SYSLOG,
+  CFG_FILE_BREWSVC, CFG_FILE_MQTT, CFG_FILE_SYSLOG, CFG_FILE_NOTIFY,
 };
 
 // Call after changing a setting in memory without saving it, such as profile
@@ -587,6 +611,8 @@ bool loadMqttConfig();
 bool saveMqttConfig();
 bool loadSyslogConfig();
 bool saveSyslogConfig();
+bool loadNotifyConfig();
+bool saveNotifyConfig();
 
 // Defaults / factory reset
 void initDefaultGlobalConfig();
@@ -599,6 +625,7 @@ void initDefaultiSpindelConfig();
 void initDefaultBrewServiceConfig();
 void initDefaultMqttConfig();
 void initDefaultSyslogConfig();
+void initDefaultNotifyConfig();
 void resetWiFiConfig();
 void resetAllConfig();
 

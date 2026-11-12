@@ -26,6 +26,7 @@
 #include "Fermenter.h"
 #include "Temperatures.h"
 #include "Log.h"
+#include "Notify.h"
 
 // Helper: get flat array index for a fermenter's current profile step
 static inline uint8_t flatStepIndex(uint8_t i) {
@@ -88,6 +89,7 @@ void advanceProfileStep(uint8_t i) {
   if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
     finishProfile(i);
+    notifyEvent(NOTIFY_PROFILE_FINISHED, i);
     saveFermenterConfig();
     return;
   }
@@ -99,6 +101,7 @@ void advanceProfileStep(uint8_t i) {
   if (isStepEmpty(step)) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished (empty step %d)", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
     finishProfile(i);
+    notifyEvent(NOTIFY_PROFILE_FINISHED, i);
     saveFermenterConfig();
     return;
   }
@@ -124,6 +127,9 @@ void advanceProfileStep(uint8_t i) {
   if (isStepComplete(i, step)) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Step %d complete -> Step %d",
       i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep, g_fermenters[i].currentStep + 1);
+    // The step that just finished, numbered from 1 as the WebUI shows it
+    uint8_t finishedStep = g_fermenters[i].currentStep + 1;
+    bool    finished     = false;
     g_fermenters[i].currentStep++;
     g_fermenters[i].currentHour = 0;
     g_fermenters[i].hourTicks   = 0;
@@ -132,13 +138,20 @@ void advanceProfileStep(uint8_t i) {
     if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
       logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
       finishProfile(i);
+      finished = true;
     } else {
       uint8_t nextIdx = flatStepIndex(i);
       if (isStepEmpty(g_profileSteps[nextIdx])) {
         logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished (no more steps)", i, g_fermenters[i].fermenterName);
         finishProfile(i);
+        finished = true;
       }
     }
+
+    // Push notification (see Notify.h): one message, for the profile ending
+    // or for the step change. Steps moved on by hand are not reported.
+    if (finished) notifyEvent(NOTIFY_PROFILE_FINISHED, i);
+    else          notifyEvent(NOTIFY_STEP_COMPLETE, i, finishedStep, (float)(finishedStep + 1));
     saveFermenterConfig();
   }
 }

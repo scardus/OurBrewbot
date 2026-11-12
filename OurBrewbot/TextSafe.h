@@ -73,3 +73,14 @@ bool makeBaseTopicSafe(char* topic);
 // throwing the reading away. Used on every POST /iSpindel and on IDs loaded
 // from the config. Returns true if anything changed.
 bool makeIdTopicSafe(char* id);
+
+// True if url can be used as the notification URL (see Notify.cpp). fieldSize
+// is the size of the field it will be stored in (the NUL needs one byte of
+// it). It must:
+//  - start with "http://" and have at least one character after it. "https://"
+//    is refused: the controller has no room for the encryption it needs;
+//  - be short enough to fit the field whole - a cut URL would post somewhere
+//    else, or nowhere;
+//  - hold only visible ASCII characters: no spaces, control characters or
+//    bytes above 0x7E, none of which belong in a URL.
+bool isValidNotifyUrl(const char* url, size_t fieldSize);

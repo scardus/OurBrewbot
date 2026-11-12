@@ -26,6 +26,7 @@
 #include "Fermenter.h"
 #include "Temperatures.h"
 #include "Reports.h"
+#include "Notify.h"
 #include "iSpindel.h"
 #include "SmartPlugs.h"
 #include "Pins.h"
@@ -48,6 +49,9 @@ void handleBLESniffPoll(ESP8266WebServer& server);
 void handleBLESniffSend(ESP8266WebServer& server);
 void handleSyslogConfig(ESP8266WebServer& server);
 void handleSyslogConfigPost(ESP8266WebServer& server);
+void handleNotifyConfig(ESP8266WebServer& server);
+void handleNotifyConfigPost(ESP8266WebServer& server);
+void handleNotifyTest(ESP8266WebServer& server);
 static bool otaUploadInstalled();
 static bool otaUploadRefused();
 static void otaUploadClear();
@@ -158,6 +162,9 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/mqtt/discover",    HTTP_POST, handleMqttDiscover,       true  },
   { "/syslog",           HTTP_GET,  handleSyslogConfig,       true  },
   { "/syslog",           HTTP_POST, handleSyslogConfigPost,   true  },
+  { "/notify",           HTTP_GET,  handleNotifyConfig,       true  },
+  { "/notify",           HTTP_POST, handleNotifyConfigPost,   true  },
+  { "/notify/test",      HTTP_POST, handleNotifyTest,         true  },
   { "/debug",            HTTP_GET,  handleDebug,              true  },
   { "/debug",            HTTP_POST, handleDebug,              true  },
   { "/profiles",         HTTP_GET,  handleProfiles,           true  },
@@ -1827,7 +1834,8 @@ void handleFsFileSave(ESP8266WebServer& server) {
     "/jsonGlobal.txt", "/jsonFermenter.txt", "/jsonProbe.txt",
     "/jsonSmartPlugs.txt", "/jsonProfile.txt", "/jsonProfileSteps.txt",
     "/jsonTilt.txt", "/jsoniSpindel.txt",
-    "/jsonBrewServices.txt", "/jsonMqtt.txt", "/jsonSyslog.txt"
+    "/jsonBrewServices.txt", "/jsonMqtt.txt", "/jsonSyslog.txt",
+    "/jsonNotify.txt"
   };
   String name = server.arg("name");
   bool ok = false;
@@ -1995,6 +2003,93 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
   bool saved = saveSyslogConfig();
   logInit();  // re-resolve host with new config
   sendSaveResult(server, saved, F("Syslog config saved"));
+}
+
+// ============================================================
+// NOTIFICATION CONFIG — GET/POST /notify
+// ============================================================
+
+// One row per kind of event: its name in the API and its bit in
+// NotifyConfig.events
+struct NotifyEventKey {
+  const char* key;
+  uint8_t     bit;
+};
+
+static const NotifyEventKey kNotifyEventKeys[] = {
+  { "alarms",   NOTIFY_EVT_ALARMS   },
+  { "sensors",  NOTIFY_EVT_SENSORS  },
+  { "restarts", NOTIFY_EVT_RESTARTS },
+  { "profile",  NOTIFY_EVT_PROFILE  },
+  { "updates",  NOTIFY_EVT_UPDATES  },
+};
+
+void handleNotifyConfig(ESP8266WebServer& server) {
+  JsonDocument doc;
+  doc["enabled"] = g_notifyConfig.enabled;
+  doc["url"]     = g_notifyConfig.url;
+  for (const NotifyEventKey& event : kNotifyEventKeys) {
+    doc[event.key] = (g_notifyConfig.events & event.bit) != 0;
+  }
+  sendJsonDoc(server, doc);
+}
+
+void handleNotifyConfigPost(ESP8266WebServer& server) {
+  JsonDocument doc;
+  if (!parseJsonBody(server, doc)) return;
+
+  // Work out the new settings first and check them, so a refused request
+  // leaves the saved settings as they were
+  bool        enabled = doc["enabled"].isNull() ? g_notifyConfig.enabled : doc["enabled"].as<bool>();
+  const char* url     = doc["url"].is<const char*>() ? doc["url"].as<const char*>() : g_notifyConfig.url;
+
+  if (url[0] != '\0' && !isValidNotifyUrl(url, sizeof(g_notifyConfig.url))) {
+    sendErr(server, 400, F("url must start with http:// and be at most 127 characters, without spaces (https is not supported)"));
+    return;
+  }
+  if (enabled && url[0] == '\0') {
+    sendErr(server, 400, F("url is required when notifications are enabled"));
+    return;
+  }
+
+  uint8_t events = g_notifyConfig.events;
+  for (const NotifyEventKey& event : kNotifyEventKeys) {
+    if (doc[event.key].isNull()) continue;
+    if (doc[event.key].as<bool>()) events |= event.bit;
+    else                           events &= ~event.bit;
+  }
+
+  // url may point at g_notifyConfig.url itself, so only copy a new one
+  if (url != g_notifyConfig.url) strlcpy(g_notifyConfig.url, url, sizeof(g_notifyConfig.url));
+  g_notifyConfig.enabled = enabled;
+  g_notifyConfig.events  = events;
+  sendSaveResult(server, saveNotifyConfig(), F("Notification settings saved"));
+}
+
+// ============================================================
+// NOTIFICATION TEST — POST /notify/test
+// Sends a test message to the saved URL and reports the HTTP result
+// ============================================================
+
+void handleNotifyTest(ESP8266WebServer& server) {
+  if (g_notifyConfig.url[0] == 0) {
+    sendErr(server, 400, F("No notification URL saved"));
+    return;
+  }
+  int  httpCode  = notifySendTest();
+  bool delivered = (httpCode >= 200 && httpCode < 300);
+  char resp[96];
+  if (httpCode < 0) {
+    // A negative code is an HTTPClient error: the server never answered
+    snprintf_P(resp, sizeof(resp),
+               PSTR("{\"status\":\"error\",\"msg\":\"No reply from the server (error %d)\",\"httpCode\":%d}"),
+               httpCode, httpCode);
+  } else {
+    snprintf_P(resp, sizeof(resp),
+               PSTR("{\"status\":\"%s\",\"msg\":\"HTTP %d - %s\",\"httpCode\":%d}"),
+               delivered ? "ok" : "error", httpCode, delivered ? "OK" : "Failed", httpCode);
+  }
+  sendJsonResponse(server, resp);
 }
 
 // ============================================================

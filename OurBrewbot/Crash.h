@@ -65,6 +65,7 @@ enum : uint8_t {
   CP_TEN_MIN    = 14,
   CP_UPDATE     = 15,
   CP_CRASH_RPT  = 16,
+  CP_NOTIFY     = 17,
 };
 
 #define CRASH_STACK_WORDS 24   // stack words captured by the crash handler

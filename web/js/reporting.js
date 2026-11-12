@@ -1,12 +1,12 @@
 'use strict';
-// The reporting view for Brewer's Friend, Brewfather and MQTT.
+// The reporting view for Brewer's Friend, Brewfather, MQTT and push notifications.
 
-// Build service-reporting and MQTT configuration forms with their explicit test actions.
+// Build service-reporting, MQTT and notification forms with their explicit test actions.
 function reportingView() {
   const m=state.mqtt;
   const mqttButtons=btn('Test connection','test-mqtt','secondary')+btn('Publish discovery','discover','ghost');
   return pageTitle('KEEP YOUR BREW CONNECTED','Reporting',
-    'Choose where your readings go. Enable each service per fermenter.')+
+    'Choose where your readings and alerts go. Enable each brew service per fermenter.')+
     `<div class="grid">${state.services.map(serviceCard).join('')}</div>
     <article class="card panel" style="margin-top:18px">
       <div class="panel-header"><div class="service-heading"><div class="service-logo">${icon('reporting')}</div>
@@ -30,7 +30,41 @@ function reportingView() {
         ${toggle('Clear saved password','clearPassword',false,'Only tick this to explicitly remove the saved password.')}
         ${formActions('Save MQTT settings',mqttButtons)}
       </form>
+    </article>
+    ${notifyCard(state.notify)}`;
+}
+
+// Build the push-notification settings and their test action.
+function notifyCard(n) {
+  return `<article class="card panel" style="margin-top:18px">
+      <div class="panel-header"><div class="service-heading"><div class="service-logo">${icon('info')}</div>
+        <div><h2>Notifications</h2><p>Alerts sent straight to your phone.</p></div></div>
+        ${badge(n.enabled?'Enabled':'Disabled',n.enabled?'good':'quiet')}</div>
+      <form data-form="notify">
+        ${toggle('Enable notifications','enabled',n.enabled)}
+        <div class="fields" style="margin-top:20px;grid-template-columns:1fr">
+          ${field('Notification URL','url',n.url,'text','maxlength="127" placeholder="http://ntfy.sh/my-topic"',
+            'An ntfy topic or other address that accepts a POST. Must start with http:// - HTTPS is not supported.')}
+        </div>
+        <h3 style="margin-top:20px">Send a notification for</h3>
+        ${toggle('Temperature alarms','alarms',n.alarms,'When an alarm starts and when it ends.')}
+        ${toggle('Sensor problems','sensors',n.sensors,'A probe, Tilt or iSpindel stops or resumes reporting.')}
+        ${toggle('Unexpected restarts','restarts',n.restarts,'After a crash or power cut.')}
+        ${toggle('Profile progress','profile',n.profile,'A step completes or a profile finishes.')}
+        ${toggle('Firmware updates','updates',n.updates,'Once when a new release is available.')}
+        ${formActions('Save notification settings',btn('Send test notification','test-notify','secondary'))}
+      </form>
     </article>`;
+}
+
+// Validate the notification URL the way TextSafe.cpp::isValidNotifyUrl() does.
+function notifyPayload(data) {
+  if (data.url && !/^http:\/\/[\x21-\x7e]+$/.test(data.url)) {
+    throw new Error('Notification URL must start with http:// and have no spaces. HTTPS is not supported.');
+  }
+  if (data.enabled && !data.url) throw new Error('Enter a notification URL before enabling notifications.');
+  return {enabled:data.enabled,url:data.url,alarms:data.alarms,sensors:data.sensors,
+    restarts:data.restarts,profile:data.profile,updates:data.updates};
 }
 
 // Build one reporting service's saved settings and connection-test controls.
