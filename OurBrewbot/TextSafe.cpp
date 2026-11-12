@@ -122,3 +122,17 @@ bool makeIdTopicSafe(char* id) {
   }
   return changed;
 }
+
+bool isValidNotifyUrl(const char* url, size_t fieldSize) {
+  static const char kPrefix[] = "http://";
+  const size_t prefixLen = sizeof(kPrefix) - 1;
+  size_t len = strlen(url);
+  if (len >= fieldSize) return false;                      // would not fit whole
+  if (len <= prefixLen) return false;                      // nothing after "http://"
+  if (strncmp(url, kPrefix, prefixLen) != 0) return false;
+  for (size_t i = 0; i < len; i++) {
+    unsigned char c = (unsigned char)url[i];
+    if (c <= 0x20 || c > 0x7E) return false;               // space, control or non-ASCII
+  }
+  return true;
+}

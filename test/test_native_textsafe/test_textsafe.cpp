@@ -299,6 +299,47 @@ void test_id_non_ascii_bytes_become_underscores(void) {
   TEST_ASSERT_EQUAL_STRING("id__", id);
 }
 
+// ============================================================
+// isValidNotifyUrl()
+// ============================================================
+
+void test_notify_url_plain_http_is_valid(void) {
+  TEST_ASSERT_TRUE(isValidNotifyUrl("http://ntfy.sh/my-topic", 128));
+  TEST_ASSERT_TRUE(isValidNotifyUrl("http://192.168.0.20:8080/brewery?x=1&y=%20", 128));
+}
+
+void test_notify_url_must_start_with_http(void) {
+  TEST_ASSERT_FALSE(isValidNotifyUrl("https://ntfy.sh/my-topic", 128));   // no room for TLS
+  TEST_ASSERT_FALSE(isValidNotifyUrl("ntfy.sh/my-topic", 128));
+  TEST_ASSERT_FALSE(isValidNotifyUrl("HTTP://ntfy.sh/my-topic", 128));
+  TEST_ASSERT_FALSE(isValidNotifyUrl("ftp://ntfy.sh/my-topic", 128));
+}
+
+void test_notify_url_needs_something_after_the_prefix(void) {
+  TEST_ASSERT_FALSE(isValidNotifyUrl("", 128));
+  TEST_ASSERT_FALSE(isValidNotifyUrl("http://", 128));
+  TEST_ASSERT_TRUE(isValidNotifyUrl("http://a", 128));
+}
+
+void test_notify_url_must_fit_the_field_whole(void) {
+  // "http://" + 120 characters = 127: the longest that fits a 128-byte field
+  char url[160] = "http://";
+  memset(url + 7, 'a', 120);
+  url[127] = '\0';
+  TEST_ASSERT_TRUE(isValidNotifyUrl(url, 128));
+  url[127] = 'a';
+  url[128] = '\0';
+  TEST_ASSERT_FALSE(isValidNotifyUrl(url, 128));
+}
+
+void test_notify_url_must_be_visible_ascii(void) {
+  TEST_ASSERT_FALSE(isValidNotifyUrl("http://ntfy.sh/my topic", 128));       // space
+  TEST_ASSERT_FALSE(isValidNotifyUrl("http://ntfy.sh/a\r\nHost: x", 128));   // would add a header
+  TEST_ASSERT_FALSE(isValidNotifyUrl("http://ntfy.sh/a\tb", 128));
+  TEST_ASSERT_FALSE(isValidNotifyUrl("http://ntfy.sh/a\x7F", 128));
+  TEST_ASSERT_FALSE(isValidNotifyUrl("http://ntfy.sh/bi\xC3\xA8re", 128));   // non-ASCII
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -342,6 +383,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_id_letters_digits_underscore_and_dash_are_kept);
   RUN_TEST(test_id_other_characters_become_underscores);
   RUN_TEST(test_id_non_ascii_bytes_become_underscores);
+
+  RUN_TEST(test_notify_url_plain_http_is_valid);
+  RUN_TEST(test_notify_url_must_start_with_http);
+  RUN_TEST(test_notify_url_needs_something_after_the_prefix);
+  RUN_TEST(test_notify_url_must_fit_the_field_whole);
+  RUN_TEST(test_notify_url_must_be_visible_ascii);
 
   return UNITY_END();
 }
