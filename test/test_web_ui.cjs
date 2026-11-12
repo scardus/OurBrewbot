@@ -496,6 +496,8 @@ const mqttFields={enabled:true,host:'broker',port:'1883',username:'user',passwor
   haDiscovery:true,allowControl:false,logEnabled:false,clearPassword:false};
 const serviceFields={enabled:true,serviceId:'key',deviceName:'device'};
 const syslogFields={enabled:true,host:'server',port:'514',facility:'16',level:'6'};
+const notifyFields={enabled:true,url:'http://ntfy.sh/topic',alarms:true,sensors:true,restarts:false,
+  profile:false,updates:true};
 
 test('log polling keeps the status dot, and shows a failure in amber',async()=>{
   const {run,context}=ui();
@@ -591,6 +593,8 @@ test('every form saves to its endpoint with the expected body and confirmation r
       body:{index:1,enabled:true,serviceId:'key',deviceName:'device'}},
     {key:'mqtt',fields:mqttFields,path:'/mqtt',reads:['mqtt'],
       body:{enabled:true,host:'broker',port:1883,username:'user',baseTopic:'topic',haDiscovery:true,allowControl:false,logEnabled:false}},
+    {key:'notify',fields:notifyFields,path:'/notify',reads:['notify'],
+      body:{enabled:true,url:'http://ntfy.sh/topic',alarms:true,sensors:true,restarts:false,profile:false,updates:true}},
     {key:'global',fields:{unit:'C',resolution:'11',alarm:'60',mdns:true,updates:false,crashes:true},path:'/controller',reads:['controller'],
       body:{Unit:1,Resolution:11,AlarmDwellSec:60,MdnsEnabled:true,UpdateCheck:false,CrashReports:true}},
     {key:'debug-mode',fields:{enabled:true},path:'/debug',reads:['debug'],body:{DebugMode:true}},
@@ -651,6 +655,33 @@ test('text longer than the firmware buffer is refused before anything is sent',a
   assert.match(multibyte.error,/limit of 31/);
 });
 
+test('the notification URL limit is the firmware field size, and a switched-off form may clear it',async()=>{
+  // 127 bytes fit NotifyConfig.url[128]; the limit counts the whole URL, http:// included.
+  const longest='http://'+'x'.repeat(120);
+  const accepted=await saveThrough('notify',{...notifyFields,url:longest});
+  assert.equal(accepted.posts.length,1);
+  const refused=await saveThrough('notify',{...notifyFields,url:longest+'x'});
+  assert.match(refused.error,/limit of 127 UTF-8 bytes/);
+  assert.equal(refused.posts.length,0);
+  const cleared=await saveThrough('notify',{...notifyFields,enabled:false,url:''});
+  assert.deepEqual(cleared.posts[0].body,{enabled:false,url:'',alarms:true,sensors:true,restarts:false,
+    profile:false,updates:true});
+});
+
+test('the notifications card shows the saved settings and escapes the URL',()=>{
+  const {run}=ui();
+  run(`state.services=[]; state.mqtt={};
+    state.notify={enabled:true,url:'http://ntfy.sh/a"b<c',alarms:true,sensors:false,restarts:true,profile:false,updates:false};`);
+  const html=run('reportingView()');
+  assert.match(html,/<h2>Notifications<\/h2>/);
+  assert.match(html,/data-form="notify"/);
+  assert.match(html,/value="http:\/\/ntfy\.sh\/a&quot;b&lt;c"/);
+  assert.match(html,/name="alarms" checked/);
+  assert.doesNotMatch(html,/name="sensors" checked/);
+  assert.match(html,/name="restarts" checked/);
+  assert.match(html,/data-action="test-notify"/);
+});
+
 test('invalid saves show their message and send nothing',async()=>{
   const cases=[
     ['ferm-0',{...fermenterFields,floor:'30'},fermenterSetup,/Temperature band/],
@@ -658,6 +689,11 @@ test('invalid saves show their message and send nothing',async()=>{
     ['plug-0',{...plugFields,fermenter:'99'},plugSetup,/Choose a fermenter/],
     ['plug-0',{...plugFields,delay:'65000'},plugSetup,/exceed the firmware limit/],
     ['mqtt',{...mqttFields,baseTopic:'bad/#'},'',/Base topic/],
+    ['notify',{...notifyFields,url:'https://ntfy.sh/topic'},'',/must start with http:\/\//],
+    ['notify',{...notifyFields,url:'ntfy.sh/topic'},'',/must start with http:\/\//],
+    ['notify',{...notifyFields,url:'http://ntfy.sh/my topic'},'',/no spaces/],
+    ['notify',{...notifyFields,url:'http://'},'',/must start with http:\/\//],
+    ['notify',{...notifyFields,url:''},'',/Enter a notification URL/],
     ['global',{unit:'F',resolution:'11',alarm:'60',mdns:true,updates:true,crashes:true},"formDrafts.set('a',{}); formDrafts.set('b',{});",/other drafts/],
     ['profile-0',{name:'New'},profileSetup+"state.profiles[0].used='Vessel';",/running/]
   ];
@@ -670,7 +706,8 @@ test('invalid saves show their message and send nothing',async()=>{
 
 test('refreshing clears an uncertain save only when that form was reread',async()=>{
   const endpoints={'ferm-0':'fermenters','profile-0':'profiles','probe-0':'probes','tilt-0':'tilts','ispindel-0':'ispindels',
-    'plug-0':'smartplugs','service-0':'brewservices',global:'controller',mqtt:'mqtt',syslog:'syslog','debug-mode':'debug'};
+    'plug-0':'smartplugs','service-0':'brewservices',global:'controller',mqtt:'mqtt',notify:'notify',syslog:'syslog',
+    'debug-mode':'debug'};
   for (const [key,endpoint] of Object.entries(endpoints)) {
     const {run,context}=ui();
     context.document={querySelectorAll:()=>[]};
@@ -693,6 +730,7 @@ const actionEffects={
   'discard-form':{called:'discardForm'},refresh:{called:'refreshForms'},reconnect:{called:'refreshForms'},
   export:{called:'exportConfig'},'file-view':{called:'viewFile'},'ble-send':{called:'sendBle'},debug:{called:'showDebug'},
   'test-service':{posted:'/brewservices/test'},'test-mqtt':{posted:'/mqtt/test'},discover:{posted:'/mqtt/discover'},
+  'test-notify':{posted:'/notify/test'},
   'update-check':{posted:'/update/check'},
   pause:{state:'state.refreshPaused',equals:true},'select-profile':{state:'state.selectedProfile',equals:1},
   'sensor-tab':{state:'state.sensorTab',equals:'chosen'},'system-tab':{state:'state.systemTab',equals:'chosen'},

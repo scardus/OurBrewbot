@@ -143,6 +143,7 @@ const actionHandlers = {
   'test-service':index=>postAndShowReply('/brewservices/test',{index}),
   'test-mqtt':()=>postAndShowReply('/mqtt/test',{}),
   discover:()=>postAndShowReply('/mqtt/discover',{}),
+  'test-notify':()=>postAndShowReply('/notify/test',{}),
   // System.
   'system-tab':(index,value)=>selectTab('systemTab',value),
   'open-rf':()=>{ state.systemTab='rf'; location.hash='system'; return loadRoute(); },
