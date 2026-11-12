@@ -54,6 +54,7 @@
 #include "Tilt.h"
 #include "iSpindel.h"
 #include "Reports.h"
+#include "Notify.h"
 #include "Mqtt.h"
 #include "WebAPI.h"
 #include "StackProbe.h"
@@ -346,6 +347,11 @@ void loop() {
     checkpoint(CP_CLOUD);
     processReportQueue();
   }
+
+  // Push notifications: events are queued where they happen, and ONE is
+  // POSTed per loop pass, for the same reason as the reports above. Returns
+  // straight away when nothing is waiting.
+  notifyLoop();
 
   // MQTT publish (separate timer, more frequent)
   if (now - g_lastMqttTime >= INTERVAL_MQTT_MS) {

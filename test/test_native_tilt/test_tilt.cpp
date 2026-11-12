@@ -56,6 +56,9 @@ void logMsgImpl(uint8_t, PGM_P, ...) {}
 // fixed false.
 static bool s_reportsPending = false;
 bool reportsPending() { return s_reportsPending; }
+// notifySendDue() gates it the same way, for a push notification about to be sent
+static bool s_notifySendDue = false;
+bool notifySendDue() { return s_notifySendDue; }
 
 // The functions under test (hexToU16/identifyTiltUuid/decodeTiltReading/
 // parseDiscLine are all file-static), plus everything else in Tilt.cpp.
@@ -82,6 +85,7 @@ void setUp(void) {
   s_silentScans       = 0;
   g_bleSniffActive    = false;
   s_reportsPending    = false;
+  s_notifySendDue     = false;
   g_bleSerial.reset();
   g_globalConfig = GlobalConfig{};
 }
@@ -371,6 +375,13 @@ void test_startTiltScan_skipped_while_a_cloud_report_is_queued(void) {
   // A queued POST can block the loop for up to 5 s, which would starve the
   // drain; Tilts advertise continuously so the next tick picks them up.
   s_reportsPending = true;
+  startTiltScan();
+  TEST_ASSERT_FALSE(s_scanActive);
+  TEST_ASSERT_EQUAL_STRING("", g_bleSerial.lastPrint());
+}
+
+void test_startTiltScan_skipped_while_a_notification_is_about_to_be_sent(void) {
+  s_notifySendDue = true;
   startTiltScan();
   TEST_ASSERT_FALSE(s_scanActive);
   TEST_ASSERT_EQUAL_STRING("", g_bleSerial.lastPrint());
@@ -733,6 +744,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_startTiltScan_sends_discovery_command);
   RUN_TEST(test_startTiltScan_skipped_while_sniff_page_owns_the_port);
   RUN_TEST(test_startTiltScan_skipped_while_a_cloud_report_is_queued);
+  RUN_TEST(test_startTiltScan_skipped_while_a_notification_is_about_to_be_sent);
   RUN_TEST(test_startTiltScan_skipped_while_previous_scan_still_draining);
   RUN_TEST(test_startTiltScan_counts_a_miss_when_module_not_ready);
 

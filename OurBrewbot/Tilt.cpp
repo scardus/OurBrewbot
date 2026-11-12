@@ -41,6 +41,7 @@
 #include "Pins.h"
 #include "Log.h"
 #include "Reports.h"   // reportsPending() — Tilt scan defers to an in-flight cloud report
+#include "Notify.h"    // notifySendDue() — and to a push notification about to be sent
 
 // SoftwareSerial: RX = GPIO13 (D7, BLE TX), TX = GPIO12 (D6, BLE RX)
 SoftwareSerial g_bleSerial(PIN_BLE_RX, PIN_BLE_TX);
@@ -367,6 +368,8 @@ void startTiltScan() {
   // 5 s — skip this tick rather than start a scan that would be starved. Tilt
   // advertises continuously, so the next tick (5 s) picks it up.
   if (reportsPending()) return;
+  // The same for a push notification that is about to be sent
+  if (notifySendDue()) return;
 
   if (!s_bleReady) {
     // One failed boot AT probe used to disable Tilt until reboot; retry the

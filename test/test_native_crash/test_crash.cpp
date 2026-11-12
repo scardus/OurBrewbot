@@ -179,7 +179,7 @@ void tearDown(void) {}
 // ============================================================
 
 static void test_module_table_has_an_entry_for_every_checkpoint_id(void) {
-  TEST_ASSERT_EQUAL_UINT32(CP_CRASH_RPT + 1, MODULE_COUNT);
+  TEST_ASSERT_EQUAL_UINT32(CP_NOTIFY + 1, MODULE_COUNT);
 }
 
 static void test_every_module_name_matches_its_enum_ordinal(void) {
@@ -200,6 +200,7 @@ static void test_every_module_name_matches_its_enum_ordinal(void) {
   TEST_ASSERT_EQUAL_STRING("TEN_MIN",    moduleName(CP_TEN_MIN));
   TEST_ASSERT_EQUAL_STRING("UPDATE",     moduleName(CP_UPDATE));
   TEST_ASSERT_EQUAL_STRING("CRASH_RPT",  moduleName(CP_CRASH_RPT));
+  TEST_ASSERT_EQUAL_STRING("NOTIFY",     moduleName(CP_NOTIFY));
 }
 
 static void test_unknown_module_id_degrades_to_a_placeholder(void) {

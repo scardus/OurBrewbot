@@ -26,6 +26,7 @@
 #include "Fermenter.h"
 #include "Temperatures.h"
 #include "Reports.h"
+#include "Notify.h"
 #include "iSpindel.h"
 #include "SmartPlugs.h"
 #include "Pins.h"
@@ -50,6 +51,7 @@ void handleSyslogConfig(ESP8266WebServer& server);
 void handleSyslogConfigPost(ESP8266WebServer& server);
 void handleNotifyConfig(ESP8266WebServer& server);
 void handleNotifyConfigPost(ESP8266WebServer& server);
+void handleNotifyTest(ESP8266WebServer& server);
 static bool otaUploadInstalled();
 static bool otaUploadRefused();
 static void otaUploadClear();
@@ -162,6 +164,7 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/syslog",           HTTP_POST, handleSyslogConfigPost,   true  },
   { "/notify",           HTTP_GET,  handleNotifyConfig,       true  },
   { "/notify",           HTTP_POST, handleNotifyConfigPost,   true  },
+  { "/notify/test",      HTTP_POST, handleNotifyTest,         true  },
   { "/debug",            HTTP_GET,  handleDebug,              true  },
   { "/debug",            HTTP_POST, handleDebug,              true  },
   { "/profiles",         HTTP_GET,  handleProfiles,           true  },
@@ -2061,6 +2064,32 @@ void handleNotifyConfigPost(ESP8266WebServer& server) {
   g_notifyConfig.enabled = enabled;
   g_notifyConfig.events  = events;
   sendSaveResult(server, saveNotifyConfig(), F("Notification settings saved"));
+}
+
+// ============================================================
+// NOTIFICATION TEST — POST /notify/test
+// Sends a test message to the saved URL and reports the HTTP result
+// ============================================================
+
+void handleNotifyTest(ESP8266WebServer& server) {
+  if (g_notifyConfig.url[0] == 0) {
+    sendErr(server, 400, F("No notification URL saved"));
+    return;
+  }
+  int  httpCode  = notifySendTest();
+  bool delivered = (httpCode >= 200 && httpCode < 300);
+  char resp[96];
+  if (httpCode < 0) {
+    // A negative code is an HTTPClient error: the server never answered
+    snprintf_P(resp, sizeof(resp),
+               PSTR("{\"status\":\"error\",\"msg\":\"No reply from the server (error %d)\",\"httpCode\":%d}"),
+               httpCode, httpCode);
+  } else {
+    snprintf_P(resp, sizeof(resp),
+               PSTR("{\"status\":\"%s\",\"msg\":\"HTTP %d - %s\",\"httpCode\":%d}"),
+               delivered ? "ok" : "error", httpCode, delivered ? "OK" : "Failed", httpCode);
+  }
+  sendJsonResponse(server, resp);
 }
 
 // ============================================================

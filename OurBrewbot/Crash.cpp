@@ -107,6 +107,7 @@ const char* const MODULE_NAMES[] = {
   "TEN_MIN",     // CP_TEN_MIN
   "UPDATE",      // CP_UPDATE
   "CRASH_RPT",   // CP_CRASH_RPT
+  "NOTIFY",      // CP_NOTIFY
 };
 constexpr size_t MODULE_COUNT = sizeof(MODULE_NAMES) / sizeof(MODULE_NAMES[0]);
 

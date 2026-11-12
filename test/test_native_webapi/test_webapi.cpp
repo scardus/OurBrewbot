@@ -115,6 +115,10 @@ bool runUpdateCheck() { s_updateChecks++; return true; }
 // Reports.cpp
 int testBrewService(uint8_t) { return 200; }
 
+static int s_notifyTestResult = 200;   // what the test notification "returns"
+static int s_notifyTests      = 0;
+int notifySendTest() { s_notifyTests++; return s_notifyTestResult; }
+
 // Tilt.cpp
 static const char* const TILT_COLOUR_NAMES[] = {
   "Red", "Green", "Black", "Purple", "Orange", "Blue", "Yellow", "Pink"
@@ -264,6 +268,8 @@ void setUp(void) {
   memset(&g_mqttConfig, 0, sizeof(g_mqttConfig));
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
   memset(&g_notifyConfig, 0, sizeof(g_notifyConfig));
+  s_notifyTestResult = 200;
+  s_notifyTests      = 0;
   g_fermenterDebugMode = false;
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     g_fermenterDebugOverrides[i] = FermenterDebugOverride{};
@@ -1599,6 +1605,44 @@ static void test_notify_url_can_be_cleared_when_switched_off(void) {
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
   TEST_ASSERT_FALSE(g_notifyConfig.enabled);
   TEST_ASSERT_EQUAL_STRING("", g_notifyConfig.url);
+}
+
+static void test_notify_test_needs_a_saved_url(void) {
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("No notification URL saved"));
+  TEST_ASSERT_EQUAL_INT(0, s_notifyTests);
+}
+
+static void test_notify_test_reports_a_delivered_message(void) {
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, s_notifyTests);
+  TEST_ASSERT_EQUAL_STRING("{\"status\":\"ok\",\"msg\":\"HTTP 200 - OK\",\"httpCode\":200}", g_httpResp.body);
+}
+
+static void test_notify_test_reports_a_refusal_with_its_http_status(void) {
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  s_notifyTestResult = 403;
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("{\"status\":\"error\",\"msg\":\"HTTP 403 - Failed\",\"httpCode\":403}", g_httpResp.body);
+}
+
+static void test_notify_test_says_when_the_server_never_answered(void) {
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  s_notifyTestResult = -11;   // HTTPClient's "read timeout", the longest code there is
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  // The whole reply must fit the handler's buffer
+  TEST_ASSERT_EQUAL_STRING(
+    "{\"status\":\"error\",\"msg\":\"No reply from the server (error -11)\",\"httpCode\":-11}",
+    g_httpResp.body);
 }
 
 static void test_fs_save_accepts_the_notify_file(void) {
@@ -3283,6 +3327,10 @@ int main(int, char**) {
   RUN_TEST(test_a_refused_notify_url_changes_nothing);
   RUN_TEST(test_notify_cannot_be_enabled_without_a_url);
   RUN_TEST(test_notify_url_can_be_cleared_when_switched_off);
+  RUN_TEST(test_notify_test_needs_a_saved_url);
+  RUN_TEST(test_notify_test_reports_a_delivered_message);
+  RUN_TEST(test_notify_test_reports_a_refusal_with_its_http_status);
+  RUN_TEST(test_notify_test_says_when_the_server_never_answered);
   RUN_TEST(test_fs_save_accepts_the_notify_file);
   RUN_TEST(test_fs_save_rejects_an_empty_body);
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);
