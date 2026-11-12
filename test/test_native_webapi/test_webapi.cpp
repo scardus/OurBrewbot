@@ -190,6 +190,7 @@ ESP8266WebServer g_webServer;
 #include "../../OurBrewbot/Config.cpp"
 #include "../../OurBrewbot/OriginalConfig.cpp"
 #include "../../OurBrewbot/Temperatures.cpp"
+#include <NotifyStub.h>   // records what Fermenter.cpp reports to the notifications
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"
 #include "../../OurBrewbot/TextSafe.cpp"

@@ -100,6 +100,19 @@ void notifyEvent(NotifyEvent type, uint8_t index = 0, uint8_t detail = 0,
 // one is tried again a minute later, three times in all.
 void notifyLoop();
 
+// Tell the notifications what a fermenter's temperature alarm is doing. Call
+// it on every alarm check, whether or not anything changed; this works out
+// what to send:
+//  - "alarm started" at once, the first time the alarm is seen active (and
+//    again, as urgent, if a mild alarm later becomes severe);
+//  - "alarm ended" only once the alarm has stayed off for 10 minutes. A
+//    temperature hovering at its limit switches the alarm on and off every
+//    few minutes, and without the wait each flip would be a notification.
+// temp and limit are in Celsius; limit is the ceiling or floor that was
+// passed. With the alarm off, temp is the current reading, or TEMP_NONE.
+void notifyAlarmState(uint8_t fermenter, bool active, bool overTemp, bool severe,
+                      float temp, float limit);
+
 // True when the next notifyLoop() call will send something, and so may block
 // the loop for a few seconds. The Tilt scan checks this, as it does for brew
 // service reports, so it doesn't start a scan that would be starved.

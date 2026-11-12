@@ -68,6 +68,7 @@ void processProfiles() {}
 
 // The code under test, plus the reading/conversion sources its payload uses.
 #include "../../OurBrewbot/Temperatures.cpp"
+#include <NotifyStub.h>   // records what Fermenter.cpp reports to the notifications
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Reports.cpp"
 

@@ -101,6 +101,8 @@ void setUp(void) {
   s_queueCount = 0;
   s_tries      = 0;
   s_lastTryAt  = 0;
+  memset(s_alarmSent, 0, sizeof(s_alarmSent));
+  memset(s_alarmOffSince, 0, sizeof(s_alarmOffSince));
 
   WiFi.connected   = true;
   httpTestReset();
@@ -387,6 +389,145 @@ void test_a_full_queue_drops_the_new_event_and_logs_it(void) {
 }
 
 // ============================================================
+// TEMPERATURE ALARMS
+// ============================================================
+
+// One alarm check: the fermenter is over its 22.0 C ceiling, or back in band
+static void alarmOn(uint8_t i, bool severe = false)  { notifyAlarmState(i, true, true, severe, 23.0f, 22.0f); }
+static void alarmOff(uint8_t i)                      { notifyAlarmState(i, false, false, false, 21.0f, 22.0f); }
+
+void test_an_alarm_is_reported_once_when_it_starts(void) {
+  alarmOff(0);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);   // no alarm, nothing to say
+
+  alarmOn(0);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_OVER, s_queue[0].event.type);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queue[0].event.index);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queue[0].event.detail);   // not severe
+  TEST_ASSERT_EQUAL_FLOAT(23.0f, s_queue[0].event.a);
+  TEST_ASSERT_EQUAL_FLOAT(22.0f, s_queue[0].event.b);
+
+  // The alarm check runs every few seconds: it must not repeat the message
+  for (int n = 0; n < 100; n++) { s_uptimeSec += 5; alarmOn(0); }
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+}
+
+void test_an_under_temperature_alarm_is_reported_as_one(void) {
+  notifyAlarmState(1, true, false, true, 9.0f, 18.0f);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_UNDER, s_queue[0].event.type);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queue[0].event.index);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queue[0].event.detail);   // severe
+}
+
+void test_a_mild_alarm_that_turns_severe_is_reported_again(void) {
+  alarmOn(0);
+  alarmOn(0, true);
+  TEST_ASSERT_EQUAL_UINT8(2, s_queueCount);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queue[1].event.detail);
+  // ...but only once, and not again when it eases back to mild
+  alarmOn(0, true);
+  alarmOn(0);
+  TEST_ASSERT_EQUAL_UINT8(2, s_queueCount);
+}
+
+void test_alarm_ended_waits_until_the_alarm_has_been_off_ten_minutes(void) {
+  alarmOn(0);
+  s_queueCount = 0;
+
+  alarmOff(0);
+  s_uptimeSec += NOTIFY_ALARM_ENDED_S - 1;
+  alarmOff(0);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);   // not yet
+
+  s_uptimeSec += 1;
+  notifyAlarmState(0, false, false, false, 20.5f, 22.0f);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_ENDED, s_queue[0].event.type);
+  TEST_ASSERT_EQUAL_FLOAT(20.5f, s_queue[0].event.a);   // the reading when it is sent
+
+  // Said once
+  s_uptimeSec += 3600;
+  alarmOff(0);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+}
+
+// The desk controller's fermenter sat at its limit for an afternoon and its
+// alarm went on and off every few minutes. That must be ONE notification,
+// not dozens.
+void test_an_alarm_flapping_at_its_limit_sends_one_notification(void) {
+  for (int cycle = 0; cycle < 20; cycle++) {
+    alarmOn(0);
+    s_uptimeSec += 180;                        // on for 3 minutes
+    alarmOn(0);
+    alarmOff(0);
+    s_uptimeSec += NOTIFY_ALARM_ENDED_S - 1;   // off for just under 10
+    alarmOff(0);
+  }
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_OVER, s_queue[0].event.type);
+}
+
+void test_a_new_alarm_after_one_has_ended_is_reported_again(void) {
+  alarmOn(0);
+  alarmOff(0);
+  s_uptimeSec += NOTIFY_ALARM_ENDED_S;
+  alarmOff(0);
+  alarmOn(0);
+  TEST_ASSERT_EQUAL_UINT8(3, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_OVER,  s_queue[0].event.type);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_ENDED, s_queue[1].event.type);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_OVER,  s_queue[2].event.type);
+}
+
+void test_each_fermenter_alarm_is_tracked_on_its_own(void) {
+  alarmOn(0);
+  alarmOn(2);
+  TEST_ASSERT_EQUAL_UINT8(2, s_queueCount);
+  alarmOff(0);
+  s_uptimeSec += NOTIFY_ALARM_ENDED_S;
+  alarmOff(0);
+  alarmOn(2);   // still on: nothing new for fermenter 2
+  TEST_ASSERT_EQUAL_UINT8(3, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_ENDED, s_queue[2].event.type);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queue[2].event.index);
+}
+
+void test_alarm_ended_carries_no_reading_when_the_fermenter_was_switched_off(void) {
+  alarmOn(0);
+  notifyAlarmState(0, false, false, false, TEMP_NONE, 0.0f);
+  s_uptimeSec += NOTIFY_ALARM_ENDED_S;
+  notifyAlarmState(0, false, false, false, TEMP_NONE, 0.0f);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_ENDED, s_queue[1].event.type);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, s_queue[1].event.a);
+}
+
+void test_switching_alarm_notifications_on_during_an_alarm_reports_it(void) {
+  g_notifyConfig.events = NOTIFY_EVT_ALL & ~NOTIFY_EVT_ALARMS;
+  alarmOn(0);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+
+  g_notifyConfig.events = NOTIFY_EVT_ALL;
+  alarmOn(0);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+}
+
+void test_no_alarm_ended_for_an_alarm_whose_start_was_never_sent(void) {
+  g_notifyConfig.enabled = false;
+  alarmOn(0);
+  g_notifyConfig.enabled = true;
+  alarmOff(0);
+  s_uptimeSec += NOTIFY_ALARM_ENDED_S;
+  alarmOff(0);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+}
+
+void test_an_alarm_for_a_fermenter_that_does_not_exist_is_ignored(void) {
+  notifyAlarmState(MAX_FERMENTERS, true, true, true, 30.0f, 22.0f);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+}
+
+// ============================================================
 // SENDING
 // ============================================================
 
@@ -597,6 +738,18 @@ int main(int argc, char** argv) {
   RUN_TEST(test_each_kind_of_event_follows_its_own_tick_box);
   RUN_TEST(test_the_test_message_is_never_queued);
   RUN_TEST(test_a_full_queue_drops_the_new_event_and_logs_it);
+
+  RUN_TEST(test_an_alarm_is_reported_once_when_it_starts);
+  RUN_TEST(test_an_under_temperature_alarm_is_reported_as_one);
+  RUN_TEST(test_a_mild_alarm_that_turns_severe_is_reported_again);
+  RUN_TEST(test_alarm_ended_waits_until_the_alarm_has_been_off_ten_minutes);
+  RUN_TEST(test_an_alarm_flapping_at_its_limit_sends_one_notification);
+  RUN_TEST(test_a_new_alarm_after_one_has_ended_is_reported_again);
+  RUN_TEST(test_each_fermenter_alarm_is_tracked_on_its_own);
+  RUN_TEST(test_alarm_ended_carries_no_reading_when_the_fermenter_was_switched_off);
+  RUN_TEST(test_switching_alarm_notifications_on_during_an_alarm_reports_it);
+  RUN_TEST(test_no_alarm_ended_for_an_alarm_whose_start_was_never_sent);
+  RUN_TEST(test_an_alarm_for_a_fermenter_that_does_not_exist_is_ignored);
 
   RUN_TEST(test_nothing_waiting_sends_nothing);
   RUN_TEST(test_a_notification_is_posted_as_ntfy_expects);

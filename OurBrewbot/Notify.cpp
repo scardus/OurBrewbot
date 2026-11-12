@@ -399,6 +399,56 @@ void notifyEvent(NotifyEvent type, uint8_t index, uint8_t detail, float a, float
   s_queueCount++;
 }
 
+// ============================================================
+// TEMPERATURE ALARMS
+// ============================================================
+
+// How long an alarm must stay off before "alarm ended" is sent
+#define NOTIFY_ALARM_ENDED_S  600
+
+// What has been sent for each fermenter's current alarm
+enum : uint8_t {
+  ALARM_NOT_SENT    = 0,
+  ALARM_SENT        = 1,   // "alarm started" has been sent
+  ALARM_SENT_SEVERE = 2,   // ...and so has the urgent one for a severe alarm
+};
+
+static uint8_t  s_alarmSent[MAX_FERMENTERS]     = {0};
+static uint32_t s_alarmOffSince[MAX_FERMENTERS] = {0};   // uptimeStamp() the alarm went off; 0 = it is on
+
+void notifyAlarmState(uint8_t fermenter, bool active, bool overTemp, bool severe,
+                      float temp, float limit) {
+  if (fermenter >= MAX_FERMENTERS) return;
+  uint8_t i = fermenter;
+
+  // Alarm notifications are off: forget what was sent, so that switching
+  // them on in the middle of an alarm reports that alarm
+  if (!g_notifyConfig.enabled || (g_notifyConfig.events & NOTIFY_EVT_ALARMS) == 0) {
+    s_alarmSent[i]     = ALARM_NOT_SENT;
+    s_alarmOffSince[i] = 0;
+    return;
+  }
+
+  if (active) {
+    s_alarmOffSince[i] = 0;
+    uint8_t level = severe ? ALARM_SENT_SEVERE : ALARM_SENT;
+    if (level > s_alarmSent[i]) {
+      s_alarmSent[i] = level;
+      notifyEvent(overTemp ? NOTIFY_ALARM_OVER : NOTIFY_ALARM_UNDER, i, severe ? 1 : 0, temp, limit);
+    }
+    return;
+  }
+
+  // The alarm is off. Nothing to end if no start was sent.
+  if (s_alarmSent[i] == ALARM_NOT_SENT) return;
+  if (s_alarmOffSince[i] == 0) s_alarmOffSince[i] = uptimeStamp();
+  if (uptimeSince(s_alarmOffSince[i]) >= NOTIFY_ALARM_ENDED_S) {
+    s_alarmSent[i]     = ALARM_NOT_SENT;
+    s_alarmOffSince[i] = 0;
+    notifyEvent(NOTIFY_ALARM_ENDED, i, 0, temp);
+  }
+}
+
 bool notifySendDue() {
   if (s_queueCount == 0 || !g_notifyConfig.enabled) return false;
   if (!WiFi.isConnected()) return false;   // waiting for WiFi
