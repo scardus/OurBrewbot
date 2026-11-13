@@ -36,6 +36,7 @@ New/Updated Features:
 - Daily firmware update check — tells you (admin page, syslog, Home Assistant) when a newer release is out
 - Crash reports — after a crash or watchdog reset, the crash details are sent to ourbrewbot.com to help fix bugs
 - Push notifications — temperature alarms, sensor problems, unexpected restarts, profile progress and new releases sent to your phone through [ntfy](https://ntfy.sh), or to any address that accepts a plain HTTP POST — see [Push notifications](#push-notifications)
+- Alert banners — the same alarms, sensor problems, restarts, finished profiles and new releases shown as a banner at the top of every admin page, whether or not push notifications are set up — see [Alert banners](#alert-banners)
 
 The update check and crash reports can each be switched off — see [Contacting ourbrewbot.com](#contacting-ourbrewbotcom).
 
@@ -220,6 +221,15 @@ A temperature sitting right at its limit, or a probe with a loose wire, can come
 
 If a message can't be delivered it is tried again twice, a minute apart, and then dropped. Messages wait for up to an hour if the WiFi is down. A message tells you something happened; it can't tell you the controller has lost power or dropped off the network, because then there is nothing to send it.
 
+### Alert banners
+
+The admin page shows the same events as banners under its top bar, on every tab, even with notifications switched off: red for a temperature alarm, amber for a sensor that has stopped reporting or an unexpected restart, and green for a finished profile or a new release. The page checks for them every 30 seconds.
+
+- An alarm or sensor banner shows while the problem is there, with the latest reading.
+- A restart banner stays until the controller restarts again; a finished profile's until the next profile starts on that fermenter.
+- At most three banners are shown, most serious first. The rest are behind a **+N more alerts** row.
+- Close a banner with its **×**. It stays closed in that browser, but something new - another alarm, a later release - gets a banner of its own. An alarm that comes and goes at its limit counts as the same one until it has stayed away for 10 minutes, as with the notifications. After a restart, anything still wrong shows again.
+
 ---
 
 ## Contacting ourbrewbot.com
@@ -241,6 +251,7 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 |--------|--------------------|-------------------------------|
 | GET    | /                  | Welcome / API index page      |
 | GET    | /admin             | Admin configuration page      |
+| GET    | /alerts            | Alerts shown as admin page banners: `{"boot":"…","alerts":[{"id","kind","age","title","text"}]}`. `kind` is alarm, sensor, restart, profile or update; `age` is in seconds |
 | GET    | /ble/sniff         | BLE AT command console page   |
 | GET    | /ble/sniff/poll    | Poll BLE serial data          |
 | POST   | /ble/sniff/send    | Send AT command to HM-10      |
@@ -361,7 +372,7 @@ OurBrewbot/
   SmartPlugs.h/.cpp    RF smart plug control
   Profile.h/.cpp       Fermentation profile runner
   Reports.h/.cpp       Brewfather / Brewer's Friend reporting
-  Notify.h/.cpp        Push notifications to ntfy or any plain HTTP address
+  Notify.h/.cpp        Push notifications to ntfy or any plain HTTP address, and the admin page alert banners
   iSpindel.h/.cpp      iSpindel WiFi hydrometer receive and registration
   Tilt.h/.cpp          Tilt hydrometer via HM-10 BLE
   Mqtt.h/.cpp          MQTT client — publishing, HA discovery, command dispatch
