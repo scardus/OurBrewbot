@@ -95,16 +95,17 @@ window.addEventListener('hashchange',()=>{
 
 // Refresh stale readings when the browser tab becomes visible again.
 document.addEventListener('visibilitychange',()=>{
-  if (!document.hidden) { lastPoll=0; lastLogPoll=0; refreshVisible(); }
+  if (!document.hidden) { lastPoll=0; lastLogPoll=0; lastAlertsPoll=0; refreshVisible(); }
 });
 
-// Schedule reading, log and console polling while the tab is visible and ready.
+// Schedule reading, alert, log and console polling while the tab is visible and ready.
 // Logs are read quickly while the controller has more waiting, and more often with the drawer open.
 const READINGS_POLL_MS = 10000;
 setInterval(()=>{
   if (document.hidden || !state.ready) return;
   updateAge();
   if (Date.now()-lastPoll>=READINGS_POLL_MS) refreshVisible();
+  if (Date.now()-lastAlertsPoll>=ALERTS_POLL_MS) pollAlerts();
   const delay=logMore?250:$('#log-content').hidden?3000:1000;
   if (Date.now()-lastLogPoll>=delay) pollLogs();
   pollConsole();

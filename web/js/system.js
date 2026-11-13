@@ -181,13 +181,17 @@ function updateDescription(c) {
   return 'No newer release found. Last check age: '+orDash(c.LastUpdateCheck)+' min';
 }
 
+// The release notes for the latest release, or the releases page if the controller has no valid link.
+function releaseNotesUrl(controller) {
+  return /^https?:\/\//.test(controller.UpdateNotesUrl)?controller.UpdateNotesUrl:
+    'https://github.com/scardus/OurBrewbot/releases';
+}
+
 // Build escaped release-check text and a validated release-notes link.
 function updateResult(controller) {
   const description=esc(updateDescription(controller));
   if (!controller.UpdateAvailable) return description;
-  const url=/^https?:\/\//.test(controller.UpdateNotesUrl)?controller.UpdateNotesUrl:
-    'https://github.com/scardus/OurBrewbot/releases';
-  return description+` · <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Release notes</a>`;
+  return description+` · <a href="${esc(releaseNotesUrl(controller))}" target="_blank" rel="noopener noreferrer">Release notes</a>`;
 }
 
 const backupFiles=[['global','/jsonGlobal.txt'],['fermenter','/jsonFermenter.txt'],['probe','/jsonProbe.txt'],

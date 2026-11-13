@@ -183,6 +183,11 @@ static char unitLetter() {
   return (g_globalConfig.unit == UNIT_CELSIUS) ? 'C' : 'F';
 }
 
+// The degree sign, as the two bytes UTF-8 uses for it. The message body is
+// sent as UTF-8; only the title (an HTTP header) has to be plain ASCII.
+// Written as an escape so this file's fixed text stays plain ASCII.
+#define DEGREE_SIGN "\xC2\xB0"
+
 // A count of minutes, kept to five digits for the same reason
 static unsigned long shownMinutes(float minutes) {
   if (minutes < 0.0f)     return 0;
@@ -247,14 +252,14 @@ bool notifyBuildMessage(const NotifyEventData& event, NotifyMessage& msg) {
   switch (event.type) {
     case NOTIFY_ALARM_OVER:
       if (i >= MAX_FERMENTERS) return false;
-      n = snprintf_P(body, size, PSTR("%s: %.2f %c is above the %.1f %c limit."),
+      n = snprintf_P(body, size, PSTR("%s: %.2f " DEGREE_SIGN "%c is above the %.1f " DEGREE_SIGN "%c limit."),
                      fermenterName(i), shownTemp(event.a), unitLetter(),
                      shownTemp(event.b), unitLetter());
       break;
 
     case NOTIFY_ALARM_UNDER:
       if (i >= MAX_FERMENTERS) return false;
-      n = snprintf_P(body, size, PSTR("%s: %.2f %c is below the %.1f %c limit."),
+      n = snprintf_P(body, size, PSTR("%s: %.2f " DEGREE_SIGN "%c is below the %.1f " DEGREE_SIGN "%c limit."),
                      fermenterName(i), shownTemp(event.a), unitLetter(),
                      shownTemp(event.b), unitLetter());
       break;
@@ -262,7 +267,7 @@ bool notifyBuildMessage(const NotifyEventData& event, NotifyMessage& msg) {
     case NOTIFY_ALARM_ENDED:
       if (i >= MAX_FERMENTERS) return false;
       if (event.a > TEMP_VALID_MIN) {
-        n = snprintf_P(body, size, PSTR("%s: back within its limits at %.2f %c."),
+        n = snprintf_P(body, size, PSTR("%s: back within its limits at %.2f " DEGREE_SIGN "%c."),
                        fermenterName(i), shownTemp(event.a), unitLetter());
       } else {
         // The alarm also ends when the fermenter is switched off or its
@@ -406,15 +411,19 @@ void notifyEvent(NotifyEvent type, uint8_t index, uint8_t detail, float a, float
 // ALARMS AND SENSOR PROBLEMS
 //
 // An alarm or a missing sensor is a "problem" that is either there or not.
-// The code that watches it calls in on every check, and the tracking below
-// turns that into two notifications:
-//  - "started" at once, the first time the problem is seen;
-//  - "over" only once it has stayed away for 10 minutes. A temperature
-//    hovering at its limit, or a probe with a loose wire, comes and goes
-//    every few minutes, and without the wait each flip would be a message.
+// The code that watches it calls in on every check. The tracking below
+// turns that into "episodes": an episode starts the first time the problem
+// is seen and ends once it has stayed away for 10 minutes. A temperature
+// hovering at its limit, or a probe with a loose wire, comes and goes every
+// few minutes; without the wait each flip would be a new episode.
+//
+// Each episode gives two notifications - "started" at once, and "over" when
+// the episode ends - and one WebUI banner, shown while the problem is there.
+// Episodes are tracked whether or not notifications are on, because the
+// banners need them either way.
 // ============================================================
 
-// How long a problem must stay away before the "over" message is sent
+// How long a problem must stay away before its episode ends
 #define NOTIFY_PROBLEM_OVER_S  600
 
 // What has been sent for a problem that is going on
@@ -432,31 +441,60 @@ enum : uint8_t {
 #define TRACK_TILTS      (TRACK_ISPINDELS + MAX_ISPINDELS)
 #define TRACK_COUNT      (TRACK_TILTS     + MAX_TILTS)
 
-static uint8_t  s_problemSent[TRACK_COUNT]     = {0};
+static uint32_t s_problemSince[TRACK_COUNT]    = {0};   // uptimeStamp() the episode started; 0 = no episode
 static uint32_t s_problemOffSince[TRACK_COUNT] = {0};   // uptimeStamp() it went away; 0 = it is there
+static uint8_t  s_problemSent[TRACK_COUNT]     = {0};   // PROBLEM_xxx: what has been sent for the episode
 
-static void forgetProblem(uint8_t tracker) {
-  s_problemSent[tracker]     = PROBLEM_NOT_SENT;
+// The last reading passed in while each fermenter's alarm was on, so the
+// banner can give the same text as the notification
+struct AlarmReading {
+  float temp;    // C
+  float limit;   // the ceiling or floor that was passed, C
+  bool  overTemp;
+  bool  severe;
+};
+static AlarmReading s_alarmReading[MAX_FERMENTERS];
+
+// How long each sensor had been quiet at its last check, for the banner's
+// text. Kept to 65535 minutes (45 days) so it fits in two bytes.
+static uint16_t s_problemMinutes[TRACK_COUNT] = {0};
+
+// Record one check of a problem. Returns true when its episode has just
+// ended, which is when the "over" notification is due.
+static bool trackProblem(uint8_t tracker, bool there) {
+  if (there) {
+    if (s_problemSince[tracker] == 0) s_problemSince[tracker] = uptimeStamp();
+    s_problemOffSince[tracker] = 0;
+    return false;
+  }
+  if (s_problemSince[tracker] == 0) return false;   // no episode going on
+  if (s_problemOffSince[tracker] == 0) s_problemOffSince[tracker] = uptimeStamp();
+  if (uptimeSince(s_problemOffSince[tracker]) < NOTIFY_PROBLEM_OVER_S) return false;
+  s_problemSince[tracker]    = 0;
   s_problemOffSince[tracker] = 0;
+  return true;
+}
+
+// True while the problem is there right now, not just during an episode
+// that has not ended yet
+static bool problemThere(uint8_t tracker) {
+  return s_problemSince[tracker] != 0 && s_problemOffSince[tracker] == 0;
 }
 
 // The problem is there. Returns true if "started" should be sent now: the
 // first time, and once more if it has become severe.
-static bool problemStarted(uint8_t tracker, uint8_t level) {
-  s_problemOffSince[tracker] = 0;
+static bool shouldSendStarted(uint8_t tracker, uint8_t level) {
   if (level <= s_problemSent[tracker]) return false;
   s_problemSent[tracker] = level;
   return true;
 }
 
-// The problem is not there. Returns true if "over" should be sent now: once,
-// when a problem that was reported has stayed away for 10 minutes.
-static bool problemOver(uint8_t tracker) {
-  if (s_problemSent[tracker] == PROBLEM_NOT_SENT) return false;   // nothing was reported
-  if (s_problemOffSince[tracker] == 0) s_problemOffSince[tracker] = uptimeStamp();
-  if (uptimeSince(s_problemOffSince[tracker]) < NOTIFY_PROBLEM_OVER_S) return false;
-  forgetProblem(tracker);
-  return true;
+// The episode has just ended. Returns true if "over" should be sent, which
+// is only when "started" was sent for it.
+static bool shouldSendOver(uint8_t tracker) {
+  bool wasSent = (s_problemSent[tracker] != PROBLEM_NOT_SENT);
+  s_problemSent[tracker] = PROBLEM_NOT_SENT;
+  return wasSent;
 }
 
 // True when this kind of event is ticked in the settings
@@ -469,18 +507,21 @@ void notifyAlarmState(uint8_t fermenter, bool active, bool overTemp, bool severe
   if (fermenter >= MAX_FERMENTERS) return;
   uint8_t tracker = TRACK_ALARMS + fermenter;
 
+  bool episodeEnded = trackProblem(tracker, active);
+  if (active) s_alarmReading[fermenter] = { temp, limit, overTemp, severe };
+
   // Alarm notifications are off: forget what was sent, so that switching
   // them on in the middle of an alarm reports that alarm
   if (!eventsWanted(NOTIFY_EVT_ALARMS)) {
-    forgetProblem(tracker);
+    s_problemSent[tracker] = PROBLEM_NOT_SENT;
     return;
   }
 
   if (active) {
-    if (problemStarted(tracker, severe ? PROBLEM_SENT_SEVERE : PROBLEM_SENT)) {
+    if (shouldSendStarted(tracker, severe ? PROBLEM_SENT_SEVERE : PROBLEM_SENT)) {
       notifyEvent(overTemp ? NOTIFY_ALARM_OVER : NOTIFY_ALARM_UNDER, fermenter, severe ? 1 : 0, temp, limit);
     }
-  } else if (problemOver(tracker)) {
+  } else if (episodeEnded && shouldSendOver(tracker)) {
     notifyEvent(NOTIFY_ALARM_ENDED, fermenter, 0, temp);
   }
 }
@@ -509,22 +550,54 @@ void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minute
       break;
   }
 
+  bool episodeEnded = trackProblem(tracker, lost);
+  if (lost) {
+    float shown = minutes;
+    if (shown < 0.0f)     shown = 0.0f;
+    if (shown > 65535.0f) shown = 65535.0f;
+    s_problemMinutes[tracker] = (uint16_t)shown;
+  }
+
   if (!eventsWanted(NOTIFY_EVT_SENSORS)) {
-    forgetProblem(tracker);
+    s_problemSent[tracker] = PROBLEM_NOT_SENT;
     return;
   }
 
   if (lost) {
-    if (problemStarted(tracker, PROBLEM_SENT)) notifyEvent(lostEvent, index, 0, minutes);
-  } else if (problemOver(tracker)) {
+    if (shouldSendStarted(tracker, PROBLEM_SENT)) notifyEvent(lostEvent, index, 0, minutes);
+  } else if (episodeEnded && shouldSendOver(tracker)) {
     notifyEvent(backEvent, index);
   }
 }
 
+// ============================================================
+// RESTARTS AND PROFILES
+// ============================================================
+
+// The reset reason of an unexpected restart, for the banner. NO_RESTART
+// when this boot was asked for (a firmware update, the Restart button...).
+#define NO_RESTART 0xFF
+static uint8_t s_restartCode = NO_RESTART;
+
+// uptimeStamp() when each fermenter's profile finished; 0 = no banner to show
+static uint32_t s_profileFinishedAt[MAX_FERMENTERS] = {0};
+
 void notifyRestart(bool afterCrash, uint8_t resetCode) {
   if (afterCrash || resetCode == REASON_DEFAULT_RST) {
+    s_restartCode = resetCode;
     notifyEvent(NOTIFY_RESTART, 0, resetCode);
   }
+}
+
+void notifyProfileFinished(uint8_t fermenter) {
+  if (fermenter >= MAX_FERMENTERS) return;
+  s_profileFinishedAt[fermenter] = uptimeStamp();
+  notifyEvent(NOTIFY_PROFILE_FINISHED, fermenter);
+}
+
+void notifyProfileStarted(uint8_t fermenter) {
+  if (fermenter >= MAX_FERMENTERS) return;
+  s_profileFinishedAt[fermenter] = 0;
 }
 
 bool notifySendDue() {
@@ -589,4 +662,105 @@ int notifySendTest() {
     logFailure(s_message.title, code, PSTR("test not delivered"));
   }
   return code;
+}
+
+// ============================================================
+// ALERTS FOR THE WEBUI (see Notify.h)
+// ============================================================
+
+// The slots after the problem trackers
+#define SLOT_PROFILES  TRACK_COUNT                        // one per fermenter
+#define SLOT_RESTART   (SLOT_PROFILES + MAX_FERMENTERS)
+#define SLOT_UPDATE    (SLOT_RESTART + 1)
+#define SLOT_COUNT     (SLOT_UPDATE + 1)
+
+uint8_t notifyAlertSlotCount() {
+  return SLOT_COUNT;
+}
+
+// True while the sensor behind a tracker is still used by a fermenter. The
+// sensor code stops checking a sensor once it is unassigned, so without
+// this a lost sensor that was then unassigned would keep its banner for good.
+static bool sensorStillUsed(uint8_t tracker) {
+  if (tracker < TRACK_PROBES)    return true;   // a fermenter alarm, not a sensor
+  if (tracker < TRACK_ISPINDELS) return g_probes[tracker - TRACK_PROBES].fermenter < MAX_FERMENTERS;
+  if (tracker < TRACK_TILTS)     return g_iSpindels[tracker - TRACK_ISPINDELS].fermenter < MAX_FERMENTERS;
+  return g_tilts[tracker - TRACK_TILTS].fermenter < MAX_FERMENTERS;
+}
+
+// The "started" event for a problem, with its latest values, so the banner
+// reads like the notification
+static NotifyEventData problemEvent(uint8_t tracker) {
+  NotifyEventData event = { NOTIFY_TEST, 0, 0, 0.0f, 0.0f };
+  float minutes = (float)s_problemMinutes[tracker];
+
+  if (tracker < TRACK_PROBES) {
+    uint8_t fermenter = tracker - TRACK_ALARMS;
+    const AlarmReading& reading = s_alarmReading[fermenter];
+    event.type   = reading.overTemp ? NOTIFY_ALARM_OVER : NOTIFY_ALARM_UNDER;
+    event.index  = fermenter;
+    event.detail = reading.severe ? 1 : 0;
+    event.a      = reading.temp;
+    event.b      = reading.limit;
+  } else if (tracker < TRACK_ISPINDELS) {
+    event.type  = NOTIFY_PROBE_LOST;
+    event.index = tracker - TRACK_PROBES;
+  } else if (tracker < TRACK_TILTS) {
+    event.type  = NOTIFY_ISPINDEL_LOST;
+    event.index = tracker - TRACK_ISPINDELS;
+    event.a     = minutes;
+  } else {
+    event.type  = NOTIFY_TILT_LOST;
+    event.index = tracker - TRACK_TILTS;
+    event.a     = minutes;
+  }
+  return event;
+}
+
+bool notifyGetAlert(uint8_t slot, NotifyAlert& alert) {
+  NotifyEventData event = { NOTIFY_TEST, 0, 0, 0.0f, 0.0f };
+  uint32_t since = 0;   // uptimeStamp() when it started; part of its id
+
+  if (slot < TRACK_COUNT) {
+    if (!problemThere(slot) || !sensorStillUsed(slot)) return false;
+    alert.kind       = (slot < TRACK_PROBES) ? ALERT_ALARM : ALERT_SENSOR;
+    event            = problemEvent(slot);
+    since            = s_problemSince[slot];
+    alert.ageSeconds = uptimeSince(since);
+  } else if (slot < SLOT_RESTART) {
+    uint8_t fermenter = slot - SLOT_PROFILES;
+    if (s_profileFinishedAt[fermenter] == 0) return false;
+    alert.kind       = ALERT_PROFILE;
+    event.type       = NOTIFY_PROFILE_FINISHED;
+    event.index      = fermenter;
+    since            = s_profileFinishedAt[fermenter];
+    alert.ageSeconds = uptimeSince(since);
+  } else if (slot == SLOT_RESTART) {
+    if (s_restartCode == NO_RESTART) return false;
+    alert.kind       = ALERT_RESTART;
+    event.type       = NOTIFY_RESTART;
+    event.detail     = s_restartCode;
+    alert.ageSeconds = uptimeSeconds();   // it happened at boot
+  } else if (slot == SLOT_UPDATE) {
+    if (!g_updateStatus.updateAvailable || g_updateStatus.latestVersion[0] == '\0') return false;
+    alert.kind       = ALERT_UPDATE;
+    event.type       = NOTIFY_UPDATE_AVAILABLE;
+    alert.ageSeconds = 0;
+  } else {
+    return false;
+  }
+
+  if (!notifyBuildMessage(event, s_message)) return false;
+  alert.message = &s_message;
+
+  // A release keeps its id across restarts, so a banner closed for it stays
+  // closed. Everything else starts with this boot's id: after a restart,
+  // a problem that is still there counts as a new one.
+  if (alert.kind == ALERT_UPDATE) {
+    snprintf_P(alert.id, sizeof(alert.id), PSTR("update-%s"), g_updateStatus.latestVersion);
+  } else {
+    snprintf_P(alert.id, sizeof(alert.id), PSTR("%08lX-%u-%lu"),
+               (unsigned long)logBootId(), (unsigned)slot, (unsigned long)since);
+  }
+  return true;
 }
