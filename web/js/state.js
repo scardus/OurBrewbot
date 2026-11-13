@@ -12,7 +12,9 @@ const state = {
   // The latest controller data, tidied by the set functions below.
   controller:{}, health:{}, debug:{Overrides:[]}, global:{},
   fermenters:[], profiles:[], probes:[], tilts:[], ispindels:[], plugs:[],
-  services:[], mqtt:{}, notify:{}, syslog:{}, files:[]
+  services:[], mqtt:{}, notify:{}, syslog:{}, files:[],
+  // The banners' alerts from /alerts, and the controller boot they came from.
+  alerts:[], alertsBoot:''
 };
 
 // Unsaved edits. A form's key is its data-form attribute, such as "ferm-0", "profile-2" or "mqtt".

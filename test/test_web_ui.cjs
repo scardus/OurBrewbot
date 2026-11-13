@@ -8,7 +8,7 @@ const vm=require('node:vm');
 
 function ui() {
   const context=vm.createContext({console,TextEncoder,AbortController,TypeError,setTimeout,clearTimeout});
-  for (const name of ['html','state','api','forms','app','fermenters','sensors','profiles','plugs','reporting','system','logs']) {
+  for (const name of ['html','state','api','forms','app','fermenters','sensors','profiles','plugs','reporting','system','logs','banners']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/js/'+name+'.js'),'utf8'),context,{filename:name+'.js'});
   }
   vm.runInContext('toast=()=>{};',context);
@@ -737,7 +737,9 @@ const actionEffects={
   'open-rf':{state:'state.systemTab',equals:'rf'},'console-start':{state:'state.activeConsole',equals:'chosen'},
   'console-stop':{state:'state.activeConsole',equals:null},
   'close-editor':{closed:'#editor'},'close-modal':{closed:'#modal'},import:{clicked:'#import-file'},
-  'rf-clear':{emptied:'#rf-output'},'ble-clear':{emptied:'#ble-output'}
+  'rf-clear':{emptied:'#rf-output'},'ble-clear':{emptied:'#ble-output'},
+  'close-alert':{state:'closedAlerts().includes("chosen")',equals:true},
+  'toggle-alerts':{state:'bannersExpanded',equals:true},'open-firmware':{state:'state.systemTab',equals:'update'}
 };
 
 test('every action a view can render is handled, and every handler is still used',()=>{
@@ -791,4 +793,147 @@ test('while saving, only the close actions still respond',async()=>{
     assert.equal(run('state.refreshPaused'),false,name);
     assert.equal(closed.length>0,name==='close-modal'||name==='close-editor',name);
   }
+});
+
+// ---- alert banners ----
+
+// A stand-in for browser storage that several pages can share, like one browser across reloads.
+function memoryStorage() {
+  const items={};
+  return {items,getItem:key=>key in items?items[key]:null,setItem:(key,value)=>{items[key]=String(value);}};
+}
+
+// A page with a banner strip, the given alerts from boot B00T0001, and optional browser storage.
+function bannerPage(alerts,storage) {
+  const {run,context}=ui();
+  const strip={innerHTML:''};
+  context.document={querySelector:selector=>selector==='#banners'?strip:null,querySelectorAll:()=>[]};
+  if (storage) context.localStorage=storage;
+  context.alerts=JSON.parse(JSON.stringify(alerts));
+  run("state.alerts=alerts; state.alertsBoot='B00T0001'; renderBanners();");
+  return {run,context,strip};
+}
+
+// The alert ids on the strip, in the order they are drawn.
+const shownIds = strip => [...strip.innerHTML.matchAll(/data-value="([^"]+)"/g)].map(match=>match[1]);
+
+const sampleAlerts=[
+  {id:'update-0.11.0',kind:'update',age:0,title:'Firmware update available',text:'OurBrewbot 0.11.0 is available.'},
+  {id:'B00T0001-24-500',kind:'profile',age:60,title:'Profile finished',text:'Fermenter 1: the profile has finished.'},
+  {id:'B00T0001-28-0',kind:'restart',age:900,title:'Controller restarted',text:'Cause: crash.'},
+  {id:'B00T0001-16-700',kind:'sensor',age:300,title:'Tilt stopped reporting',text:'Red Tilt: no reading for 14 min.'},
+  {id:'B00T0001-0-800',kind:'alarm',age:200,title:'Temperature alarm',text:'Fermenter 1: too warm.'},
+  {id:'B00T0001-1-900',kind:'alarm',age:100,title:'Temperature alarm',text:'Fermenter 2: too warm.'}
+];
+
+test('banners show the most serious alerts first, newest first, and at most three',()=>{
+  const {strip}=bannerPage(sampleAlerts);
+  assert.deepEqual(shownIds(strip),['B00T0001-1-900','B00T0001-0-800','B00T0001-16-700']);
+  assert.match(strip.innerHTML,/data-action="toggle-alerts"[^>]*>\+3 more alerts</);
+});
+
+test('the more-alerts row opens the rest and closes them again',()=>{
+  const {run,strip}=bannerPage(sampleAlerts);
+  run("actionHandlers['toggle-alerts']()");
+  assert.deepEqual(shownIds(strip),['B00T0001-1-900','B00T0001-0-800','B00T0001-16-700',
+    'B00T0001-28-0','B00T0001-24-500','update-0.11.0']);
+  assert.match(strip.innerHTML,/aria-expanded="true">Show fewer alerts</);
+  run("actionHandlers['toggle-alerts']()");
+  assert.equal(shownIds(strip).length,3);
+  // One hidden alert is "1 more alert", and three or fewer need no row at all
+  const one=bannerPage(sampleAlerts.slice(2));
+  assert.match(one.strip.innerHTML,/\+1 more alert</);
+  const few=bannerPage(sampleAlerts.slice(3));
+  assert.doesNotMatch(few.strip.innerHTML,/toggle-alerts/);
+});
+
+test('a closed banner stays closed after a reload, and the next one moves up',()=>{
+  const storage=memoryStorage();
+  const first=bannerPage(sampleAlerts,storage);
+  first.run("actionHandlers['close-alert'](0,'B00T0001-1-900')");
+  assert.deepEqual(shownIds(first.strip),['B00T0001-0-800','B00T0001-16-700','B00T0001-28-0']);
+  const reloaded=bannerPage(sampleAlerts,storage);
+  assert.deepEqual(shownIds(reloaded.strip),['B00T0001-0-800','B00T0001-16-700','B00T0001-28-0']);
+});
+
+// An alarm hovering at its limit drops out of /alerts while it is briefly off, then comes back
+// with the same id. A banner closed for it must stay closed, until the controller restarts.
+test('a closed alarm stays closed while it flips off and on, and is forgotten after a restart',()=>{
+  const storage=memoryStorage();
+  const {run,strip}=bannerPage(sampleAlerts,storage);
+  run("closeAlert('B00T0001-1-900')");
+  run("state.alerts=state.alerts.filter(alert=>alert.id!=='B00T0001-1-900'); forgetOldClosedAlerts();");
+  assert.ok(run("closedAlerts().includes('B00T0001-1-900')"));
+  run("state.alerts=alerts; forgetOldClosedAlerts(); renderBanners();");
+  assert.ok(!shownIds(strip).includes('B00T0001-1-900'));
+
+  // After a restart the old boot's ids can never come back, so they are dropped from storage
+  run("state.alerts=[]; state.alertsBoot='B00T0002'; forgetOldClosedAlerts();");
+  assert.deepEqual(JSON.parse(storage.items['ourbrewbot.closedAlerts']),[]);
+});
+
+test('a closed release banner is kept while that release is listed, whatever the boot',()=>{
+  const storage=memoryStorage();
+  const {run}=bannerPage(sampleAlerts,storage);
+  run("closeAlert('update-0.11.0'); state.alertsBoot='B00T0002'; forgetOldClosedAlerts();");
+  assert.deepEqual(JSON.parse(storage.items['ourbrewbot.closedAlerts']),['update-0.11.0']);
+  run("state.alerts=[{id:'update-0.12.0',kind:'update',age:0,title:'T',text:'X'}]; forgetOldClosedAlerts();");
+  assert.deepEqual(JSON.parse(storage.items['ourbrewbot.closedAlerts']),[]);
+});
+
+test('closing a banner still works on the page when browser storage is blocked',()=>{
+  const blocked={getItem:()=>{throw new Error('blocked');},setItem:()=>{throw new Error('blocked');}};
+  const {run,strip}=bannerPage(sampleAlerts,blocked);
+  run("closeAlert('B00T0001-1-900')");
+  assert.ok(!shownIds(strip).includes('B00T0001-1-900'));
+  // Storage holding something that is not a list is ignored too
+  const odd=memoryStorage();
+  odd.setItem('ourbrewbot.closedAlerts','{"not":"a list"}');
+  assert.equal(shownIds(bannerPage(sampleAlerts,odd).strip).length,3);
+});
+
+test('each kind of banner has its colour and its links',()=>{
+  const {run}=bannerPage([]);
+  run("state.controller={UpdateNotesUrl:'https://ourbrewbot.com/news/#v0.11.0'}");
+  const html=kind=>run(`bannerHtml(${JSON.stringify(sampleAlerts.find(alert=>alert.kind===kind))})`);
+  assert.match(html('alarm'),/class="banner alarm"/);
+  assert.match(html('sensor'),/class="banner warning"[\s\S]*href="#sensors">Open sensors</);
+  assert.match(html('restart'),/class="banner warning"[\s\S]*href="#system">Open system</);
+  assert.match(html('profile'),/class="banner success"/);
+  assert.doesNotMatch(html('profile'),/<a /);
+  assert.match(html('update'),/class="banner success"[\s\S]*href="https:\/\/ourbrewbot.com\/news\/#v0.11.0"/);
+  assert.match(html('update'),/data-action="open-firmware">Firmware update</);
+  // Without a valid link from the controller, the releases page
+  run("state.controller={UpdateNotesUrl:'javascript:alert(1)'}");
+  assert.match(html('update'),/href="https:\/\/github.com\/scardus\/OurBrewbot\/releases"/);
+});
+
+test('banner text and ids from the controller are escaped, and unknown kinds are left out',()=>{
+  const {strip}=bannerPage([
+    {id:'B00T0001-0-1"x',kind:'alarm',age:0,title:'<b>Alarm</b>',text:'Tom\'s & "Jerry\'s" <fridge>'},
+    {id:'B00T0001-9-1',kind:'something-new',age:0,title:'New',text:'Kind'}
+  ]);
+  assert.match(strip.innerHTML,/&lt;b&gt;Alarm&lt;\/b&gt;/);
+  assert.match(strip.innerHTML,/Tom&#39;s &amp; &quot;Jerry&#39;s&quot; &lt;fridge&gt;/);
+  assert.match(strip.innerHTML,/data-value="B00T0001-0-1&quot;x"/);
+  assert.doesNotMatch(strip.innerHTML,/something-new|>New</);
+});
+
+test('alert polling draws the reply, and keeps the last banners after a failed read',async()=>{
+  const {run,context,strip}=bannerPage([]);
+  context.reply={boot:'B00T0001',alerts:sampleAlerts.slice(4)};
+  run("state.ready=true; document.hidden=false; request=async path=>{ requested=path; return {data:reply}; };");
+  await run('pollAlerts()');
+  assert.equal(run('requested'),'/alerts');
+  assert.deepEqual(shownIds(strip),['B00T0001-1-900','B00T0001-0-800']);
+  assert.ok(run('lastAlertsPoll>0'));
+
+  run("request=async()=>{ throw new Error('Controller unreachable.'); };");
+  await run('pollAlerts()');
+  assert.deepEqual(shownIds(strip),['B00T0001-1-900','B00T0001-0-800']);
+  // A reply without a list draws no banners rather than failing
+  context.reply={boot:'B00T0001'};
+  run("request=async()=>({data:reply});");
+  await run('pollAlerts()');
+  assert.deepEqual(shownIds(strip),[]);
 });
