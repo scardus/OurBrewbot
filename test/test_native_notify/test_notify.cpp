@@ -36,6 +36,7 @@
 FermenterConfig g_fermenters[MAX_FERMENTERS];
 ProbeConfig     g_probes[MAX_PROBES];
 iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
+TiltConfig      g_tilts[MAX_TILTS];
 GlobalConfig    g_globalConfig;
 NotifyConfig    g_notifyConfig;
 UpdateStatus    g_updateStatus;
@@ -61,6 +62,10 @@ void logMsgImpl(uint8_t, PGM_P fmt, ...) {
 static uint8_t s_lastCheckpoint = 0xFF;
 void checkpoint(uint8_t module) { s_lastCheckpoint = module; }
 
+// This boot's id (Log.cpp), settable so a test can play a restart
+static uint32_t s_bootId = 0x0BADF00D;
+uint32_t logBootId() { return s_bootId; }
+
 // The same conversion as Temperatures.cpp
 float toDisplayTemp(float celsius) {
   return (g_globalConfig.unit == UNIT_CELSIUS) ? celsius : celsius * 9.0f / 5.0f + 32.0f;
@@ -84,6 +89,7 @@ void setUp(void) {
   for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenters[i] = FermenterConfig{};
   for (int i = 0; i < MAX_PROBES; i++)     g_probes[i]     = ProbeConfig{};
   for (int i = 0; i < MAX_ISPINDELS; i++)  g_iSpindels[i]  = iSpindelConfig{};
+  for (int i = 0; i < MAX_TILTS; i++)      g_tilts[i]      = TiltConfig{};
   g_globalConfig = GlobalConfig{};
   g_globalConfig.unit = UNIT_CELSIUS;
   memset(&g_updateStatus, 0, sizeof(g_updateStatus));
@@ -102,7 +108,13 @@ void setUp(void) {
   s_tries      = 0;
   s_lastTryAt  = 0;
   memset(s_problemSent, 0, sizeof(s_problemSent));
+  memset(s_problemSince, 0, sizeof(s_problemSince));
   memset(s_problemOffSince, 0, sizeof(s_problemOffSince));
+  memset(s_problemMinutes, 0, sizeof(s_problemMinutes));
+  memset(s_alarmReading, 0, sizeof(s_alarmReading));
+  memset(s_profileFinishedAt, 0, sizeof(s_profileFinishedAt));
+  s_restartCode = NO_RESTART;
+  s_bootId      = 0x0BADF00D;
 
   WiFi.connected   = true;
   httpTestReset();
@@ -671,6 +683,294 @@ void test_a_restart_notification_waits_for_wifi(void) {
 }
 
 // ============================================================
+// ALERTS FOR THE WEBUI
+// ============================================================
+
+static NotifyAlert alert;
+
+// Ask for one slot's alert. Returns false when the slot has nothing to show.
+static bool getAlert(uint8_t slot) {
+  memset(&alert, 0, sizeof(alert));
+  return notifyGetAlert(slot, alert);
+}
+
+// How many slots have an alert to show
+static int alertCount() {
+  int count = 0;
+  for (uint8_t slot = 0; slot < notifyAlertSlotCount(); slot++) {
+    if (getAlert(slot)) count++;
+  }
+  return count;
+}
+
+void test_there_are_no_alerts_when_nothing_is_wrong(void) {
+  TEST_ASSERT_EQUAL_INT(0, alertCount());
+  // A slot past the end is empty too
+  TEST_ASSERT_FALSE(getAlert(notifyAlertSlotCount()));
+  TEST_ASSERT_FALSE(getAlert(255));
+}
+
+void test_an_alarm_gives_an_alert_with_the_notification_text(void) {
+  alarmOn(1);
+  TEST_ASSERT_EQUAL_INT(1, alertCount());
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS + 1));
+  TEST_ASSERT_EQUAL_INT(ALERT_ALARM, alert.kind);
+  TEST_ASSERT_EQUAL_STRING("Temperature alarm", alert.message->title);
+  TEST_ASSERT_EQUAL_STRING("Lager fridge: 23.00 °C is above the 22.0 °C limit.", alert.message->body);
+  TEST_ASSERT_EQUAL_STRING("0BADF00D-1-1000", alert.id);   // boot, slot, when it started
+  TEST_ASSERT_EQUAL_UINT32(0, alert.ageSeconds);
+
+  s_uptimeSec += 90;
+  alarmOn(1);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS + 1));
+  TEST_ASSERT_EQUAL_UINT32(90, alert.ageSeconds);
+}
+
+void test_an_alarm_alert_shows_the_latest_reading(void) {
+  notifyAlarmState(0, true, true, false, 23.0f, 22.0f);
+  notifyAlarmState(0, true, true, true, 25.5f, 22.0f);   // now severe
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  TEST_ASSERT_EQUAL_STRING("Severe temperature alarm", alert.message->title);
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 25.50 °C is above the 22.0 °C limit.", alert.message->body);
+
+  notifyAlarmState(0, true, false, false, 9.0f, 10.0f);  // and now under its floor
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 9.00 °C is below the 10.0 °C limit.", alert.message->body);
+}
+
+// An alarm hovering at its limit flips on and off every few minutes. Its
+// alert must keep one id the whole time, or a banner the brewer closed would
+// come back at every flip.
+void test_a_flapping_alarm_keeps_one_alert_id(void) {
+  alarmOn(0);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  char firstId[sizeof(alert.id)];
+  strlcpy(firstId, alert.id, sizeof(firstId));
+
+  for (int flip = 0; flip < 5; flip++) {
+    s_uptimeSec += 120; alarmOff(0);
+    TEST_ASSERT_FALSE(getAlert(TRACK_ALARMS));   // no banner while it is off...
+    s_uptimeSec += 120; alarmOn(0);
+    TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));    // ...and the same one when it is back
+    TEST_ASSERT_EQUAL_STRING(firstId, alert.id);
+  }
+}
+
+void test_an_alarm_after_ten_quiet_minutes_is_a_new_alert(void) {
+  alarmOn(0);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  char firstId[sizeof(alert.id)];
+  strlcpy(firstId, alert.id, sizeof(firstId));
+
+  alarmOff(0);
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S;
+  alarmOff(0);   // the episode ends here
+  s_uptimeSec += 5;
+  alarmOn(0);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  TEST_ASSERT_FALSE(strcmp(firstId, alert.id) == 0);
+}
+
+// The banners are for everyone using the WebUI, not only those who set up
+// notifications
+void test_alerts_are_kept_with_notifications_off(void) {
+  g_notifyConfig.enabled = false;
+  alarmOn(0);
+  notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+  notifyRestart(true, REASON_EXCEPTION_RST);
+  notifyProfileFinished(1);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);   // nothing to send...
+  TEST_ASSERT_EQUAL_INT(4, alertCount());     // ...but four banners
+}
+
+// Switching notifications, or any of their tick boxes, off and on during
+// an alarm or a lost sensor must not touch the banners: same alerts, same ids
+void test_changing_the_notification_settings_leaves_alerts_alone(void) {
+  alarmOn(0);
+  notifySensorState(NOTIFY_SENSOR_TILT, 0, true, 14.0f);
+  notifyRestart(true, REASON_EXCEPTION_RST);
+  notifyProfileFinished(1);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  char alarmId[sizeof(alert.id)];
+  strlcpy(alarmId, alert.id, sizeof(alarmId));
+  TEST_ASSERT_TRUE(getAlert(TRACK_TILTS));
+  char tiltId[sizeof(alert.id)];
+  strlcpy(tiltId, alert.id, sizeof(tiltId));
+
+  const uint8_t settings[][2] = {   // { enabled, events }
+    { false, NOTIFY_EVT_ALL }, { true, 0 }, { true, NOTIFY_EVT_ALL & ~NOTIFY_EVT_ALARMS },
+    { true, NOTIFY_EVT_ALL & ~NOTIFY_EVT_SENSORS }, { false, 0 }, { true, NOTIFY_EVT_ALL },
+  };
+  for (const auto& setting : settings) {
+    g_notifyConfig.enabled = setting[0];
+    g_notifyConfig.events  = setting[1];
+    s_uptimeSec += 30;
+    alarmOn(0);   // the checks carry on as normal
+    notifySensorState(NOTIFY_SENSOR_TILT, 0, true, 15.0f);
+
+    TEST_ASSERT_EQUAL_INT(4, alertCount());
+    TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+    TEST_ASSERT_EQUAL_STRING(alarmId, alert.id);
+    TEST_ASSERT_TRUE(getAlert(TRACK_TILTS));
+    TEST_ASSERT_EQUAL_STRING(tiltId, alert.id);
+  }
+}
+
+// Notifications switched on part-way through an alarm still report it once,
+// and still send "alarm ended" when it is over
+void test_tracking_alerts_does_not_change_what_is_sent(void) {
+  g_notifyConfig.enabled = false;
+  alarmOn(0);
+  g_notifyConfig.enabled = true;
+  alarmOn(0);
+  alarmOn(0);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_OVER, s_queue[0].event.type);
+
+  alarmOff(0);
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S;
+  alarmOff(0);
+  TEST_ASSERT_EQUAL_UINT8(2, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_ENDED, s_queue[1].event.type);
+}
+
+void test_a_lost_sensor_gives_an_alert_with_the_latest_minutes(void) {
+  notifySensorState(NOTIFY_SENSOR_TILT, 0, true, 14.0f);
+  TEST_ASSERT_TRUE(getAlert(TRACK_TILTS));
+  TEST_ASSERT_EQUAL_INT(ALERT_SENSOR, alert.kind);
+  TEST_ASSERT_EQUAL_STRING("Tilt stopped reporting", alert.message->title);
+  TEST_ASSERT_EQUAL_STRING("Red Tilt: no reading for 14 min. Its readings are no longer used.", alert.message->body);
+
+  notifySensorState(NOTIFY_SENSOR_TILT, 0, true, 15.0f);
+  TEST_ASSERT_TRUE(getAlert(TRACK_TILTS));
+  TEST_ASSERT_EQUAL_STRING("Red Tilt: no reading for 15 min. Its readings are no longer used.", alert.message->body);
+
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, 1, true, 70.0f);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ISPINDELS + 1));
+  TEST_ASSERT_EQUAL_STRING("ispindel-4: no report for 70 min. Its readings are no longer used.", alert.message->body);
+
+  notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+  TEST_ASSERT_TRUE(getAlert(TRACK_PROBES + 2));
+  TEST_ASSERT_EQUAL_STRING("Beer Temp is not responding. Its readings are no longer used.", alert.message->body);
+
+  // Reporting again: the banner goes at once
+  notifySensorState(NOTIFY_SENSOR_TILT, 0, false);
+  TEST_ASSERT_FALSE(getAlert(TRACK_TILTS));
+}
+
+// The sensor code stops checking a sensor once it is unassigned, so the
+// alert must not wait for a "reporting again" that will never come
+void test_a_lost_sensor_that_is_unassigned_has_no_alert(void) {
+  notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+  notifySensorState(NOTIFY_SENSOR_ISPINDEL, 1, true, 70.0f);
+  notifySensorState(NOTIFY_SENSOR_TILT, 3, true, 20.0f);
+  TEST_ASSERT_EQUAL_INT(3, alertCount());
+
+  g_probes[2].fermenter    = PROBE_UNASSIGNED;
+  g_iSpindels[1].fermenter = PROBE_UNASSIGNED;
+  g_tilts[3].fermenter     = PROBE_UNASSIGNED;
+  TEST_ASSERT_EQUAL_INT(0, alertCount());
+}
+
+void test_an_unexpected_restart_gives_an_alert_for_the_whole_boot(void) {
+  notifyRestart(true, REASON_WDT_RST);
+  TEST_ASSERT_TRUE(getAlert(SLOT_RESTART));
+  TEST_ASSERT_EQUAL_INT(ALERT_RESTART, alert.kind);
+  TEST_ASSERT_EQUAL_STRING("Controller restarted", alert.message->title);
+  TEST_ASSERT_EQUAL_STRING("The controller restarted unexpectedly. Cause: hardware watchdog.", alert.message->body);
+  TEST_ASSERT_EQUAL_UINT32(1000, alert.ageSeconds);   // seconds since boot
+  TEST_ASSERT_EQUAL_STRING("0BADF00D-28-0", alert.id);
+
+  s_uptimeSec += 3 * 86400;
+  TEST_ASSERT_TRUE(getAlert(SLOT_RESTART));
+}
+
+void test_a_restart_that_was_asked_for_gives_no_alert(void) {
+  notifyRestart(false, REASON_SOFT_RESTART);
+  notifyRestart(false, REASON_EXT_SYS_RST);
+  TEST_ASSERT_EQUAL_INT(0, alertCount());
+}
+
+// Every alert but a release belongs to one boot: after a restart, a problem
+// that is still there is a new one, so a closed banner for it shows again
+void test_alert_ids_change_after_a_restart(void) {
+  alarmOn(0);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  TEST_ASSERT_EQUAL_STRING("0BADF00D-0-1000", alert.id);
+  s_bootId = 0x12345678;
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  TEST_ASSERT_EQUAL_STRING("12345678-0-1000", alert.id);
+}
+
+void test_a_finished_profile_gives_an_alert_until_a_new_one_starts(void) {
+  notifyProfileFinished(1);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);   // the notification still goes
+  TEST_ASSERT_EQUAL_INT(NOTIFY_PROFILE_FINISHED, s_queue[0].event.type);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queue[0].event.index);
+
+  s_uptimeSec += 600;
+  TEST_ASSERT_TRUE(getAlert(SLOT_PROFILES + 1));
+  TEST_ASSERT_EQUAL_INT(ALERT_PROFILE, alert.kind);
+  TEST_ASSERT_EQUAL_STRING("Profile finished", alert.message->title);
+  TEST_ASSERT_EQUAL_STRING("Lager fridge: the profile has finished.", alert.message->body);
+  TEST_ASSERT_EQUAL_UINT32(600, alert.ageSeconds);
+
+  notifyProfileStarted(0);   // another fermenter's start changes nothing
+  TEST_ASSERT_TRUE(getAlert(SLOT_PROFILES + 1));
+  notifyProfileStarted(1);
+  TEST_ASSERT_FALSE(getAlert(SLOT_PROFILES + 1));
+
+  // A fermenter that doesn't exist is ignored
+  notifyProfileFinished(MAX_FERMENTERS);
+  notifyProfileStarted(MAX_FERMENTERS);
+  TEST_ASSERT_EQUAL_INT(0, alertCount());
+}
+
+// A release's id has no boot in it, so a banner closed for it stays closed
+// after a restart, until there is a newer release
+void test_a_new_release_gives_an_alert_named_after_the_version(void) {
+  strlcpy(g_updateStatus.latestVersion, "0.11.0", sizeof(g_updateStatus.latestVersion));
+  TEST_ASSERT_FALSE(getAlert(SLOT_UPDATE));   // not newer than this firmware
+  g_updateStatus.updateAvailable = true;
+  TEST_ASSERT_TRUE(getAlert(SLOT_UPDATE));
+  TEST_ASSERT_EQUAL_INT(ALERT_UPDATE, alert.kind);
+  TEST_ASSERT_EQUAL_STRING("Firmware update available", alert.message->title);
+  TEST_ASSERT_EQUAL_STRING("update-0.11.0", alert.id);
+  TEST_ASSERT_EQUAL_UINT32(0, alert.ageSeconds);
+  s_bootId = 0x12345678;
+  TEST_ASSERT_TRUE(getAlert(SLOT_UPDATE));
+  TEST_ASSERT_EQUAL_STRING("update-0.11.0", alert.id);
+}
+
+// The longest ids: the largest boot id, slot and time, and the longest
+// version. snprintf_P cuts an id that doesn't fit, and two cut ids could
+// then look the same, so check they arrive whole.
+void test_the_longest_alert_ids_fit(void) {
+  s_bootId    = 0xFFFFFFFF;
+  s_uptimeSec = 0xFFFFFFFF;
+  notifySensorState(NOTIFY_SENSOR_TILT, MAX_TILTS - 1, true, 20.0f);
+  TEST_ASSERT_TRUE(getAlert(TRACK_TILTS + MAX_TILTS - 1));
+  TEST_ASSERT_EQUAL_STRING("FFFFFFFF-23-4294967295", alert.id);
+
+  memset(g_updateStatus.latestVersion, '9', sizeof(g_updateStatus.latestVersion) - 1);
+  g_updateStatus.updateAvailable = true;
+  TEST_ASSERT_TRUE(getAlert(SLOT_UPDATE));
+  TEST_ASSERT_EQUAL_UINT(strlen("update-") + sizeof(g_updateStatus.latestVersion) - 1, strlen(alert.id));
+  TEST_ASSERT_TRUE(strlen(alert.id) < sizeof(alert.id) - 1);
+}
+
+void test_every_kind_of_alert_at_once(void) {
+  for (int i = 0; i < MAX_FERMENTERS; i++) { alarmOn(i); notifyProfileFinished(i); }
+  for (int i = 0; i < MAX_PROBES; i++)     notifySensorState(NOTIFY_SENSOR_PROBE, i, true);
+  for (int i = 0; i < MAX_ISPINDELS; i++)  notifySensorState(NOTIFY_SENSOR_ISPINDEL, i, true, 30.0f);
+  for (int i = 0; i < MAX_TILTS; i++)      notifySensorState(NOTIFY_SENSOR_TILT, i, true, 30.0f);
+  notifyRestart(false, REASON_DEFAULT_RST);
+  strlcpy(g_updateStatus.latestVersion, "0.11.0", sizeof(g_updateStatus.latestVersion));
+  g_updateStatus.updateAvailable = true;
+  TEST_ASSERT_EQUAL_INT(notifyAlertSlotCount(), alertCount());
+}
+
+// ============================================================
 // SENDING
 // ============================================================
 
@@ -907,6 +1207,24 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_restart_that_was_asked_for_is_not_reported);
   RUN_TEST(test_a_restart_is_not_reported_when_its_box_is_not_ticked);
   RUN_TEST(test_a_restart_notification_waits_for_wifi);
+
+  RUN_TEST(test_there_are_no_alerts_when_nothing_is_wrong);
+  RUN_TEST(test_an_alarm_gives_an_alert_with_the_notification_text);
+  RUN_TEST(test_an_alarm_alert_shows_the_latest_reading);
+  RUN_TEST(test_a_flapping_alarm_keeps_one_alert_id);
+  RUN_TEST(test_an_alarm_after_ten_quiet_minutes_is_a_new_alert);
+  RUN_TEST(test_alerts_are_kept_with_notifications_off);
+  RUN_TEST(test_changing_the_notification_settings_leaves_alerts_alone);
+  RUN_TEST(test_tracking_alerts_does_not_change_what_is_sent);
+  RUN_TEST(test_a_lost_sensor_gives_an_alert_with_the_latest_minutes);
+  RUN_TEST(test_a_lost_sensor_that_is_unassigned_has_no_alert);
+  RUN_TEST(test_an_unexpected_restart_gives_an_alert_for_the_whole_boot);
+  RUN_TEST(test_a_restart_that_was_asked_for_gives_no_alert);
+  RUN_TEST(test_alert_ids_change_after_a_restart);
+  RUN_TEST(test_a_finished_profile_gives_an_alert_until_a_new_one_starts);
+  RUN_TEST(test_a_new_release_gives_an_alert_named_after_the_version);
+  RUN_TEST(test_the_longest_alert_ids_fit);
+  RUN_TEST(test_every_kind_of_alert_at_once);
 
   RUN_TEST(test_nothing_waiting_sends_nothing);
   RUN_TEST(test_a_notification_is_posted_as_ntfy_expects);

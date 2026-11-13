@@ -881,6 +881,12 @@ void test_startProfile_initialises_run_state(void) {
   TEST_ASSERT_EQUAL_UINT32(1234567, g_fermenters[F].startMillis);
 }
 
+// So the WebUI banner for the last finished profile goes away
+void test_startProfile_tells_the_notifications(void) {
+  startProfile(F, 2);
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubProfileStarts);
+}
+
 void test_pauseProfile_preserves_position(void) {
   // The whole point of pause vs. stop: step and elapsed hours survive so
   // resume picks up where it left off instead of restarting the batch.
@@ -1025,6 +1031,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_prevProfileStep_retreats_and_resets_hour);
 
   RUN_TEST(test_startProfile_initialises_run_state);
+  RUN_TEST(test_startProfile_tells_the_notifications);
   RUN_TEST(test_pauseProfile_preserves_position);
   RUN_TEST(test_resumeProfile_restores_from_pause);
   RUN_TEST(test_resumeProfile_ignored_in_standard_mode);

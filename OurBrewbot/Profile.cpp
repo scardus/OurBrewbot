@@ -89,7 +89,7 @@ void advanceProfileStep(uint8_t i) {
   if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
     finishProfile(i);
-    notifyEvent(NOTIFY_PROFILE_FINISHED, i);
+    notifyProfileFinished(i);
     saveFermenterConfig();
     return;
   }
@@ -101,7 +101,7 @@ void advanceProfileStep(uint8_t i) {
   if (isStepEmpty(step)) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished (empty step %d)", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
     finishProfile(i);
-    notifyEvent(NOTIFY_PROFILE_FINISHED, i);
+    notifyProfileFinished(i);
     saveFermenterConfig();
     return;
   }
@@ -150,7 +150,7 @@ void advanceProfileStep(uint8_t i) {
 
     // Push notification (see Notify.h): one message, for the profile ending
     // or for the step change. Steps moved on by hand are not reported.
-    if (finished) notifyEvent(NOTIFY_PROFILE_FINISHED, i);
+    if (finished) notifyProfileFinished(i);
     else          notifyEvent(NOTIFY_STEP_COMPLETE, i, finishedStep, (float)(finishedStep + 1));
     saveFermenterConfig();
   }
@@ -277,6 +277,7 @@ void startProfile(uint8_t i, uint8_t profileIndex) {
   g_fermenters[i].profileRunning = true;
   g_fermenters[i].profilePaused  = false;
   g_fermenters[i].startMillis    = millis();
+  notifyProfileStarted(i);   // removes the WebUI banner for the last finished profile
   logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile %d started", i, g_fermenters[i].fermenterName, profileIndex);
   saveFermenterConfig();
 }

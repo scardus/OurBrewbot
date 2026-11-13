@@ -135,6 +135,14 @@ void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minute
 // reported. It waits in the queue until WiFi is connected.
 void notifyRestart(bool afterCrash, uint8_t resetCode);
 
+// Call when a fermenter's profile reaches its end. Queues "profile finished"
+// and keeps the WebUI's banner for it until a new profile is started.
+void notifyProfileFinished(uint8_t fermenter);
+
+// Call when a profile is started, so the banner for the fermenter's last
+// finished profile goes away
+void notifyProfileStarted(uint8_t fermenter);
+
 // True when the next notifyLoop() call will send something, and so may block
 // the loop for a few seconds. The Tilt scan checks this, as it does for brew
 // service reports, so it doesn't start a scan that would be starved.
@@ -148,3 +156,42 @@ int notifySendTest();
 // names a fermenter or sensor that doesn't exist, or the text did not fit.
 // Only called from this module and its tests.
 bool notifyBuildMessage(const NotifyEventData& event, NotifyMessage& msg);
+
+// ============================================================
+// ALERTS FOR THE WEBUI
+//
+// The WebUI shows a banner at the top of every page for each problem going
+// on now (an alarm, a sensor that stopped reporting), for an unexpected
+// restart, a finished profile and a new firmware release. The banners use
+// the same rules and the same text as the notifications, but are kept
+// whether or not notifications are switched on.
+//
+// GET /alerts asks for each slot in turn, 0 to notifyAlertSlotCount() - 1.
+// A slot holds at most one alert: slots for the alarms and sensors come
+// first, then one for each fermenter's finished profile, the restart and the
+// firmware release.
+// ============================================================
+
+// What an alert is about. The WebUI picks the banner's colour from this.
+enum NotifyAlertKind : uint8_t {
+  ALERT_ALARM,      // a temperature alarm
+  ALERT_SENSOR,     // a probe, iSpindel or Tilt that stopped reporting
+  ALERT_RESTART,    // the controller restarted after a crash or a power cut
+  ALERT_PROFILE,    // a profile finished
+  ALERT_UPDATE,     // a newer firmware release is available
+};
+
+// One alert, ready for the WebUI
+struct NotifyAlert {
+  NotifyAlertKind      kind;
+  char                 id[28];       // the same for as long as this occurrence lasts; a new one gets a new id
+  uint32_t             ageSeconds;   // how long ago it started (0 for a firmware release)
+  const NotifyMessage* message;      // its title and text
+};
+
+uint8_t notifyAlertSlotCount();
+
+// Fill in `alert` for one slot. Returns false when the slot has nothing to
+// show. alert.message points at a buffer the next call reuses, so use it
+// before asking for another slot.
+bool notifyGetAlert(uint8_t slot, NotifyAlert& alert);
