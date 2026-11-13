@@ -54,9 +54,21 @@ static NotifyStubAlarm g_notifyStubAlarm[4];   // one per fermenter (MAX_FERMENT
 static NotifyStubSensor g_notifyStubSensor[3][8];
 static int g_notifyStubProfileStarts = 0;   // notifyProfileStarted() calls
 
+// The alerts GET /alerts lists. A test sets how many slots there are and
+// fills in the ones it wants; a slot whose message has no title is empty.
+#define NOTIFY_STUB_ALERT_SLOTS 8
+static uint8_t       g_notifyStubAlertSlots = 0;
+static NotifyAlert   g_notifyStubAlerts[NOTIFY_STUB_ALERT_SLOTS];
+static NotifyMessage g_notifyStubAlertMessages[NOTIFY_STUB_ALERT_SLOTS];
+
 static void notifyStubReset() {
   g_notifyStubEvent = NotifyStubEvent{};
   g_notifyStubProfileStarts = 0;
+  g_notifyStubAlertSlots    = 0;
+  for (int i = 0; i < NOTIFY_STUB_ALERT_SLOTS; i++) {
+    g_notifyStubAlerts[i]        = NotifyAlert{};
+    g_notifyStubAlertMessages[i] = NotifyMessage{};
+  }
   for (int i = 0; i < 4; i++) g_notifyStubAlarm[i] = NotifyStubAlarm{};
   for (int k = 0; k < 3; k++) {
     for (int i = 0; i < 8; i++) g_notifyStubSensor[k][i] = NotifyStubSensor{};
@@ -83,6 +95,18 @@ void notifyProfileFinished(uint8_t fermenter) {
 
 void notifyProfileStarted(uint8_t) {
   g_notifyStubProfileStarts++;
+}
+
+uint8_t notifyAlertSlotCount() {
+  return g_notifyStubAlertSlots;
+}
+
+bool notifyGetAlert(uint8_t slot, NotifyAlert& alert) {
+  if (slot >= g_notifyStubAlertSlots || slot >= NOTIFY_STUB_ALERT_SLOTS) return false;
+  if (g_notifyStubAlertMessages[slot].title[0] == '\0') return false;
+  alert         = g_notifyStubAlerts[slot];
+  alert.message = &g_notifyStubAlertMessages[slot];
+  return true;
 }
 
 void notifyAlarmState(uint8_t fermenter, bool active, bool overTemp, bool severe,

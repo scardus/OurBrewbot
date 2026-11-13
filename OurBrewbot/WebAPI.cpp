@@ -143,6 +143,7 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/probes",           HTTP_GET,  handleProbes,             true  },
   { "/probes",           HTTP_POST, handleProbePost,          true  },
   { "/health",           HTTP_GET,  handleHealth,             true  },
+  { "/alerts",           HTTP_GET,  handleAlerts,             false },   // polled by every WebUI page
   { "/logs",             HTTP_GET,  handleLogs,               false },
   { "/admin",            HTTP_GET,  handleAdmin,              true  },
   { "/smartplugs",       HTTP_GET,  handleSmartPlugs,         true  },
@@ -832,6 +833,64 @@ void handleHealth(ESP8266WebServer& server) {
   doc["ip"]          = WiFi.localIP().toString();
   doc["resetReason"] = ESP.getResetReason();
   sendJsonDoc(server, doc);
+}
+
+// ============================================================
+// ALERTS — GET /alerts
+//
+// The banners at the top of the WebUI: alarms and sensor problems going on
+// now, an unexpected restart, finished profiles and a new firmware release.
+// Notify.cpp keeps them and builds their text (see Notify.h).
+//
+//   {"boot":"0BADF00D",
+//    "alerts":[{"id":"0BADF00D-1-1000","kind":"alarm","age":90,
+//               "title":"Temperature alarm","text":"Fermenter 2: ..."}]}
+//
+// id stays the same for as long as one occurrence lasts, so a banner the
+// brewer closed stays closed; age is in seconds. boot is this boot's id,
+// which every id except a firmware release's starts with: the WebUI forgets
+// closed banners from earlier boots.
+// ============================================================
+
+// The name the WebUI knows each kind of alert by
+static PGM_P alertKindName(NotifyAlertKind kind) {
+  switch (kind) {
+    case ALERT_ALARM:   return PSTR("alarm");
+    case ALERT_SENSOR:  return PSTR("sensor");
+    case ALERT_RESTART: return PSTR("restart");
+    case ALERT_PROFILE: return PSTR("profile");
+    case ALERT_UPDATE:  return PSTR("update");
+  }
+  return PSTR("unknown");
+}
+
+void handleAlerts(ESP8266WebServer& server) {
+  // One chunk per alert, like /fermenters. The largest is about 400 bytes:
+  // a 127-byte text with every character escaped to 2, the 39-byte title,
+  // the 27-byte id and the key names.
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  char head[32];   // {"boot":"XXXXXXXX","alerts":[ is 30 characters
+  int headLen = snprintf_P(head, sizeof(head), PSTR("{\"boot\":\"%08lX\",\"alerts\":["), (unsigned long)logBootId());
+  server.sendContent(head, headLen);
+  bool first = true;
+  for (uint8_t slot = 0; slot < notifyAlertSlotCount(); slot++) {
+    NotifyAlert alert;
+    if (!notifyGetAlert(slot, alert)) continue;
+    if (!first) server.sendContent_P(PSTR(","));
+    first = false;
+
+    JsonDocument doc;
+    doc["id"]    = alert.id;
+    doc["kind"]  = FPSTR(alertKindName(alert.kind));
+    doc["age"]   = alert.ageSeconds;
+    doc["title"] = alert.message->title;
+    doc["text"]  = alert.message->body;
+    size_t n = serializeJson(doc, s_chunkBuf, sizeof(s_chunkBuf));
+    server.sendContent(s_chunkBuf, n);
+  }
+  server.sendContent_P(PSTR("]}"));
+  server.sendContent("");  // end chunked transfer
 }
 
 // ============================================================

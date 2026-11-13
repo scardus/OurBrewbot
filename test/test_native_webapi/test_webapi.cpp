@@ -1900,6 +1900,98 @@ static void test_smartplug_post_requires_a_valid_index(void) {
   TEST_ASSERT_TRUE(bodyContains("Invalid plug index"));
 }
 
+// ---- /alerts ----
+// Notify.cpp's own tests cover which alerts there are and their text; these
+// check that GET /alerts sends what it is given, whole.
+
+// Put one alert in the stub's slot
+static void stubAlert(uint8_t slot, NotifyAlertKind kind, const char* id, uint32_t age,
+                      const char* title, const char* text) {
+  g_notifyStubAlerts[slot].kind       = kind;
+  g_notifyStubAlerts[slot].ageSeconds = age;
+  strlcpy(g_notifyStubAlerts[slot].id, id, sizeof(g_notifyStubAlerts[slot].id));
+  strlcpy(g_notifyStubAlertMessages[slot].title, title, sizeof(g_notifyStubAlertMessages[slot].title));
+  strlcpy(g_notifyStubAlertMessages[slot].body,  text,  sizeof(g_notifyStubAlertMessages[slot].body));
+}
+
+static void test_alerts_get_sends_an_empty_list_when_all_is_well(void) {
+  g_notifyStubAlertSlots = 4;   // all empty
+  handleAlerts(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["alerts"].is<JsonArray>());
+  TEST_ASSERT_EQUAL_INT(0, doc["alerts"].as<JsonArray>().size());
+}
+
+// The WebUI forgets closed banners whose id starts with an earlier boot's
+static void test_alerts_get_names_this_boot(void) {
+  handleAlerts(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_STRING("0BADF00D", doc["boot"].as<const char*>());   // logBootId() in this suite
+}
+
+static void test_alerts_get_lists_each_alert_and_skips_empty_slots(void) {
+  g_notifyStubAlertSlots = 4;
+  stubAlert(0, ALERT_ALARM, "0BADF00D-0-1000", 90, "Temperature alarm",
+            "Fermenter 1: 23.00 \xC2\xB0" "C is above the 22.0 \xC2\xB0" "C limit.");
+  stubAlert(3, ALERT_UPDATE, "update-0.11.0", 0, "Firmware update available",
+            "OurBrewbot 0.11.0 is available. This controller runs 0.10.0.");
+  handleAlerts(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  JsonArray alerts = doc["alerts"].as<JsonArray>();
+  TEST_ASSERT_EQUAL_INT(2, alerts.size());
+  TEST_ASSERT_EQUAL_STRING("0BADF00D-0-1000", alerts[0]["id"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("alarm", alerts[0]["kind"].as<const char*>());
+  TEST_ASSERT_EQUAL_UINT32(90, alerts[0]["age"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_STRING("Temperature alarm", alerts[0]["title"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 23.00 \xC2\xB0" "C is above the 22.0 \xC2\xB0" "C limit.",
+                           alerts[0]["text"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("update-0.11.0", alerts[1]["id"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("update", alerts[1]["kind"].as<const char*>());
+}
+
+// The WebUI picks each banner's colour from these names
+static void test_alerts_get_names_every_kind(void) {
+  const NotifyAlertKind kinds[] = { ALERT_ALARM, ALERT_SENSOR, ALERT_RESTART, ALERT_PROFILE, ALERT_UPDATE };
+  const char* names[]           = { "alarm", "sensor", "restart", "profile", "update" };
+  g_notifyStubAlertSlots = 5;
+  for (uint8_t i = 0; i < 5; i++) stubAlert(i, kinds[i], "id", 0, "Title", "Text");
+  handleAlerts(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  for (int i = 0; i < 5; i++) {
+    TEST_ASSERT_EQUAL_STRING(names[i], doc["alerts"][i]["kind"].as<const char*>());
+  }
+}
+
+// Every field as long as it can be, in every slot: each alert is built in
+// s_chunkBuf, which cuts it off silently if it doesn't fit
+static void test_alerts_get_sends_worst_case_alerts_whole(void) {
+  g_notifyStubAlertSlots = NOTIFY_STUB_ALERT_SLOTS;
+  for (uint8_t i = 0; i < NOTIFY_STUB_ALERT_SLOTS; i++) {
+    g_notifyStubAlerts[i].kind       = ALERT_RESTART;   // the longest kind name
+    g_notifyStubAlerts[i].ageSeconds = 0xFFFFFFFF;
+    FILL_WORST(g_notifyStubAlerts[i].id);
+    FILL_WORST(g_notifyStubAlertMessages[i].title);
+    FILL_WORST(g_notifyStubAlertMessages[i].body);
+  }
+  handleAlerts(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_STUB_ALERT_SLOTS, doc["alerts"].as<JsonArray>().size());
+  for (int i = 0; i < NOTIFY_STUB_ALERT_SLOTS; i++) {
+    TEST_ASSERT_EQUAL_STRING(g_notifyStubAlerts[i].id,          doc["alerts"][i]["id"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(g_notifyStubAlertMessages[i].title, doc["alerts"][i]["title"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(g_notifyStubAlertMessages[i].body,  doc["alerts"][i]["text"].as<const char*>());
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, doc["alerts"][i]["age"].as<uint32_t>());
+  }
+}
+
 // ---- a plug is switched OFF before a change to how it is switched ----
 
 // A plug in use: Fermenter 1's heater, with learnt codes.
@@ -3332,6 +3424,11 @@ int main(int, char**) {
   RUN_TEST(test_notify_test_reports_a_delivered_message);
   RUN_TEST(test_notify_test_reports_a_refusal_with_its_http_status);
   RUN_TEST(test_notify_test_says_when_the_server_never_answered);
+  RUN_TEST(test_alerts_get_sends_an_empty_list_when_all_is_well);
+  RUN_TEST(test_alerts_get_names_this_boot);
+  RUN_TEST(test_alerts_get_lists_each_alert_and_skips_empty_slots);
+  RUN_TEST(test_alerts_get_names_every_kind);
+  RUN_TEST(test_alerts_get_sends_worst_case_alerts_whole);
   RUN_TEST(test_fs_save_accepts_the_notify_file);
   RUN_TEST(test_fs_save_rejects_an_empty_body);
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);
