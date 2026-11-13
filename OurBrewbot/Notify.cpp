@@ -183,6 +183,11 @@ static char unitLetter() {
   return (g_globalConfig.unit == UNIT_CELSIUS) ? 'C' : 'F';
 }
 
+// The degree sign, as the two bytes UTF-8 uses for it. The message body is
+// sent as UTF-8; only the title (an HTTP header) has to be plain ASCII.
+// Written as an escape so this file's fixed text stays plain ASCII.
+#define DEGREE_SIGN "\xC2\xB0"
+
 // A count of minutes, kept to five digits for the same reason
 static unsigned long shownMinutes(float minutes) {
   if (minutes < 0.0f)     return 0;
@@ -247,14 +252,14 @@ bool notifyBuildMessage(const NotifyEventData& event, NotifyMessage& msg) {
   switch (event.type) {
     case NOTIFY_ALARM_OVER:
       if (i >= MAX_FERMENTERS) return false;
-      n = snprintf_P(body, size, PSTR("%s: %.2f %c is above the %.1f %c limit."),
+      n = snprintf_P(body, size, PSTR("%s: %.2f " DEGREE_SIGN "%c is above the %.1f " DEGREE_SIGN "%c limit."),
                      fermenterName(i), shownTemp(event.a), unitLetter(),
                      shownTemp(event.b), unitLetter());
       break;
 
     case NOTIFY_ALARM_UNDER:
       if (i >= MAX_FERMENTERS) return false;
-      n = snprintf_P(body, size, PSTR("%s: %.2f %c is below the %.1f %c limit."),
+      n = snprintf_P(body, size, PSTR("%s: %.2f " DEGREE_SIGN "%c is below the %.1f " DEGREE_SIGN "%c limit."),
                      fermenterName(i), shownTemp(event.a), unitLetter(),
                      shownTemp(event.b), unitLetter());
       break;
@@ -262,7 +267,7 @@ bool notifyBuildMessage(const NotifyEventData& event, NotifyMessage& msg) {
     case NOTIFY_ALARM_ENDED:
       if (i >= MAX_FERMENTERS) return false;
       if (event.a > TEMP_VALID_MIN) {
-        n = snprintf_P(body, size, PSTR("%s: back within its limits at %.2f %c."),
+        n = snprintf_P(body, size, PSTR("%s: back within its limits at %.2f " DEGREE_SIGN "%c."),
                        fermenterName(i), shownTemp(event.a), unitLetter());
       } else {
         // The alarm also ends when the fermenter is switched off or its

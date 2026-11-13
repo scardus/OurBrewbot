@@ -29,7 +29,7 @@
  *   Priority: 4
  *   Tags: warning
  *
- *   Fermenter 1: 29.2 C is above the 29.0 C limit.
+ *   Fermenter 1: 29.25 °C is above the 29.0 °C limit.
  *
  * Anything else that accepts a plain POST (a Home Assistant webhook, for
  * example) gets the same request and can ignore the headers.

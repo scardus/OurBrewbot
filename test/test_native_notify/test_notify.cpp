@@ -129,7 +129,7 @@ static bool build(NotifyEvent type, uint8_t index = 0, uint8_t detail = 0,
 void test_over_temperature_alarm_message(void) {
   TEST_ASSERT_TRUE(build(NOTIFY_ALARM_OVER, 0, 0, 29.24f, 29.0f));
   TEST_ASSERT_EQUAL_STRING("Temperature alarm", msg.title);
-  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 29.24 C is above the 29.0 C limit.", msg.body);
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 29.24 °C is above the 29.0 °C limit.", msg.body);
   TEST_ASSERT_EQUAL_STRING("warning", msg.tags);
   TEST_ASSERT_EQUAL_UINT8(4, msg.priority);
 }
@@ -137,7 +137,7 @@ void test_over_temperature_alarm_message(void) {
 void test_under_temperature_alarm_message(void) {
   TEST_ASSERT_TRUE(build(NOTIFY_ALARM_UNDER, 1, 0, 8.5f, 10.0f));
   TEST_ASSERT_EQUAL_STRING("Temperature alarm", msg.title);
-  TEST_ASSERT_EQUAL_STRING("Lager fridge: 8.50 C is below the 10.0 C limit.", msg.body);
+  TEST_ASSERT_EQUAL_STRING("Lager fridge: 8.50 °C is below the 10.0 °C limit.", msg.body);
 }
 
 void test_severe_alarm_is_urgent_and_says_so(void) {
@@ -150,19 +150,19 @@ void test_severe_alarm_is_urgent_and_says_so(void) {
 // sent as "29.0 C is above the 29.0 C limit" when both had one decimal place
 void test_a_reading_just_past_its_limit_does_not_look_equal_to_it(void) {
   TEST_ASSERT_TRUE(build(NOTIFY_ALARM_OVER, 0, 0, 29.05f, 29.0f));
-  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 29.05 C is above the 29.0 C limit.", msg.body);
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 29.05 °C is above the 29.0 °C limit.", msg.body);
 }
 
 void test_alarm_message_uses_fahrenheit_when_the_controller_does(void) {
   g_globalConfig.unit = 2;   // Fahrenheit
   TEST_ASSERT_TRUE(build(NOTIFY_ALARM_OVER, 0, 0, 30.0f, 25.0f));
-  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 86.00 F is above the 77.0 F limit.", msg.body);
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 86.00 °F is above the 77.0 °F limit.", msg.body);
 }
 
 void test_alarm_ended_message_gives_the_temperature(void) {
   TEST_ASSERT_TRUE(build(NOTIFY_ALARM_ENDED, 0, 0, 20.1f));
   TEST_ASSERT_EQUAL_STRING("Temperature alarm ended", msg.title);
-  TEST_ASSERT_EQUAL_STRING("Fermenter 1: back within its limits at 20.10 C.", msg.body);
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: back within its limits at 20.10 °C.", msg.body);
   TEST_ASSERT_EQUAL_STRING("white_check_mark", msg.tags);
   TEST_ASSERT_EQUAL_UINT8(3, msg.priority);
 }
@@ -319,7 +319,7 @@ void test_headings_fit_their_fields(void) {
 
 void test_extreme_numbers_are_kept_to_a_fixed_width(void) {
   TEST_ASSERT_TRUE(build(NOTIFY_ALARM_OVER, 0, 0, 3.0e38f, -3.0e38f));
-  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 999.90 C is above the -999.9 C limit.", msg.body);
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 999.90 °C is above the -999.9 °C limit.", msg.body);
   TEST_ASSERT_TRUE(build(NOTIFY_ISPINDEL_LOST, 1, 0, 3.0e38f));
   TEST_ASSERT_EQUAL_STRING("ispindel-4: no report for 99999 min. Its readings are no longer used.", msg.body);
 }
@@ -688,7 +688,7 @@ void test_a_notification_is_posted_as_ntfy_expects(void) {
 
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
   TEST_ASSERT_EQUAL_STRING("http://ntfy.sh/my-topic", g_httpTest.url);
-  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 32.00 C is above the 29.0 C limit.", g_httpTest.body);
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 32.00 °C is above the 29.0 °C limit.", g_httpTest.body);
   TEST_ASSERT_EQUAL_STRING(
     "Content-Type: text/plain; charset=utf-8\n"
     "Title: Severe temperature alarm\n"
