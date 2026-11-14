@@ -450,7 +450,7 @@ void buildFermenterJson(JsonDocument& doc, uint8_t i) {
     PressureReading reading = pressureCurrentReading();
     doc["PressureState"] = (unsigned)reading.state;
     doc["Pressure"]      = nullptr;
-    if (reading.state == PRESSURE_IN_RANGE || reading.state == PRESSURE_ABOVE_RANGE)
+    if (reading.state == PRESSURE_CALIBRATED || reading.state == PRESSURE_ESTIMATE)
       doc["Pressure"] = reading.psi;
   }
 }
@@ -2185,7 +2185,7 @@ void handlePressure(ESP8266WebServer& server) {
   doc["state"] = (unsigned)reading.state;
   doc["raw"] = reading.raw;
   doc["psi"] = nullptr;
-  if (reading.state == PRESSURE_IN_RANGE || reading.state == PRESSURE_ABOVE_RANGE)
+  if (reading.state == PRESSURE_CALIBRATED || reading.state == PRESSURE_ESTIMATE)
     doc["psi"] = reading.psi;
   doc["enabled"] = g_pressureEnabled;
   doc["active"] = g_pressureCapture.active;

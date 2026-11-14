@@ -39,14 +39,14 @@ PressureReading pressureConvert(const PressureCalibration& calibration, uint16_t
     return reading;
   }
   if (raw + PRESSURE_ZERO_MARGIN < calibration.points[0].raw) {
-    reading.state = PRESSURE_BELOW_RANGE;
+    reading.state = PRESSURE_BELOW_ZERO;
     return reading;
   }
 
   // Small excursions below the averaged zero point are ADC noise. Larger
-  // ones stay below range rather than being mistaken for an empty vessel.
+  // ones stay below zero rather than being mistaken for an empty vessel.
   if (raw <= calibration.points[0].raw) {
-    reading.state = PRESSURE_IN_RANGE;
+    reading.state = PRESSURE_CALIBRATED;
     reading.psi = 0.0f;
     return reading;
   }
@@ -59,7 +59,7 @@ PressureReading pressureConvert(const PressureCalibration& calibration, uint16_t
   const PressurePoint& low  = calibration.points[upper - 1];
   const PressurePoint& high = calibration.points[upper];
   reading.psi = low.psi + (high.psi - low.psi) * (raw - low.raw) / (high.raw - low.raw);
-  reading.state = raw > calibration.points[last].raw ? PRESSURE_ABOVE_RANGE : PRESSURE_IN_RANGE;
+  reading.state = raw > calibration.points[last].raw ? PRESSURE_ESTIMATE : PRESSURE_CALIBRATED;
   return reading;
 }
 

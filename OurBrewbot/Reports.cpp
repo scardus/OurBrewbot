@@ -163,7 +163,7 @@ int reportBrewService(uint8_t i, uint8_t svcIndex) {
   // there is a usable value. Otherwise it is left out, never sent as 0.
   if (svc.pressureKey && g_pressureEnabled && g_fermenters[i].psiCollect) {
     PressureReading pressure = pressureCurrentReading();
-    if (pressure.state == PRESSURE_IN_RANGE || pressure.state == PRESSURE_ABOVE_RANGE) {
+    if (pressure.state == PRESSURE_CALIBRATED || pressure.state == PRESSURE_ESTIMATE) {
       doc[svc.pressureKey] = pressure.psi;
       if (svc.sendPressureUnit) doc["pressure_unit"] = "PSI";
     }

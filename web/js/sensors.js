@@ -145,7 +145,7 @@ function clearSensor(kind,index) {
 // sends as the state.
 const pressureStates = [
   {name:'Unavailable', badge:'quiet'},
-  {name:'Below range', badge:'warn'},
+  {name:'Below zero', badge:'warn'},
   {name:'Calibrated', badge:'good'},
   {name:'Estimate', badge:''},
   {name:'ADC limit', badge:'warn'}

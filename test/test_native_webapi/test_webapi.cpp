@@ -846,7 +846,7 @@ static void fillWorstFermenters(void) {
   // Only one fermenter can have the pressure sensor; give it the longest
   // reading text. No real conversion prints 13 characters, so set it directly.
   g_fermenters[0].psiCollect = true;
-  s_reading     = {PRESSURE_ABOVE_RANGE, 1022, LONG_FLOAT};
+  s_reading     = {PRESSURE_ESTIMATE, 1022, LONG_FLOAT};
   s_readingAt   = s_millis;
   s_haveReading = true;
 }
@@ -3391,7 +3391,7 @@ static void test_only_the_assigned_fermenter_reports_pressure(void) {
   JsonDocument assigned;
   buildFermenterJson(assigned, 0);
   TEST_ASSERT_TRUE(assigned["PressureAssigned"].as<bool>());
-  TEST_ASSERT_EQUAL(PRESSURE_IN_RANGE, assigned["PressureState"].as<int>());
+  TEST_ASSERT_EQUAL(PRESSURE_CALIBRATED, assigned["PressureState"].as<int>());
   TEST_ASSERT_EQUAL_FLOAT(0, assigned["Pressure"].as<float>());
   JsonDocument other;
   buildFermenterJson(other, 1);

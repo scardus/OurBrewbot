@@ -65,20 +65,20 @@ static void test_calibration_requires_atmospheric_zero_and_respects_sender_ratin
 static void test_five_points_use_the_middle_segment_and_include_the_highest_point(void) {
   calibration = {5, {{0,160}, {5,190}, {10,230}, {15,270}, {20,320}}};
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 12.5f, pressureConvert(calibration,250).psi);
-  TEST_ASSERT_EQUAL(PRESSURE_IN_RANGE, pressureConvert(calibration,320).state);
+  TEST_ASSERT_EQUAL(PRESSURE_CALIBRATED, pressureConvert(calibration,320).state);
 }
 
 static void test_a_small_dip_below_zero_is_noise_but_a_larger_dip_is_unavailable(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, pressureConvert(calibration,159).psi);
-  TEST_ASSERT_EQUAL(PRESSURE_IN_RANGE, pressureConvert(calibration,158).state);
-  TEST_ASSERT_EQUAL(PRESSURE_BELOW_RANGE, pressureConvert(calibration,157).state);
+  TEST_ASSERT_EQUAL(PRESSURE_CALIBRATED, pressureConvert(calibration,158).state);
+  TEST_ASSERT_EQUAL(PRESSURE_BELOW_ZERO, pressureConvert(calibration,157).state);
   TEST_ASSERT_TRUE(isnan(pressureConvert(calibration,157).psi));
 }
 
 static void test_interpolates_between_neighbouring_points(void) {
   calibration.points[2].raw = 310;
   PressureReading reading = pressureConvert(calibration, 250);
-  TEST_ASSERT_EQUAL(PRESSURE_IN_RANGE, reading.state);
+  TEST_ASSERT_EQUAL(PRESSURE_CALIBRATED, reading.state);
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 12.5f, reading.psi);
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 5.0f, pressureConvert(calibration, 190).psi);
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 20.0f, pressureConvert(calibration, 310).psi);
@@ -87,13 +87,13 @@ static void test_interpolates_between_neighbouring_points(void) {
 static void test_two_points_and_extrapolation(void) {
   calibration.count = 2;
   PressureReading reading = pressureConvert(calibration, 220);
-  TEST_ASSERT_EQUAL(PRESSURE_ABOVE_RANGE, reading.state);
+  TEST_ASSERT_EQUAL(PRESSURE_ESTIMATE, reading.state);
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 10.0f, reading.psi);
 }
 
-static void test_unavailable_below_range_and_adc_limit(void) {
-  TEST_ASSERT_EQUAL(PRESSURE_BELOW_RANGE, pressureConvert(calibration, 150).state);
-  TEST_ASSERT_EQUAL(PRESSURE_IN_RANGE, pressureConvert(calibration, 160).state);
+static void test_unavailable_below_zero_and_adc_limit(void) {
+  TEST_ASSERT_EQUAL(PRESSURE_BELOW_ZERO, pressureConvert(calibration, 150).state);
+  TEST_ASSERT_EQUAL(PRESSURE_CALIBRATED, pressureConvert(calibration, 160).state);
   TEST_ASSERT_EQUAL(PRESSURE_ADC_LIMIT, pressureConvert(calibration, 1023).state);
   TEST_ASSERT_TRUE(isnan(pressureConvert(calibration, 1023).psi));
   calibration.count = 0;
@@ -155,7 +155,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_small_dip_below_zero_is_noise_but_a_larger_dip_is_unavailable);
   RUN_TEST(test_interpolates_between_neighbouring_points);
   RUN_TEST(test_two_points_and_extrapolation);
-  RUN_TEST(test_unavailable_below_range_and_adc_limit);
+  RUN_TEST(test_unavailable_below_zero_and_adc_limit);
   // Freshness
   RUN_TEST(test_reading_expires_at_two_minutes_even_across_wrap);
   // Capture

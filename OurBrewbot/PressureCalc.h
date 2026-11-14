@@ -45,12 +45,15 @@ struct PressureCalibration {
 
 // The API sends these values as numbers, and pressureLabel() in the WebUI's
 // sensors.js picks its label by the same number. Only add new states at the end.
+// The states describe the reading against the calibration points. They avoid
+// the word "range" so they can't be mixed up with pressure limits the brewer
+// sets for a fermenter.
 enum PressureReadingState : uint8_t {
-  PRESSURE_UNAVAILABLE,
-  PRESSURE_BELOW_RANGE,
-  PRESSURE_IN_RANGE,
-  PRESSURE_ABOVE_RANGE,
-  PRESSURE_ADC_LIMIT,
+  PRESSURE_UNAVAILABLE,   // no calibration, or no reading yet
+  PRESSURE_BELOW_ZERO,    // well under the 0 PSI point: possibly a fault
+  PRESSURE_CALIBRATED,    // between the calibration points
+  PRESSURE_ESTIMATE,      // above the top point, so extrapolated
+  PRESSURE_ADC_LIMIT,     // the input is at full scale, so the pressure is unknown
 };
 
 struct PressureReading {
