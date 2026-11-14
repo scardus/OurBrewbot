@@ -2249,6 +2249,11 @@ void handlePressurePost(ESP8266WebServer& server) {
       sendErr(server, 400, F("Apply a valid pressure calibration before assigning a fermenter"));
       return;
     }
+    // Changing the assignment would clear the draft, so ask the user to resolve it first.
+    if (g_pressureDraft.count && !switchingOff) {
+      sendErr(server, 409, F("Apply or discard new calibration points before changing the assignment"));
+      return;
+    }
     g_pressureEnabled = doc["enabled"] | g_pressureEnabled;
     for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenters[i].psiCollect = (i == index);
     pressureResetRuntime();

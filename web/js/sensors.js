@@ -356,7 +356,7 @@ function updatePressureControls() {
   const settings=$('form[data-form="pressure"]');
   settings.elements.fermenter.disabled=saving || !actions.assign;
   $('[data-save]',settings).disabled=saving || settings.dataset.dirty!=='true' ||
-    (!!p.active && settings.elements.enabled.checked);
+    (pressureHasNewPoints(p) && settings.elements.enabled.checked);
   $('[data-pressure-assignment]').textContent=actions.assign?'Assignment is optional. Unassigned sensors still show local readings.':
     (p.points||[]).length<2?'Apply a calibration before assigning a fermenter.':'Apply or discard new points before changing the assignment.';
 }

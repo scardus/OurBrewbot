@@ -1138,6 +1138,32 @@ test('pressure controls guide zero, higher points, retry, apply and switching of
   assert.equal(nodes['[data-pressure-start]'].disabled,true);
 });
 
+test('a pending assignment waits for new pressure points to be applied or discarded',()=>{
+  const {run,settings,nodes}=pressureControlsUI();
+  run('state.pressure.points=[{psi:0,raw:160},{psi:20,raw:280}]; updatePressureControls();');
+  settings.elements.fermenter.value='1';
+  settings.dataset.dirty='true';
+  run('state.pressure.draft=[{psi:0,raw:165}]; updatePressureControls();');
+  assert.equal(nodes['[data-save]'].disabled,true);
+  assert.equal(settings.elements.fermenter.disabled,true);
+  assert.equal(settings.elements.fermenter.value,'1');
+  run('state.pressure.draft.push({psi:20,raw:285}); updatePressureControls();');
+  assert.equal(nodes['[data-save]'].disabled,true);
+  // Applying or discarding the new points empties the draft.
+  run('state.pressure.draft=[]; updatePressureControls();');
+  assert.equal(nodes['[data-save]'].disabled,false);
+  assert.equal(settings.elements.fermenter.disabled,false);
+  assert.equal(settings.elements.fermenter.value,'1');
+});
+
+test('switching pressure off can still discard completed draft points',()=>{
+  const {run,settings,nodes}=pressureControlsUI();
+  settings.dataset.dirty='true';
+  settings.elements.enabled.checked=false;
+  run('state.pressure.draft=[{psi:0,raw:160}]; updatePressureControls();');
+  assert.equal(nodes['[data-save]'].disabled,false);
+});
+
 test('zero capture is submitted once without an assignment or a dirty form',async()=>{
   const {run}=pressureControlsUI();
   run("var posts=[]; request=async(path,options)=>{if(options.method==='POST'){posts.push(JSON.parse(options.body));return {data:{msg:'Started'}};}return {data:{enabled:true,active:true,capturePsi:0,samples:1,draft:[]}};}; updatePressureReadings=()=>{};");

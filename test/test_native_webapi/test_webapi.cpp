@@ -3528,6 +3528,70 @@ static void test_pressure_assignment_requires_applied_calibration(void) {
   TEST_ASSERT_EQUAL_UINT8(2, g_pressureDraft.count);
 }
 
+static void test_pressure_assignment_keeps_unapplied_points_and_writes_nothing(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  g_pressureDraft = {2, {{0,165}, {20,285}}};
+  g_fermenters[0].psiCollect = true;
+  const char* requests[] = {
+    "{\"action\":\"assign\",\"fermenter\":1,\"enabled\":true}",
+    "{\"action\":\"assign\",\"fermenter\":99}"
+  };
+  int writes = g_fsWriteCount;
+  for (const char* body : requests) {
+    httpRespReset();
+    postBody(body);
+    handlePressurePost(srv);
+    TEST_ASSERT_EQUAL_INT(409, g_httpResp.code);
+    TEST_ASSERT_TRUE(bodyContains("Apply or discard new calibration points"));
+    TEST_ASSERT_EQUAL_INT(writes, g_fsWriteCount);
+    httpRespReset();
+    handlePressure(srv);
+    JsonDocument doc;
+    parseResponse(doc);
+    TEST_ASSERT_TRUE(doc["enabled"].as<bool>());
+    TEST_ASSERT_EQUAL_INT(0, doc["fermenter"].as<int>());
+    TEST_ASSERT_EQUAL_UINT(2, doc["points"].size());
+    TEST_ASSERT_EQUAL_UINT(2, doc["draft"].size());
+    TEST_ASSERT_EQUAL_UINT16(160, doc["points"][0]["raw"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_UINT16(280, doc["points"][1]["raw"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_UINT16(165, doc["draft"][0]["raw"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_UINT16(285, doc["draft"][1]["raw"].as<uint16_t>());
+  }
+}
+
+static void test_pressure_assignment_succeeds_after_applying_or_discarding_points(void) {
+  const char* actions[] = { "{\"action\":\"apply\"}", "{\"action\":\"cancel\"}" };
+  for (const char* action : actions) {
+    g_pressureCalibration = {2, {{0,160}, {20,280}}};
+    g_pressureDraft = {2, {{0,165}, {20,285}}};
+    httpRespReset();
+    postBody(action);
+    handlePressurePost(srv);
+    TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+    TEST_ASSERT_EQUAL_UINT8(0, g_pressureDraft.count);
+    httpRespReset();
+    postBody("{\"action\":\"assign\",\"fermenter\":1,\"enabled\":true}");
+    handlePressurePost(srv);
+    TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+    TEST_ASSERT_EQUAL_INT(1, pressureFermenter());
+  }
+}
+
+static void test_switching_pressure_off_discards_completed_draft_points(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  g_pressureDraft = {2, {{0,165}, {20,285}}};
+  g_fermenters[0].psiCollect = true;
+  postBody("{\"action\":\"assign\",\"fermenter\":0,\"enabled\":false}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_pressureEnabled);
+  TEST_ASSERT_EQUAL_UINT8(0, g_pressureDraft.count);
+  TEST_ASSERT_EQUAL_INT(0, pressureFermenter());
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureCalibration.count);
+  TEST_ASSERT_EQUAL_UINT16(160, g_pressureCalibration.points[0].raw);
+  TEST_ASSERT_EQUAL_UINT16(280, g_pressureCalibration.points[1].raw);
+}
+
 static void test_pressure_capture_refusals_say_what_to_fix(void) {
   postBody("{\"action\":\"capture\",\"psi\":5}");
   handlePressurePost(srv);
@@ -3858,6 +3922,9 @@ int main(int, char**) {
   RUN_TEST(test_pressure_api_uses_the_unassigned_value_for_no_fermenter);
   RUN_TEST(test_pressure_capture_refusals_say_what_to_fix);
   RUN_TEST(test_pressure_assignment_requires_applied_calibration);
+  RUN_TEST(test_pressure_assignment_keeps_unapplied_points_and_writes_nothing);
+  RUN_TEST(test_pressure_assignment_succeeds_after_applying_or_discarding_points);
+  RUN_TEST(test_switching_pressure_off_discards_completed_draft_points);
   RUN_TEST(test_pressure_progress_survives_wrap_and_waits_for_actual_samples);
   RUN_TEST(test_failed_pressure_point_keeps_completed_points_and_can_be_retried);
   RUN_TEST(test_switching_pressure_off_stops_capture_and_hides_fermenter_readings);
