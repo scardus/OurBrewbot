@@ -40,6 +40,11 @@ TiltConfig      g_tilts[MAX_TILTS];
 GlobalConfig    g_globalConfig;
 NotifyConfig    g_notifyConfig;
 UpdateStatus    g_updateStatus;
+bool            g_pressureEnabled = true;
+
+// ---- which fermenter has the pressure sensor (Pressure.cpp), settable per test ----
+static int s_pressureFermenter = 0;
+int pressureFermenter() { return s_pressureFermenter; }
 
 // ---- the uptime clock (Uptime.cpp), settable per test ----
 static uint32_t s_uptimeSec = 0;
@@ -113,6 +118,9 @@ void setUp(void) {
   memset(s_problemMinutes, 0, sizeof(s_problemMinutes));
   memset(s_alarmReading, 0, sizeof(s_alarmReading));
   memset(s_profileFinishedAt, 0, sizeof(s_profileFinishedAt));
+  s_pressureFault     = PRESSURE_BELOW_ZERO;
+  g_pressureEnabled   = true;   // and assigned to fermenter 1, like the other sensors
+  s_pressureFermenter = 0;
   s_restartCode = NO_RESTART;
   s_bootId      = 0x0BADF00D;
 
@@ -216,6 +224,33 @@ void test_tilt_messages(void) {
   TEST_ASSERT_EQUAL_STRING("Purple Tilt is reporting again. Its readings are used.", msg.body);
 }
 
+void test_pressure_sensor_messages(void) {
+  TEST_ASSERT_TRUE(build(NOTIFY_PRESSURE_FAULT, 0, PRESSURE_BELOW_ZERO));
+  TEST_ASSERT_EQUAL_STRING("Pressure sensor needs checking", msg.title);
+  TEST_ASSERT_EQUAL_STRING("warning", msg.tags);
+  TEST_ASSERT_EQUAL_UINT8(PRIORITY_HIGH, msg.priority);
+  TEST_ASSERT_EQUAL_STRING("The pressure sensor reads below its 0 PSI point. "
+                           "Check the sensor and its wiring. Its readings are no longer used.", msg.body);
+
+  TEST_ASSERT_TRUE(build(NOTIFY_PRESSURE_FAULT, 0, PRESSURE_ADC_LIMIT));
+  TEST_ASSERT_EQUAL_STRING("Pressure sensor needs checking", msg.title);
+  TEST_ASSERT_EQUAL_STRING("The pressure sensor input is at full scale. "
+                           "Check the sensor and its wiring. Its readings are no longer used.", msg.body);
+
+  TEST_ASSERT_TRUE(build(NOTIFY_PRESSURE_BACK));
+  TEST_ASSERT_EQUAL_STRING("Pressure sensor reading again", msg.title);
+  TEST_ASSERT_EQUAL_UINT8(PRIORITY_NORMAL, msg.priority);
+  TEST_ASSERT_EQUAL_STRING("The pressure sensor is reading again. Its readings are used.", msg.body);
+}
+
+// Only below zero and full scale are faults; any other state builds nothing
+void test_a_pressure_state_that_is_not_a_fault_builds_nothing(void) {
+  TEST_ASSERT_FALSE(build(NOTIFY_PRESSURE_FAULT, 0, PRESSURE_UNAVAILABLE));
+  TEST_ASSERT_FALSE(build(NOTIFY_PRESSURE_FAULT, 0, PRESSURE_CALIBRATED));
+  TEST_ASSERT_FALSE(build(NOTIFY_PRESSURE_FAULT, 0, PRESSURE_ESTIMATE));
+  TEST_ASSERT_FALSE(build(NOTIFY_PRESSURE_FAULT, 0, 255));
+}
+
 void test_restart_message_names_the_cause(void) {
   TEST_ASSERT_TRUE(build(NOTIFY_RESTART, 0, REASON_EXCEPTION_RST));
   TEST_ASSERT_EQUAL_STRING("Controller restarted", msg.title);
@@ -306,16 +341,22 @@ void test_worst_case_messages_all_fit_the_buffer(void) {
   const float huge = 3.0e38f;   // far outside any real reading; shown as 999.9
   size_t longest = 0;
   for (int type = NOTIFY_ALARM_OVER; type <= NOTIFY_TEST; type++) {
+    if (type == NOTIFY_PRESSURE_FAULT) continue;   // its detail picks the text: checked below
     TEST_ASSERT_TRUE_MESSAGE(build((NotifyEvent)type, 0, 255, -huge, -huge), "negative extreme");
     if (strlen(msg.body) > longest) longest = strlen(msg.body);
     TEST_ASSERT_TRUE_MESSAGE(build((NotifyEvent)type, 0, 255, huge, huge), "positive extreme");
     if (strlen(msg.body) > longest) longest = strlen(msg.body);
   }
-  // The longest today: an iSpindel that stopped reporting, 82 characters.
+  const uint8_t pressureFaults[] = { PRESSURE_BELOW_ZERO, PRESSURE_ADC_LIMIT };
+  for (uint8_t fault : pressureFaults) {
+    TEST_ASSERT_TRUE_MESSAGE(build(NOTIFY_PRESSURE_FAULT, 0, fault), "pressure fault");
+    if (strlen(msg.body) > longest) longest = strlen(msg.body);
+  }
+  // The longest today: a pressure sensor reading below zero, 114 characters.
   // The titles and tags have fixed-size fields too: the longest title is
   // "Temperature probe responding again" (34), the longest tag
   // "white_check_mark" (16) - see test_headings_fit_their_fields.
-  TEST_ASSERT_EQUAL_UINT(82, longest);
+  TEST_ASSERT_EQUAL_UINT(114, longest);
   TEST_ASSERT_TRUE(longest < NOTIFY_BODY_SIZE);
 }
 
@@ -368,6 +409,8 @@ void test_each_kind_of_event_follows_its_own_tick_box(void) {
     { NOTIFY_ISPINDEL_BACK,    NOTIFY_EVT_SENSORS  },
     { NOTIFY_TILT_LOST,        NOTIFY_EVT_SENSORS  },
     { NOTIFY_TILT_BACK,        NOTIFY_EVT_SENSORS  },
+    { NOTIFY_PRESSURE_FAULT,   NOTIFY_EVT_SENSORS  },
+    { NOTIFY_PRESSURE_BACK,    NOTIFY_EVT_SENSORS  },
     { NOTIFY_RESTART,          NOTIFY_EVT_RESTARTS },
     { NOTIFY_STEP_COMPLETE,    NOTIFY_EVT_PROFILE  },
     { NOTIFY_PROFILE_FINISHED, NOTIFY_EVT_PROFILE  },
@@ -634,6 +677,44 @@ void test_switching_sensor_notifications_on_reports_a_sensor_already_lost(void) 
   TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
 }
 
+// pressureLoop() checks the sensor once a minute
+void test_a_pressure_fault_is_reported_once_and_back_after_ten_minutes(void) {
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_BELOW_ZERO);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_PRESSURE_FAULT, s_queue[0].event.type);
+  TEST_ASSERT_EQUAL_UINT8(PRESSURE_BELOW_ZERO, s_queue[0].event.detail);
+
+  // Still faulty, and now at full scale too: the same episode, so nothing more
+  for (int n = 0; n < 5; n++) {
+    s_uptimeSec += 60;
+    notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_ADC_LIMIT);
+  }
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+
+  // Reading again: "back" only after ten steady minutes
+  for (int n = 0; n < 10; n++) {
+    s_uptimeSec += 60;
+    notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, false, 0.0f, PRESSURE_CALIBRATED);
+  }
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);   // ten minutes after the first good reading is the next one
+  s_uptimeSec += 60;
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, false, 0.0f, PRESSURE_CALIBRATED);
+  TEST_ASSERT_EQUAL_UINT8(2, s_queueCount);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_PRESSURE_BACK, s_queue[1].event.type);
+}
+
+void test_a_pressure_fault_is_not_sent_when_sensor_problems_are_not_ticked(void) {
+  g_notifyConfig.events = NOTIFY_EVT_ALL & ~NOTIFY_EVT_SENSORS;
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_ADC_LIMIT);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+}
+
+// There is only one pressure sensor
+void test_a_pressure_sensor_past_the_first_is_ignored(void) {
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 1, true, 0.0f, PRESSURE_ADC_LIMIT);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+}
+
 // ============================================================
 // RESTARTS
 // ============================================================
@@ -872,6 +953,37 @@ void test_a_lost_sensor_that_is_unassigned_has_no_alert(void) {
   TEST_ASSERT_EQUAL_INT(0, alertCount());
 }
 
+void test_a_pressure_fault_gives_an_alert_with_the_latest_fault(void) {
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_BELOW_ZERO);
+  TEST_ASSERT_TRUE(getAlert(TRACK_PRESSURE));
+  TEST_ASSERT_EQUAL_INT(ALERT_SENSOR, alert.kind);
+  TEST_ASSERT_EQUAL_STRING("Pressure sensor needs checking", alert.message->title);
+  TEST_ASSERT_EQUAL_STRING("The pressure sensor reads below its 0 PSI point. "
+                           "Check the sensor and its wiring. Its readings are no longer used.", alert.message->body);
+
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_ADC_LIMIT);
+  TEST_ASSERT_TRUE(getAlert(TRACK_PRESSURE));
+  TEST_ASSERT_EQUAL_STRING("The pressure sensor input is at full scale. "
+                           "Check the sensor and its wiring. Its readings are no longer used.", alert.message->body);
+
+  // Reading again: the banner goes at once
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, false, 0.0f, PRESSURE_CALIBRATED);
+  TEST_ASSERT_FALSE(getAlert(TRACK_PRESSURE));
+}
+
+// pressureLoop() stops checking once the sensor is unassigned or switched off
+void test_a_pressure_fault_has_no_alert_once_unassigned_or_switched_off(void) {
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_ADC_LIMIT);
+  TEST_ASSERT_TRUE(getAlert(TRACK_PRESSURE));
+
+  s_pressureFermenter = -1;
+  TEST_ASSERT_FALSE(getAlert(TRACK_PRESSURE));
+
+  s_pressureFermenter = 0;
+  g_pressureEnabled   = false;
+  TEST_ASSERT_FALSE(getAlert(TRACK_PRESSURE));
+}
+
 void test_an_unexpected_restart_gives_an_alert_for_the_whole_boot(void) {
   notifyRestart(true, REASON_WDT_RST);
   TEST_ASSERT_TRUE(getAlert(SLOT_RESTART));
@@ -879,7 +991,7 @@ void test_an_unexpected_restart_gives_an_alert_for_the_whole_boot(void) {
   TEST_ASSERT_EQUAL_STRING("Controller restarted", alert.message->title);
   TEST_ASSERT_EQUAL_STRING("The controller restarted unexpectedly. Cause: hardware watchdog.", alert.message->body);
   TEST_ASSERT_EQUAL_UINT32(1000, alert.ageSeconds);   // seconds since boot
-  TEST_ASSERT_EQUAL_STRING("0BADF00D-28-0", alert.id);
+  TEST_ASSERT_EQUAL_STRING("0BADF00D-29-0", alert.id);
 
   s_uptimeSec += 3 * 86400;
   TEST_ASSERT_TRUE(getAlert(SLOT_RESTART));
@@ -948,9 +1060,9 @@ void test_a_new_release_gives_an_alert_named_after_the_version(void) {
 void test_the_longest_alert_ids_fit(void) {
   s_bootId    = 0xFFFFFFFF;
   s_uptimeSec = 0xFFFFFFFF;
-  notifySensorState(NOTIFY_SENSOR_TILT, MAX_TILTS - 1, true, 20.0f);
-  TEST_ASSERT_TRUE(getAlert(TRACK_TILTS + MAX_TILTS - 1));
-  TEST_ASSERT_EQUAL_STRING("FFFFFFFF-23-4294967295", alert.id);
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_ADC_LIMIT);   // the last tracker
+  TEST_ASSERT_TRUE(getAlert(TRACK_PRESSURE));
+  TEST_ASSERT_EQUAL_STRING("FFFFFFFF-24-4294967295", alert.id);
 
   memset(g_updateStatus.latestVersion, '9', sizeof(g_updateStatus.latestVersion) - 1);
   g_updateStatus.updateAvailable = true;
@@ -964,6 +1076,7 @@ void test_every_kind_of_alert_at_once(void) {
   for (int i = 0; i < MAX_PROBES; i++)     notifySensorState(NOTIFY_SENSOR_PROBE, i, true);
   for (int i = 0; i < MAX_ISPINDELS; i++)  notifySensorState(NOTIFY_SENSOR_ISPINDEL, i, true, 30.0f);
   for (int i = 0; i < MAX_TILTS; i++)      notifySensorState(NOTIFY_SENSOR_TILT, i, true, 30.0f);
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_BELOW_ZERO);
   notifyRestart(false, REASON_DEFAULT_RST);
   strlcpy(g_updateStatus.latestVersion, "0.11.0", sizeof(g_updateStatus.latestVersion));
   g_updateStatus.updateAvailable = true;
@@ -1166,6 +1279,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_probe_messages);
   RUN_TEST(test_ispindel_messages);
   RUN_TEST(test_tilt_messages);
+  RUN_TEST(test_pressure_sensor_messages);
+  RUN_TEST(test_a_pressure_state_that_is_not_a_fault_builds_nothing);
   RUN_TEST(test_restart_message_names_the_cause);
   RUN_TEST(test_profile_messages);
   RUN_TEST(test_update_message_names_both_versions);
@@ -1201,6 +1316,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_the_same_index_of_different_sensor_kinds_is_tracked_apart);
   RUN_TEST(test_the_last_sensor_of_each_kind_has_a_tracker);
   RUN_TEST(test_switching_sensor_notifications_on_reports_a_sensor_already_lost);
+  RUN_TEST(test_a_pressure_fault_is_reported_once_and_back_after_ten_minutes);
+  RUN_TEST(test_a_pressure_fault_is_not_sent_when_sensor_problems_are_not_ticked);
+  RUN_TEST(test_a_pressure_sensor_past_the_first_is_ignored);
 
   RUN_TEST(test_a_restart_after_a_crash_is_reported_with_its_reset_code);
   RUN_TEST(test_the_power_coming_back_on_is_reported);
@@ -1218,6 +1336,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_tracking_alerts_does_not_change_what_is_sent);
   RUN_TEST(test_a_lost_sensor_gives_an_alert_with_the_latest_minutes);
   RUN_TEST(test_a_lost_sensor_that_is_unassigned_has_no_alert);
+  RUN_TEST(test_a_pressure_fault_gives_an_alert_with_the_latest_fault);
+  RUN_TEST(test_a_pressure_fault_has_no_alert_once_unassigned_or_switched_off);
   RUN_TEST(test_an_unexpected_restart_gives_an_alert_for_the_whole_boot);
   RUN_TEST(test_a_restart_that_was_asked_for_gives_no_alert);
   RUN_TEST(test_alert_ids_change_after_a_restart);

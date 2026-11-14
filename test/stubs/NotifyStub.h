@@ -34,9 +34,10 @@ struct NotifyStubEvent {
 // The most recent notifySensorState() call for each sensor, and how many
 // there have been for it. Indexed [kind][index]; 8 covers every kind.
 struct NotifyStubSensor {
-  int   count;
-  bool  lost;
-  float minutes;
+  int     count;
+  bool    lost;
+  float   minutes;
+  uint8_t detail;
 };
 
 // The most recent notifyAlarmState() call for each fermenter
@@ -51,7 +52,7 @@ struct NotifyStubAlarm {
 
 static NotifyStubEvent g_notifyStubEvent;
 static NotifyStubAlarm g_notifyStubAlarm[4];   // one per fermenter (MAX_FERMENTERS)
-static NotifyStubSensor g_notifyStubSensor[3][8];
+static NotifyStubSensor g_notifyStubSensor[4][8];   // one row per NotifySensor kind
 static int g_notifyStubProfileStarts = 0;   // notifyProfileStarted() calls
 
 // The alerts GET /alerts lists. A test sets how many slots there are and
@@ -70,17 +71,18 @@ static void notifyStubReset() {
     g_notifyStubAlertMessages[i] = NotifyMessage{};
   }
   for (int i = 0; i < 4; i++) g_notifyStubAlarm[i] = NotifyStubAlarm{};
-  for (int k = 0; k < 3; k++) {
+  for (int k = 0; k < 4; k++) {
     for (int i = 0; i < 8; i++) g_notifyStubSensor[k][i] = NotifyStubSensor{};
   }
 }
 
-void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minutes) {
-  if (kind > NOTIFY_SENSOR_TILT || index >= 8) return;
+void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minutes, uint8_t detail) {
+  if (kind > NOTIFY_SENSOR_PRESSURE || index >= 8) return;
   NotifyStubSensor& sensor = g_notifyStubSensor[kind][index];
   sensor.count++;
   sensor.lost    = lost;
   sensor.minutes = minutes;
+  sensor.detail  = detail;
 }
 
 void notifyEvent(NotifyEvent type, uint8_t index, uint8_t detail, float a, float b) {

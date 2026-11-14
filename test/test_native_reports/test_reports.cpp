@@ -107,6 +107,7 @@ void setUp(void) {
   g_pressureEnabled = true;
   g_pressureCalibration = {};
   s_pressureAdc = 160;
+  notifyStubReset();
 }
 
 void tearDown(void) {}
@@ -455,6 +456,60 @@ void test_payload_leaves_out_pressure_without_a_usable_reading(void) {
   TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
 }
 
+// ---- what pressureLoop() tells the notifications (see Notify.h) ----
+
+// The last notifySensorState() call for the pressure sensor
+static NotifyStubSensor& pressureNotify() {
+  return g_notifyStubSensor[NOTIFY_SENSOR_PRESSURE][0];
+}
+
+void test_a_reading_below_zero_is_reported_as_a_pressure_fault(void) {
+  readPressure(F, 150);   // more than two counts below the 0 PSI point (160)
+  TEST_ASSERT_EQUAL_INT(1, pressureNotify().count);
+  TEST_ASSERT_TRUE(pressureNotify().lost);
+  TEST_ASSERT_EQUAL_UINT8(PRESSURE_BELOW_ZERO, pressureNotify().detail);
+}
+
+void test_an_input_at_full_scale_is_reported_as_a_pressure_fault(void) {
+  readPressure(F, 1023);
+  TEST_ASSERT_EQUAL_INT(1, pressureNotify().count);
+  TEST_ASSERT_TRUE(pressureNotify().lost);
+  TEST_ASSERT_EQUAL_UINT8(PRESSURE_ADC_LIMIT, pressureNotify().detail);
+}
+
+void test_calibrated_and_estimated_readings_are_not_pressure_faults(void) {
+  readPressure(F, 205);   // between the calibration points
+  TEST_ASSERT_EQUAL_INT(1, pressureNotify().count);
+  TEST_ASSERT_FALSE(pressureNotify().lost);
+
+  s_millis += 60000;      // the next reading is a minute later
+  readPressure(F, 400);   // above the top point: an estimate
+  TEST_ASSERT_EQUAL_INT(2, pressureNotify().count);
+  TEST_ASSERT_FALSE(pressureNotify().lost);
+}
+
+// As for the other sensors, only a sensor a fermenter uses is reported
+void test_an_unassigned_pressure_sensor_is_not_reported(void) {
+  g_pressureCalibration = {2, {{0, 160}, {20, 280}}};
+  s_pressureAdc = 1023;
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(0, pressureNotify().count);
+}
+
+void test_a_switched_off_pressure_sensor_is_not_reported(void) {
+  g_pressureEnabled = false;
+  readPressure(F, 1023);
+  TEST_ASSERT_EQUAL_INT(0, pressureNotify().count);
+}
+
+// With no calibration there is no reading to judge
+void test_an_uncalibrated_pressure_sensor_is_not_reported(void) {
+  g_fermenters[F].psiCollect = true;
+  s_pressureAdc = 1023;
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(0, pressureNotify().count);
+}
+
 void test_payload_names_the_fermenter_not_the_device(void) {
   // The service rate-limits per "name", so each fermenter reports under its
   // own name and the device name goes in device_source.
@@ -516,6 +571,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_payload_sends_pressure_only_for_the_fermenter_with_the_sensor);
   RUN_TEST(test_switching_pressure_off_omits_it_from_both_services);
   RUN_TEST(test_payload_leaves_out_pressure_without_a_usable_reading);
+  RUN_TEST(test_a_reading_below_zero_is_reported_as_a_pressure_fault);
+  RUN_TEST(test_an_input_at_full_scale_is_reported_as_a_pressure_fault);
+  RUN_TEST(test_calibrated_and_estimated_readings_are_not_pressure_faults);
+  RUN_TEST(test_an_unassigned_pressure_sensor_is_not_reported);
+  RUN_TEST(test_a_switched_off_pressure_sensor_is_not_reported);
+  RUN_TEST(test_an_uncalibrated_pressure_sensor_is_not_reported);
   RUN_TEST(test_payload_names_the_fermenter_not_the_device);
   RUN_TEST(test_payload_url_is_built_per_service);
   RUN_TEST(test_report_skipped_for_unconfigured_or_bad_slot);

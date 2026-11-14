@@ -16,6 +16,7 @@
 
 #include "Pressure.h"
 #include "Config.h"
+#include "Notify.h"
 #include "Pins.h"
 #include <math.h>
 
@@ -83,6 +84,16 @@ int pressureFermenter() {
   return -1;
 }
 
+// Tell the notifications (see Notify.h) whether the latest reading shows a
+// fault. Called after every new reading, and only while a fermenter uses the
+// sensor, as for the other sensors. With no calibration there is no reading
+// to judge, so nothing is reported.
+static void pressureReportToNotify() {
+  if (pressureFermenter() < 0 || s_reading.state == PRESSURE_UNAVAILABLE) return;
+  bool fault = (s_reading.state == PRESSURE_BELOW_ZERO || s_reading.state == PRESSURE_ADC_LIMIT);
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, fault, 0.0f, s_reading.state);
+}
+
 PressureReading pressureCurrentReading() {
   if (!g_pressureEnabled || !s_haveReading || !pressureReadingFresh(millis(), s_readingAt))
     return {PRESSURE_UNAVAILABLE, 0, NAN};
@@ -140,6 +151,7 @@ void pressureLoop() {
       s_reading = pressureConvert(g_pressureCalibration, raw);
       s_readingAt = now;
       s_haveReading = true;
+      pressureReportToNotify();
     }
   }
 }
