@@ -98,6 +98,7 @@ static int lastPlugState(uint8_t plugIndex) {
 // The functions under test, plus everything else in Fermenter.cpp.
 // This also brings the file-static s_state[]/s_lastCoolingStop[]/
 // s_outOfRangeSince[] arrays into scope below, for state reset between tests.
+#include <NotifyStub.h>   // records what Fermenter.cpp reports to the notifications
 #include "../../OurBrewbot/Fermenter.cpp"
 
 // ---- test fixture ----
@@ -105,6 +106,7 @@ static int lastPlugState(uint8_t plugIndex) {
 static const uint8_t F = 0;  // fermenter index used by most tests
 
 void setUp(void) {
+  notifyStubReset();
   for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenters[i] = FermenterConfig{};
   g_fermenters[F].power       = true;
   g_fermenters[F].tempControl = true;
@@ -437,6 +439,60 @@ void test_alarm_fires_immediately_on_severe_deviation(void) {
   s_controlTemp = 26.0f;  // 4.0 over ceiling >= 3.0 tolerance
   checkFermenterAlarm(F);
   TEST_ASSERT_TRUE(g_fermenters[F].alarm);
+}
+
+// ---- what the alarm check tells the notifications (see Notify.h) ----
+
+void test_alarm_check_reports_a_severe_over_temperature_alarm(void) {
+  g_fermenters[F].floorTemp      = 18.0f;
+  g_fermenters[F].ceilingTemp    = 22.0f;
+  g_fermenters[F].alarmTolerance = 3.0f;
+  s_controlTemp = 26.0f;
+  checkFermenterAlarm(F);
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubAlarm[F].count);
+  TEST_ASSERT_TRUE(g_notifyStubAlarm[F].active);
+  TEST_ASSERT_TRUE(g_notifyStubAlarm[F].overTemp);
+  TEST_ASSERT_TRUE(g_notifyStubAlarm[F].severe);
+  TEST_ASSERT_EQUAL_FLOAT(26.0f, g_notifyStubAlarm[F].temp);
+  TEST_ASSERT_EQUAL_FLOAT(22.0f, g_notifyStubAlarm[F].limit);   // the ceiling
+}
+
+void test_alarm_check_reports_a_mild_under_temperature_alarm_after_the_dwell(void) {
+  g_fermenters[F].floorTemp      = 18.0f;
+  g_fermenters[F].ceilingTemp    = 22.0f;
+  g_fermenters[F].alarmTolerance = 3.0f;
+  g_globalConfig.alarmDwellSec   = 60;
+  s_controlTemp = 17.0f;
+  uint32_t t = 1000000;
+  test_setMillis(t);
+  checkFermenterAlarm(F);
+  TEST_ASSERT_FALSE(g_notifyStubAlarm[F].active);   // still inside the dwell
+
+  test_setMillis(t + 60001);
+  checkFermenterAlarm(F);
+  TEST_ASSERT_TRUE(g_notifyStubAlarm[F].active);
+  TEST_ASSERT_FALSE(g_notifyStubAlarm[F].overTemp);
+  TEST_ASSERT_FALSE(g_notifyStubAlarm[F].severe);
+  TEST_ASSERT_EQUAL_FLOAT(17.0f, g_notifyStubAlarm[F].temp);
+  TEST_ASSERT_EQUAL_FLOAT(18.0f, g_notifyStubAlarm[F].limit);   // the floor
+}
+
+void test_alarm_check_reports_no_alarm_with_the_reading_when_in_band(void) {
+  g_fermenters[F].floorTemp   = 18.0f;
+  g_fermenters[F].ceilingTemp = 22.0f;
+  s_controlTemp = 20.0f;
+  checkFermenterAlarm(F);
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubAlarm[F].count);
+  TEST_ASSERT_FALSE(g_notifyStubAlarm[F].active);
+  TEST_ASSERT_EQUAL_FLOAT(20.0f, g_notifyStubAlarm[F].temp);
+}
+
+void test_alarm_check_reports_no_alarm_and_no_reading_when_powered_off(void) {
+  g_fermenters[F].power = false;
+  checkFermenterAlarm(F);
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubAlarm[F].count);
+  TEST_ASSERT_FALSE(g_notifyStubAlarm[F].active);
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_notifyStubAlarm[F].temp);
 }
 
 void test_alarm_does_not_fire_immediately_on_mild_deviation(void) {
@@ -1036,6 +1092,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_alarm_clears_when_in_band);
   RUN_TEST(test_alarm_fires_immediately_on_severe_deviation);
   RUN_TEST(test_alarm_does_not_fire_immediately_on_mild_deviation);
+  RUN_TEST(test_alarm_check_reports_a_severe_over_temperature_alarm);
+  RUN_TEST(test_alarm_check_reports_a_mild_under_temperature_alarm_after_the_dwell);
+  RUN_TEST(test_alarm_check_reports_no_alarm_with_the_reading_when_in_band);
+  RUN_TEST(test_alarm_check_reports_no_alarm_and_no_reading_when_powered_off);
   RUN_TEST(test_alarm_fires_after_dwell_elapses);
   RUN_TEST(test_alarm_dwell_resets_on_return_to_band);
   RUN_TEST(test_alarm_dwell_is_kept_across_the_millis_wrap);

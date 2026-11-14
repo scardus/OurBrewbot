@@ -121,6 +121,10 @@ const actionHandlers = {
   reconnect:()=>refreshForms(),
   pause:()=>{ state.refreshPaused=!state.refreshPaused; render(); },
   'close-modal':()=>$('#modal').close(),
+  // Alert banners.
+  'close-alert':(index,value)=>closeAlert(value),
+  'toggle-alerts':()=>{ bannersExpanded=!bannersExpanded; renderBanners(); },
+  'open-firmware':()=>{ state.systemTab='update'; location.hash='system'; return loadRoute(); },
   'discard-form':(index,value,button)=>discardForm(button.closest('form')),
   // Fermenters.
   'edit-ferm':index=>openFerm(index),
@@ -147,6 +151,7 @@ const actionHandlers = {
   'test-service':index=>postAndShowReply('/brewservices/test',{index}),
   'test-mqtt':()=>postAndShowReply('/mqtt/test',{}),
   discover:()=>postAndShowReply('/mqtt/discover',{}),
+  'test-notify':()=>postAndShowReply('/notify/test',{}),
   // System.
   'system-tab':(index,value)=>selectTab('systemTab',value),
   'open-rf':()=>{ state.systemTab='rf'; location.hash='system'; return loadRoute(); },

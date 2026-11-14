@@ -27,6 +27,7 @@
 #include "Fermenter.h"
 #include "Temperatures.h"
 #include "Reports.h"
+#include "Notify.h"
 #include "iSpindel.h"
 #include "SmartPlugs.h"
 #include "Pins.h"
@@ -49,6 +50,9 @@ void handleBLESniffPoll(ESP8266WebServer& server);
 void handleBLESniffSend(ESP8266WebServer& server);
 void handleSyslogConfig(ESP8266WebServer& server);
 void handleSyslogConfigPost(ESP8266WebServer& server);
+void handleNotifyConfig(ESP8266WebServer& server);
+void handleNotifyConfigPost(ESP8266WebServer& server);
+void handleNotifyTest(ESP8266WebServer& server);
 static bool otaUploadInstalled();
 static bool otaUploadRefused();
 static void otaUploadClear();
@@ -144,6 +148,7 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/pressure",         HTTP_GET,  handlePressure,           false },
   { "/pressure",         HTTP_POST, handlePressurePost,       true  },
   { "/health",           HTTP_GET,  handleHealth,             true  },
+  { "/alerts",           HTTP_GET,  handleAlerts,             false },   // polled by every WebUI page
   { "/logs",             HTTP_GET,  handleLogs,               false },
   { "/admin",            HTTP_GET,  handleAdmin,              true  },
   { "/smartplugs",       HTTP_GET,  handleSmartPlugs,         true  },
@@ -163,6 +168,9 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/mqtt/discover",    HTTP_POST, handleMqttDiscover,       true  },
   { "/syslog",           HTTP_GET,  handleSyslogConfig,       true  },
   { "/syslog",           HTTP_POST, handleSyslogConfigPost,   true  },
+  { "/notify",           HTTP_GET,  handleNotifyConfig,       true  },
+  { "/notify",           HTTP_POST, handleNotifyConfigPost,   true  },
+  { "/notify/test",      HTTP_POST, handleNotifyTest,         true  },
   { "/debug",            HTTP_GET,  handleDebug,              true  },
   { "/debug",            HTTP_POST, handleDebug,              true  },
   { "/profiles",         HTTP_GET,  handleProfiles,           true  },
@@ -242,7 +250,7 @@ void setupWebServer(ESP8266WebServer& server) {
         holdPlugsOff(false);   // no restart is coming: the control loop takes over again
         String err = "Update FAILED: ";
         if (otaUploadRefused())     err += F("this is not a complete OurBrewbot firmware file");
-        else if (Update.hasError()) err += Update.getError();
+        else if (Update.hasError()) err += Update.getErrorString();
         else                        err += F("no firmware file was received");
         otaUploadClear();   // so the next request isn't answered with this one's result
         server.send(500, "text/html", err);
@@ -331,6 +339,38 @@ static int getValidIndex(ESP8266WebServer& server, const JsonDocument& doc,
     return -1;
   }
   return idx;
+}
+
+// Calibration offsets are small corrections to a sensor's reading. A typo
+// such as 10 for 1.0 used to be stored as given, and as the offset moves the
+// control temperature, heating or cooling then ran the wrong way.
+#define MAX_TEMP_ADJUST_C  10.0f    // degrees C either way (18 F)
+#define MAX_SG_ADJUST      0.050f   // gravity either way
+
+// Reads an optional "tempAdjust" (in the display unit) into adjustC, in
+// Celsius. Sends the 400 error and returns false if it is out of range; a
+// missing field leaves adjustC as it was.
+static bool readTempAdjust(ESP8266WebServer& server, const JsonDocument& doc, float& adjustC) {
+  if (doc["tempAdjust"].isNull()) return true;
+  float v = toCelsiusTempDelta((float)doc["tempAdjust"]);   // a span, not absolute
+  if (!isfinite(v) || fabsf(v) > MAX_TEMP_ADJUST_C) {
+    sendErr(server, 400, F("temperature offset out of range (-10 to 10 C)"));
+    return false;
+  }
+  adjustC = v;
+  return true;
+}
+
+// The same for an optional "sgAdjust"
+static bool readSgAdjust(ESP8266WebServer& server, const JsonDocument& doc, float& adjust) {
+  if (doc["sgAdjust"].isNull()) return true;
+  float v = doc["sgAdjust"];
+  if (!isfinite(v) || fabsf(v) > MAX_SG_ADJUST) {
+    sendErr(server, 400, F("gravity offset out of range (-0.050 to 0.050)"));
+    return false;
+  }
+  adjust = v;
+  return true;
 }
 
 // ============================================================
@@ -533,13 +573,23 @@ void handleFermenter(ESP8266WebServer& server) {
       fc.alarmTolerance = v;
     }
 
-    if (!doc["Power"].isNull())           fc.power           = doc["Power"];
+    if (!doc["ProfileNo"].isNull()) {
+      int v = doc["ProfileNo"];
+      if (v >= 0 && v <= MAX_PROFILES) {
+        if (!profileNoChangeAllowed(idx, (uint8_t)v)) {
+          sendErr(server, 400, F("Stop the running profile before choosing another"));
+          return;
+        }
+        fc.profileNo = (uint8_t)v;
+      }
+    }
+
+    if (!doc["Power"].isNull())         fc.power           = doc["Power"];
     if (!doc["TempControl"].isNull())     fc.tempControl     = doc["TempControl"];
     if (doc["BeerName"].is<const char*>())      copyText(fc.beerName,      doc["BeerName"].as<const char*>(),      sizeof(fc.beerName));
     if (doc["FermenterName"].is<const char*>()) copyText(fc.fermenterName, doc["FermenterName"].as<const char*>(), sizeof(fc.fermenterName));
     if (doc["YeastName"].is<const char*>())     copyText(fc.yeastName,     doc["YeastName"].as<const char*>(),     sizeof(fc.yeastName));
     if (!doc["BrewServices"].isNull())    fc.brewServices    = doc["BrewServices"];
-    if (!doc["ProfileNo"].isNull())       { int v = doc["ProfileNo"]; if (v >= 0 && v <= MAX_PROFILES) fc.profileNo = (uint8_t)v; }
     if (!doc["LiveTest"].isNull())        fc.liveTest        = doc["LiveTest"];
 
     // Single commit point: nothing above this line is visible to the
@@ -670,7 +720,7 @@ void handleController(ESP8266WebServer& server) {
     if (!doc["UpdateCheck"].isNull())   g_globalConfig.updateCheck   = doc["UpdateCheck"];
     if (!doc["CrashReports"].isNull())  g_globalConfig.crashReports  = doc["CrashReports"];
     if (!doc["NotifyOn"].isNull())      g_globalConfig.notifyOn      = doc["NotifyOn"];
-    if (!doc["BrewService"].isNull())   g_globalConfig.brewService   = doc["BrewService"];
+    if (!doc["BrewService"].isNull())   { uint8_t v = doc["BrewService"]; if (v <= BREW_SERVICE_MQTT) g_globalConfig.brewService = v; }
     if (doc["BrewServiceId"].is<const char*>()) copyText(g_globalConfig.brewServiceId, doc["BrewServiceId"].as<const char*>(), sizeof(g_globalConfig.brewServiceId));
     bool saved = saveGlobalConfig();
     // HA discovery advertises the temperature unit — republish so entities
@@ -801,6 +851,64 @@ void handleHealth(ESP8266WebServer& server) {
   doc["ip"]          = WiFi.localIP().toString();
   doc["resetReason"] = ESP.getResetReason();
   sendJsonDoc(server, doc);
+}
+
+// ============================================================
+// ALERTS — GET /alerts
+//
+// The banners at the top of the WebUI: alarms and sensor problems going on
+// now, an unexpected restart, finished profiles and a new firmware release.
+// Notify.cpp keeps them and builds their text (see Notify.h).
+//
+//   {"boot":"0BADF00D",
+//    "alerts":[{"id":"0BADF00D-1-1000","kind":"alarm","age":90,
+//               "title":"Temperature alarm","text":"Fermenter 2: ..."}]}
+//
+// id stays the same for as long as one occurrence lasts, so a banner the
+// brewer closed stays closed; age is in seconds. boot is this boot's id,
+// which every id except a firmware release's starts with: the WebUI forgets
+// closed banners from earlier boots.
+// ============================================================
+
+// The name the WebUI knows each kind of alert by
+static PGM_P alertKindName(NotifyAlertKind kind) {
+  switch (kind) {
+    case ALERT_ALARM:   return PSTR("alarm");
+    case ALERT_SENSOR:  return PSTR("sensor");
+    case ALERT_RESTART: return PSTR("restart");
+    case ALERT_PROFILE: return PSTR("profile");
+    case ALERT_UPDATE:  return PSTR("update");
+  }
+  return PSTR("unknown");
+}
+
+void handleAlerts(ESP8266WebServer& server) {
+  // One chunk per alert, like /fermenters. The largest is about 400 bytes:
+  // a 127-byte text with every character escaped to 2, the 39-byte title,
+  // the 27-byte id and the key names.
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  char head[32];   // {"boot":"XXXXXXXX","alerts":[ is 30 characters
+  int headLen = snprintf_P(head, sizeof(head), PSTR("{\"boot\":\"%08lX\",\"alerts\":["), (unsigned long)logBootId());
+  server.sendContent(head, headLen);
+  bool first = true;
+  for (uint8_t slot = 0; slot < notifyAlertSlotCount(); slot++) {
+    NotifyAlert alert;
+    if (!notifyGetAlert(slot, alert)) continue;
+    if (!first) server.sendContent_P(PSTR(","));
+    first = false;
+
+    JsonDocument doc;
+    doc["id"]    = alert.id;
+    doc["kind"]  = FPSTR(alertKindName(alert.kind));
+    doc["age"]   = alert.ageSeconds;
+    doc["title"] = alert.message->title;
+    doc["text"]  = alert.message->body;
+    size_t n = serializeJson(doc, s_chunkBuf, sizeof(s_chunkBuf));
+    server.sendContent(s_chunkBuf, n);
+  }
+  server.sendContent_P(PSTR("]}"));
+  server.sendContent("");  // end chunked transfer
 }
 
 // ============================================================
@@ -955,15 +1063,14 @@ void handleOTAUpload(ESP8266WebServer& server) {
     firmwareCheckStart(s_otaCheck);
     s_otaInstalled = false;
     s_otaRefused   = false;
+    // If begin() or a write() fails, the updater keeps the reason, and
+    // Update.end(true) below then fails too and logs it. Logging each failed
+    // write would add a line for every chunk of the file.
     uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-    if (!Update.begin(maxSketchSpace)) {
-      Update.printError(Serial);
-    }
+    Update.begin(maxSketchSpace);
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     firmwareCheckAdd(s_otaCheck, upload.buf, upload.currentSize);
-    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-      Update.printError(Serial);
-    }
+    Update.write(upload.buf, upload.currentSize);
   } else if (upload.status == UPLOAD_FILE_END) {
     if (!firmwareCheckPassed(s_otaCheck)) {
       // Cut short or damaged. Update.end() without "true" throws the upload
@@ -980,10 +1087,15 @@ void handleOTAUpload(ESP8266WebServer& server) {
       // nothing in the firmware.
       logMsgL(SYSLOG_NOTICE, "[OTA] Update success: %u bytes", (unsigned)upload.totalSize);
     } else {
-      Update.printError(Serial);
+      // The updater's reason used to go to the serial port only, so a failed
+      // update couldn't be diagnosed from syslog
+      logMsgL(SYSLOG_WARNING, "[OTA] Update failed: %s (%u bytes)",
+              Update.getErrorString().c_str(), (unsigned)upload.totalSize);
     }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     // The connection dropped mid-upload: no restart is coming
+    logMsgL(SYSLOG_WARNING, "[OTA] Upload cut off after %u bytes - nothing installed",
+            (unsigned)upload.totalSize);
     Update.end();
     holdPlugsOff(false);
   }
@@ -1113,12 +1225,18 @@ void handleiSpindelConfigPost(ESP8266WebServer& server) {
     }
   }
 
+  // The calibration offsets are checked before anything is changed too
+  float tempAdjust = g_iSpindels[idx].tempAdjust;
+  float sgAdjust   = g_iSpindels[idx].sgAdjust;
+  if (!readTempAdjust(server, doc, tempAdjust)) return;
+  if (!readSgAdjust(server, doc, sgAdjust))     return;
+
   if (!doc["collectData"].isNull()) g_iSpindels[idx].collectData = doc["collectData"];
   g_iSpindels[idx].fermenter = fermenter;
-  if (!doc["unit"].isNull())        g_iSpindels[idx].unit        = doc["unit"];
+  if (!doc["unit"].isNull())        { uint8_t v = doc["unit"]; if (v == ISPINDEL_UNIT_SG || v == ISPINDEL_UNIT_PLATO) g_iSpindels[idx].unit = v; }
   if (!doc["function"].isNull())    { uint8_t v = doc["function"]; g_iSpindels[idx].function = (v == PROBE_FN_BEER) ? PROBE_FN_BEER : PROBE_UNASSIGNED; }
-  if (!doc["tempAdjust"].isNull())  g_iSpindels[idx].tempAdjust  = toCelsiusTempDelta((float)doc["tempAdjust"]);
-  if (!doc["sgAdjust"].isNull())    g_iSpindels[idx].sgAdjust    = doc["sgAdjust"];
+  g_iSpindels[idx].tempAdjust = tempAdjust;
+  g_iSpindels[idx].sgAdjust   = sgAdjust;
   // Normalize collectData from fermenter when client didn't send it explicitly.
   // Lets the UI omit the toggle entirely; legacy 'collectData=false + fermenter assigned'
   // configs self-heal on first UI save. External scripts that POST collectData win.
@@ -1157,9 +1275,12 @@ void handleProbePost(ESP8266WebServer& server) {
     sendErr(server, 400, F("Invalid probe index"));
     return;
   }
-  if (!doc["function"].isNull())   g_probes[idx].function   = doc["function"];
+  // Checked first, so a refused save leaves the probe as it was
+  float tempAdjust = g_probes[idx].tempAdjust;
+  if (!readTempAdjust(server, doc, tempAdjust)) return;
+  if (!doc["function"].isNull())   { uint8_t v = doc["function"];  if ((v >= PROBE_FN_BEER && v <= PROBE_FN_CONTROL) || v == PROBE_FN_UNASSIGNED) g_probes[idx].function = v; }
   if (!doc["fermenter"].isNull())  { uint8_t v = doc["fermenter"]; if (v < MAX_FERMENTERS || v == PROBE_UNASSIGNED) g_probes[idx].fermenter = v; }
-  if (!doc["tempAdjust"].isNull()) g_probes[idx].tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
+  g_probes[idx].tempAdjust = tempAdjust;
   sendSaveResult(server, saveProbeConfig(), F("Probe updated"));
 }
 
@@ -1790,7 +1911,8 @@ void handleFsFileSave(ESP8266WebServer& server) {
     "/jsonGlobal.txt", "/jsonFermenter.txt", "/jsonProbe.txt",
     "/jsonSmartPlugs.txt", "/jsonProfile.txt", "/jsonProfileSteps.txt",
     "/jsonTilt.txt", "/jsoniSpindel.txt",
-    "/jsonBrewServices.txt", "/jsonMqtt.txt", "/jsonSyslog.txt", FILE_PRESSURE
+    "/jsonBrewServices.txt", "/jsonMqtt.txt", "/jsonSyslog.txt",
+    "/jsonNotify.txt", FILE_PRESSURE
   };
   String name = server.arg("name");
   bool ok = false;
@@ -1897,10 +2019,12 @@ void handleTiltPost(ESP8266WebServer& server) {
   // Marking the colour makes saveTiltConfig() include it.
   TiltConfig tilt = g_tilts[colour];
   tilt.colour = (uint8_t)colour;
-  if (!doc["function"].isNull())   tilt.function   = doc["function"];
+  // Only "beer temperature" or "not used" - the same rule the iSpindel save and
+  // the Tilt loader use, so a Tilt behaves the same before and after a restart
+  if (!doc["function"].isNull())   { uint8_t v = doc["function"]; tilt.function = (v == PROBE_FN_BEER) ? PROBE_FN_BEER : PROBE_UNASSIGNED; }
   tilt.fermenter = requestedFermenter(doc, tilt.fermenter);
-  if (!doc["tempAdjust"].isNull()) tilt.tempAdjust = toCelsiusTempDelta((float)doc["tempAdjust"]);
-  if (!doc["sgAdjust"].isNull())   tilt.sgAdjust   = doc["sgAdjust"];
+  if (!readTempAdjust(server, doc, tilt.tempAdjust)) return;
+  if (!readSgAdjust(server, doc, tilt.sgAdjust))     return;
 
   // Only MAX_TILT_SLOTS Tilts fit in the settings file. A fifth used to be
   // dropped from the file without a word and lost at the next restart.
@@ -1939,8 +2063,8 @@ void handleSyslogConfig(ESP8266WebServer& server) {
 void handleSyslogConfigPost(ESP8266WebServer& server) {
   JsonDocument doc;
   if (!parseJsonBody(server, doc)) return;
-  if (!doc["enabled"].isNull())  g_syslogConfig.enabled  = doc["enabled"];
-  if (doc["host"].is<const char*>()) copyText(g_syslogConfig.host, doc["host"].as<const char*>(), sizeof(g_syslogConfig.host));
+  // The port is checked before anything else is changed, so a refused request
+  // leaves the settings as they were (it used to apply "enabled" and "host" first)
   if (!doc["port"].isNull()) {
     uint32_t port = doc["port"];
     if (port < 1 || port > 65535) {
@@ -1949,11 +2073,100 @@ void handleSyslogConfigPost(ESP8266WebServer& server) {
     }
     g_syslogConfig.port = (uint16_t)port;
   }
+  if (!doc["enabled"].isNull())  g_syslogConfig.enabled  = doc["enabled"];
+  if (doc["host"].is<const char*>()) copyText(g_syslogConfig.host, doc["host"].as<const char*>(), sizeof(g_syslogConfig.host));
   if (!doc["facility"].isNull()) { uint8_t v = doc["facility"]; if (v <= 23) g_syslogConfig.facility = v; }
   if (!doc["minLevel"].isNull()) { uint8_t v = doc["minLevel"]; if (v <= 7)  g_syslogConfig.minLevel = v; }
   bool saved = saveSyslogConfig();
   logInit();  // re-resolve host with new config
   sendSaveResult(server, saved, F("Syslog config saved"));
+}
+
+// ============================================================
+// NOTIFICATION CONFIG — GET/POST /notify
+// ============================================================
+
+// One row per kind of event: its name in the API and its bit in
+// NotifyConfig.events
+struct NotifyEventKey {
+  const char* key;
+  uint8_t     bit;
+};
+
+static const NotifyEventKey kNotifyEventKeys[] = {
+  { "alarms",   NOTIFY_EVT_ALARMS   },
+  { "sensors",  NOTIFY_EVT_SENSORS  },
+  { "restarts", NOTIFY_EVT_RESTARTS },
+  { "profile",  NOTIFY_EVT_PROFILE  },
+  { "updates",  NOTIFY_EVT_UPDATES  },
+};
+
+void handleNotifyConfig(ESP8266WebServer& server) {
+  JsonDocument doc;
+  doc["enabled"] = g_notifyConfig.enabled;
+  doc["url"]     = g_notifyConfig.url;
+  for (const NotifyEventKey& event : kNotifyEventKeys) {
+    doc[event.key] = (g_notifyConfig.events & event.bit) != 0;
+  }
+  sendJsonDoc(server, doc);
+}
+
+void handleNotifyConfigPost(ESP8266WebServer& server) {
+  JsonDocument doc;
+  if (!parseJsonBody(server, doc)) return;
+
+  // Work out the new settings first and check them, so a refused request
+  // leaves the saved settings as they were
+  bool        enabled = doc["enabled"].isNull() ? g_notifyConfig.enabled : doc["enabled"].as<bool>();
+  const char* url     = doc["url"].is<const char*>() ? doc["url"].as<const char*>() : g_notifyConfig.url;
+
+  if (url[0] != '\0' && !isValidNotifyUrl(url, sizeof(g_notifyConfig.url))) {
+    sendErr(server, 400, F("url must start with http:// and be at most 127 characters, without spaces (https is not supported)"));
+    return;
+  }
+  if (enabled && url[0] == '\0') {
+    sendErr(server, 400, F("url is required when notifications are enabled"));
+    return;
+  }
+
+  uint8_t events = g_notifyConfig.events;
+  for (const NotifyEventKey& event : kNotifyEventKeys) {
+    if (doc[event.key].isNull()) continue;
+    if (doc[event.key].as<bool>()) events |= event.bit;
+    else                           events &= ~event.bit;
+  }
+
+  // url may point at g_notifyConfig.url itself, so only copy a new one
+  if (url != g_notifyConfig.url) strlcpy(g_notifyConfig.url, url, sizeof(g_notifyConfig.url));
+  g_notifyConfig.enabled = enabled;
+  g_notifyConfig.events  = events;
+  sendSaveResult(server, saveNotifyConfig(), F("Notification settings saved"));
+}
+
+// ============================================================
+// NOTIFICATION TEST — POST /notify/test
+// Sends a test message to the saved URL and reports the HTTP result
+// ============================================================
+
+void handleNotifyTest(ESP8266WebServer& server) {
+  if (g_notifyConfig.url[0] == 0) {
+    sendErr(server, 400, F("No notification URL saved"));
+    return;
+  }
+  int  httpCode  = notifySendTest();
+  bool delivered = (httpCode >= 200 && httpCode < 300);
+  char resp[96];
+  if (httpCode < 0) {
+    // A negative code is an HTTPClient error: the server never answered
+    snprintf_P(resp, sizeof(resp),
+               PSTR("{\"status\":\"error\",\"msg\":\"No reply from the server (error %d)\",\"httpCode\":%d}"),
+               httpCode, httpCode);
+  } else {
+    snprintf_P(resp, sizeof(resp),
+               PSTR("{\"status\":\"%s\",\"msg\":\"HTTP %d - %s\",\"httpCode\":%d}"),
+               delivered ? "ok" : "error", httpCode, delivered ? "OK" : "Failed", httpCode);
+  }
+  sendJsonResponse(server, resp);
 }
 
 // ============================================================

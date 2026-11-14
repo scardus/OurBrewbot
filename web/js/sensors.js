@@ -74,6 +74,8 @@ function sensorCard(kind,s,i) {
   const key=kind+'.'+i;
   const clearButton=type.clearable?btn('Clear slot','clear-sensor','ghost',`data-kind="${kind}" data-id="${i}"`):'';
   const unitNote='The device reports its own gravity unit; it can reset this selection on its next report.';
+  // Match the offset limits in WebAPI.cpp: ±10 °C (±18 °F) and ±0.050 gravity.
+  const adjustLimit=state.unit==='F'?18:10;
   return `<article class="card panel">
     <div class="panel-header">
       <div>
@@ -94,8 +96,10 @@ function sensorCard(kind,s,i) {
         ${select(type.functionLabel,'fn',s.fn,type.functions)}
         ${select('Fermenter','fermenter',s.fermenter,fermOptions())}
         ${isSpindel?select('Device gravity unit','unit',s.unit,[[0,'Specific gravity'],[1,'Plato']]):''}
-        ${field('Temperature adjustment (°'+state.unit+')','adjust',deltaToUnit(s.adjust),'number','step="0.1" required')}
-        ${type.hasGravity?field('Gravity adjustment','sgAdjust',s.sgAdjust,'number','step="0.0001" required'):''}
+        ${field('Temperature adjustment (°'+state.unit+')','adjust',deltaToUnit(s.adjust),'number',
+          `min="-${adjustLimit}" max="${adjustLimit}" step="0.1" required`)}
+        ${type.hasGravity?field('Gravity adjustment','sgAdjust',s.sgAdjust,'number',
+          'min="-0.05" max="0.05" step="0.0001" required'):''}
       </div>
       ${isSpindel&&s.gravityUnit?`<p class="review-caption">${unitNote}</p>`:''}
       ${formActions('Save changes',clearButton)}

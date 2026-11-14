@@ -22,6 +22,7 @@
 #include "Config.h"
 #include "Pins.h"
 #include "Log.h"
+#include "Notify.h"
 #include "iSpindel.h"
 
 // Hardware bus instances — defined here, declared extern in Temperatures.h
@@ -279,6 +280,11 @@ void readTempResults() {
         g_probes[i].temperature = TEMP_NONE;
         g_probes[i].rawTemperature = TEMP_NONE;
       }
+    }
+
+    // Push notification (see Notify.h), only for a probe a fermenter uses
+    if (g_probes[i].fermenter < MAX_FERMENTERS) {
+      notifySensorState(NOTIFY_SENSOR_PROBE, i, g_probes[i].failCount >= PROBE_FAIL_THRESHOLD);
     }
   }
 }

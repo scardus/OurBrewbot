@@ -22,6 +22,7 @@
     <h2>OurBrewbot</h2>
     <a class='btn' href='/admin'>Open Admin Dashboard</a>
     <div class='card'><h3>REST API</h3><ul>
+    <li><span class='method'>GET</span><a href='/alerts'>/alerts</a><span class='desc'> &mdash; alerts shown as WebUI banners</span></li>
     <li><span class='method'>GET</span><a href='/ble/sniff'>/ble/sniff</a><span class='desc'> &mdash; BLE sniff page</span></li>
     <li><span class='method'>GET</span><a href='/ble/sniff/poll'>/ble/sniff/poll</a><span class='desc'> &mdash; poll BLE sniff results</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/ble/sniff/send</span><span class='desc'> &mdash; send BLE AT command</span></li>
@@ -51,6 +52,9 @@
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt</span><span class='desc'> &mdash; update MQTT config</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt/test</span><span class='desc'> &mdash; test MQTT connection</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/mqtt/discover</span><span class='desc'> &mdash; trigger HA discovery</span></li>
+    <li><span class='method'>GET</span><a href='/notify'>/notify</a><span class='desc'> &mdash; push notification config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/notify</span><span class='desc'> &mdash; update push notification config</span></li>
+    <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/notify/test</span><span class='desc'> &mdash; send a test notification</span></li>
     <li><span class='method'>GET</span><a href='/probes'>/probes</a><span class='desc'> &mdash; temperature probes</span></li>
     <li><span class='method'>POST</span><span style='color:#53d8fb;font-family:monospace;font-size:13px'>/probes</span><span class='desc'> &mdash; update probe config</span></li>
     <li><span class='method'>GET</span><a href='/profiles'>/profiles</a><span class='desc'> &mdash; fermentation profiles</span></li>

@@ -104,7 +104,7 @@ function routeData() {
   if (state.route==='dashboard' || state.route==='profiles') return ['fermenters','profiles'];
   if (state.route==='sensors') return [state.sensorTab];
   if (state.route==='plugs') return ['smartplugs'];
-  if (state.route==='reporting') return ['brewservices','mqtt'];
+  if (state.route==='reporting') return ['brewservices','mqtt','notify'];
   if (state.route==='system') {
     if (state.systemTab==='settings') return ['controller','debug','syslog'];
     if (state.systemTab==='files') return ['fs/files'];

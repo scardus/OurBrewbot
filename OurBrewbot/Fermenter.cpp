@@ -24,6 +24,7 @@
 #include "Log.h"
 #include "iSpindel.h"
 #include "Uptime.h"
+#include "Notify.h"
 
 // When each fermenter's cooling last stopped, in uptimeSeconds() - the
 // compressor delay is counted from here. 0 is boot, so the delay also holds
@@ -227,6 +228,7 @@ void checkFermenterAlarm(uint8_t i) {
   if (temp < TEMP_VALID_MIN) {
     g_fermenters[i].alarm = false;
     s_outOfRangeSince[i]  = 0;   // a mild deviation's dwell starts again
+    notifyAlarmState(i, false, false, false, TEMP_NONE, 0.0f);
     return;
   }
 
@@ -242,6 +244,7 @@ void checkFermenterAlarm(uint8_t i) {
 
   bool alarmActive = false;
   bool overTemp    = (overBy > underBy);
+  bool severe      = (deviation > 0.0f && deviation >= tolerance);
 
   if (deviation > 0.0f) {
     if (deviation >= tolerance) {
@@ -274,6 +277,10 @@ void checkFermenterAlarm(uint8_t i) {
   }
 
   g_fermenters[i].alarm = alarmActive;
+
+  // Push notification (see Notify.h): sent when the alarm starts, and when it
+  // has stayed off for 10 minutes
+  notifyAlarmState(i, alarmActive, overTemp, severe, temp, overTemp ? ceiling : floor_);
 
   if (alarmActive && g_globalConfig.notifyOn) {
     logMsgL(SYSLOG_WARNING, "[ALARM] F%d (%s): alarm active", i, g_fermenters[i].fermenterName);

@@ -28,9 +28,13 @@
 #include <Arduino.h>   // String
 #include <WiFiClient.h>
 
+// The real client's error code for "could not connect"
+#define HTTPC_ERROR_CONNECTION_FAILED (-1)
+
 struct HttpTestRecord {
   char url[192];
   char body[1024];
+  char headers[512];     // every addHeader() call, as "Name: value\n"
   int  postCount;
   int  nextStatus;
   int  getCount;
@@ -38,11 +42,12 @@ struct HttpTestRecord {
   int  responseSize;     // what getSize() returns (-1 = "not given", as for a chunked reply)
 };
 
-static HttpTestRecord g_httpTest = { {0}, {0}, 0, 200, 0, {0}, -1 };
+static HttpTestRecord g_httpTest = { {0}, {0}, {0}, 0, 200, 0, {0}, -1 };
 
 static void httpTestReset() {
   g_httpTest.url[0]       = '\0';
   g_httpTest.body[0]      = '\0';
+  g_httpTest.headers[0]   = '\0';
   g_httpTest.postCount    = 0;
   g_httpTest.nextStatus   = 200;
   g_httpTest.getCount     = 0;
@@ -61,12 +66,24 @@ static void httpTestSetReply(int status, const char* body) {
 
 class HTTPClient {
 public:
-  void begin(WiFiClient& /*client*/, const char* url) {
+  bool begin(WiFiClient& /*client*/, const char* url) {
     strncpy(g_httpTest.url, url ? url : "", sizeof(g_httpTest.url) - 1);
     g_httpTest.url[sizeof(g_httpTest.url) - 1] = '\0';
+    g_httpTest.headers[0] = '\0';   // a new request starts with no headers
+    return true;
   }
   void setTimeout(uint16_t /*ms*/) {}
-  void addHeader(const char* /*name*/, const char* /*value*/) {}
+  void addHeader(const char* name, const char* value) {
+    size_t used = strlen(g_httpTest.headers);
+    snprintf(g_httpTest.headers + used, sizeof(g_httpTest.headers) - used, "%s: %s\n", name, value);
+  }
+  // The same, for a name or value written with F()
+  void addHeader(const __FlashStringHelper* name, const char* value) {
+    addHeader(reinterpret_cast<const char*>(name), value);
+  }
+  void addHeader(const __FlashStringHelper* name, const __FlashStringHelper* value) {
+    addHeader(reinterpret_cast<const char*>(name), reinterpret_cast<const char*>(value));
+  }
 
   int POST(String& body) {
     strncpy(g_httpTest.body, body.c_str(), sizeof(g_httpTest.body) - 1);

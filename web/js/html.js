@@ -56,11 +56,12 @@ function field(label,name,value,type='text',extra='',help='') {
     ${help?`<small>${esc(help)}</small>`:''}</label>`;
 }
 
-// Build a labelled dropdown with its current option selected.
-function select(label,name,value,options,extra='') {
+// Build a labelled dropdown with its current option selected and optional help text.
+function select(label,name,value,options,extra='',help='') {
   const choices=options.map(([key,text])=>
     `<option value="${esc(key)}" ${String(value)===String(key)?'selected':''}>${esc(text)}</option>`).join('');
-  return `<label class="field">${esc(label)}<select name="${name}" ${extra}>${choices}</select></label>`;
+  return `<label class="field">${esc(label)}<select name="${name}" ${extra}>${choices}</select>
+    ${help?`<small>${esc(help)}</small>`:''}</label>`;
 }
 
 // Build a labelled checkbox switch with optional help text.

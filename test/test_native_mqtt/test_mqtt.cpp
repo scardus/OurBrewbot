@@ -69,6 +69,7 @@ void processProfiles() {}
 
 // The real conversions, then the function under test.
 #include "../../OurBrewbot/Temperatures.cpp"
+#include <NotifyStub.h>   // records what Fermenter.cpp reports to the notifications
 #include "../../OurBrewbot/Fermenter.cpp"
 
 static const uint8_t F = 0;

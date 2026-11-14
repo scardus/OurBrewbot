@@ -50,6 +50,7 @@ iSpindelConfig  g_iSpindels[MAX_ISPINDELS];
 BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 MqttConfig        g_mqttConfig;
 SyslogConfig      g_syslogConfig;
+NotifyConfig      g_notifyConfig;
 PressureCalibration g_pressureCalibration = {};
 bool g_pressureEnabled = false;
 
@@ -562,6 +563,19 @@ static const CfgField kSyslogFields[] PROGMEM = { SYSLOG_CONFIG_FIELDS(CFG_ROW) 
 #undef CFG_CHK
 #undef CFG_ROW
 
+// ---------- NotifyConfig (jsonNotify.txt) ----------
+#define NOTIFY_CONFIG_FIELDS(X)   X("enabled", enabled, BOOL, false)    X("url",     url,     STR,  "")       X("events",  events,  U8,   NOTIFY_EVT_DEFAULT)
+
+#define CFG_KEY(key, member, type, def) static const char kNTKey_##member[] PROGMEM = key;
+#define CFG_CHK(key, member, type, def) CFG_ASSERT_TYPE(NotifyConfig, member, type)
+#define CFG_ROW(key, member, type, def) CFG_FIELD(NotifyConfig, kNTKey_##member, member, type, def)
+NOTIFY_CONFIG_FIELDS(CFG_KEY)
+NOTIFY_CONFIG_FIELDS(CFG_CHK)
+static const CfgField kNotifyFields[] PROGMEM = { NOTIFY_CONFIG_FIELDS(CFG_ROW) };
+#undef CFG_KEY
+#undef CFG_CHK
+#undef CFG_ROW
+
 // ============================================================
 // GLOBAL CONFIG
 // ============================================================
@@ -1070,6 +1084,46 @@ bool saveSyslogConfig() {
 }
 
 // ============================================================
+// NOTIFICATION CONFIG
+// ============================================================
+
+bool loadNotifyConfig() {
+  JsonDocument doc;
+  if (!loadConfigDoc(CFG_FILE_NOTIFY, doc, FILE_NOTIFY, FILE_NOTIFY_BKP)) {
+    initDefaultNotifyConfig();
+    return false;
+  }
+  cfgLoadScalar(doc, &g_notifyConfig, kNotifyFields, CFG_COUNT(kNotifyFields));
+  // POST /notify refuses a URL that can't be used, but an imported file can
+  // hold anything, so it is checked here as well. A bad URL is removed and
+  // notifications are switched off rather than posting to the wrong place.
+  if (g_notifyConfig.url[0] != '\0' &&
+      !isValidNotifyUrl(g_notifyConfig.url, sizeof(g_notifyConfig.url))) {
+    g_notifyConfig.url[0]  = '\0';
+    g_notifyConfig.enabled = false;
+    configMarkUnsaved(CFG_FILE_NOTIFY);
+    logMsgL(SYSLOG_WARNING, "[CFG] Notification URL was not a usable http:// address - notifications switched off");
+  }
+  // Notifications can't be on without somewhere to send them
+  if (g_notifyConfig.enabled && g_notifyConfig.url[0] == '\0') {
+    g_notifyConfig.enabled = false;
+    configMarkUnsaved(CFG_FILE_NOTIFY);
+  }
+  // Bits this firmware doesn't know are dropped
+  if (g_notifyConfig.events & ~NOTIFY_EVT_ALL) {
+    g_notifyConfig.events &= NOTIFY_EVT_ALL;
+    configMarkUnsaved(CFG_FILE_NOTIFY);
+  }
+  return true;
+}
+
+bool saveNotifyConfig() {
+  JsonDocument doc;
+  cfgSaveScalar(doc, &g_notifyConfig, kNotifyFields, CFG_COUNT(kNotifyFields));
+  return saveConfigDoc(CFG_FILE_NOTIFY, doc, FILE_NOTIFY, FILE_NOTIFY_BKP);
+}
+
+// ============================================================
 // MOUNT THE FILESYSTEM
 // ============================================================
 
@@ -1146,6 +1200,7 @@ void loadAllConfig() {
     loadBrewServiceConfig();
     loadMqttConfig();
     loadSyslogConfig();
+    loadNotifyConfig();
     loadPressureConfig();
   }
 
@@ -1182,6 +1237,7 @@ void saveAllConfig() {
   ok &= saveBrewServiceConfig();
   ok &= saveMqttConfig();
   ok &= saveSyslogConfig();
+  ok &= saveNotifyConfig();
   ok &= savePressureConfig();
   if (!ok)
     logMsgL(SYSLOG_ERR, "[CFG] One or more config saves failed");
@@ -1249,6 +1305,7 @@ static void saveUnsavedConfig() {
   if (isUnsaved(CFG_FILE_BREWSVC))    ok &= saveBrewServiceConfig();
   if (isUnsaved(CFG_FILE_MQTT))       ok &= saveMqttConfig();
   if (isUnsaved(CFG_FILE_SYSLOG))     ok &= saveSyslogConfig();
+  if (isUnsaved(CFG_FILE_NOTIFY))     ok &= saveNotifyConfig();
   if (isUnsaved(CFG_FILE_PRESSURE))   ok &= savePressureConfig();
   if (!ok)
     logMsgL(SYSLOG_ERR, "[CFG] One or more config saves failed - trying again in 10 minutes");
@@ -1406,6 +1463,12 @@ void initDefaultSyslogConfig() {
   g_syslogConfig.minLevel  = 7;   // DEBUG
 }
 
+void initDefaultNotifyConfig() {
+  g_notifyConfig.enabled = false;
+  g_notifyConfig.url[0]  = '\0';
+  g_notifyConfig.events  = NOTIFY_EVT_DEFAULT;
+}
+
 static void clearWiFiProvisioningArtifacts() {
   if (LittleFS.exists(FILE_CONFIG))     LittleFS.remove(FILE_CONFIG);
   if (LittleFS.exists(FILE_CONFIG_BKP)) LittleFS.remove(FILE_CONFIG_BKP);
@@ -1436,6 +1499,7 @@ static void initAllDefaultConfig() {
   initDefaultBrewServiceConfig();
   initDefaultMqttConfig();
   initDefaultSyslogConfig();
+  initDefaultNotifyConfig();
 }
 
 void resetAllConfig() {

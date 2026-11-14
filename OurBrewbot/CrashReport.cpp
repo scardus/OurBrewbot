@@ -33,7 +33,7 @@
 // TIMING AND LIMITS
 // ============================================================
 #define CRASH_REPORT_FIRST_MS    (2UL * 60UL * 1000UL)    // first try once WiFi has been up 2 min, so it has settled
-#define CRASH_REPORT_NEXT_MS     (30UL * 1000UL)          // between saved reports - each POST can hold up the loop for 5 s
+#define CRASH_REPORT_NEXT_MS     (30UL * 1000UL)          // between saved reports - each POST can hold up the loop for ~15 s (5 s each for DNS, connect, reply)
 #define CRASH_REPORT_RETRY_MS    (10UL * 60UL * 1000UL)   // after a failed try...
 #define CRASH_REPORT_ATTEMPTS    4                        // ...for up to 4 failed tries per boot
 #define CRASH_REPORT_BUSY_MS     (60UL * 60UL * 1000UL)   // after the website's daily limit (HTTP 429)

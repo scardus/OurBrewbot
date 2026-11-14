@@ -26,6 +26,7 @@
 #include "Fermenter.h"
 #include "Temperatures.h"
 #include "Log.h"
+#include "Notify.h"
 
 // Helper: get flat array index for a fermenter's current profile step
 static inline uint8_t flatStepIndex(uint8_t i) {
@@ -88,6 +89,7 @@ void advanceProfileStep(uint8_t i) {
   if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
     finishProfile(i);
+    notifyProfileFinished(i);
     saveFermenterConfig();
     return;
   }
@@ -99,6 +101,7 @@ void advanceProfileStep(uint8_t i) {
   if (isStepEmpty(step)) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished (empty step %d)", i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep);
     finishProfile(i);
+    notifyProfileFinished(i);
     saveFermenterConfig();
     return;
   }
@@ -124,6 +127,9 @@ void advanceProfileStep(uint8_t i) {
   if (isStepComplete(i, step)) {
     logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Step %d complete -> Step %d",
       i, g_fermenters[i].fermenterName, g_fermenters[i].currentStep, g_fermenters[i].currentStep + 1);
+    // The step that just finished, numbered from 1 as the WebUI shows it
+    uint8_t finishedStep = g_fermenters[i].currentStep + 1;
+    bool    finished     = false;
     g_fermenters[i].currentStep++;
     g_fermenters[i].currentHour = 0;
     g_fermenters[i].hourTicks   = 0;
@@ -132,13 +138,20 @@ void advanceProfileStep(uint8_t i) {
     if (g_fermenters[i].currentStep >= MAX_STEPS_PER_PROFILE) {
       logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished", i, g_fermenters[i].fermenterName);
       finishProfile(i);
+      finished = true;
     } else {
       uint8_t nextIdx = flatStepIndex(i);
       if (isStepEmpty(g_profileSteps[nextIdx])) {
         logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile Finished (no more steps)", i, g_fermenters[i].fermenterName);
         finishProfile(i);
+        finished = true;
       }
     }
+
+    // Push notification (see Notify.h): one message, for the profile ending
+    // or for the step change. Steps moved on by hand are not reported.
+    if (finished) notifyProfileFinished(i);
+    else          notifyEvent(NOTIFY_STEP_COMPLETE, i, finishedStep, (float)(finishedStep + 1));
     saveFermenterConfig();
   }
 }
@@ -264,6 +277,7 @@ void startProfile(uint8_t i, uint8_t profileIndex) {
   g_fermenters[i].profileRunning = true;
   g_fermenters[i].profilePaused  = false;
   g_fermenters[i].startMillis    = millis();
+  notifyProfileStarted(i);   // removes the WebUI banner for the last finished profile
   logMsgL(SYSLOG_NOTICE, "[PROF] F%d (%s): Profile %d started", i, g_fermenters[i].fermenterName, profileIndex);
   saveFermenterConfig();
 }
@@ -288,6 +302,16 @@ void profileAddTenMinutes(uint8_t i) {
     g_fermenters[i].hourTicks = 0;
     profileAddHour(i);
   }
+}
+
+// A running or paused profile keeps its number until it is stopped. Changing
+// it used to carry the old profile's step and hour over into a different
+// profile, and choosing 0 (Standard) left the profile "running" with its
+// temperatures frozen. The same number is always allowed: the WebUI sends it
+// with every fermenter save.
+bool profileNoChangeAllowed(uint8_t i, uint8_t profileNo) {
+  if (profileNo == g_fermenters[i].profileNo) return true;
+  return !g_fermenters[i].profileRunning && !g_fermenters[i].profilePaused;
 }
 
 void stopProfile(uint8_t i) {

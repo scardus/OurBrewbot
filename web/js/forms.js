@@ -106,6 +106,8 @@ const formTypes = {
     buildBody:(form,data,index)=>({index,enabled:data.enabled,serviceId:data.serviceId,deviceName:data.deviceName})},
   mqtt: {path:'/mqtt', refresh:'mqtt', limits:{host:63,username:31,password:47,baseTopic:31},
     buildBody:(form,data)=>mqttPayload(data)},
+  notify: {path:'/notify', refresh:'notify', limits:{url:127},
+    buildBody:(form,data)=>notifyPayload(data)},
   global: {path:'/controller', refresh:'controller',
     buildBody:(form,data)=>globalPayload(data)},
   debug: {path:'/debug', refresh:'debug',

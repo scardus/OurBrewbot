@@ -70,6 +70,7 @@ static int s_saveProbeConfigCalls = 0;
 bool saveProbeConfig() { s_saveProbeConfigCalls++; return true; }
 
 // The functions under test, plus everything else in Temperatures.cpp.
+#include <NotifyStub.h>   // records what Temperatures.cpp reports to the notifications
 #include "../../OurBrewbot/Temperatures.cpp"
 
 // ---- test fixture ----
@@ -120,6 +121,7 @@ void setUp(void) {
   g_sensors1.testReset();
   g_sensors2.testReset();
   s_saveProbeConfigCalls = 0;
+  notifyStubReset();
 }
 
 void tearDown(void) {}
@@ -501,6 +503,47 @@ void test_readTempResults_only_retries_the_first_failure(void) {
 
 // Before 0.6.4 the count was a uint8_t and went back to 0 after 255 failed
 // reads (~21 min): the warnings and the 750 ms blocking retry then repeated
+// ---- readTempResults: what it tells the notifications (see Notify.h) ----
+
+void test_readTempResults_reports_a_probe_in_use_as_lost_at_the_fail_threshold(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_probes[0].fermenter = 1;
+  g_probes[0].failCount = PROBE_FAIL_THRESHOLD - 2;
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+  g_sensors1.testSetFailures(ADDR_A, 99);
+  NotifyStubSensor& sensor = g_notifyStubSensor[NOTIFY_SENSOR_PROBE][0];
+
+  readTempResults();   // one short of the threshold: its last reading is still in use
+  TEST_ASSERT_EQUAL_INT(1, sensor.count);
+  TEST_ASSERT_FALSE(sensor.lost);
+
+  readTempResults();   // threshold reached: the reading is dropped
+  TEST_ASSERT_EQUAL_FLOAT(TEMP_NONE, g_probes[0].temperature);
+  TEST_ASSERT_TRUE(sensor.lost);
+}
+
+void test_readTempResults_reports_a_probe_that_reads_again(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_probes[0].fermenter = 1;
+  g_probes[0].failCount = 50;
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+
+  readTempResults();
+  TEST_ASSERT_EQUAL_INT(1, g_notifyStubSensor[NOTIFY_SENSOR_PROBE][0].count);
+  TEST_ASSERT_FALSE(g_notifyStubSensor[NOTIFY_SENSOR_PROBE][0].lost);
+}
+
+void test_readTempResults_says_nothing_about_a_probe_no_fermenter_uses(void) {
+  configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
+  g_probes[0].fermenter = PROBE_UNASSIGNED;
+  g_probes[0].failCount = 50;
+  g_sensors1.testAddDevice(ADDR_A, 20.5f);
+  g_sensors1.testSetFailures(ADDR_A, 99);
+
+  readTempResults();
+  TEST_ASSERT_EQUAL_INT(0, g_notifyStubSensor[NOTIFY_SENSOR_PROBE][0].count);
+}
+
 void test_readTempResults_fail_count_does_not_wrap(void) {
   configureProbe(0, ADDR_A, "Probe Bus1-1", 1);
   g_probes[0].failCount = 255;
@@ -1053,6 +1096,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_readTempResults_leaves_the_bus_non_blocking_after_a_retry);
   RUN_TEST(test_readTempResults_only_retries_the_first_failure);
   RUN_TEST(test_readTempResults_counts_a_persistent_failure);
+  RUN_TEST(test_readTempResults_reports_a_probe_in_use_as_lost_at_the_fail_threshold);
+  RUN_TEST(test_readTempResults_reports_a_probe_that_reads_again);
+  RUN_TEST(test_readTempResults_says_nothing_about_a_probe_no_fermenter_uses);
   RUN_TEST(test_readTempResults_fail_count_does_not_wrap);
   RUN_TEST(test_readTempResults_reminds_hourly_while_a_probe_is_missing);
   RUN_TEST(test_readTempResults_keeps_the_last_reading_below_the_threshold);

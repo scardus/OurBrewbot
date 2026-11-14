@@ -35,6 +35,8 @@ New/Updated Features:
 - Rebuilt Fermentation Profiles tab — 4 editable profiles with up to 15 steps each, per-fermenter assignment, start/stop/pause, manual step navigation
 - Daily firmware update check — tells you (admin page, syslog, Home Assistant) when a newer release is out
 - Crash reports — after a crash or watchdog reset, the crash details are sent to ourbrewbot.com to help fix bugs
+- Push notifications — temperature alarms, sensor problems, unexpected restarts, profile progress and new releases sent to your phone through [ntfy](https://ntfy.sh), or to any address that accepts a plain HTTP POST — see [Push notifications](#push-notifications)
+- Alert banners — the same alarms, sensor problems, restarts, finished profiles and new releases shown as a banner at the top of every admin page, whether or not push notifications are set up — see [Alert banners](#alert-banners)
 
 The update check and crash reports can each be switched off — see [Contacting ourbrewbot.com](#contacting-ourbrewbotcom).
 
@@ -201,6 +203,43 @@ Readings above the highest calibration point are labelled estimates. This monito
 
 ---
 
+## Push notifications
+
+The controller can send a short message to your phone when something needs your attention. It is off until you set it up in the admin page on the **Reporting** tab, under **Notifications**.
+
+The easiest way to receive the messages is the free [ntfy](https://ntfy.sh) app:
+
+1. Install the ntfy app on your phone and subscribe to a topic. Pick a long name nobody would guess, such as `brewery-7f3k9q2x` - anyone who knows the name can read the messages and send their own.
+2. In the admin page enter `http://ntfy.sh/` followed by your topic name as the **Notification URL**, switch on **Enable notifications** and save.
+3. Press **Send test notification**. The message should arrive within a few seconds.
+
+The address must start with `http://`. The controller does not have the memory to encrypt the connection, so `https://` addresses are refused, and the messages cross the internet unencrypted. To keep them on your own network, run your own ntfy server or point the URL at something local such as a Home Assistant webhook - any address that accepts a plain HTTP POST will do. The message text is the body of the POST, and its title and priority are sent as ntfy's `Title`, `Priority` and `Tags` headers.
+
+Choose what to be told about:
+
+| Setting | When a message is sent | On by default |
+|---------|------------------------|---------------|
+| **Temperature alarms** | When a fermenter's alarm starts, and when it has ended. A severe alarm is sent as urgent. | Yes |
+| **Sensor problems** | When a temperature probe, Tilt or iSpindel that a fermenter uses stops reporting, and when it is back. | Yes |
+| **Unexpected restarts** | When the controller starts up after a crash, a watchdog reset or a power cut. Firmware updates and the Restart button are not reported. | Yes |
+| **Profile progress** | When a profile step completes by itself, and when a profile finishes. | No |
+| **Firmware updates** | Once when the daily update check finds a new release. | No |
+
+A temperature sitting right at its limit, or a probe with a loose wire, can come and go every few minutes. To stop that filling your phone, the "ended" or "back" message is only sent once things have stayed normal for 10 minutes, and nothing more is sent for that fermenter or sensor until then.
+
+If a message can't be delivered it is tried again twice, a minute apart, and then dropped. Messages wait for up to an hour if the WiFi is down. A message tells you something happened; it can't tell you the controller has lost power or dropped off the network, because then there is nothing to send it.
+
+### Alert banners
+
+The admin page shows the same events as banners under its top bar, on every tab, even with notifications switched off: red for a temperature alarm, amber for a sensor that has stopped reporting or an unexpected restart, and green for a finished profile or a new release. The page checks for them every 30 seconds.
+
+- An alarm or sensor banner shows while the problem is there, with the latest reading.
+- A restart banner stays until the controller restarts again; a finished profile's until the next profile starts on that fermenter.
+- At most three banners are shown, most serious first. The rest are behind a **+N more alerts** row.
+- Close a banner with its **×**. It stays closed in that browser, but something new - another alarm, a later release - gets a banner of its own. An alarm that comes and goes at its limit counts as the same one until it has stayed away for 10 minutes, as with the notifications. After a restart, anything still wrong shows again.
+
+---
+
 ## Contacting ourbrewbot.com
 
 The controller runs entirely on your own network. It only contacts ourbrewbot.com for two things, and both can be switched off in the admin page on the **System Settings** tab, under **Global Settings**:
@@ -220,6 +259,7 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 |--------|--------------------|-------------------------------|
 | GET    | /                  | Welcome / API index page      |
 | GET    | /admin             | Admin configuration page      |
+| GET    | /alerts            | Alerts shown as admin page banners: `{"boot":"…","alerts":[{"id","kind","age","title","text"}]}`. `kind` is alarm, sensor, restart, profile or update; `age` is in seconds |
 | GET    | /ble/sniff         | BLE AT command console page   |
 | GET    | /ble/sniff/poll    | Poll BLE serial data          |
 | POST   | /ble/sniff/send    | Send AT command to HM-10      |
@@ -248,6 +288,9 @@ Neither sends your settings, WiFi network name or password, temperatures or brew
 | POST   | /mqtt              | Update MQTT config (haDiscovery, LWT, discovery cleanup on disable) |
 | POST   | /mqtt/discover     | Trigger HA MQTT discovery     |
 | POST   | /mqtt/test         | Test MQTT connection          |
+| GET    | /notify            | Push notification config (enabled, url, and one true/false for each kind of event) |
+| POST   | /notify            | Update push notification config. The url must start with `http://` |
+| POST   | /notify/test       | Send a test notification to the saved URL |
 | GET    | /probes            | All temperature probes        |
 | POST   | /probes            | Update probe config           |
 | GET    | /pressure          | Local pressure reading, assignment, calibration and capture progress |
@@ -341,6 +384,7 @@ OurBrewbot/
   SmartPlugs.h/.cpp    RF smart plug control
   Profile.h/.cpp       Fermentation profile runner
   Reports.h/.cpp       Brewfather / Brewer's Friend reporting
+  Notify.h/.cpp        Push notifications to ntfy or any plain HTTP address, and the admin page alert banners
   iSpindel.h/.cpp      iSpindel WiFi hydrometer receive and registration
   Tilt.h/.cpp          Tilt hydrometer via HM-10 BLE
   Mqtt.h/.cpp          MQTT client — publishing, HA discovery, command dispatch

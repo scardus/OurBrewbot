@@ -24,6 +24,7 @@
 
 #include "iSpindel.h"
 #include "Log.h"
+#include "Notify.h"
 #include "StackProbe.h"
 #include "TextSafe.h"
 #include <ArduinoJson.h>
@@ -263,8 +264,9 @@ void handleiSpindelPost(const String& body) {
   runTime     = dropIfImpossible(runTime,     0.0f,    3600.0f, "run time",         name, id);
 
   if (matched >= 0) {
-    // Apply calibration offsets
-    sg   += g_iSpindels[matched].sgAdjust;
+    // Apply calibration offsets - only to readings that were received, so a
+    // post with no gravity doesn't show the offset itself as a gravity
+    if (sg > 0.0f) sg += g_iSpindels[matched].sgAdjust;
     if (temp > TEMP_VALID_MIN) temp += g_iSpindels[matched].tempAdjust;
     if (corrGravity > 0.0f) corrGravity += g_iSpindels[matched].sgAdjust;
 
@@ -351,9 +353,18 @@ void iSpindelCheckFreshness() {
   // Starts false for every slot, so nothing is logged for a device that
   // simply hasn't reported since boot
   static bool s_wasFresh[MAX_ISPINDELS] = {false};
+  // True once a slot has reported since boot. A push notification (see
+  // Notify.h) is only sent for a device that was reporting and then stopped.
+  static bool s_hasReported[MAX_ISPINDELS] = {false};
 
   for (int i = 0; i < MAX_ISPINDELS; i++) {
     bool fresh = iSpindelIsFresh(g_iSpindels[i]);
+    if (fresh) s_hasReported[i] = true;
+    // Only for an iSpindel a fermenter uses
+    if (s_hasReported[i] && g_iSpindels[i].fermenter < MAX_FERMENTERS) {
+      notifySensorState(NOTIFY_SENSOR_ISPINDEL, i, !fresh,
+                        (float)(uptimeSince(g_iSpindels[i].lastSeen) / 60));
+    }
     if (fresh == s_wasFresh[i]) continue;
     s_wasFresh[i] = fresh;
     if (fresh) {

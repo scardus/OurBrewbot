@@ -115,6 +115,10 @@ bool runUpdateCheck() { s_updateChecks++; return true; }
 // Reports.cpp
 int testBrewService(uint8_t) { return 200; }
 
+static int s_notifyTestResult = 200;   // what the test notification "returns"
+static int s_notifyTests      = 0;
+int notifySendTest() { s_notifyTests++; return s_notifyTestResult; }
+
 // Tilt.cpp
 static const char* const TILT_COLOUR_NAMES[] = {
   "Red", "Green", "Black", "Purple", "Orange", "Blue", "Yellow", "Pink"
@@ -187,6 +191,7 @@ ESP8266WebServer g_webServer;
 #include "../../OurBrewbot/Config.cpp"
 #include "../../OurBrewbot/OriginalConfig.cpp"
 #include "../../OurBrewbot/Temperatures.cpp"
+#include <NotifyStub.h>   // records what Fermenter.cpp reports to the notifications
 #include "../../OurBrewbot/Fermenter.cpp"
 #include "../../OurBrewbot/Profile.cpp"
 #include "../../OurBrewbot/TextSafe.cpp"
@@ -252,6 +257,8 @@ void setUp(void) {
   s_rfSniffLastPoll = 0;
   s_restarts       = 0;
   s_lastForgetWiFi = false;
+  Update.error     = 0;
+  otaUploadClear();
 
   memset(&g_updateStatus, 0, sizeof(g_updateStatus));
   s_updateChecks = 0;
@@ -267,6 +274,9 @@ void setUp(void) {
   for (int i = 0; i < MAX_BREW_SERVICES; i++) g_brewServices[i] = BrewServiceConfig{};
   memset(&g_mqttConfig, 0, sizeof(g_mqttConfig));
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
+  memset(&g_notifyConfig, 0, sizeof(g_notifyConfig));
+  s_notifyTestResult = 200;
+  s_notifyTests      = 0;
   g_fermenterDebugMode = false;
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     g_fermenterDebugOverrides[i] = FermenterDebugOverride{};
@@ -1130,6 +1140,48 @@ static void test_profile_resume_rejected_when_nothing_is_paused(void) {
   TEST_ASSERT_TRUE(bodyContains("No paused profile to resume"));
 }
 
+// A running profile keeps its number. Changing it used to carry the step and
+// hour over into another profile, and 0 froze the temperatures mid-run.
+static void test_fermenter_save_refuses_another_profile_while_one_runs(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  postBody("{\"Fermenter\":0,\"ProfileNo\":0,\"BeerName\":\"Changed\"}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Stop the running profile"));
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F0].profileNo);
+  TEST_ASSERT_EQUAL_STRING("", g_fermenters[F0].beerName);   // nothing else applied either
+}
+
+static void test_fermenter_save_refuses_another_profile_while_one_is_paused(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  pauseProfile(F0);
+  postBody("{\"Fermenter\":0,\"ProfileNo\":2}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(1, g_fermenters[F0].profileNo);
+}
+
+// The WebUI sends ProfileNo with every save, so the running one must pass
+static void test_fermenter_save_with_the_running_profile_is_accepted(void) {
+  giveProfileOneStep(0);
+  startProfile(F0, 1);
+  postBody("{\"Fermenter\":0,\"ProfileNo\":1,\"BeerName\":\"Changed\"}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("Changed", g_fermenters[F0].beerName);
+  TEST_ASSERT_TRUE(g_fermenters[F0].profileRunning);
+}
+
+static void test_fermenter_save_changes_the_profile_when_none_runs(void) {
+  g_fermenters[F0].profileNo = 1;
+  postBody("{\"Fermenter\":0,\"ProfileNo\":2}");
+  handleFermenter(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(2, g_fermenters[F0].profileNo);
+}
+
 static void test_profile_resume_rejected_when_already_running(void) {
   giveProfileOneStep(0);
   startProfile(F0, 1);
@@ -1479,6 +1531,145 @@ static void test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces(void) {
   TEST_ASSERT_EQUAL_STRING("home/brew bot/12345678901234567", g_mqttConfig.baseTopic);
 }
 
+// A bad port used to be refused only after "enabled" and "host" had already
+// been changed in RAM, so the rejected request still half-applied
+static void test_a_refused_syslog_port_changes_nothing(void) {
+  g_syslogConfig.enabled = false;
+  strlcpy(g_syslogConfig.host, "old.example", sizeof(g_syslogConfig.host));
+  g_syslogConfig.port = 514;
+  postBody("{\"enabled\":true,\"host\":\"new.example\",\"port\":70000}");
+  handleSyslogConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_syslogConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("old.example", g_syslogConfig.host);
+  TEST_ASSERT_EQUAL_UINT16(514, g_syslogConfig.port);
+}
+
+static void test_a_valid_syslog_save_applies_every_field(void) {
+  postBody("{\"enabled\":true,\"host\":\"new.example\",\"port\":1514}");
+  handleSyslogConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(g_syslogConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("new.example", g_syslogConfig.host);
+  TEST_ASSERT_EQUAL_UINT16(1514, g_syslogConfig.port);
+}
+
+// ---- /notify ----
+
+static void test_notify_get_reports_each_event_as_its_own_flag(void) {
+  g_notifyConfig.enabled = true;
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  g_notifyConfig.events  = NOTIFY_EVT_ALARMS | NOTIFY_EVT_PROFILE;
+  handleNotifyConfig(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING(
+    "{\"enabled\":true,\"url\":\"http://ntfy.sh/my-topic\",\"alarms\":true,"
+    "\"sensors\":false,\"restarts\":false,\"profile\":true,\"updates\":false}",
+    g_httpResp.body);
+}
+
+static void test_a_valid_notify_save_applies_every_field(void) {
+  postBody("{\"enabled\":true,\"url\":\"http://ntfy.sh/my-topic\",\"alarms\":true,"
+           "\"sensors\":false,\"restarts\":true,\"profile\":false,\"updates\":true}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("http://ntfy.sh/my-topic", g_notifyConfig.url);
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALARMS | NOTIFY_EVT_RESTARTS | NOTIFY_EVT_UPDATES,
+                          g_notifyConfig.events);
+  TEST_ASSERT_NOT_NULL(strstr(fsTestRead(FILE_NOTIFY), "\"url\":\"http://ntfy.sh/my-topic\""));
+}
+
+static void test_a_notify_save_leaves_fields_it_does_not_name_alone(void) {
+  g_notifyConfig.enabled = true;
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  g_notifyConfig.events  = NOTIFY_EVT_ALARMS | NOTIFY_EVT_SENSORS;
+  postBody("{\"sensors\":false}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_TRUE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("http://ntfy.sh/my-topic", g_notifyConfig.url);
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALARMS, g_notifyConfig.events);
+}
+
+static void test_a_refused_notify_url_changes_nothing(void) {
+  g_notifyConfig.enabled = false;
+  strlcpy(g_notifyConfig.url, "http://old.example/topic", sizeof(g_notifyConfig.url));
+  g_notifyConfig.events  = NOTIFY_EVT_ALARMS;
+  postBody("{\"enabled\":true,\"url\":\"https://ntfy.sh/my-topic\",\"updates\":true}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  // The whole message must fit sendStatusMsg()'s buffer
+  TEST_ASSERT_TRUE(bodyContains("(https is not supported)\"}"));
+  TEST_ASSERT_FALSE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("http://old.example/topic", g_notifyConfig.url);
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALARMS, g_notifyConfig.events);
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_NOTIFY));
+}
+
+static void test_notify_cannot_be_enabled_without_a_url(void) {
+  postBody("{\"enabled\":true}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("url is required"));
+  TEST_ASSERT_FALSE(g_notifyConfig.enabled);
+}
+
+static void test_notify_url_can_be_cleared_when_switched_off(void) {
+  g_notifyConfig.enabled = true;
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  postBody("{\"enabled\":false,\"url\":\"\"}");
+  handleNotifyConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("", g_notifyConfig.url);
+}
+
+static void test_notify_test_needs_a_saved_url(void) {
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("No notification URL saved"));
+  TEST_ASSERT_EQUAL_INT(0, s_notifyTests);
+}
+
+static void test_notify_test_reports_a_delivered_message(void) {
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, s_notifyTests);
+  TEST_ASSERT_EQUAL_STRING("{\"status\":\"ok\",\"msg\":\"HTTP 200 - OK\",\"httpCode\":200}", g_httpResp.body);
+}
+
+static void test_notify_test_reports_a_refusal_with_its_http_status(void) {
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  s_notifyTestResult = 403;
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_STRING("{\"status\":\"error\",\"msg\":\"HTTP 403 - Failed\",\"httpCode\":403}", g_httpResp.body);
+}
+
+static void test_notify_test_says_when_the_server_never_answered(void) {
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  s_notifyTestResult = -11;   // HTTPClient's "read timeout", the longest code there is
+  postBody("{}");
+  handleNotifyTest(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  // The whole reply must fit the handler's buffer
+  TEST_ASSERT_EQUAL_STRING(
+    "{\"status\":\"error\",\"msg\":\"No reply from the server (error -11)\",\"httpCode\":-11}",
+    g_httpResp.body);
+}
+
+static void test_fs_save_accepts_the_notify_file(void) {
+  srv.setArg("name", "/jsonNotify.txt");
+  srv.setBody("{\"enabled\":false}");
+  handleFsFileSave(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+}
+
 static void test_fs_save_rejects_an_empty_body(void) {
   srv.setArg("name", "/jsonGlobal.txt");
   srv.setBody("");
@@ -1632,12 +1823,52 @@ static void test_probe_post_rejects_an_unpopulated_slot(void) {
 
 static void test_probe_post_updates_a_populated_slot(void) {
   strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
-  postBody("{\"index\":0,\"function\":1,\"fermenter\":2,\"tempAdjust\":-0.5}");
+  postBody("{\"index\":0,\"function\":2,\"fermenter\":2,\"tempAdjust\":-0.5}");
   handleProbePost(srv);
   TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
-  TEST_ASSERT_EQUAL_UINT8(1, g_probes[0].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_BEER, g_probes[0].function);
   TEST_ASSERT_EQUAL_UINT8(2, g_probes[0].fermenter);
   TEST_ASSERT_EQUAL_FLOAT(-0.5f, g_probes[0].tempAdjust);
+}
+
+static void test_probe_post_ignores_an_unknown_function(void) {
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  g_probes[0].function = PROBE_FN_AMBIENT;
+  postBody("{\"index\":0,\"function\":50}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AMBIENT, g_probes[0].function);
+}
+
+// A calibration offset is a small correction. A typo such as 10 for 1.0 used
+// to be stored, and it moves the temperature the fermenter is controlled by.
+static void test_probe_post_refuses_an_offset_over_10_c(void) {
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  g_probes[0].tempAdjust = 0.3f;
+  g_probes[0].function   = PROBE_FN_AMBIENT;
+  g_probes[0].fermenter  = PROBE_UNASSIGNED;
+  postBody("{\"index\":0,\"function\":2,\"fermenter\":1,\"tempAdjust\":10.5}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("temperature offset out of range"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_FLOAT(0.3f, g_probes[0].tempAdjust);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_FN_AMBIENT, g_probes[0].function);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_probes[0].fermenter);
+}
+
+// The limit is 10 C, so 18 F is the largest offset in Fahrenheit
+static void test_probe_offset_limit_is_checked_in_celsius(void) {
+  g_globalConfig.unit = UNIT_FAHRENHEIT;
+  strlcpy(g_probes[0].address, "28FF001122334455", sizeof(g_probes[0].address));
+  postBody("{\"index\":0,\"tempAdjust\":-18}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -10.0f, g_probes[0].tempAdjust);
+  httpRespReset();
+  postBody("{\"index\":0,\"tempAdjust\":18.5}");
+  handleProbePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
 }
 
 // A fermenter number is either a real slot or the unassigned sentinel; a value
@@ -1684,6 +1915,98 @@ static void test_smartplug_post_requires_a_valid_index(void) {
   handleSmartPlugPost(srv);
   TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
   TEST_ASSERT_TRUE(bodyContains("Invalid plug index"));
+}
+
+// ---- /alerts ----
+// Notify.cpp's own tests cover which alerts there are and their text; these
+// check that GET /alerts sends what it is given, whole.
+
+// Put one alert in the stub's slot
+static void stubAlert(uint8_t slot, NotifyAlertKind kind, const char* id, uint32_t age,
+                      const char* title, const char* text) {
+  g_notifyStubAlerts[slot].kind       = kind;
+  g_notifyStubAlerts[slot].ageSeconds = age;
+  strlcpy(g_notifyStubAlerts[slot].id, id, sizeof(g_notifyStubAlerts[slot].id));
+  strlcpy(g_notifyStubAlertMessages[slot].title, title, sizeof(g_notifyStubAlertMessages[slot].title));
+  strlcpy(g_notifyStubAlertMessages[slot].body,  text,  sizeof(g_notifyStubAlertMessages[slot].body));
+}
+
+static void test_alerts_get_sends_an_empty_list_when_all_is_well(void) {
+  g_notifyStubAlertSlots = 4;   // all empty
+  handleAlerts(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["alerts"].is<JsonArray>());
+  TEST_ASSERT_EQUAL_INT(0, doc["alerts"].as<JsonArray>().size());
+}
+
+// The WebUI forgets closed banners whose id starts with an earlier boot's
+static void test_alerts_get_names_this_boot(void) {
+  handleAlerts(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_STRING("0BADF00D", doc["boot"].as<const char*>());   // logBootId() in this suite
+}
+
+static void test_alerts_get_lists_each_alert_and_skips_empty_slots(void) {
+  g_notifyStubAlertSlots = 4;
+  stubAlert(0, ALERT_ALARM, "0BADF00D-0-1000", 90, "Temperature alarm",
+            "Fermenter 1: 23.00 \xC2\xB0" "C is above the 22.0 \xC2\xB0" "C limit.");
+  stubAlert(3, ALERT_UPDATE, "update-0.11.0", 0, "Firmware update available",
+            "OurBrewbot 0.11.0 is available. This controller runs 0.10.0.");
+  handleAlerts(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  JsonArray alerts = doc["alerts"].as<JsonArray>();
+  TEST_ASSERT_EQUAL_INT(2, alerts.size());
+  TEST_ASSERT_EQUAL_STRING("0BADF00D-0-1000", alerts[0]["id"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("alarm", alerts[0]["kind"].as<const char*>());
+  TEST_ASSERT_EQUAL_UINT32(90, alerts[0]["age"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_STRING("Temperature alarm", alerts[0]["title"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Fermenter 1: 23.00 \xC2\xB0" "C is above the 22.0 \xC2\xB0" "C limit.",
+                           alerts[0]["text"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("update-0.11.0", alerts[1]["id"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("update", alerts[1]["kind"].as<const char*>());
+}
+
+// The WebUI picks each banner's colour from these names
+static void test_alerts_get_names_every_kind(void) {
+  const NotifyAlertKind kinds[] = { ALERT_ALARM, ALERT_SENSOR, ALERT_RESTART, ALERT_PROFILE, ALERT_UPDATE };
+  const char* names[]           = { "alarm", "sensor", "restart", "profile", "update" };
+  g_notifyStubAlertSlots = 5;
+  for (uint8_t i = 0; i < 5; i++) stubAlert(i, kinds[i], "id", 0, "Title", "Text");
+  handleAlerts(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  for (int i = 0; i < 5; i++) {
+    TEST_ASSERT_EQUAL_STRING(names[i], doc["alerts"][i]["kind"].as<const char*>());
+  }
+}
+
+// Every field as long as it can be, in every slot: each alert is built in
+// s_chunkBuf, which cuts it off silently if it doesn't fit
+static void test_alerts_get_sends_worst_case_alerts_whole(void) {
+  g_notifyStubAlertSlots = NOTIFY_STUB_ALERT_SLOTS;
+  for (uint8_t i = 0; i < NOTIFY_STUB_ALERT_SLOTS; i++) {
+    g_notifyStubAlerts[i].kind       = ALERT_RESTART;   // the longest kind name
+    g_notifyStubAlerts[i].ageSeconds = 0xFFFFFFFF;
+    FILL_WORST(g_notifyStubAlerts[i].id);
+    FILL_WORST(g_notifyStubAlertMessages[i].title);
+    FILL_WORST(g_notifyStubAlertMessages[i].body);
+  }
+  handleAlerts(srv);
+
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_INT(NOTIFY_STUB_ALERT_SLOTS, doc["alerts"].as<JsonArray>().size());
+  for (int i = 0; i < NOTIFY_STUB_ALERT_SLOTS; i++) {
+    TEST_ASSERT_EQUAL_STRING(g_notifyStubAlerts[i].id,          doc["alerts"][i]["id"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(g_notifyStubAlertMessages[i].title, doc["alerts"][i]["title"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING(g_notifyStubAlertMessages[i].body,  doc["alerts"][i]["text"].as<const char*>());
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, doc["alerts"][i]["age"].as<uint32_t>());
+  }
 }
 
 // ---- a plug is switched OFF before a change to how it is switched ----
@@ -1994,6 +2317,39 @@ static void test_an_aborted_ota_upload_releases_the_plugs(void) {
   srv.testUpload().status = UPLOAD_FILE_ABORTED;
   handleOTAUpload(srv);
   TEST_ASSERT_FALSE(s_plugsHeldOff);
+}
+
+// The updater's reason for a failure used to go to the serial port only. It
+// is now logged once when the upload ends - not once for every failed chunk.
+static void test_a_failed_firmware_install_is_logged_once(void) {
+  makeTestImage();
+  Update.error = 4;   // flash write failed
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  s_logCalls = 0;
+  const size_t chunk = TEST_IMAGE_SIZE / 4;
+  for (size_t sent = 0; sent < TEST_IMAGE_SIZE; sent += chunk) {
+    size_t n = (TEST_IMAGE_SIZE - sent < chunk) ? TEST_IMAGE_SIZE - sent : chunk;
+    srv.testUpload().status      = UPLOAD_FILE_WRITE;
+    srv.testUpload().buf         = g_testImage + sent;
+    srv.testUpload().currentSize = n;
+    handleOTAUpload(srv);
+  }
+  srv.testUpload().totalSize = TEST_IMAGE_SIZE;
+  srv.testUpload().status    = UPLOAD_FILE_END;
+  handleOTAUpload(srv);
+  TEST_ASSERT_FALSE(otaUploadInstalled());
+  TEST_ASSERT_FALSE(otaUploadRefused());   // the file was fine; flashing it failed
+  TEST_ASSERT_EQUAL_INT(1, s_logCalls);
+}
+
+static void test_a_cut_off_upload_is_logged(void) {
+  srv.testUpload().status = UPLOAD_FILE_START;
+  handleOTAUpload(srv);
+  s_logCalls = 0;
+  srv.testUpload().status = UPLOAD_FILE_ABORTED;
+  handleOTAUpload(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_logCalls);
 }
 
 // ============================================================
@@ -2472,6 +2828,28 @@ static void test_tilt_post_converts_temp_adjust_from_fahrenheit(void) {
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, g_tilts[0].tempAdjust);
 }
 
+static void test_tilt_post_refuses_an_out_of_range_offset(void) {
+  postBody("{\"colour\":0,\"fermenter\":1,\"tempAdjust\":-11}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[0].fermenter);   // nothing applied
+  httpRespReset();
+  postBody("{\"colour\":0,\"fermenter\":1,\"sgAdjust\":0.06}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("gravity offset out of range"));
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[0].fermenter);
+}
+
+// Only "beer temperature" or "not used", as the Tilt loader already treats
+// any other value - so a Tilt no longer changes role at the next restart
+static void test_tilt_post_stores_an_unknown_function_as_not_used(void) {
+  postBody("{\"colour\":0,\"function\":3,\"fermenter\":1}");
+  handleTiltPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_tilts[0].function);
+}
+
 // The clear path posts a literal zero offset, and zero converts to zero under
 // the span helpers - so clearing a slot works identically in either unit.
 static void test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit(void) {
@@ -2594,6 +2972,35 @@ static void test_ispindel_post_refuses_a_fermenter_another_ispindel_is_on(void) 
   TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[1].fermenter);
   TEST_ASSERT_FALSE(g_iSpindels[1].collectData);
   TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[1].sgAdjust);
+}
+
+static void test_ispindel_post_refuses_an_out_of_range_offset(void) {
+  g_iSpindels[0].fermenter = PROBE_UNASSIGNED;
+  g_iSpindels[0].sgAdjust  = 0.002f;
+  postBody("{\"index\":0,\"fermenter\":2,\"tempAdjust\":0.5,\"sgAdjust\":-0.051}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("gravity offset out of range"));
+  // Left exactly as it was
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[0].fermenter);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f,   g_iSpindels[0].tempAdjust);
+  TEST_ASSERT_EQUAL_FLOAT(0.002f, g_iSpindels[0].sgAdjust);
+}
+
+static void test_ispindel_post_accepts_offsets_at_the_limits(void) {
+  postBody("{\"index\":0,\"tempAdjust\":-10,\"sgAdjust\":0.05}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_FLOAT(-10.0f, g_iSpindels[0].tempAdjust);
+  TEST_ASSERT_EQUAL_FLOAT(0.05f,  g_iSpindels[0].sgAdjust);
+}
+
+static void test_ispindel_post_ignores_an_unknown_gravity_unit(void) {
+  g_iSpindels[0].unit = ISPINDEL_UNIT_PLATO;
+  postBody("{\"index\":0,\"unit\":5}");
+  handleiSpindelConfigPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(ISPINDEL_UNIT_PLATO, g_iSpindels[0].unit);
 }
 
 static void test_ispindel_refusal_sends_a_worst_case_name_whole(void) {
@@ -3254,6 +3661,10 @@ int main(int, char**) {
   RUN_TEST(test_profile_pause_holds_the_step);
   RUN_TEST(test_profile_resume_restarts_a_paused_profile);
   RUN_TEST(test_profile_resume_rejected_when_nothing_is_paused);
+  RUN_TEST(test_fermenter_save_refuses_another_profile_while_one_runs);
+  RUN_TEST(test_fermenter_save_refuses_another_profile_while_one_is_paused);
+  RUN_TEST(test_fermenter_save_with_the_running_profile_is_accepted);
+  RUN_TEST(test_fermenter_save_changes_the_profile_when_none_runs);
   RUN_TEST(test_profile_resume_rejected_when_already_running);
   RUN_TEST(test_profile_next_advances_a_running_profile);
   RUN_TEST(test_profile_next_on_a_stopped_profile_is_rejected);
@@ -3287,6 +3698,24 @@ int main(int, char**) {
   RUN_TEST(test_mqtt_post_saves_a_new_password);
   RUN_TEST(test_mqtt_post_with_an_empty_password_clears_it);
   RUN_TEST(test_mqtt_post_accepts_a_base_topic_with_levels_and_spaces);
+  RUN_TEST(test_a_refused_syslog_port_changes_nothing);
+  RUN_TEST(test_a_valid_syslog_save_applies_every_field);
+  RUN_TEST(test_notify_get_reports_each_event_as_its_own_flag);
+  RUN_TEST(test_a_valid_notify_save_applies_every_field);
+  RUN_TEST(test_a_notify_save_leaves_fields_it_does_not_name_alone);
+  RUN_TEST(test_a_refused_notify_url_changes_nothing);
+  RUN_TEST(test_notify_cannot_be_enabled_without_a_url);
+  RUN_TEST(test_notify_url_can_be_cleared_when_switched_off);
+  RUN_TEST(test_notify_test_needs_a_saved_url);
+  RUN_TEST(test_notify_test_reports_a_delivered_message);
+  RUN_TEST(test_notify_test_reports_a_refusal_with_its_http_status);
+  RUN_TEST(test_notify_test_says_when_the_server_never_answered);
+  RUN_TEST(test_alerts_get_sends_an_empty_list_when_all_is_well);
+  RUN_TEST(test_alerts_get_names_this_boot);
+  RUN_TEST(test_alerts_get_lists_each_alert_and_skips_empty_slots);
+  RUN_TEST(test_alerts_get_names_every_kind);
+  RUN_TEST(test_alerts_get_sends_worst_case_alerts_whole);
+  RUN_TEST(test_fs_save_accepts_the_notify_file);
   RUN_TEST(test_fs_save_rejects_an_empty_body);
   RUN_TEST(test_fs_save_rejects_invalid_json_without_touching_the_file);
   RUN_TEST(test_fs_save_writes_a_whitelisted_file);
@@ -3307,6 +3736,9 @@ int main(int, char**) {
   RUN_TEST(test_probe_post_requires_a_valid_index);
   RUN_TEST(test_probe_post_rejects_an_unpopulated_slot);
   RUN_TEST(test_probe_post_updates_a_populated_slot);
+  RUN_TEST(test_probe_post_ignores_an_unknown_function);
+  RUN_TEST(test_probe_post_refuses_an_offset_over_10_c);
+  RUN_TEST(test_probe_offset_limit_is_checked_in_celsius);
   RUN_TEST(test_probe_post_ignores_an_impossible_fermenter_number);
   RUN_TEST(test_smartplug_post_updates_a_slot);
   RUN_TEST(test_smartplug_post_ignores_an_impossible_bit_count);
@@ -3333,6 +3765,8 @@ int main(int, char**) {
   RUN_TEST(test_ota_upload_start_switches_every_plug_off_and_holds_them);
   RUN_TEST(test_ota_upload_chunks_do_not_switch_the_plugs_again);
   RUN_TEST(test_an_aborted_ota_upload_releases_the_plugs);
+  RUN_TEST(test_a_failed_firmware_install_is_logged_once);
+  RUN_TEST(test_a_cut_off_upload_is_logged);
   RUN_TEST(test_a_complete_firmware_file_is_installed);
   RUN_TEST(test_a_cut_short_firmware_file_is_refused);
   RUN_TEST(test_clearing_the_upload_result_forgets_a_refused_upload);
@@ -3373,6 +3807,8 @@ int main(int, char**) {
   RUN_TEST(test_probe_temp_adjust_round_trips_through_fahrenheit);
   RUN_TEST(test_tilt_payload_converts_temp_adjust_as_a_span);
   RUN_TEST(test_tilt_post_converts_temp_adjust_from_fahrenheit);
+  RUN_TEST(test_tilt_post_refuses_an_out_of_range_offset);
+  RUN_TEST(test_tilt_post_stores_an_unknown_function_as_not_used);
   RUN_TEST(test_clearing_a_tilt_slot_zeroes_the_offset_in_fahrenheit);
   RUN_TEST(test_tilt_post_refuses_a_fifth_set_up_tilt);
   RUN_TEST(test_tilt_post_still_edits_one_of_four_set_up_tilts);
@@ -3383,6 +3819,9 @@ int main(int, char**) {
   RUN_TEST(test_several_tilts_can_be_unassigned);
   RUN_TEST(test_a_tilt_and_an_ispindel_can_share_a_fermenter);
   RUN_TEST(test_ispindel_post_refuses_a_fermenter_another_ispindel_is_on);
+  RUN_TEST(test_ispindel_post_refuses_an_out_of_range_offset);
+  RUN_TEST(test_ispindel_post_accepts_offsets_at_the_limits);
+  RUN_TEST(test_ispindel_post_ignores_an_unknown_gravity_unit);
   RUN_TEST(test_ispindel_refusal_sends_a_worst_case_name_whole);
   RUN_TEST(test_ispindels_already_sharing_a_fermenter_can_still_be_edited);
   RUN_TEST(test_several_ispindels_can_be_unassigned);

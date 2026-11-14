@@ -8,7 +8,7 @@ const vm=require('node:vm');
 
 function ui() {
   const context=vm.createContext({console,TextEncoder,AbortController,TypeError,setTimeout,clearTimeout});
-  for (const name of ['html','state','api','forms','app','fermenters','sensors','profiles','plugs','reporting','system','logs']) {
+  for (const name of ['html','state','api','forms','app','fermenters','sensors','profiles','plugs','reporting','system','logs','banners']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/js/'+name+'.js'),'utf8'),context,{filename:name+'.js'});
   }
   vm.runInContext('toast=()=>{};',context);
@@ -182,6 +182,34 @@ test('the dashboard menu item counts the fermenters that are powered on, and fol
   // The profiles view polls fermenters without redrawing, so the number updates on its own.
   run('state.fermenters[1].power=true; updateLiveReadings();');
   assert.equal(count.textContent,2);
+});
+
+test('the profile dropdown is locked while a profile runs or is paused, as the firmware requires',()=>{
+  const {run,context}=ui();
+  const elements={};
+  context.document={querySelectorAll:()=>[],querySelector:selector=>
+    elements[selector]??={open:true,showModal:()=>{},querySelector:()=>null,querySelectorAll:()=>[]}};
+  run(`mountForms=()=>{}; state.global={debug:false}; state.profiles=[{name:'Lager',steps:[{}]}];
+    state.fermenters=[{name:'Vessel',beer:'Beer',yeast:'',beerTemp:20,status:'Idle',alarmActive:false,
+      og:1.05,tg:1.01,floor:18,ceiling:20,hysteresis:0.5,alarm:3,delay:10,power:true,tempControl:true,
+      liveTest:false,brewfather:false,brewers:false,mqtt:false,profile:1,running:false,paused:false,step:0,hour:0}];`);
+  const profileSelect=()=>elements['#editor-content'].innerHTML.match(/<select name="profile"[^>]*>/)[0];
+  for (const [running,paused,locked] of [[false,false,false],[true,false,true],[false,true,true]]) {
+    run(`state.fermenters[0].running=${running}; state.fermenters[0].paused=${paused}; openFerm(0);`);
+    assert.equal(profileSelect().includes('disabled'),locked,'running='+running+' paused='+paused);
+    assert.equal(elements['#editor-content'].innerHTML.includes('Stop the profile to choose another.'),locked);
+  }
+});
+
+test('sensor offset fields carry the firmware limits in the display unit',()=>{
+  const {run}=ui();
+  const sensor="{name:'Tilt',fn:99,fermenter:99,adjust:0,sgAdjust:0,temp:20,sg:1.05,active:true}";
+  for (const [unit,limit] of [['C',10],['F',18]]) {
+    run(`state.unit='${unit}'; state.fermenters=[];`);
+    const html=run(`sensorCard('tilts',${sensor},0)`);
+    assert.match(html,new RegExp(`name="adjust"[^>]*min="-${limit}" max="${limit}"`),unit);
+    assert.match(html,/name="sgAdjust"[^>]*min="-0.05" max="0.05"/);
+  }
 });
 
 function saveFixture() {
@@ -468,6 +496,8 @@ const mqttFields={enabled:true,host:'broker',port:'1883',username:'user',passwor
   haDiscovery:true,allowControl:false,logEnabled:false,clearPassword:false};
 const serviceFields={enabled:true,serviceId:'key',deviceName:'device'};
 const syslogFields={enabled:true,host:'server',port:'514',facility:'16',level:'6'};
+const notifyFields={enabled:true,url:'http://ntfy.sh/topic',alarms:true,sensors:true,restarts:false,
+  profile:false,updates:true};
 
 test('log polling keeps the status dot, and shows a failure in amber',async()=>{
   const {run,context}=ui();
@@ -563,6 +593,8 @@ test('every form saves to its endpoint with the expected body and confirmation r
       body:{index:1,enabled:true,serviceId:'key',deviceName:'device'}},
     {key:'mqtt',fields:mqttFields,path:'/mqtt',reads:['mqtt'],
       body:{enabled:true,host:'broker',port:1883,username:'user',baseTopic:'topic',haDiscovery:true,allowControl:false,logEnabled:false}},
+    {key:'notify',fields:notifyFields,path:'/notify',reads:['notify'],
+      body:{enabled:true,url:'http://ntfy.sh/topic',alarms:true,sensors:true,restarts:false,profile:false,updates:true}},
     {key:'global',fields:{unit:'C',resolution:'11',alarm:'60',mdns:true,updates:false,crashes:true},path:'/controller',reads:['controller'],
       body:{Unit:1,Resolution:11,AlarmDwellSec:60,MdnsEnabled:true,UpdateCheck:false,CrashReports:true}},
     {key:'debug-mode',fields:{enabled:true},path:'/debug',reads:['debug'],body:{DebugMode:true}},
@@ -623,6 +655,33 @@ test('text longer than the firmware buffer is refused before anything is sent',a
   assert.match(multibyte.error,/limit of 31/);
 });
 
+test('the notification URL limit is the firmware field size, and a switched-off form may clear it',async()=>{
+  // 127 bytes fit NotifyConfig.url[128]; the limit counts the whole URL, http:// included.
+  const longest='http://'+'x'.repeat(120);
+  const accepted=await saveThrough('notify',{...notifyFields,url:longest});
+  assert.equal(accepted.posts.length,1);
+  const refused=await saveThrough('notify',{...notifyFields,url:longest+'x'});
+  assert.match(refused.error,/limit of 127 UTF-8 bytes/);
+  assert.equal(refused.posts.length,0);
+  const cleared=await saveThrough('notify',{...notifyFields,enabled:false,url:''});
+  assert.deepEqual(cleared.posts[0].body,{enabled:false,url:'',alarms:true,sensors:true,restarts:false,
+    profile:false,updates:true});
+});
+
+test('the notifications card shows the saved settings and escapes the URL',()=>{
+  const {run}=ui();
+  run(`state.services=[]; state.mqtt={};
+    state.notify={enabled:true,url:'http://ntfy.sh/a"b<c',alarms:true,sensors:false,restarts:true,profile:false,updates:false};`);
+  const html=run('reportingView()');
+  assert.match(html,/<h2>Notifications<\/h2>/);
+  assert.match(html,/data-form="notify"/);
+  assert.match(html,/value="http:\/\/ntfy\.sh\/a&quot;b&lt;c"/);
+  assert.match(html,/name="alarms" checked/);
+  assert.doesNotMatch(html,/name="sensors" checked/);
+  assert.match(html,/name="restarts" checked/);
+  assert.match(html,/data-action="test-notify"/);
+});
+
 test('invalid saves show their message and send nothing',async()=>{
   const cases=[
     ['ferm-0',{...fermenterFields,floor:'30'},fermenterSetup,/Temperature band/],
@@ -630,6 +689,11 @@ test('invalid saves show their message and send nothing',async()=>{
     ['plug-0',{...plugFields,fermenter:'99'},plugSetup,/Choose a fermenter/],
     ['plug-0',{...plugFields,delay:'65000'},plugSetup,/exceed the firmware limit/],
     ['mqtt',{...mqttFields,baseTopic:'bad/#'},'',/Base topic/],
+    ['notify',{...notifyFields,url:'https://ntfy.sh/topic'},'',/must start with http:\/\//],
+    ['notify',{...notifyFields,url:'ntfy.sh/topic'},'',/must start with http:\/\//],
+    ['notify',{...notifyFields,url:'http://ntfy.sh/my topic'},'',/no spaces/],
+    ['notify',{...notifyFields,url:'http://'},'',/must start with http:\/\//],
+    ['notify',{...notifyFields,url:''},'',/Enter a notification URL/],
     ['global',{unit:'F',resolution:'11',alarm:'60',mdns:true,updates:true,crashes:true},"formDrafts.set('a',{}); formDrafts.set('b',{});",/other drafts/],
     ['profile-0',{name:'New'},profileSetup+"state.profiles[0].used='Vessel';",/running/]
   ];
@@ -642,7 +706,8 @@ test('invalid saves show their message and send nothing',async()=>{
 
 test('refreshing clears an uncertain save only when that form was reread',async()=>{
   const endpoints={'ferm-0':'fermenters','profile-0':'profiles','probe-0':'probes','tilt-0':'tilts','ispindel-0':'ispindels',
-    'plug-0':'smartplugs','service-0':'brewservices',global:'controller',mqtt:'mqtt',syslog:'syslog','debug-mode':'debug'};
+    'plug-0':'smartplugs','service-0':'brewservices',global:'controller',mqtt:'mqtt',notify:'notify',syslog:'syslog',
+    'debug-mode':'debug'};
   for (const [key,endpoint] of Object.entries(endpoints)) {
     const {run,context}=ui();
     context.document={querySelectorAll:()=>[]};
@@ -666,13 +731,16 @@ const actionEffects={
   'discard-form':{called:'discardForm'},refresh:{called:'refreshForms'},reconnect:{called:'refreshForms'},
   export:{called:'exportConfig'},'file-view':{called:'viewFile'},'ble-send':{called:'sendBle'},debug:{called:'showDebug'},
   'test-service':{posted:'/brewservices/test'},'test-mqtt':{posted:'/mqtt/test'},discover:{posted:'/mqtt/discover'},
+  'test-notify':{posted:'/notify/test'},
   'update-check':{posted:'/update/check'},
   pause:{state:'state.refreshPaused',equals:true},'select-profile':{state:'state.selectedProfile',equals:1},
   'sensor-tab':{state:'state.sensorTab',equals:'chosen'},'system-tab':{state:'state.systemTab',equals:'chosen'},
   'open-rf':{state:'state.systemTab',equals:'rf'},'console-start':{state:'state.activeConsole',equals:'chosen'},
   'console-stop':{state:'state.activeConsole',equals:null},
   'close-editor':{closed:'#editor'},'close-modal':{closed:'#modal'},import:{clicked:'#import-file'},
-  'rf-clear':{emptied:'#rf-output'},'ble-clear':{emptied:'#ble-output'}
+  'rf-clear':{emptied:'#rf-output'},'ble-clear':{emptied:'#ble-output'},
+  'close-alert':{state:'closedAlerts().includes("chosen")',equals:true},
+  'toggle-alerts':{state:'bannersExpanded',equals:true},'open-firmware':{state:'state.systemTab',equals:'update'}
 };
 
 test('every action a view can render is handled, and every handler is still used',()=>{
@@ -726,6 +794,149 @@ test('while saving, only the close actions still respond',async()=>{
     assert.equal(run('state.refreshPaused'),false,name);
     assert.equal(closed.length>0,name==='close-modal'||name==='close-editor',name);
   }
+});
+
+// ---- alert banners ----
+
+// A stand-in for browser storage that several pages can share, like one browser across reloads.
+function memoryStorage() {
+  const items={};
+  return {items,getItem:key=>key in items?items[key]:null,setItem:(key,value)=>{items[key]=String(value);}};
+}
+
+// A page with a banner strip, the given alerts from boot B00T0001, and optional browser storage.
+function bannerPage(alerts,storage) {
+  const {run,context}=ui();
+  const strip={innerHTML:''};
+  context.document={querySelector:selector=>selector==='#banners'?strip:null,querySelectorAll:()=>[]};
+  if (storage) context.localStorage=storage;
+  context.alerts=JSON.parse(JSON.stringify(alerts));
+  run("state.alerts=alerts; state.alertsBoot='B00T0001'; renderBanners();");
+  return {run,context,strip};
+}
+
+// The alert ids on the strip, in the order they are drawn.
+const shownIds = strip => [...strip.innerHTML.matchAll(/data-value="([^"]+)"/g)].map(match=>match[1]);
+
+const sampleAlerts=[
+  {id:'update-0.11.0',kind:'update',age:0,title:'Firmware update available',text:'OurBrewbot 0.11.0 is available.'},
+  {id:'B00T0001-24-500',kind:'profile',age:60,title:'Profile finished',text:'Fermenter 1: the profile has finished.'},
+  {id:'B00T0001-28-0',kind:'restart',age:900,title:'Controller restarted',text:'Cause: crash.'},
+  {id:'B00T0001-16-700',kind:'sensor',age:300,title:'Tilt stopped reporting',text:'Red Tilt: no reading for 14 min.'},
+  {id:'B00T0001-0-800',kind:'alarm',age:200,title:'Temperature alarm',text:'Fermenter 1: too warm.'},
+  {id:'B00T0001-1-900',kind:'alarm',age:100,title:'Temperature alarm',text:'Fermenter 2: too warm.'}
+];
+
+test('banners show the most serious alerts first, newest first, and at most three',()=>{
+  const {strip}=bannerPage(sampleAlerts);
+  assert.deepEqual(shownIds(strip),['B00T0001-1-900','B00T0001-0-800','B00T0001-16-700']);
+  assert.match(strip.innerHTML,/data-action="toggle-alerts"[^>]*>\+3 more alerts</);
+});
+
+test('the more-alerts row opens the rest and closes them again',()=>{
+  const {run,strip}=bannerPage(sampleAlerts);
+  run("actionHandlers['toggle-alerts']()");
+  assert.deepEqual(shownIds(strip),['B00T0001-1-900','B00T0001-0-800','B00T0001-16-700',
+    'B00T0001-28-0','B00T0001-24-500','update-0.11.0']);
+  assert.match(strip.innerHTML,/aria-expanded="true">Show fewer alerts</);
+  run("actionHandlers['toggle-alerts']()");
+  assert.equal(shownIds(strip).length,3);
+  // One hidden alert is "1 more alert", and three or fewer need no row at all
+  const one=bannerPage(sampleAlerts.slice(2));
+  assert.match(one.strip.innerHTML,/\+1 more alert</);
+  const few=bannerPage(sampleAlerts.slice(3));
+  assert.doesNotMatch(few.strip.innerHTML,/toggle-alerts/);
+});
+
+test('a closed banner stays closed after a reload, and the next one moves up',()=>{
+  const storage=memoryStorage();
+  const first=bannerPage(sampleAlerts,storage);
+  first.run("actionHandlers['close-alert'](0,'B00T0001-1-900')");
+  assert.deepEqual(shownIds(first.strip),['B00T0001-0-800','B00T0001-16-700','B00T0001-28-0']);
+  const reloaded=bannerPage(sampleAlerts,storage);
+  assert.deepEqual(shownIds(reloaded.strip),['B00T0001-0-800','B00T0001-16-700','B00T0001-28-0']);
+});
+
+// An alarm hovering at its limit drops out of /alerts while it is briefly off, then comes back
+// with the same id. A banner closed for it must stay closed, until the controller restarts.
+test('a closed alarm stays closed while it flips off and on, and is forgotten after a restart',()=>{
+  const storage=memoryStorage();
+  const {run,strip}=bannerPage(sampleAlerts,storage);
+  run("closeAlert('B00T0001-1-900')");
+  run("state.alerts=state.alerts.filter(alert=>alert.id!=='B00T0001-1-900'); forgetOldClosedAlerts();");
+  assert.ok(run("closedAlerts().includes('B00T0001-1-900')"));
+  run("state.alerts=alerts; forgetOldClosedAlerts(); renderBanners();");
+  assert.ok(!shownIds(strip).includes('B00T0001-1-900'));
+
+  // After a restart the old boot's ids can never come back, so they are dropped from storage
+  run("state.alerts=[]; state.alertsBoot='B00T0002'; forgetOldClosedAlerts();");
+  assert.deepEqual(JSON.parse(storage.items['ourbrewbot.closedAlerts']),[]);
+});
+
+test('a closed release banner is kept while that release is listed, whatever the boot',()=>{
+  const storage=memoryStorage();
+  const {run}=bannerPage(sampleAlerts,storage);
+  run("closeAlert('update-0.11.0'); state.alertsBoot='B00T0002'; forgetOldClosedAlerts();");
+  assert.deepEqual(JSON.parse(storage.items['ourbrewbot.closedAlerts']),['update-0.11.0']);
+  run("state.alerts=[{id:'update-0.12.0',kind:'update',age:0,title:'T',text:'X'}]; forgetOldClosedAlerts();");
+  assert.deepEqual(JSON.parse(storage.items['ourbrewbot.closedAlerts']),[]);
+});
+
+test('closing a banner still works on the page when browser storage is blocked',()=>{
+  const blocked={getItem:()=>{throw new Error('blocked');},setItem:()=>{throw new Error('blocked');}};
+  const {run,strip}=bannerPage(sampleAlerts,blocked);
+  run("closeAlert('B00T0001-1-900')");
+  assert.ok(!shownIds(strip).includes('B00T0001-1-900'));
+  // Storage holding something that is not a list is ignored too
+  const odd=memoryStorage();
+  odd.setItem('ourbrewbot.closedAlerts','{"not":"a list"}');
+  assert.equal(shownIds(bannerPage(sampleAlerts,odd).strip).length,3);
+});
+
+test('each kind of banner has its colour and its links',()=>{
+  const {run}=bannerPage([]);
+  run("state.controller={UpdateNotesUrl:'https://ourbrewbot.com/news/#v0.11.0'}");
+  const html=kind=>run(`bannerHtml(${JSON.stringify(sampleAlerts.find(alert=>alert.kind===kind))})`);
+  assert.match(html('alarm'),/class="banner alarm"/);
+  assert.match(html('sensor'),/class="banner warning"[\s\S]*href="#sensors">Open sensors</);
+  assert.match(html('restart'),/class="banner warning"[\s\S]*href="#system">Open system</);
+  assert.match(html('profile'),/class="banner success"/);
+  assert.doesNotMatch(html('profile'),/<a /);
+  assert.match(html('update'),/class="banner success"[\s\S]*href="https:\/\/ourbrewbot.com\/news\/#v0.11.0"/);
+  assert.match(html('update'),/data-action="open-firmware">Firmware update</);
+  // Without a valid link from the controller, the releases page
+  run("state.controller={UpdateNotesUrl:'javascript:alert(1)'}");
+  assert.match(html('update'),/href="https:\/\/github.com\/scardus\/OurBrewbot\/releases"/);
+});
+
+test('banner text and ids from the controller are escaped, and unknown kinds are left out',()=>{
+  const {strip}=bannerPage([
+    {id:'B00T0001-0-1"x',kind:'alarm',age:0,title:'<b>Alarm</b>',text:'Tom\'s & "Jerry\'s" <fridge>'},
+    {id:'B00T0001-9-1',kind:'something-new',age:0,title:'New',text:'Kind'}
+  ]);
+  assert.match(strip.innerHTML,/&lt;b&gt;Alarm&lt;\/b&gt;/);
+  assert.match(strip.innerHTML,/Tom&#39;s &amp; &quot;Jerry&#39;s&quot; &lt;fridge&gt;/);
+  assert.match(strip.innerHTML,/data-value="B00T0001-0-1&quot;x"/);
+  assert.doesNotMatch(strip.innerHTML,/something-new|>New</);
+});
+
+test('alert polling draws the reply, and keeps the last banners after a failed read',async()=>{
+  const {run,context,strip}=bannerPage([]);
+  context.reply={boot:'B00T0001',alerts:sampleAlerts.slice(4)};
+  run("state.ready=true; document.hidden=false; request=async path=>{ requested=path; return {data:reply}; };");
+  await run('pollAlerts()');
+  assert.equal(run('requested'),'/alerts');
+  assert.deepEqual(shownIds(strip),['B00T0001-1-900','B00T0001-0-800']);
+  assert.ok(run('lastAlertsPoll>0'));
+
+  run("request=async()=>{ throw new Error('Controller unreachable.'); };");
+  await run('pollAlerts()');
+  assert.deepEqual(shownIds(strip),['B00T0001-1-900','B00T0001-0-800']);
+  // A reply without a list draws no banners rather than failing
+  context.reply={boot:'B00T0001'};
+  run("request=async()=>({data:reply});");
+  await run('pollAlerts()');
+  assert.deepEqual(shownIds(strip),[]);
 });
 
 test('pressure readings distinguish zero, unavailable and extrapolated pressure',()=>{

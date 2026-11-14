@@ -64,6 +64,7 @@ bool saveiSpindelConfig() { s_saveCalls++; return true; }
 
 // The functions under test, plus everything else in iSpindel.cpp.
 #include "../../OurBrewbot/TextSafe.cpp"
+#include <NotifyStub.h>   // records what iSpindel.cpp reports to the notifications
 #include "../../OurBrewbot/iSpindel.cpp"
 
 // ---- test fixture ----
@@ -81,6 +82,7 @@ void setUp(void) {
   s_saveCalls = 0;
   s_millis    = 0;
   s_uptimeSec = 0;
+  notifyStubReset();
 }
 
 void tearDown(void) {}
@@ -442,6 +444,22 @@ void test_post_temp_adjust_applied_as_celsius_delta(void) {
   g_iSpindels[0].tempAdjust = 1.0f;
   handleiSpindelPost(makeBody("ispindel-1", "C2A080", 62.3f, "F"));
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 17.83f, g_iSpindels[0].temperature);
+}
+
+// No gravity in the POST: it stays "no reading". The offset used to be added
+// to the 0, so /ispindels and MQTT showed the offset itself as a gravity.
+void test_post_without_gravity_does_not_add_the_gravity_offset(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].sgAdjust = 0.002f;
+  handleiSpindelPost(String("{\"name\":\"ispindel-1\",\"ID\":\"C2A080\",\"temperature\":20.0}"));
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].sg);
+}
+
+void test_post_gravity_offset_is_added_to_a_reading(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  g_iSpindels[0].sgAdjust = 0.002f;
+  handleiSpindelPost(makeBody("ispindel-1", "C2A080", 20.0f, "C", 1.0500f, "G"));
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.052f, g_iSpindels[0].sg);
 }
 
 void test_post_registration_path_stores_celsius(void) {
@@ -822,6 +840,51 @@ void test_over_long_id_matches_its_slot_without_resaving(void) {
   TEST_ASSERT_EQUAL_STRING("None", g_iSpindels[1].name);   // and no second slot
 }
 
+// ---- iSpindelCheckFreshness: what it tells the notifications (see Notify.h) ----
+//
+// The function remembers which slots have reported in a static of its own
+// that a test can't reset, so each test here uses a slot no other test uses.
+
+void test_freshness_check_says_nothing_about_a_slot_that_never_reported(void) {
+  g_iSpindels[0].fermenter = 0;
+  s_uptimeSec = 100000;   // long after boot, and still nothing heard
+  iSpindelCheckFreshness();
+  TEST_ASSERT_EQUAL_INT(0, g_notifyStubSensor[NOTIFY_SENSOR_ISPINDEL][0].count);
+}
+
+void test_freshness_check_reports_an_ispindel_that_stops_and_comes_back(void) {
+  g_iSpindels[1].fermenter = 2;
+  g_iSpindels[1].interval  = 900;
+  s_uptimeSec = 5000;
+  g_iSpindels[1].lastSeen  = 5000;
+  iSpindelCheckFreshness();
+  NotifyStubSensor& sensor = g_notifyStubSensor[NOTIFY_SENSOR_ISPINDEL][1];
+  TEST_ASSERT_EQUAL_INT(1, sensor.count);
+  TEST_ASSERT_FALSE(sensor.lost);
+
+  // Stale after an hour with no report (three 15-minute intervals is less
+  // than ISPINDEL_STALE_MIN_S, so the hour applies). 61 minutes have gone by.
+  s_uptimeSec = 5000 + 3600 + 60;
+  iSpindelCheckFreshness();
+  TEST_ASSERT_TRUE(sensor.lost);
+  TEST_ASSERT_EQUAL_FLOAT(61.0f, sensor.minutes);
+
+  g_iSpindels[1].lastSeen = s_uptimeSec;
+  iSpindelCheckFreshness();
+  TEST_ASSERT_FALSE(sensor.lost);
+}
+
+void test_freshness_check_says_nothing_about_an_ispindel_no_fermenter_uses(void) {
+  g_iSpindels[2].fermenter = PROBE_UNASSIGNED;
+  g_iSpindels[2].interval  = 900;
+  s_uptimeSec = 5000;
+  g_iSpindels[2].lastSeen  = 5000;
+  iSpindelCheckFreshness();
+  s_uptimeSec = 50000;
+  iSpindelCheckFreshness();
+  TEST_ASSERT_EQUAL_INT(0, g_notifyStubSensor[NOTIFY_SENSOR_ISPINDEL][2].count);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -876,6 +939,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_post_with_a_non_numeric_temperature_stores_no_reading);
   RUN_TEST(test_post_of_zero_celsius_is_a_real_reading);
   RUN_TEST(test_post_temp_adjust_applied_as_celsius_delta);
+  RUN_TEST(test_post_without_gravity_does_not_add_the_gravity_offset);
+  RUN_TEST(test_post_gravity_offset_is_added_to_a_reading);
   RUN_TEST(test_post_registration_path_stores_celsius);
   RUN_TEST(test_post_conversion_does_not_disturb_gravity);
 
@@ -920,6 +985,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_report_in_the_first_second_after_boot_counts);
   RUN_TEST(test_new_ispindel_registers_unassigned);
   RUN_TEST(test_known_ispindel_keeps_its_assignment);
+  RUN_TEST(test_freshness_check_says_nothing_about_a_slot_that_never_reported);
+  RUN_TEST(test_freshness_check_reports_an_ispindel_that_stops_and_comes_back);
+  RUN_TEST(test_freshness_check_says_nothing_about_an_ispindel_no_fermenter_uses);
 
   return UNITY_END();
 }

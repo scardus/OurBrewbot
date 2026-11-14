@@ -89,6 +89,7 @@ void setUp(void) {
   for (int i = 0; i < MAX_BREW_SERVICES; i++) g_brewServices[i] = BrewServiceConfig{};
   memset(&g_mqttConfig, 0, sizeof(g_mqttConfig));
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
+  memset(&g_notifyConfig, 0, sizeof(g_notifyConfig));
   s_importActive    = false;
   s_importLastWrite = 0;
   s_unsavedFiles    = 0;
@@ -323,6 +324,53 @@ void test_working_stored_base_topic_is_loaded_unchanged(void) {
   fsTestWrite(FILE_MQTT, "{\"baseTopic\":\"home/brew bot\"}");
   TEST_ASSERT_TRUE(loadMqttConfig());
   TEST_ASSERT_EQUAL_STRING("home/brew bot", g_mqttConfig.baseTopic);
+}
+
+void test_notify_config_defaults_when_no_file_exists(void) {
+  g_notifyConfig.enabled = true;
+  g_notifyConfig.events  = 0;
+  TEST_ASSERT_FALSE(loadNotifyConfig());
+  TEST_ASSERT_FALSE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("", g_notifyConfig.url);
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALARMS | NOTIFY_EVT_SENSORS | NOTIFY_EVT_RESTARTS,
+                          g_notifyConfig.events);
+}
+
+void test_notify_config_round_trips_through_save_and_load(void) {
+  g_notifyConfig.enabled = true;
+  strlcpy(g_notifyConfig.url, "http://ntfy.sh/my-topic", sizeof(g_notifyConfig.url));
+  g_notifyConfig.events  = NOTIFY_EVT_ALARMS | NOTIFY_EVT_UPDATES;
+  TEST_ASSERT_TRUE(saveNotifyConfig());
+  TEST_ASSERT_EQUAL_STRING("{\"enabled\":true,\"url\":\"http://ntfy.sh/my-topic\",\"events\":17}",
+                           fsTestRead(FILE_NOTIFY));
+  TEST_ASSERT_TRUE(LittleFS.exists(FILE_NOTIFY_BKP));
+
+  memset(&g_notifyConfig, 0, sizeof(g_notifyConfig));
+  TEST_ASSERT_TRUE(loadNotifyConfig());
+  TEST_ASSERT_TRUE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("http://ntfy.sh/my-topic", g_notifyConfig.url);
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALARMS | NOTIFY_EVT_UPDATES, g_notifyConfig.events);
+}
+
+void test_unusable_stored_notify_url_switches_notifications_off(void) {
+  // An imported file can hold anything: an https URL can't be posted to
+  fsTestWrite(FILE_NOTIFY, "{\"enabled\":true,\"url\":\"https://ntfy.sh/my-topic\",\"events\":1}");
+  TEST_ASSERT_TRUE(loadNotifyConfig());
+  TEST_ASSERT_FALSE(g_notifyConfig.enabled);
+  TEST_ASSERT_EQUAL_STRING("", g_notifyConfig.url);
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALARMS, g_notifyConfig.events);
+}
+
+void test_stored_notify_enabled_without_a_url_is_switched_off(void) {
+  fsTestWrite(FILE_NOTIFY, "{\"enabled\":true,\"url\":\"\"}");
+  TEST_ASSERT_TRUE(loadNotifyConfig());
+  TEST_ASSERT_FALSE(g_notifyConfig.enabled);
+}
+
+void test_stored_notify_event_bits_this_firmware_does_not_know_are_dropped(void) {
+  fsTestWrite(FILE_NOTIFY, "{\"enabled\":false,\"url\":\"\",\"events\":255}");
+  TEST_ASSERT_TRUE(loadNotifyConfig());
+  TEST_ASSERT_EQUAL_UINT8(NOTIFY_EVT_ALL, g_notifyConfig.events);
 }
 
 void test_oversized_string_is_truncated_to_the_member_size(void) {
@@ -989,7 +1037,7 @@ void test_reset_all_config_restores_defaults_and_writes_every_file(void) {
   const char* files[] = {
     FILE_GLOBAL, FILE_FERMENTER, FILE_PROBE, FILE_SMARTPLUGS, FILE_PROFILE,
     FILE_STEPS, FILE_ISPINDEL, FILE_BREWSVC, FILE_MQTT, FILE_SYSLOG,
-    FILE_TILT,
+    FILE_NOTIFY, FILE_TILT,
   };
   for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
     TEST_ASSERT_TRUE_MESSAGE(LittleFS.exists(files[i]), files[i]);
@@ -1492,6 +1540,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_unusable_stored_base_topic_is_repaired_on_load);
   RUN_TEST(test_empty_stored_base_topic_falls_back_to_the_default);
   RUN_TEST(test_working_stored_base_topic_is_loaded_unchanged);
+  RUN_TEST(test_notify_config_defaults_when_no_file_exists);
+  RUN_TEST(test_notify_config_round_trips_through_save_and_load);
+  RUN_TEST(test_unusable_stored_notify_url_switches_notifications_off);
+  RUN_TEST(test_stored_notify_enabled_without_a_url_is_switched_off);
+  RUN_TEST(test_stored_notify_event_bits_this_firmware_does_not_know_are_dropped);
   RUN_TEST(test_oversized_string_is_truncated_to_the_member_size);
   RUN_TEST(test_stored_text_is_made_valid_utf8_on_load);
   RUN_TEST(test_saved_key_order_matches_the_declared_table);
