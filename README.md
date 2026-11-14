@@ -199,7 +199,7 @@ The untouched original files are kept in the `orig` folder, and `orig/conversion
 
 In Sensors > Pressure, enable the sensor and save, then capture atmospheric zero and at least one higher pressure measured with a reference gauge. Each capture takes about 45 seconds; the countdown and sample count show progress, and the current calibration stays visible alongside the new points until you apply them. Check the calibrated reading before assigning a fermenter; disabling the sensor removes pressure from fermenter cards and reports while keeping the current calibration and assignment, but discards unfinished calibration points.
 
-Readings above the highest calibration point are labelled estimates. This monitor does not control a relief valve, and the original wiring and chosen sender must be checked before connection. An assigned sensor sends usable pressure readings to Brewfather or Brewer's Friend when enabled.
+Readings above the highest calibration point are labelled estimates. This monitor does not control a relief valve, and the original wiring and chosen sender must be checked before connection. An assigned sensor sends usable pressure readings to Brewfather or Brewer's Friend when enabled. A reading below the 0 PSI point, or an input at full scale, is shown as "Below zero" or "ADC limit". For an assigned sensor this also gives a [push notification](#push-notifications) and an [alert banner](#alert-banners), under Sensor problems.
 
 ---
 
@@ -220,7 +220,7 @@ Choose what to be told about:
 | Setting | When a message is sent | On by default |
 |---------|------------------------|---------------|
 | **Temperature alarms** | When a fermenter's alarm starts, and when it has ended. A severe alarm is sent as urgent. | Yes |
-| **Sensor problems** | When a temperature probe, Tilt or iSpindel that a fermenter uses stops reporting, and when it is back. | Yes |
+| **Sensor problems** | When a temperature probe, Tilt or iSpindel that a fermenter uses stops reporting, and when it is back. Also when the pressure sensor reads below its 0 PSI point or its input is at full scale, which can mean a wiring fault, and when it reads normally again. | Yes |
 | **Unexpected restarts** | When the controller starts up after a crash, a watchdog reset or a power cut. Firmware updates and the Restart button are not reported. | Yes |
 | **Profile progress** | When a profile step completes by itself, and when a profile finishes. | No |
 | **Firmware updates** | Once when the daily update check finds a new release. | No |
@@ -231,7 +231,7 @@ If a message can't be delivered it is tried again twice, a minute apart, and the
 
 ### Alert banners
 
-The admin page shows the same events as banners under its top bar, on every tab, even with notifications switched off: red for a temperature alarm, amber for a sensor that has stopped reporting or an unexpected restart, and green for a finished profile or a new release. The page checks for them every 30 seconds.
+The admin page shows the same events as banners under its top bar, on every tab, even with notifications switched off: red for a temperature alarm, amber for a sensor that has stopped reporting or needs checking, or an unexpected restart, and green for a finished profile or a new release. The page checks for them every 30 seconds.
 
 - An alarm or sensor banner shows while the problem is there, with the latest reading.
 - A restart banner stays until the controller restarts again; a finished profile's until the next profile starts on that fermenter.
