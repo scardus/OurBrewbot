@@ -61,6 +61,30 @@ test('profile loading stops at the same empty sentinel as the firmware',()=>{
   assert.equal(run('state.profiles[0].steps.length'),1);
 });
 
+test('preview scroll survives a type change or step move, but resets for a different profile',()=>{
+  for (const action of ['type','move','select']) {
+    const {run,context}=ui(),handlers={};
+    let preview={scrollLeft:0};
+    const main={dataset:{},querySelectorAll:()=>[],
+      querySelector:selector=>selector==='.profile-preview-content'?preview:null};
+    Object.defineProperty(main,'innerHTML',{set:()=>{preview={scrollLeft:0};}});
+    const other={classList:{remove:()=>{}},setAttribute:()=>{}};
+    context.document={addEventListener:(name,handler)=>{handlers[name]=handler;},querySelectorAll:()=>[],
+      querySelector:selector=>selector==='#main'?main:selector.startsWith('form')?null:other};
+    context.location={hash:'#profiles'};
+    run(`state.profiles=[{name:'One',used:'',steps:[{type:1},{type:6}]},{name:'Two',used:'',steps:[]}];
+      profilesView=()=>''; captureProfile=()=>clone(state.profiles[state.selectedProfile]);
+      profileChanged=()=>{}; render();`);
+    preview.scrollLeft=800;
+    bootstrapHandlers(context);
+    if (action==='type') {
+      handlers.change({target:{name:'type-0',closest:()=>({dataset:{form:'profile-0'}})}});
+    } else if (action==='move') run("editProfileStep('step-down',0)");
+    else run("actionHandlers['select-profile'](1)");
+    assert.equal(preview.scrollLeft,action==='select'?0:800,action);
+  }
+});
+
 test('all ten profile types expose exactly the fields used by the runner',()=>{
   const {run}=ui();
   // Derived from Profile.cpp::isStepComplete(), stepRamps(), and Free Rise's band.
@@ -132,7 +156,7 @@ test('profile-name edits and reverted temperature edits preserve exact values',(
   const fields={name:'Renamed','type-0':'1','start-0':'18.3','end-0':'19.3','days-0':'2'};
   const inputs=Object.entries(fields).map(([name,value])=>({name,value,type:'text'}));
   context.form={querySelectorAll:()=>inputs};
-  context.document={querySelector:()=>context.form};
+  context.document={querySelector:selector=>selector.startsWith('form[')?context.form:null};
   run(`state.profiles=[{name:'Original',steps:[{type:1,start:18.25,end:19.25,days:2,trigger:0}]}];
     profileFormValues.set(form,clone(state.profiles[0]));
     formBaselines.set(form,{'name':'Original','type-0':'1','start-0':'18.3','end-0':'19.3','days-0':'2'});`);
@@ -158,6 +182,93 @@ test('held profile steps ignore stale Start in the drawn line and axis',()=>{
   }
   const band=run("profilePlot({name:'Free rise',steps:[{type:2,start:18,end:22}]})");
   assert.match(band,/<rect[^>]+[\s\S]*fill-opacity="0.25"/);
+});
+
+// Profile preview: completion conditions and live drafts.
+test('the preview explains every step completion condition, including both parts of combined steps',()=>{
+  const {run}=ui();
+  const expected=[
+    'After 3 days and Temperature reaches 20.0\u00a0°C within the control band',
+    'After 3 days','After 3 days','After 3 days and SG ≤ 1.0200',
+    'After 3 days and Attenuation ≥ 75%',
+    'Temperature reaches 20.0\u00a0°C within the control band',
+    'SG ≤ 1.0200','Attenuation ≥ 75%',
+    'After 3 days and SG ≤ 1.0200','After 3 days and Attenuation ≥ 75%'
+  ];
+  for (let type=0;type<10;type++) {
+    const trigger=[4,7,9].includes(type)?75:1.02;
+    const html=run(`profileStepCondition({type:${type},end:20,days:3,trigger:${trigger}})`);
+    assert.equal(html.replace(/<[^>]+>/g,''),expected[type],'type '+type);
+  }
+  assert.equal(run('profileStepCondition({type:1,days:1})'),'After 1 day');
+  const unset={3:'After 3 days and gravity target not set',6:'Set a gravity target',
+    8:'After 3 days and gravity target not set',4:'After 3 days and attenuation target not set',
+    7:'Set an attenuation target',9:'After 3 days and attenuation target not set'};
+  for (const [type,text] of Object.entries(unset)) {
+    for (const trigger of [0,-1]) {
+      const html=run(`profileStepCondition({type:${type},days:3,trigger:${trigger}})`);
+      assert.equal(html.replace(/<[^>]+>/g,''),text,'unset target for type '+type);
+      assert.match(html,/<span class="profile-condition-unset">/);
+    }
+  }
+  run("state.unit='F'");
+  assert.match(run('profileStepCondition({type:5,end:20})'),/68.0\u00a0°F/);
+  assert.equal(run('profileStepCondition({type:6,trigger:1.0123})'),'SG ≤ 1.0123');
+});
+
+test('preview conditions follow step order through moves and deletion, up to fifteen steps',()=>{
+  const {run,context}=ui();
+  context.document={querySelector:()=>null};
+  run(`state.profiles=[{name:'Test',used:'',steps:[
+    {type:6,start:0,end:20,days:0,trigger:1.02},
+    {type:7,start:0,end:21,days:0,trigger:75}]}]; render=()=>{};`);
+  run("editProfileStep('step-down',0)");
+  const moved=run('profilePlot(profileDrafts.get(0))');
+  assert.ok(moved.indexOf('Attenuation ≥ 75%')<moved.indexOf('SG ≤ 1.0200'));
+  run("editProfileStep('step-delete',1)");
+  assert.doesNotMatch(run('profilePlot(profileDrafts.get(0))'),/SG ≤/);
+  run("editProfileStep('step-delete',0)");
+  assert.match(run('profilePlot(profileDrafts.get(0))'),/Add a step to preview/);
+  for (let i=0;i<15;i++) run("editProfileStep('step-add',0)");
+  const full=run('profilePlot(profileDrafts.get(0))');
+  assert.equal((full.match(/After 1 day/g)||[]).length,15);
+  assert.match(full,/Step 15/);
+});
+
+test('typing updates only the preview, retains its scroll and handles unfinished numbers',()=>{
+  const {run,context}=ui(),handlers={};
+  const fields={name:'Test','type-0':'3','start-0':'0.0','end-0':'20.0','days-0':'3','trigger-0':'1.02'};
+  const inputs=Object.entries(fields).map(([name,value])=>({name,value,
+    type:['name','type-0'].includes(name)?'text':'number',disabled:name==='start-0',validity:{badInput:false}}));
+  const form={dataset:{form:'profile-0'},querySelectorAll:selector=>selector==='[name]'?inputs:inputs.filter(i=>i.type==='number')};
+  const preview={innerHTML:'',scrollLeft:180,closest:()=>form};
+  context.document={addEventListener:(name,handler)=>{handlers[name]=handler;},
+    querySelector:selector=>selector==='.profile-preview-content'?preview:form};
+  context.form=form;
+  run(`state.profiles=[{name:'Test',used:'',steps:[{type:3,start:0,end:20,days:3,trigger:1.02}]}];
+    profileFormValues.set(form,clone(state.profiles[0])); formBaselines.set(form,formData(form));
+    render=()=>{throw new Error('Replaced the form while typing');}; updateDirty=()=>{};`);
+  bootstrapHandlers(context);
+  const input=inputs.find(i=>i.name==='trigger-0');
+  const event={target:{name:input.name,closest:selector=>selector==='form[data-form]'?form:null}};
+  input.value='1.015';
+  handlers.input(event);
+  assert.match(preview.innerHTML,/SG ≤ 1.0150/);
+  assert.equal(preview.scrollLeft,180);
+  assert.equal(run('profileDrafts.get(0).steps[0].trigger'),1.015);
+  inputs.find(i=>i.name==='days-0').value='4';
+  handlers.input(event);
+  assert.match(preview.innerHTML,/After 4 days/);
+  inputs.find(i=>i.name==='end-0').value='22';
+  handlers.input(event);
+  assert.match(preview.innerHTML,/22.0 to 22.0\u00a0°C/);
+  input.value='';
+  handlers.input(event);
+  assert.match(preview.innerHTML,/Complete the step values/);
+  input.value='1.01';
+  handlers.input(event);
+  assert.match(preview.innerHTML,/SG ≤ 1.0100/);
+  assert.equal(run('state.profiles[0].steps[0].trigger'),1.02,'saved profile is unchanged');
 });
 
 test('dashboard includes paused profiles in its running count',()=>{

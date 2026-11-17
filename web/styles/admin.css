@@ -1131,11 +1131,50 @@ input[type=checkbox] {
 .profile-choice .badge {
   margin-top:9px
 }
-.profile-plot {
+.profile-plot,.profile-axis svg {
   width:100%;
-  height:125px;
+  height:110px;
   display:block;
-  margin:10px 0
+  margin:10px 0 0
+}
+/* The axis column covers the whole height, so steps scrolled under it are hidden completely. */
+.profile-axis {
+  position:sticky;
+  left:0;
+  z-index:1;
+  background:#121b28
+}
+.profile-preview-content {
+  overflow-x:auto
+}
+.profile-preview-content:focus-visible {
+  outline:2px solid var(--accent);
+  outline-offset:3px
+}
+.profile-plan {
+  display:grid
+}
+.profile-preview-step {
+  min-width:0;
+  text-align:center
+}
+.profile-preview-label {
+  font-size:11px;
+  color:var(--muted)
+}
+.profile-condition {
+  margin:8px 4px 12px;
+  padding:8px;
+  border-top:2px solid var(--border);
+  font-size:12px;
+  line-height:1.5;
+  overflow-wrap:anywhere
+}
+.profile-condition-reading {
+  border-color:var(--blue)
+}
+.profile-condition-unset {
+  color:var(--muted)
 }
 .step-help {
   grid-column:1/-1;
@@ -1792,9 +1831,6 @@ input[type=checkbox] {
   .step-row {
     grid-template-columns:18px minmax(0,1fr) minmax(0,1fr);
     padding:12px
-  }
-  .profile-plot {
-    height:110px
   }
   .panel-header {
     align-items:flex-start
