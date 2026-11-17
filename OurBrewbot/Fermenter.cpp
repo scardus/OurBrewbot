@@ -85,6 +85,9 @@ void processFermenters() {
     checkFermenterAlarm(i);
   }
 
+  // The plugs that already had the state asked for above: one is re-sent
+  smartPlugsResendOne();
+
   // Run active fermentation profiles
   processProfiles();
 }

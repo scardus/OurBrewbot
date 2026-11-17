@@ -63,6 +63,7 @@ void logMsgImpl(uint8_t, PGM_P, ...) {}
 bool saveFermenterConfig() { return true; }
 bool saveProbeConfig()     { return true; }
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugsResendOne() {}
 void smartPlugForceOff(uint8_t) {}
 void allPlugsForceOff() {}
 void processProfiles() {}

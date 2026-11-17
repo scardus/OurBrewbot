@@ -76,6 +76,9 @@ static int      s_plugCallCount;
 void smartPlugSwitch(uint8_t plugIndex, bool on) {
   if (s_plugCallCount < 32) s_plugCalls[s_plugCallCount++] = {plugIndex, on};
 }
+// Counted so a test can prove processFermenters() re-sends once per pass
+static int s_resendOneCount;
+void smartPlugsResendOne() { s_resendOneCount++; }
 // A forced OFF is recorded as an OFF, and also counted on its own so a test
 // can tell it apart from a normal switch (which skips plugs with no role).
 static int s_forceOffCount;
@@ -122,6 +125,7 @@ void setUp(void) {
   s_uptimeSec     = 0;
   s_plugCallCount = 0;
   s_forceOffCount = 0;
+  s_resendOneCount = 0;
   for (int i = 0; i < MAX_FERMENTERS; i++) {
     s_state[i]            = STATUS_IDLE;
     s_lastCoolingStop[i]  = 0;
@@ -704,6 +708,16 @@ void test_dispatch_powered_off_skips_alarm_entirely(void) {
   TEST_ASSERT_EQUAL(0, lastPlugState(0));     // plug forced off
 }
 
+// Every fermenter asks for its plugs, but only one plug is re-sent per pass,
+// so the re-sends can't all block the same pass
+void test_a_control_pass_resends_once_for_all_fermenters(void) {
+  for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenters[i].power = (i % 2 == 0);
+  processFermenters();
+  TEST_ASSERT_EQUAL_INT(1, s_resendOneCount);
+  processFermenters();
+  TEST_ASSERT_EQUAL_INT(2, s_resendOneCount);
+}
+
 // The control loop must reach the alarm check for a powered-off fermenter too,
 // or an alarm raised before it was switched off is never cleared.
 void test_dispatch_powered_off_clears_an_earlier_alarm(void) {
@@ -1116,6 +1130,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_validate_accepts_null_errmsg_pointer);
 
   RUN_TEST(test_dispatch_powered_off_skips_alarm_entirely);
+  RUN_TEST(test_a_control_pass_resends_once_for_all_fermenters);
   RUN_TEST(test_dispatch_powered_off_clears_an_earlier_alarm);
   RUN_TEST(test_dispatch_temp_control_off_still_alarms);
   RUN_TEST(test_dispatch_controls_normally_when_powered_and_enabled);

@@ -123,6 +123,7 @@ const char* getTiltColourName(uint8_t colour) {
 
 // SmartPlugs.cpp - Fermenter.cpp drives the plugs; nothing here asserts on them.
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugsResendOne() {}
 void smartPlugForceOff(uint8_t) {}
 void allPlugsForceOff() { s_allPlugsOffs++; }
 bool getPlugState(uint8_t) { return false; }

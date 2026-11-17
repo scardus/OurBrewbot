@@ -70,8 +70,9 @@ void setUp(void) {
   for (int i = 0; i < MAX_SMART_PLUGS; i++) {
     g_smartPlugs[i] = SmartPlugConfig{};
     s_plugState[i]  = false;
-    s_plugSent[i]   = false;
-    s_plugSentAt[i] = 0;
+    s_plugSent[i]    = false;
+    s_plugSentAt[i]  = 0;
+    s_resendAsked[i] = false;
   }
   rcTestReset();
   test_setMillis(0);
@@ -82,6 +83,31 @@ void setUp(void) {
 }
 
 void tearDown(void) {}
+
+// One 10 s control pass for one plug: the control loop asks for a state, then
+// re-sends one plug that is due (as processFermenters() does)
+static void controlPass(uint8_t idx, bool on) {
+  smartPlugSwitch(idx, on);
+  smartPlugsResendOne();
+}
+
+// One control pass for plugs 0 to count-1, each asked to stay OFF. Returns
+// how many RF sends the pass made.
+static int controlPassAllOff(int count) {
+  int before = g_rfTest.sendCount;
+  for (int p = 0; p < count; p++) smartPlugSwitch(p, false);
+  smartPlugsResendOne();
+  return g_rfTest.sendCount - before;
+}
+
+// Plugs 0 to count-1 configured, each with its own OFF code (0x100 + slot) so
+// a test can tell which plug was sent
+static void configurePlugs(int count) {
+  for (int p = 0; p < count; p++) {
+    configurePlug(p);
+    g_smartPlugs[p].offCode = 0x100 + p;
+  }
+}
 
 // ============================================================
 // THE FOUR SILENT GUARDS
@@ -251,11 +277,11 @@ static void test_slots_keep_independent_state(void) {
 static void test_an_unchanged_state_is_not_resent_within_a_minute(void) {
   configurePlug(P);
   test_setMillis(1000);
-  smartPlugSwitch(P, false);                 // first ask after boot is sent
+  controlPass(P, false);                     // first ask after boot is sent
   TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
   for (uint32_t t = 11000; t < 1000 + PLUG_RESEND_MS; t += 10000) {
     test_setMillis(t);
-    smartPlugSwitch(P, false);
+    controlPass(P, false);
   }
   TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
 }
@@ -263,9 +289,9 @@ static void test_an_unchanged_state_is_not_resent_within_a_minute(void) {
 static void test_an_unchanged_state_is_resent_after_a_minute(void) {
   configurePlug(P);
   test_setMillis(1000);
-  smartPlugSwitch(P, true);
+  controlPass(P, true);
   test_setMillis(1000 + PLUG_RESEND_MS);
-  smartPlugSwitch(P, true);
+  controlPass(P, true);
   TEST_ASSERT_EQUAL_INT(2, g_rfTest.sendCount);
   TEST_ASSERT_EQUAL_HEX32(0x123456, g_rfTest.lastCode);
 }
@@ -275,14 +301,14 @@ static void test_an_unchanged_state_is_resent_after_a_minute(void) {
 static void test_a_plug_asked_every_10_s_is_resent_every_60_s(void) {
   configurePlug(P);
   test_setMillis(1900);                      // sent 0.9 s into the pass
-  smartPlugSwitch(P, false);
+  controlPass(P, false);
   for (uint32_t t = 11000; t <= 51000; t += 10000) {
     test_setMillis(t);
-    smartPlugSwitch(P, false);
+    controlPass(P, false);
   }
   TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
   test_setMillis(61000);                     // the sixth pass
-  smartPlugSwitch(P, false);
+  controlPass(P, false);
   TEST_ASSERT_EQUAL_INT(2, g_rfTest.sendCount);
 }
 
@@ -308,12 +334,12 @@ static void test_the_first_ask_at_boot_is_sent(void) {
 static void test_the_resend_survives_millis_wrapping(void) {
   configurePlug(P);
   test_setMillis(0xFFFFFFFFUL - 5000);
-  smartPlugSwitch(P, true);
+  controlPass(P, true);
   test_setMillis(10000);                     // 15 s later, past the wrap
-  smartPlugSwitch(P, true);
+  controlPass(P, true);
   TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
   test_setMillis(PLUG_RESEND_MS - 5000);     // a minute later
-  smartPlugSwitch(P, true);
+  controlPass(P, true);
   TEST_ASSERT_EQUAL_INT(2, g_rfTest.sendCount);
 }
 
@@ -329,6 +355,126 @@ static void test_the_next_ask_after_a_force_off_is_sent_at_once(void) {
   smartPlugSwitch(P, false);
   TEST_ASSERT_EQUAL_INT(3, g_rfTest.sendCount);
   TEST_ASSERT_EQUAL_HEX32(0x654321, g_rfTest.lastCode);
+}
+
+// ============================================================
+// RESEND — one plug per control pass, the one sent longest ago
+// ============================================================
+
+// All plugs are first sent at boot, so their resends all fall due together.
+// Sending them all in one pass blocked the loop for up to ~16 s.
+static void test_two_plugs_due_together_are_resent_on_separate_passes(void) {
+  configurePlugs(2);
+  test_setMillis(1000);
+  TEST_ASSERT_EQUAL_INT(2, controlPassAllOff(2));   // boot: both are changes
+  test_setMillis(61000);
+  TEST_ASSERT_EQUAL_INT(1, controlPassAllOff(2));
+  TEST_ASSERT_EQUAL_HEX32(0x100, g_rfTest.lastCode);
+  test_setMillis(71000);
+  TEST_ASSERT_EQUAL_INT(1, controlPassAllOff(2));
+  TEST_ASSERT_EQUAL_HEX32(0x101, g_rfTest.lastCode);
+}
+
+// The control loop always asks in slot order, so "first one asked" would let
+// the low slots take every turn
+static void test_the_plug_sent_longest_ago_is_resent_first(void) {
+  configurePlugs(6);
+  test_setMillis(1000);
+  smartPlugSwitch(5, false);                 // plug 5 sent first
+  test_setMillis(6000);
+  smartPlugSwitch(2, false);
+  test_setMillis(70000);
+  smartPlugSwitch(2, false);                 // plug 2 is asked first...
+  smartPlugSwitch(5, false);
+  smartPlugsResendOne();                     // ...but plug 5 waited longer
+  TEST_ASSERT_EQUAL_INT(3, g_rfTest.sendCount);
+  TEST_ASSERT_EQUAL_HEX32(0x105, g_rfTest.lastCode);
+}
+
+// Eight plugs, six passes a minute: never more than one resend a pass, and
+// every plug still gets its turn - once the first round has gone round, each
+// plug is re-sent every eight passes. (The first round starts a minute after
+// boot and takes eight passes, as every plug was sent at boot.)
+static void test_eight_plugs_are_all_resent_one_per_pass(void) {
+  const int PLUGS = 8;
+  configurePlugs(PLUGS);
+  bool     resentOnce[PLUGS] = {false};
+  uint32_t lastResent[PLUGS] = {0};
+  uint32_t t = 1000;
+  test_setMillis(t);
+  TEST_ASSERT_EQUAL_INT(PLUGS, controlPassAllOff(PLUGS));   // boot
+
+  for (int pass = 1; pass <= 60; pass++) {   // ten minutes
+    t += 10000;
+    test_setMillis(t);
+    int sends = controlPassAllOff(PLUGS);
+    TEST_ASSERT_LESS_OR_EQUAL_INT(1, sends);
+    if (sends == 1) {
+      int p = g_rfTest.lastCode - 0x100;
+      resentOnce[p] = true;
+      lastResent[p] = t;
+    }
+    for (int p = 0; p < PLUGS; p++) {
+      if (resentOnce[p]) TEST_ASSERT_LESS_OR_EQUAL_UINT32(PLUGS * 10000UL, t - lastResent[p]);
+    }
+  }
+  for (int p = 0; p < PLUGS; p++) TEST_ASSERT_TRUE(resentOnce[p]);
+}
+
+// Heating or cooling must start at once, whatever is waiting to be re-sent
+static void test_a_change_is_sent_in_the_same_pass_as_a_resend(void) {
+  configurePlugs(2);
+  test_setMillis(1000);
+  controlPassAllOff(2);
+  test_setMillis(61000);
+  int before = g_rfTest.sendCount;
+  smartPlugSwitch(0, false);                 // due for a resend
+  smartPlugSwitch(1, true);                  // a change: sent now
+  TEST_ASSERT_EQUAL_INT(before + 1, g_rfTest.sendCount);
+  TEST_ASSERT_EQUAL_HEX32(0x123456, g_rfTest.lastCode);
+  smartPlugsResendOne();                     // the change didn't use the turn
+  TEST_ASSERT_EQUAL_INT(before + 2, g_rfTest.sendCount);
+  TEST_ASSERT_EQUAL_HEX32(0x100, g_rfTest.lastCode);
+}
+
+// A plug the control loop no longer asks for (its role was removed) is never
+// re-sent, even though it was asked for on an earlier pass
+static void test_a_plug_not_asked_this_pass_is_not_resent(void) {
+  configurePlug(P);
+  test_setMillis(1000);
+  controlPass(P, false);
+  test_setMillis(11000);
+  controlPass(P, false);                     // asked, not yet due
+  test_setMillis(61000);
+  smartPlugsResendOne();                     // due, but not asked this pass
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+}
+
+static void test_a_held_plug_is_not_resent(void) {
+  configurePlug(P);
+  test_setMillis(1000);
+  controlPass(P, false);
+  test_setMillis(61000);
+  smartPlugSwitch(P, false);                 // asked just before the hold...
+  holdPlugsOff(true);
+  smartPlugsResendOne();                     // ...but not sent while held
+  controlPass(P, false);
+  TEST_ASSERT_EQUAL_INT(1, g_rfTest.sendCount);
+}
+
+// A plug whose RF settings are now refused is the oldest every pass. It must
+// not keep the other plugs from their turn.
+static void test_a_refused_plug_does_not_block_the_other_resends(void) {
+  configurePlugs(2);
+  test_setMillis(1000);
+  controlPassAllOff(2);
+  g_smartPlugs[0].protocol    = 1;           // now over the 2 s burst limit
+  g_smartPlugs[0].delayLength = 3500;
+  test_setMillis(61000);
+  TEST_ASSERT_EQUAL_INT(0, controlPassAllOff(2));   // plug 0's turn: refused
+  test_setMillis(71000);
+  TEST_ASSERT_EQUAL_INT(1, controlPassAllOff(2));
+  TEST_ASSERT_EQUAL_HEX32(0x101, g_rfTest.lastCode);
 }
 
 // ============================================================
@@ -492,6 +638,13 @@ int main(int, char**) {
   RUN_TEST(test_the_first_ask_at_boot_is_sent);
   RUN_TEST(test_the_resend_survives_millis_wrapping);
   RUN_TEST(test_the_next_ask_after_a_force_off_is_sent_at_once);
+  RUN_TEST(test_two_plugs_due_together_are_resent_on_separate_passes);
+  RUN_TEST(test_the_plug_sent_longest_ago_is_resent_first);
+  RUN_TEST(test_eight_plugs_are_all_resent_one_per_pass);
+  RUN_TEST(test_a_change_is_sent_in_the_same_pass_as_a_resend);
+  RUN_TEST(test_a_plug_not_asked_this_pass_is_not_resent);
+  RUN_TEST(test_a_held_plug_is_not_resent);
+  RUN_TEST(test_a_refused_plug_does_not_block_the_other_resends);
   RUN_TEST(test_receiver_is_re_enabled_after_the_burst_while_sniffing);
 
   RUN_TEST(test_state_defaults_to_off);

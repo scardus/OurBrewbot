@@ -155,6 +155,7 @@ void restartDevice(bool forgetWiFi) {
   s_lastForgetWiFi = forgetWiFi;
 }
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugsResendOne() {}
 bool getPlugState(uint8_t) { return false; }
 
 // A forced OFF is recorded together with the plug's settings AT THE TIME of
