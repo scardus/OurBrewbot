@@ -38,9 +38,14 @@
 //      command path and the Home Assistant birth message.
 //
 //   3. Scripted failure (mqttTestSetPublishFail / mqttTestSetConnectOk). A
-//      publish that fails is what reaches logPublishFailure(), and a connect
-//      that fails is what drives the backoff ladder; neither happens against a
-//      stub that always succeeds.
+//      publish that fails while connected is what makes Mqtt.cpp drop a dead
+//      connection, and a connect that fails is what drives the backoff ladder;
+//      neither happens against a stub that always succeeds.
+//
+//   4. The dead-connection drop. Mqtt.cpp aborts its WiFiClient when a publish
+//      fails; connected() then reports the connection lost (state -3) as the
+//      real client does, and publishAttempts counts every publish call, failed
+//      ones included, so a test can prove the rest of a burst was skipped.
 
 #include <cstdint>
 #include <cstring>
@@ -86,8 +91,9 @@ struct MqttConnectRecord {
 
 struct MqttTestState {
   MqttPublishRecord records[MQTT_TEST_MAX_RECORDS];
-  int  recordCount   = 0;
-  int  overflowCount = 0;   // publishes dropped for want of a record slot
+  int  recordCount     = 0;
+  int  overflowCount   = 0;   // publishes dropped for want of a record slot
+  int  publishAttempts = 0;   // every publish() call, including failed ones
 
   char subs[MQTT_TEST_MAX_SUBS][MQTT_TEST_MAX_TOPIC];
   int  subCount = 0;
@@ -121,9 +127,13 @@ struct MqttTestState {
 
 static MqttTestState g_mqttTest;
 
+// The WiFiClient the PubSubClient was built on - Mqtt.cpp's g_mqttWifi. Kept so
+// connected() can see an abort() and the test helpers can reset it.
+static WiFiClient* g_mqttTestClient = nullptr;
+
 class PubSubClient {
 public:
-  PubSubClient(WiFiClient&) {}
+  PubSubClient(WiFiClient& client) { g_mqttTestClient = &client; }
 
   PubSubClient& setServer(const char* host, uint16_t port) {
     strncpy(g_mqttTest.serverHost, host ? host : "", sizeof(g_mqttTest.serverHost) - 1);
@@ -140,7 +150,15 @@ public:
   bool setBufferSize(uint16_t size) { g_mqttTest.bufferSize = size; return true; }
   void setSocketTimeout(uint8_t t)  { g_mqttTest.socketTimeout = t; }
 
-  bool connected() { return g_mqttTest.connected; }
+  // The real client checks its socket here: once Mqtt.cpp has aborted it, the
+  // connection is lost and state() reports -3 (MQTT_CONNECTION_LOST).
+  bool connected() {
+    if (g_mqttTest.connected && g_mqttTestClient && g_mqttTestClient->aborted) {
+      g_mqttTest.connected = false;
+      g_mqttTest.state     = -3;
+    }
+    return g_mqttTest.connected;
+  }
   int  state()     { return g_mqttTest.state; }
   bool loop()      { g_mqttTest.loopCount++; return g_mqttTest.connected; }
   void disconnect() { g_mqttTest.connected = false; g_mqttTest.disconnectCount++; }
@@ -159,6 +177,8 @@ public:
     r.hadCredentials = (user != nullptr);
     r.attempts++;
 
+    // A new connection gets a new socket, so an earlier abort no longer applies
+    if (g_mqttTestClient) g_mqttTestClient->aborted = false;
     g_mqttTest.connected = g_mqttTest.connectOk;
     return g_mqttTest.connected;
   }
@@ -188,9 +208,10 @@ public:
                   payload ? strlen(payload) : 0, retained);
   }
 
-  // The overload removeOneEntity() uses to clear a retained discovery config
-  // with an empty payload.
-  bool publish(const char* topic, const uint8_t* payload, unsigned int len, bool retained) {
+  // The overload every Mqtt.cpp publish goes through (mqttPublishOrDrop()),
+  // with the same signature as the real client's. removeOneEntity() uses it to
+  // clear a retained discovery config with an empty payload.
+  bool publish(const char* topic, const uint8_t* payload, size_t len, bool retained) {
     return record(topic, payload, len, retained);
   }
 
@@ -201,7 +222,8 @@ private:
   }
 
   bool record(const char* topic, const uint8_t* payload, size_t len, bool retained) {
-    if (!g_mqttTest.connected) return false;
+    g_mqttTest.publishAttempts++;
+    if (!connected()) return false;
     if (g_mqttTest.failPublishes) return false;
     if (g_mqttTest.failTopicContains[0] && topic &&
         strstr(topic, g_mqttTest.failTopicContains) != nullptr) {
@@ -231,15 +253,23 @@ private:
 
 static void mqttTestReset() {
   g_mqttTest = MqttTestState{};
+  if (g_mqttTestClient) {
+    g_mqttTestClient->aborted    = false;
+    g_mqttTestClient->abortCount = 0;
+  }
 }
+
+// How many times Mqtt.cpp has aborted its connection since the last reset
+static int mqttTestAbortCount() { return g_mqttTestClient ? g_mqttTestClient->abortCount : 0; }
 
 // Clears the recorded traffic but keeps the connection, the registered callback
 // and the knobs. A fixture needs this because the only way to populate
 // Mqtt.cpp's static s_availTopic (and reset its backoff) is to drive a real
 // connect, which itself publishes and subscribes - traffic no test wants to see.
 static void mqttTestResetRecords() {
-  g_mqttTest.recordCount   = 0;
-  g_mqttTest.overflowCount = 0;
+  g_mqttTest.recordCount     = 0;
+  g_mqttTest.overflowCount   = 0;
+  g_mqttTest.publishAttempts = 0;
   g_mqttTest.subCount      = 0;
   g_mqttTest.unsubCount    = 0;
 }
