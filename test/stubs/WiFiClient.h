@@ -41,6 +41,13 @@ public:
   bool connected() { return g_clientConnected; }
   void stop()      {}
 
+  // Mqtt.cpp aborts the MQTT client's own WiFiClient when a publish fails on a
+  // dead connection. The PubSubClient stub reads `aborted` back and reports
+  // the connection as lost, as the real client does once its socket is gone.
+  void abort()     { aborted = true; abortCount++; }
+  bool aborted    = false;
+  int  abortCount = 0;
+
   IPAddress remoteIP() { return g_clientRemoteIP; }
 
   size_t write(uint8_t c) {

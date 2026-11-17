@@ -76,24 +76,61 @@ static unsigned long g_mqttPendingSaveAt = 0;
 static char s_topicBuf[128];
 static char s_availTopic[64];   // "<baseTopic>/availability", built on connect
 
-// Throttled publish-failure logger — one syslog line per 30 s with a suppressed
-// count, so a broker dropping mid-burst can't cause a log storm.
-static void logPublishFailure(const char* topic) {
-  static uint32_t s_failCount = 0;
-  static unsigned long s_lastLogMs = 0;
-  s_failCount++;
-  if (millis() - s_lastLogMs >= 30000) {
-    logMsgL(SYSLOG_WARNING, "[MQTT] publish failed: %s (%u failure(s)), state=%d",
-            topic, (unsigned)s_failCount, g_mqtt.state());
-    s_lastLogMs = millis();
-    s_failCount = 0;
-  }
+// Close a connection whose publish has just failed.
+//
+// On a connected client a publish only fails when the socket write times out
+// (5 s), which means the broker has stopped answering: usually a half-open
+// connection that still reports itself as connected. Carrying on would wait
+// 5 s on every remaining message, and a full report is dozens of them - on
+// 2026-11-17 that froze the main loop for 6.5 minutes.
+//
+// abort() resets only this TCP connection (not WiFi or any other socket) and
+// frees its unsent data at once, after a flush of at most 300 ms.
+// g_mqtt.disconnect() would send a DISCONNECT packet over the dead link and
+// wait again. PubSubClient then sees the closed client and reports state -3,
+// so every later publish returns at once, and the next report reconnects.
+//
+// The warning is logged later by logDroppedConnection(), not here: a publish
+// can fail deep in the call stack (inside the log mirror, under a web request),
+// and logging from there would stack a second log line on top of the one
+// still being sent.
+static char s_droppedTopic[sizeof(s_topicBuf)];   // the failed publish's topic
+static bool s_dropLogPending = false;
+
+static void dropDeadConnection(const char* topic) {
+  g_mqttWifi.abort();
+  strncpy(s_droppedTopic, topic, sizeof(s_droppedTopic) - 1);
+  s_droppedTopic[sizeof(s_droppedTopic) - 1] = '\0';
+  s_dropLogPending = true;
+}
+
+// Log the warning for a connection dropped since the last call. Called from
+// mqttLoop(), reportMqtt() and testMqtt(), which run near the top of the stack.
+static void logDroppedConnection() {
+  if (!s_dropLogPending) return;
+  s_dropLogPending = false;
+  logMsgL(SYSLOG_WARNING,
+          "[MQTT] Publish failed: %s - closing the connection, will reconnect at the next report",
+          s_droppedTopic);
+}
+
+// Every publish goes through here, so a dead connection costs one timeout
+// instead of one per message. Returns false without trying when the
+// connection is already down - the rest of a burst after a drop is skipped.
+static bool mqttPublishOrDrop(const char* topic, const uint8_t* payload, size_t len, bool retained) {
+  if (!g_mqtt.connected()) return false;
+  if (g_mqtt.publish(topic, payload, len, retained)) return true;
+  dropDeadConnection(topic);
+  return false;
+}
+
+static bool mqttPublishOrDrop(const char* topic, const char* payload, bool retained) {
+  return mqttPublishOrDrop(topic, (const uint8_t*)payload, strlen(payload), retained);
 }
 
 static void publishValue(const char* base, const char* key, const char* value) {
   snprintf(s_topicBuf, sizeof(s_topicBuf), "%s/%s", base, key);
-  if (!g_mqtt.publish(s_topicBuf, value, true))  // retained
-    logPublishFailure(s_topicBuf);
+  mqttPublishOrDrop(s_topicBuf, value, true);  // retained
 }
 
 // dtostrf() writes as many digits as the value needs and is never told the
@@ -180,8 +217,7 @@ static void publishAndReset(JsonDocument& doc,
             (unsigned)len, discTopic);
   } else {
     serializeJson(doc, s_discPayload, sizeof(s_discPayload));
-    if (!g_mqtt.publish(discTopic, s_discPayload, true))
-      logPublishFailure(discTopic);
+    mqttPublishOrDrop(discTopic, s_discPayload, true);
   }
   doc.clear();
   yield();  // feed WDT between successive publishes
@@ -612,7 +648,8 @@ static void publishDeviceDiscovery() {
   publishEntityTable(doc, kDeviceEntities, HA_COUNT(kDeviceEntities),
                      devId, devBase, "OurBrewbot");
 
-  logMsg("[MQTT] HA discovery published for device: base=%s", devBase);
+  // Only true if no publish failed and dropped the connection
+  if (g_mqtt.connected()) logMsg("[MQTT] HA discovery published for device: base=%s", devBase);
 }
 
 // Publish all HA discovery entity configs for one fermenter.
@@ -629,7 +666,7 @@ static void publishHaDiscovery(int i) {
   publishEntityTable(doc, kFermenterEntities, HA_COUNT(kFermenterEntities),
                      devId, fermBase, fermLabel);
 
-  logMsg("[MQTT] HA discovery published for F%d: base=%s", i, fermBase);
+  if (g_mqtt.connected()) logMsg("[MQTT] HA discovery published for F%d: base=%s", i, fermBase);
 }
 
 // Publish HA discovery for one Probe slot. Skips empty / unconfigured slots.
@@ -648,7 +685,7 @@ static void publishProbeDiscovery(int idx) {
   JsonDocument doc;
   publishEntityTable(doc, kProbeEntities, HA_COUNT(kProbeEntities), devId, base, devName);
 
-  logMsg("[MQTT] HA discovery published for probe %s", g_probes[idx].address);
+  if (g_mqtt.connected()) logMsg("[MQTT] HA discovery published for probe %s", g_probes[idx].address);
 }
 
 // Publish HA discovery for one Tilt colour slot. Skips unconfigured colours.
@@ -667,7 +704,7 @@ static void publishTiltDiscovery(int colour) {
   JsonDocument doc;
   publishEntityTable(doc, kTiltEntities, HA_COUNT(kTiltEntities), devId, base, devName);
 
-  logMsg("[MQTT] HA discovery published for tilt %s", colourName);
+  if (g_mqtt.connected()) logMsg("[MQTT] HA discovery published for tilt %s", colourName);
 }
 
 // Publish HA discovery for one iSpindel slot. Skips empty / "None" slots.
@@ -687,7 +724,7 @@ static void publishIspindelDiscovery(int idx) {
   JsonDocument doc;
   publishEntityTable(doc, kIspindelEntities, HA_COUNT(kIspindelEntities), devId, base, devName);
 
-  logMsg("[MQTT] HA discovery published for ispindel %s", g_iSpindels[idx].id);
+  if (g_mqtt.connected()) logMsg("[MQTT] HA discovery published for ispindel %s", g_iSpindels[idx].id);
 }
 
 // Remove HA discovery for one Probe by its OneWire address.
@@ -722,8 +759,7 @@ static void removeOneEntity(const char* component, const char* devId, const char
   char discTopic[96];   // 88 chars at most - see publishAndReset()
   snprintf(discTopic, sizeof(discTopic), "homeassistant/%s/%s/%s/config",
     component, devId, objectId);
-  if (!g_mqtt.publish(discTopic, (const uint8_t*)"", 0, true))
-    logPublishFailure(discTopic);
+  mqttPublishOrDrop(discTopic, (const uint8_t*)"", 0, true);
   yield();
 }
 
@@ -735,7 +771,7 @@ static void removeHaDiscovery(int i) {
   snprintf(devId, sizeof(devId), "ourbrewbot_%06X_f%d", ESP.getChipId(), i);
   removeLegacyEntityTable(kFermenterLegacyEntities, HA_COUNT(kFermenterLegacyEntities), devId);
   removeEntityTable(kFermenterEntities, HA_COUNT(kFermenterEntities), devId);
-  logMsg("[MQTT] HA discovery removed for F%d", i);
+  if (g_mqtt.connected()) logMsg("[MQTT] HA discovery removed for F%d", i);
 }
 
 // Remove all HA discovery entities for the device itself.
@@ -744,7 +780,7 @@ static void removeDeviceDiscovery() {
   char devId[24];
   snprintf(devId, sizeof(devId), "ourbrewbot_%06X", ESP.getChipId());
   removeEntityTable(kDeviceEntities, HA_COUNT(kDeviceEntities), devId);
-  logMsg("[MQTT] HA discovery removed for device");
+  if (g_mqtt.connected()) logMsg("[MQTT] HA discovery removed for device");
 }
 
 // Publish discovery for all MQTT-enabled fermenters and the device itself.
@@ -938,8 +974,7 @@ static void onMqttConnected() {
   g_mqttBackoffMs = 5000;  // reset backoff on success
 
   // Mark device online
-  if (!g_mqtt.publish(s_availTopic, "online", true))
-    logPublishFailure(s_availTopic);
+  mqttPublishOrDrop(s_availTopic, "online", true);
 
   // Subscribe to HA birth message to re-publish discovery after HA restarts
   g_mqtt.subscribe("homeassistant/status");
@@ -1037,8 +1072,9 @@ void mqttSettingsChanged() {
     // The broker only sends the "offline" will for a connection that is lost,
     // not one closed on purpose. s_availTopic still holds the old base topic:
     // it is only rebuilt on connect.
-    g_mqtt.publish(s_availTopic, "offline", true);
-    g_mqtt.disconnect();
+    // On a dead link the send fails and mqttPublishOrDrop() aborts the
+    // connection, so there is nothing left to close politely.
+    if (mqttPublishOrDrop(s_availTopic, "offline", true)) g_mqtt.disconnect();
     logMsg("[MQTT] Settings changed - disconnected, will reconnect with the new settings");
   }
   g_mqttWasConnected = false;
@@ -1172,9 +1208,11 @@ void mqttPublishLog(uint8_t level, const char* timestamp, const char* msg) {
   s_inLogPublish = true;
   char topic[64];
   snprintf(topic, sizeof(topic), "%s/Device/log", g_mqttConfig.baseTopic);
-  // Deliberately unchecked: logging a failure here would re-enter the log
-  // path this function mirrors (the s_inLogPublish guard would swallow it).
-  g_mqtt.publish(topic, payload, false);  // non-retained
+  // Every log line is mirrored, so on a dead connection this is usually the
+  // first publish to fail. mqttPublishOrDrop() then closes the connection and
+  // leaves its warning for logDroppedConnection(), so nothing is logged from
+  // inside this log call.
+  mqttPublishOrDrop(topic, payload, false);  // non-retained
   s_inLogPublish = false;
 }
 
@@ -1192,6 +1230,7 @@ void initMqtt() {
 
 void mqttLoop() {
   if (!g_mqttConfig.enabled) return;
+  logDroppedConnection();
   if (!g_mqtt.connected()) return;
   g_mqtt.loop();
 }
@@ -1300,7 +1339,8 @@ static void publishDeviceReport() {
     publishValue(base, "latest_version", g_updateStatus.latestVersion);
   }
 
-  logMsg("[MQTT] Published device report: base=%s", base);
+  // Only true if no publish failed and dropped the connection
+  if (g_mqtt.connected()) logMsg("[MQTT] Published device report: base=%s", base);
 }
 
 void mqttPublishUpdateStatus() {
@@ -1314,6 +1354,7 @@ void mqttPublishUpdateStatus() {
 
 void reportMqtt() {
   if (!g_mqttConfig.enabled) return;
+  logDroppedConnection();   // before "Connection lost", so the log reads in order
   if (!WiFi.isConnected()) return;
 
   if (!mqttEnsureConnected()) return;
@@ -1377,12 +1418,18 @@ void reportMqtt() {
       publishInt(base, "profile_steps", 0);
     }
 
+    // A failed publish drops the connection - stop here, as nothing more can
+    // be sent and the "Published" line would not be true.
+    if (!g_mqtt.connected()) return;
     logMsg("[MQTT] Published F%d (%s)", i, g_fermenters[i].fermenterName);
   }
 
   publishProbes();
+  if (!g_mqtt.connected()) return;
   publishTilts();
+  if (!g_mqtt.connected()) return;
   publishIspindels();
+  if (!g_mqtt.connected()) return;
   publishDeviceReport();
 }
 
@@ -1431,7 +1478,8 @@ bool testMqtt() {
 
   char topic[48];
   snprintf(topic, sizeof(topic), "%s/test", g_mqttConfig.baseTopic);
-  bool ok = g_mqtt.publish(topic, "OurBrewbot MQTT test OK");
+  bool ok = mqttPublishOrDrop(topic, "OurBrewbot MQTT test OK", false);
+  logDroppedConnection();
   logMsg("[MQTT] Test publish to %s: %s", topic, ok ? "OK" : "FAIL");
 
   return ok;
