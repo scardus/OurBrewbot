@@ -67,4 +67,5 @@ bool parseVersionJson(const String& body,
 bool runUpdateCheck();
 
 // Call every loop pass: runs the scheduled check when it's due.
-void updateCheckLoop();
+// Returns true if it made an HTTP request (see the main loop).
+bool updateCheckLoop();

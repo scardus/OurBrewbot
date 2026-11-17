@@ -123,12 +123,16 @@ void setUp(void) {
 
 void tearDown(void) {}
 
-// Run the loop at a given time and report whether a POST was made
+// Run the loop at a given time and report whether a POST was made. The
+// main loop sends one HTTP request per pass, so crashReportLoop() must
+// return true exactly when it made one.
 static bool loopAt(uint32_t ms) {
   int before = g_httpTest.postCount;
   s_millis = ms;
-  crashReportLoop();
-  return g_httpTest.postCount != before;
+  bool saidSent = crashReportLoop();
+  bool sent = g_httpTest.postCount != before;
+  TEST_ASSERT_EQUAL_MESSAGE(sent, saidSent, "crashReportLoop() return value");
+  return sent;
 }
 
 // Reports in the queue file (one per line)

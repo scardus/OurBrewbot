@@ -339,12 +339,16 @@ static void test_failure_keeps_the_last_good_result(void) {
 // updateCheckLoop (scheduler)
 // ============================================================
 
-// Run the loop at a given time and report whether a check happened
+// Run the loop at a given time and report whether a check happened. The
+// main loop sends one HTTP request per pass, so updateCheckLoop() must
+// return true exactly when it made one.
 static bool loopAt(uint32_t ms) {
   int before = g_httpTest.getCount;
   s_millis = ms;
-  updateCheckLoop();
-  return g_httpTest.getCount != before;
+  bool saidSent = updateCheckLoop();
+  bool sent = g_httpTest.getCount != before;
+  TEST_ASSERT_EQUAL_MESSAGE(sent, saidSent, "updateCheckLoop() return value");
+  return sent;
 }
 
 static uint32_t firstCheckDelay() {

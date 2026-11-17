@@ -31,7 +31,8 @@
 // HTTP_TIMEOUT_MS), and a failed one drops the rest of that service's cycle.
 void queueReports();        // mark every enabled service×fermenter pair pending
 bool reportsPending();      // anything still queued? (also the Tilt-scan interlock in 0.3.20)
-void processReportQueue();  // send AT MOST one pending report, then return
+bool processReportQueue();  // send AT MOST one pending report, then return;
+                            // true if it made an HTTP request
 
 // Report one fermenter to one brew service slot (0=Brewer's Friend, 1=Brewfather).
 // Returns the HTTP status code, or a negative HTTPClient error.

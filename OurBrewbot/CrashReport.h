@@ -49,5 +49,5 @@ bool buildCrashReportJson(const CrashInfo& crash, char* out, size_t outSize);
 
 // Call every loop pass: saves this boot's crash (if any) to the queue, then
 // sends the saved reports when they are due. Does nothing once the queue is
-// empty.
-void crashReportLoop();
+// empty. Returns true if it made an HTTP request (see the main loop).
+bool crashReportLoop();

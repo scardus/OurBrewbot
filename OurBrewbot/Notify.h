@@ -98,7 +98,8 @@ void notifyEvent(NotifyEvent type, uint8_t index = 0, uint8_t detail = 0,
 // with nothing to send it returns straight away. The POST blocks for up to
 // about 15 s if the server does not answer (see NOTIFY_TIMEOUT_MS). A failed
 // one is tried again a minute later, three times in all.
-void notifyLoop();
+// Returns true if it made an HTTP request (see the main loop).
+bool notifyLoop();
 
 // Tell the notifications what a fermenter's temperature alarm is doing. Call
 // it on every alarm check, whether or not anything changed; this works out

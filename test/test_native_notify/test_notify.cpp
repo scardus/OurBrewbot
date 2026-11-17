@@ -976,7 +976,7 @@ void test_every_kind_of_alert_at_once(void) {
 
 void test_nothing_waiting_sends_nothing(void) {
   TEST_ASSERT_FALSE(notifySendDue());
-  notifyLoop();
+  TEST_ASSERT_FALSE(notifyLoop());   // no request, so the loop's next job can run
   TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
   TEST_ASSERT_EQUAL_UINT8(0xFF, s_lastCheckpoint);
 }
@@ -984,7 +984,7 @@ void test_nothing_waiting_sends_nothing(void) {
 void test_a_notification_is_posted_as_ntfy_expects(void) {
   notifyEvent(NOTIFY_ALARM_OVER, 0, 1, 32.0f, 29.0f);
   TEST_ASSERT_TRUE(notifySendDue());
-  notifyLoop();
+  TEST_ASSERT_TRUE(notifyLoop());    // tells the loop it made a request
 
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
   TEST_ASSERT_EQUAL_STRING("http://ntfy.sh/my-topic", g_httpTest.url);
@@ -1009,11 +1009,11 @@ void test_one_notification_is_sent_per_pass_oldest_first(void) {
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
   TEST_ASSERT_EQUAL_STRING("Beer Temp is not responding. Its readings are no longer used.", g_httpTest.body);
 
-  notifyLoop();
+  TEST_ASSERT_TRUE(notifyLoop());
   TEST_ASSERT_EQUAL_INT(2, g_httpTest.postCount);
   TEST_ASSERT_EQUAL_STRING("Lager fridge: the profile has finished.", g_httpTest.body);
 
-  notifyLoop();
+  TEST_ASSERT_FALSE(notifyLoop());
   TEST_ASSERT_EQUAL_INT(2, g_httpTest.postCount);
 }
 
@@ -1032,15 +1032,16 @@ void test_the_log_never_holds_the_url(void) {
 void test_a_failed_send_is_tried_again_a_minute_later(void) {
   g_httpTest.nextStatus = 503;
   notifyEvent(NOTIFY_PROFILE_FINISHED, 0);
-  notifyLoop();
+  TEST_ASSERT_TRUE(notifyLoop());    // a failed request still took the turn
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
   TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);   // still waiting
   TEST_ASSERT_EQUAL_STRING("[NOTIFY] Profile finished: HTTP 503 - trying again in a minute", s_lastLog);
 
-  // Not before the minute is up
+  // Not before the minute is up. While it waits it doesn't hold up the
+  // loop's other internet jobs.
   s_uptimeSec += NOTIFY_RETRY_S - 1;
   TEST_ASSERT_FALSE(notifySendDue());
-  notifyLoop();
+  TEST_ASSERT_FALSE(notifyLoop());
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
 
   s_uptimeSec += 1;
@@ -1086,7 +1087,7 @@ void test_nothing_is_sent_while_wifi_is_down(void) {
   WiFi.connected = false;
   notifyEvent(NOTIFY_PROFILE_FINISHED, 0);
   TEST_ASSERT_FALSE(notifySendDue());
-  notifyLoop();
+  TEST_ASSERT_FALSE(notifyLoop());
   TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
   TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);   // kept for when WiFi is back
 
@@ -1105,7 +1106,7 @@ void test_an_event_older_than_an_hour_is_dropped_unsent(void) {
 
   s_uptimeSec += 1;
   WiFi.connected = true;
-  notifyLoop();
+  TEST_ASSERT_FALSE(notifyLoop());   // dropped without a request
   TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
   TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
 }
@@ -1115,7 +1116,7 @@ void test_switching_notifications_off_clears_what_was_waiting(void) {
   notifyEvent(NOTIFY_PROBE_BACK, 2);
   g_notifyConfig.enabled = false;
   TEST_ASSERT_FALSE(notifySendDue());
-  notifyLoop();
+  TEST_ASSERT_FALSE(notifyLoop());
   TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
   TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
 }
@@ -1123,9 +1124,9 @@ void test_switching_notifications_off_clears_what_was_waiting(void) {
 void test_an_event_that_cannot_be_built_does_not_block_the_queue(void) {
   notifyEvent(NOTIFY_PROFILE_FINISHED, MAX_FERMENTERS);   // no such fermenter
   notifyEvent(NOTIFY_PROBE_BACK, 2);
-  notifyLoop();
+  TEST_ASSERT_FALSE(notifyLoop());   // the bad record is dropped without a request
   TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
-  notifyLoop();
+  TEST_ASSERT_TRUE(notifyLoop());
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
   TEST_ASSERT_EQUAL_STRING("Beer Temp is responding again. Its readings are used.", g_httpTest.body);
 }

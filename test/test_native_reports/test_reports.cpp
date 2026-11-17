@@ -183,7 +183,7 @@ void test_queue_accepts_an_eligible_pair(void) {
 
 void test_queue_drains_exactly_one_post_per_pass(void) {
   // The whole point of the staggered dispatcher: each blocking POST can take
-  // up to the 5 s HTTP timeout, so only one may run per loop pass.
+  // about 15 s (three 5 s timeouts), so only one may run per loop pass.
   enableService(BF, "abc");
   enableService(BFR, "def");
   for (int i = 0; i < 3; i++) {
@@ -194,13 +194,13 @@ void test_queue_drains_exactly_one_post_per_pass(void) {
 
   int expected = 0;
   for (int pass = 0; pass < 6; pass++) {   // 3 fermenters x 2 services
-    processReportQueue();
+    TEST_ASSERT_TRUE(processReportQueue());   // tells the loop it sent one
     expected++;
     TEST_ASSERT_EQUAL_INT(expected, g_httpTest.postCount);
   }
   TEST_ASSERT_FALSE(reportsPending());     // queue emptied
 
-  processReportQueue();                    // nothing left to send
+  TEST_ASSERT_FALSE(processReportQueue()); // nothing left to send
   TEST_ASSERT_EQUAL_INT(6, g_httpTest.postCount);
 }
 
@@ -217,7 +217,8 @@ void test_a_failed_post_drops_the_rest_of_that_services_cycle(void) {
   queueReports();
   g_httpTest.nextStatus = -1;              // HTTPC_ERROR_CONNECTION_FAILED
 
-  processReportQueue();                    // Brewer's Friend F0 fails
+  // A failed request still took the pass's turn
+  TEST_ASSERT_TRUE(processReportQueue());  // Brewer's Friend F0 fails
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
   processReportQueue();                    // straight on to Brewfather F0
   TEST_ASSERT_EQUAL_INT(2, g_httpTest.postCount);
@@ -245,7 +246,7 @@ void test_queue_dropped_entirely_when_wifi_is_down(void) {
   queueReports();
   WiFi.connected = false;
 
-  processReportQueue();
+  TEST_ASSERT_FALSE(processReportQueue()); // no request, so the next job can run
 
   TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
   TEST_ASSERT_FALSE(reportsPending());

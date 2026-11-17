@@ -340,22 +340,29 @@ void loop() {
   }
 
   // Cloud / service reporting (HTTP services only). The 15-min tick only
-  // queues work; ONE report is POSTed per loop pass so the loop never stalls
-  // longer than a single 5 s HTTP timeout (was: up to services × fermenters
-  // × 5 s in one pass).
+  // queues the reports; they are sent below, one at a time.
   if (now - g_lastCloudTime >= INTERVAL_CLOUD_MS) {
     g_lastCloudTime = now;
     queueReports();
   }
-  if (reportsPending()) {
-    checkpoint(CP_CLOUD);
-    processReportQueue();
-  }
 
-  // Push notifications: events are queued where they happen, and ONE is
-  // POSTed per loop pass, for the same reason as the reports above. Returns
-  // straight away when nothing is waiting.
-  notifyLoop();
+  // Internet jobs: at most ONE HTTP request per loop pass, so the controller
+  // gets back to temperature control between them. One request can still
+  // hold up the loop for about 15 s (DNS, connect and the reply each have a
+  // 5 s timeout), and before this four of them could follow each other.
+  // Each function returns true if it made a request; the jobs after it wait
+  // for the next pass. Notifications go first as they're the urgent ones
+  // (alarms), and they can't keep the others waiting for long: a failed one
+  // waits a minute before trying again, and at most 8 can be queued.
+  bool sentRequest = notifyLoop();
+  if (!sentRequest && reportsPending()) {
+    checkpoint(CP_CLOUD);
+    sentRequest = processReportQueue();
+  }
+  // Daily firmware update check - returns straight away until it's due
+  if (!sentRequest) sentRequest = updateCheckLoop();
+  // Send the crash report once after a crash - does nothing otherwise
+  if (!sentRequest) crashReportLoop();
 
   // MQTT publish (separate timer, more frequent)
   if (now - g_lastMqttTime >= INTERVAL_MQTT_MS) {
@@ -370,12 +377,6 @@ void loop() {
     checkpoint(CP_TEN_MIN);
     onTenMinuteTimer();
   }
-
-  // Daily firmware update check - returns straight away until it's due
-  updateCheckLoop();
-
-  // Send the crash report once after a crash - does nothing otherwise
-  crashReportLoop();
 
   // Uptime in minutes, saved with the global config for the reboot log.
   // Taken from the uptime clock rather than counted up here, so it can't

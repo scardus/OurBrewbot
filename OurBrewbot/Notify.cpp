@@ -607,24 +607,24 @@ bool notifySendDue() {
   return true;
 }
 
-void notifyLoop() {
-  if (s_queueCount == 0) return;
+bool notifyLoop() {
+  if (s_queueCount == 0) return false;
 
   // Switched off while events were waiting: they are not wanted any more
   if (!g_notifyConfig.enabled) {
     s_queueCount = 0;
     s_tries      = 0;
-    return;
+    return false;
   }
 
   // Too old to be useful (WiFi was down, or the server kept failing)
   if (uptimeSince(s_queue[0].queuedAt) > NOTIFY_MAX_AGE_S) {
     logMsgL(SYSLOG_WARNING, "[NOTIFY] A notification waited over an hour - dropped unsent");
     removeFront();
-    return;
+    return false;
   }
 
-  if (!notifySendDue()) return;
+  if (!notifySendDue()) return false;
 
   checkpoint(CP_NOTIFY);   // so a crash while sending is logged against it
 
@@ -632,14 +632,14 @@ void notifyLoop() {
     // A fermenter or sensor number that doesn't exist. The callers never
     // pass one, so this is only here to stop a bad record blocking the queue.
     removeFront();
-    return;
+    return false;
   }
 
   int code = postMessage(s_message);
   if (isSuccess(code)) {
     logMsg("[NOTIFY] Sent: %s (HTTP %d)", s_message.title, code);
     removeFront();
-    return;
+    return true;
   }
 
   s_tries++;
@@ -650,6 +650,7 @@ void notifyLoop() {
   } else {
     logFailure(s_message.title, code, PSTR("trying again in a minute"));
   }
+  return true;
 }
 
 int notifySendTest() {
