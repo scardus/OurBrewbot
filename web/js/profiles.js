@@ -54,10 +54,12 @@ function profilesView() {
           ${btn('Copy to slot…','copy-profile','secondary')}</div>
         <form data-form="profile-${state.selectedProfile}">
           ${field('Profile name','name',profile.name,'text',`maxlength="31" ${locked?'disabled':''}`)}
-          <div class="profile-preview"><div class="plot-heading">TEMPERATURE PLAN · °${state.unit} · step order</div>
-            ${profilePlot(profile)}
+          <div class="profile-preview"><div class="plot-heading">PROFILE PLAN · °${state.unit} · step order</div>
+            <div class="profile-preview-content" tabindex="0" role="region" aria-label="Profile plan and step conditions">
+              ${profilePlot(profile)}</div>
             <p class="review-caption">Solid: timed step. Dashed: condition-dependent step. Shaded: free-rise band.
-              This shows step order, not predicted completion times.</p></div>
+              Conditions below each step show when it can advance. SG means specific gravity.
+              This shows step order, not predicted completion times or gravity readings.</p></div>
           <div class="section-heading">
             <h3>Profile steps</h3><span class="subtle">${stepCount} of ${MAX_PROFILE_STEPS} slots</span>
           </div>
@@ -100,7 +102,25 @@ function profileStep(step,i,count,locked) {
   </div>`;
 }
 
-// Draw the profile's temperature sequence, including held steps and free-rise bands.
+// Describe the conditions that must all be met before the runner advances a step.
+function profileStepCondition(step) {
+  const type=stepTypes[step.type],conditions=[];
+  if (type.usesDays) conditions.push('After '+step.days+(step.days===1?' day':' days'));
+  if (type.target && !(step.trigger>0)) {
+    const target=type.target==='gravity'?'gravity':'attenuation';
+    const prompt=type.usesDays?target+' target not set':'Set '+(target==='gravity'?'a':'an')+' '+target+' target';
+    return (type.usesDays?esc(conditions[0])+' <strong>and</strong> ':'')+
+      '<span class="profile-condition-unset">'+esc(prompt)+'</span>';
+  }
+  if (type.target==='gravity') conditions.push('SG ≤ '+formatGravity(step.trigger));
+  else if (type.target==='attenuation') conditions.push('Attenuation ≥ '+step.trigger+'%');
+  else if (step.type===0 || step.type===5) {
+    conditions.push('Temperature reaches '+formatTemp(step.end)+'\u00a0°'+state.unit+' within the control band');
+  }
+  return conditions.map(esc).join(' <strong>and</strong> ');
+}
+
+// Keep each temperature segment and its completion conditions in the same column.
 function profilePlot(profile) {
   if (!profile.steps.length) return '<p class="empty-state">Add a step to preview the profile.</p>';
   const segments=profile.steps.map(step=>({
@@ -111,24 +131,29 @@ function profilePlot(profile) {
   const low=Math.min(...values)-3,high=Math.max(...values)+3;
   // Map a Celsius temperature into the chart's vertical coordinate.
   const y=value=>95-(value-low)/(high-low)*65;
-  const width=420/profile.steps.length;
-  return `<svg class="profile-plot" viewBox="0 0 490 120" role="img"
-      aria-label="Temperature sequence for ${esc(profile.name)}">
-    ${[0,1,2].map(i=>{
-      const v=low+(high-low)*i/2;
-      return `<line x1="40" x2="467" y1="${y(v)}" y2="${y(v)}" stroke="#2b3749" stroke-dasharray="3 5"/>
-        <text x="4" y="${y(v)+3}" fill="#7e8da2" font-size="9">${formatTemp(v)}°</text>`;
-    }).join('')}
-    ${segments.map((segment,i)=>`
-      ${segment.line==='band'?`<rect x="${40+i*width}" y="${y(Math.max(segment.start,segment.end))}"
-        width="${width-4}" height="${Math.max(1,Math.abs(y(segment.start)-y(segment.end)))}"
-        fill="#ed7182" fill-opacity="0.25" stroke="#ed7182"/>`:
-        `<line x1="${40+i*width}" x2="${40+(i+1)*width-4}" y1="${y(segment.start)}" y2="${y(segment.end)}"
-          stroke="#ed7182" stroke-width="2.5" ${segment.line==='solid'?'':'stroke-dasharray="5 4"'}/>
-        <circle cx="${40+i*width}" cy="${y(segment.start)}" r="3" fill="#ed7182"/>`}
-      <text x="${40+i*width+width/2}" y="116" fill="#8d9cb1" font-size="9"
-        text-anchor="middle">Step ${i+1}</text>`).join('')}
-  </svg>`;
+  return `<div class="profile-plan" style="grid-template-columns:44px repeat(${segments.length},minmax(140px,1fr));
+      min-width:${44+segments.length*140}px">
+    <div class="profile-axis"><svg aria-hidden="true">
+      ${[0,1,2].map(i=>{
+        const v=low+(high-low)*i/2;
+        return `<text x="0" y="${y(v)+3}" fill="#7e8da2" font-size="10">${formatTemp(v)}°</text>`;
+      }).join('')}</svg></div>
+    ${segments.map((segment,i)=>`<div class="profile-preview-step">
+      <svg class="profile-plot" role="img" aria-label="Step ${i+1}: ${segment.line==='band'?'free-rise band':'temperature'}
+          ${formatTemp(segment.start)} to ${formatTemp(segment.end)}\u00a0°${state.unit}">
+        ${[0,1,2].map(n=>`<line x1="0" x2="100%" y1="${y(low+(high-low)*n/2)}"
+          y2="${y(low+(high-low)*n/2)}" stroke="#2b3749" stroke-dasharray="3 5"/>`).join('')}
+        ${segment.line==='band'?`<rect x="3%" y="${y(Math.max(segment.start,segment.end))}"
+          width="94%" height="${Math.max(1,Math.abs(y(segment.start)-y(segment.end)))}"
+          fill="#ed7182" fill-opacity="0.25" stroke="#ed7182"/>`:
+          `<line x1="3%" x2="97%" y1="${y(segment.start)}" y2="${y(segment.end)}"
+            stroke="#ed7182" stroke-width="2.5" ${segment.line==='solid'?'':'stroke-dasharray="5 4"'}/>
+          <circle cx="3%" cy="${y(segment.start)}" r="3" fill="#ed7182"/>`}
+      </svg><strong class="profile-preview-label">Step ${i+1}</strong>
+      <p class="profile-condition ${stepTypes[profile.steps[i].type].target?'profile-condition-reading':''}">
+        ${profileStepCondition(profile.steps[i])}</p>
+    </div>`).join('')}
+  </div>`;
 }
 
 // Serialize the editable parts of a profile for change comparisons.
@@ -158,6 +183,15 @@ function profileChanged() {
   const saved=state.profiles[state.selectedProfile];
   if (profileValues(profile)===profileValues(saved)) profileDrafts.delete(state.selectedProfile);
   else profileDrafts.set(state.selectedProfile,profile);
+  const preview=$('.profile-preview-content');
+  if (preview) {
+    const scroll=preview.scrollLeft;
+    // A cleared number field is an unfinished edit, not a zero-temperature plan.
+    const incomplete=$$('input[type="number"]',preview.closest('form')).some(input=>
+      !input.disabled && (input.value==='' || input.validity.badInput));
+    preview.innerHTML=incomplete?'<p class="empty-state">Complete the step values to preview the profile.</p>':profilePlot(profile);
+    preview.scrollLeft=scroll;
+  }
 }
 
 // Update the visible profile form's unsaved-change state after rendering.
