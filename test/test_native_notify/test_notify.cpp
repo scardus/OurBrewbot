@@ -107,6 +107,7 @@ void setUp(void) {
   s_queueCount = 0;
   s_tries      = 0;
   s_lastTryAt  = 0;
+  s_queueFullLogged = false;
   memset(s_problemSent, 0, sizeof(s_problemSent));
   memset(s_problemSince, 0, sizeof(s_problemSince));
   memset(s_problemOffSince, 0, sizeof(s_problemOffSince));
@@ -396,20 +397,177 @@ void test_a_full_queue_drops_the_new_event_and_logs_it(void) {
   TEST_ASSERT_EQUAL_UINT8(NOTIFY_QUEUE_SIZE, s_queueCount);
   TEST_ASSERT_EQUAL_INT(0, s_logCalls);
 
-  notifyEvent(NOTIFY_ALARM_OVER, 1, 0, 30.0f, 25.0f);
+  TEST_ASSERT_FALSE(notifyEvent(NOTIFY_ALARM_OVER, 1, 0, 30.0f, 25.0f));
   TEST_ASSERT_EQUAL_UINT8(NOTIFY_QUEUE_SIZE, s_queueCount);
   TEST_ASSERT_EQUAL_INT(1, s_logCalls);
   // The events already waiting are untouched
   TEST_ASSERT_EQUAL_INT(NOTIFY_PROFILE_FINISHED, s_queue[NOTIFY_QUEUE_SIZE - 1].event.type);
+
+  // Logged once while it stays full, not for every event turned away
+  notifyEvent(NOTIFY_ALARM_OVER, 1, 0, 30.0f, 25.0f);
+  TEST_ASSERT_EQUAL_INT(1, s_logCalls);
+
+  // ...and again the next time it fills up
+  removeFront();
+  TEST_ASSERT_TRUE(notifyEvent(NOTIFY_PROFILE_FINISHED, 0));
+  notifyEvent(NOTIFY_ALARM_OVER, 1, 0, 30.0f, 25.0f);
+  TEST_ASSERT_EQUAL_INT(2, s_logCalls);
+}
+
+// One alarm check: the fermenter is over its 22.0 C ceiling, or back in band
+static void alarmOn(uint8_t i, bool severe = false)  { notifyAlarmState(i, true, true, severe, 23.0f, 22.0f); }
+static void alarmOff(uint8_t i)                      { notifyAlarmState(i, false, false, false, 21.0f, 22.0f); }
+
+// Fill the queue with events that are not alarms
+static void fillQueue() {
+  while (s_queueCount < NOTIFY_QUEUE_SIZE) notifyEvent(NOTIFY_PROFILE_FINISHED, 0);
+}
+
+// How many events of one type are waiting
+static int queued(NotifyEvent type) {
+  int n = 0;
+  for (uint8_t i = 0; i < s_queueCount; i++) {
+    if (s_queue[i].event.type == type) n++;
+  }
+  return n;
+}
+
+// An alarm that starts while the queue is full is still reported once
+// there's room: it used to be marked as sent even though it was dropped
+void test_an_alarm_started_while_the_queue_is_full_is_queued_once_there_is_room(void) {
+  fillQueue();
+  notifyAlarmState(0, true, true, false, 23.0f, 22.0f);   // dropped
+  TEST_ASSERT_EQUAL_INT(0, queued(NOTIFY_ALARM_OVER));
+
+  removeFront();                                          // one is sent
+  s_uptimeSec += 10;
+  notifyAlarmState(0, true, true, false, 23.5f, 22.0f);   // the next check
+  TEST_ASSERT_EQUAL_INT(1, queued(NOTIFY_ALARM_OVER));
+  TEST_ASSERT_EQUAL_FLOAT(23.5f, s_queue[NOTIFY_QUEUE_SIZE - 1].event.a);   // today's reading
+
+  // Not repeated at later checks
+  s_queueCount = 0;
+  for (int n = 0; n < 10; n++) { s_uptimeSec += 10; alarmOn(0); }
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+
+  // ...and its "over" is sent when it ends
+  alarmOff(0);
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S;
+  alarmOff(0);
+  TEST_ASSERT_EQUAL_INT(1, queued(NOTIFY_ALARM_ENDED));
+}
+
+// The same for the urgent message when a mild alarm turns severe
+void test_a_severe_alarm_while_the_queue_is_full_is_queued_once_there_is_room(void) {
+  alarmOn(0);                  // mild, queued
+  fillQueue();
+  alarmOn(0, true);            // severe, dropped
+  removeFront();
+  alarmOn(0, true);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queue[NOTIFY_QUEUE_SIZE - 1].event.detail);   // severe
+  TEST_ASSERT_EQUAL_INT(NOTIFY_ALARM_OVER, s_queue[NOTIFY_QUEUE_SIZE - 1].event.type);
+}
+
+// The same for a lost sensor
+void test_a_lost_sensor_while_the_queue_is_full_is_queued_once_there_is_room(void) {
+  fillQueue();
+  notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+  TEST_ASSERT_EQUAL_INT(0, queued(NOTIFY_PROBE_LOST));
+  removeFront();
+  notifySensorState(NOTIFY_SENSOR_PROBE, 2, true);
+  TEST_ASSERT_EQUAL_INT(1, queued(NOTIFY_PROBE_LOST));
+}
+
+// With WiFi (or the server) down for over an hour, the alarm's message is
+// dropped as old news. The alarm is still on, so it is queued again.
+void test_an_alarm_that_waited_over_an_hour_is_queued_again_while_it_is_on(void) {
+  WiFi.connected = false;
+  alarmOn(0);
+  s_uptimeSec += NOTIFY_MAX_AGE_S + 1;
+  notifyLoop();                                  // dropped unsent
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+
+  alarmOn(0);
+  TEST_ASSERT_EQUAL_INT(1, queued(NOTIFY_ALARM_OVER));
+  WiFi.connected = true;
+  notifyLoop();
+  TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
+}
+
+// The same for a severe alarm: the urgent message is queued again
+void test_a_severe_alarm_that_waited_over_an_hour_is_queued_again(void) {
+  WiFi.connected = false;
+  alarmOn(0, true);
+  s_uptimeSec += NOTIFY_MAX_AGE_S + 1;
+  notifyLoop();
+  alarmOn(0, true);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queueCount);
+  TEST_ASSERT_EQUAL_UINT8(1, s_queue[0].event.detail);
+}
+
+// The same for a lost Tilt
+void test_a_lost_sensor_that_waited_over_an_hour_is_queued_again(void) {
+  WiFi.connected = false;
+  notifySensorState(NOTIFY_SENSOR_TILT, 3, true, 25.0f);
+  s_uptimeSec += NOTIFY_MAX_AGE_S + 1;
+  notifyLoop();
+  notifySensorState(NOTIFY_SENSOR_TILT, 3, true, 90.0f);
+  TEST_ASSERT_EQUAL_INT(1, queued(NOTIFY_TILT_LOST));
+}
+
+// An alarm that has ended while its message waited isn't queued again
+void test_an_alarm_that_waited_over_an_hour_is_not_queued_again_once_ended(void) {
+  WiFi.connected = false;
+  alarmOn(0);                                    // queued at 1,000 s
+  alarmOff(0);
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S;
+  alarmOff(0);                                   // ended: "over" queued at 1,600 s
+  s_uptimeSec = 1000 + NOTIFY_MAX_AGE_S + 1;
+  notifyLoop();                                  // the alarm's message is dropped
+
+  alarmOff(0);
+  TEST_ASSERT_EQUAL_INT(0, queued(NOTIFY_ALARM_OVER));
+  TEST_ASSERT_EQUAL_INT(1, queued(NOTIFY_ALARM_ENDED));
+}
+
+// A new alarm that started after the old message was queued isn't
+// reported twice when the old message is dropped
+void test_a_new_alarm_is_not_reported_twice_when_an_old_one_expires(void) {
+  WiFi.connected = false;
+  alarmOn(0);                                    // first alarm, queued at 1,000 s
+  alarmOff(0);
+  s_uptimeSec += NOTIFY_PROBLEM_OVER_S;
+  alarmOff(0);                                   // ended
+  s_uptimeSec += 100;
+  alarmOn(0);                                    // a new alarm, queued at 1,700 s
+  s_uptimeSec = 1000 + NOTIFY_MAX_AGE_S + 1;
+  notifyLoop();                                  // the first one's message is dropped
+
+  alarmOn(0);
+  TEST_ASSERT_EQUAL_INT(1, queued(NOTIFY_ALARM_OVER));   // just the new one's
+}
+
+// A notification the server keeps refusing is given up on, and not queued
+// again - otherwise a wrong URL would be tried for as long as an alarm lasts
+void test_an_alarm_given_up_on_after_three_tries_is_not_queued_again(void) {
+  g_httpTest.nextStatus = -1;   // no connection
+  alarmOn(0);
+  notifyLoop();
+  s_uptimeSec += NOTIFY_RETRY_S;
+  notifyLoop();
+  s_uptimeSec += NOTIFY_RETRY_S;
+  notifyLoop();                                  // third try: given up
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
+
+  alarmOn(0);
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);
 }
 
 // ============================================================
 // TEMPERATURE ALARMS
 // ============================================================
 
-// One alarm check: the fermenter is over its 22.0 C ceiling, or back in band
-static void alarmOn(uint8_t i, bool severe = false)  { notifyAlarmState(i, true, true, severe, 23.0f, 22.0f); }
-static void alarmOff(uint8_t i)                      { notifyAlarmState(i, false, false, false, 21.0f, 22.0f); }
+// alarmOn() and alarmOff() are with the queue tests above
 
 void test_an_alarm_is_reported_once_when_it_starts(void) {
   alarmOff(0);
@@ -1236,6 +1394,15 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_redirect_counts_as_a_failure);
   RUN_TEST(test_nothing_is_sent_while_wifi_is_down);
   RUN_TEST(test_an_event_older_than_an_hour_is_dropped_unsent);
+  RUN_TEST(test_an_alarm_started_while_the_queue_is_full_is_queued_once_there_is_room);
+  RUN_TEST(test_a_severe_alarm_while_the_queue_is_full_is_queued_once_there_is_room);
+  RUN_TEST(test_a_lost_sensor_while_the_queue_is_full_is_queued_once_there_is_room);
+  RUN_TEST(test_an_alarm_that_waited_over_an_hour_is_queued_again_while_it_is_on);
+  RUN_TEST(test_a_severe_alarm_that_waited_over_an_hour_is_queued_again);
+  RUN_TEST(test_a_lost_sensor_that_waited_over_an_hour_is_queued_again);
+  RUN_TEST(test_an_alarm_that_waited_over_an_hour_is_not_queued_again_once_ended);
+  RUN_TEST(test_a_new_alarm_is_not_reported_twice_when_an_old_one_expires);
+  RUN_TEST(test_an_alarm_given_up_on_after_three_tries_is_not_queued_again);
   RUN_TEST(test_switching_notifications_off_clears_what_was_waiting);
   RUN_TEST(test_an_event_that_cannot_be_built_does_not_block_the_queue);
 
