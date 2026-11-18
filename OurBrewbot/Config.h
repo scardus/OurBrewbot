@@ -454,7 +454,7 @@ struct TiltConfig {
   float   sg;                   // current specific gravity reading (with sgAdjust applied)
   float   temperature;          // Tilt temperature reading (with tempAdjust applied)
   bool    active;               // Tilt has been seen recently
-  uint32_t lastSeen;            // millis() of last reading
+  uint32_t lastSeen;            // uptimeStamp() of last reading (seconds since boot, so it never wraps)
   bool    isPro;                // true if auto-detected as Tilt Pro (raw minor > TILT_PRO_THRESHOLD)
 };
 
