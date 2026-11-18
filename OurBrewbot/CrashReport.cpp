@@ -297,17 +297,20 @@ static SendResult sendOldestReport() {
 // SCHEDULER
 // ============================================================
 
+void crashReportBootSave() {
+  if (s_started) return;
+  s_started = true;
+  // Count the reports earlier boots left waiting, then add this boot's crash
+  // (there is none after a normal boot or an intentional restart)
+  s_queued = countQueuedReports();
+  if (g_lastCrash.valid && g_globalConfig.crashReports) saveCrashToQueue(g_lastCrash);
+}
+
 bool crashReportLoop() {
   if (s_finished) return false;
 
-  // First pass after boot: count the reports earlier boots left waiting, then
-  // add this boot's crash (there is none after a normal boot or an
-  // intentional restart)
-  if (!s_started) {
-    s_started = true;
-    s_queued  = countQueuedReports();
-    if (g_lastCrash.valid && g_globalConfig.crashReports) saveCrashToQueue(g_lastCrash);
-  }
+  // setup() has normally done this already; it only runs once either way
+  crashReportBootSave();
 
   // Switched off: nothing is sent, and nothing is kept to send later
   if (!g_globalConfig.crashReports) {

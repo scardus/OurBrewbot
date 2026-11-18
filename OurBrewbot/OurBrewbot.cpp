@@ -220,6 +220,9 @@ void setup() {
     // report (CrashReport.cpp) can send it
     crashLogPendingDeferred();
   }
+  // Save the crash record to flash now. It has just been cleared from RTC
+  // memory, and the crash report job may not get its turn for a while.
+  crashReportBootSave();
 
   // Push notification for a restart after a crash or a power cut. Queued
   // here and sent from loop() once WiFi is connected.

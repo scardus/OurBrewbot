@@ -291,6 +291,36 @@ static void test_crash_is_saved_at_once(void) {
   TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "saved"));
 }
 
+// setup() saves it before the first loop pass: by then it has been cleared
+// from RTC memory, and the loop's crash report job can wait behind the other
+// internet jobs, so a restart before its turn would lose it
+static void test_crash_is_saved_at_boot_before_any_loop_pass(void) {
+  stageException();
+  crashReportBootSave();
+  TEST_ASSERT_EQUAL_INT(1, queuedLines());
+
+  // ...and the loop doesn't save it a second time
+  TEST_ASSERT_FALSE(loopAt(0));
+  crashReportBootSave();
+  TEST_ASSERT_EQUAL_INT(1, queuedLines());
+}
+
+static void test_boot_save_with_crash_reports_off_saves_nothing(void) {
+  stageException();
+  g_globalConfig.crashReports = false;
+  crashReportBootSave();
+  TEST_ASSERT_FALSE(LittleFS.exists(FILE_CRASH_QUEUE));
+}
+
+// The report saved at boot is sent as before, 2 minutes after WiFi is up
+static void test_report_saved_at_boot_is_sent_two_minutes_later(void) {
+  stageException();
+  crashReportBootSave();
+  TEST_ASSERT_FALSE(loopAt(1 * MIN));
+  TEST_ASSERT_TRUE(loopAt(2 * MIN));
+  TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
+}
+
 // This boot's crash goes on the end, behind the ones still waiting
 static void test_new_crash_goes_after_the_waiting_ones(void) {
   fsTestWrite(FILE_CRASH_QUEUE, "{\"n\":1}\n{\"n\":2}\n");
@@ -512,6 +542,9 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_nothing_is_saved_or_sent_after_a_normal_boot);
   RUN_TEST(test_crash_is_saved_at_once);
+  RUN_TEST(test_crash_is_saved_at_boot_before_any_loop_pass);
+  RUN_TEST(test_boot_save_with_crash_reports_off_saves_nothing);
+  RUN_TEST(test_report_saved_at_boot_is_sent_two_minutes_later);
   RUN_TEST(test_new_crash_goes_after_the_waiting_ones);
   RUN_TEST(test_a_sixth_report_deletes_the_oldest);
   RUN_TEST(test_report_that_cannot_be_saved_is_logged);
