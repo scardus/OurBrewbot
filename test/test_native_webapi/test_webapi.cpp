@@ -158,7 +158,9 @@ void restartDevice(bool forgetWiFi) {
 }
 void smartPlugSwitch(uint8_t, bool) {}
 void smartPlugsResendOne() {}
-bool getPlugState(uint8_t) { return false; }
+// What getPlugState() answers: true = the plug was last switched ON
+static bool s_plugIsOn = false;
+bool getPlugState(uint8_t) { return s_plugIsOn; }
 
 // A forced OFF is recorded together with the plug's settings AT THE TIME of
 // the call, so a test can prove the OFF went out with the old code, not the
@@ -242,6 +244,7 @@ void setUp(void) {
   s_rfTransmits = 0;
   s_rfRefuses   = false;
   s_forceOffs   = 0;
+  s_plugIsOn    = false;
   s_allPlugsOffs = 0;
   s_offCodeAtAllPlugsOff = 0;
   s_plugsHeldOff = false;
@@ -2071,6 +2074,77 @@ static void test_smartplug_post_leaves_the_plug_alone_when_switching_is_unchange
   TEST_ASSERT_EQUAL_STRING("Dial", g_smartPlugs[0].manufacturer);
 }
 
+// ---- the compressor delay after a fridge plug is changed while ON ----
+
+// Fermenter 1's fridge plug, ON, with Fermenter 1 cooling. The compressor
+// last stopped long ago, at uptime 0.
+static void configureRunningFridgePlug(uint8_t idx) {
+  configureHeaterPlug(idx);
+  g_smartPlugs[idx].function = PLUG_FN_F1_COLD;
+  s_plugIsOn  = true;
+  s_uptimeSec = 5000;
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    s_state[i]           = STATUS_IDLE;
+    s_lastCoolingStop[i] = 0;
+  }
+  s_state[0] = STATUS_COOLING;
+}
+
+// A small change to the pulse length: the plug is switched OFF, and the
+// compressor delay starts, so the next pass can't switch it back on
+static void test_smartplug_post_starts_the_compressor_delay_for_a_running_fridge(void) {
+  configureRunningFridgePlug(0);
+  postBody("{\"index\":0,\"delay\":420}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, s_forceOffs);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[0]);
+  TEST_ASSERT_EQUAL_UINT32(5000, s_lastCoolingStop[0]);
+}
+
+// Moved to Fermenter 2's cooling: both fermenters wait out the delay
+static void test_smartplug_post_starts_the_compressor_delay_where_a_running_fridge_moves(void) {
+  configureRunningFridgePlug(0);
+  s_state[1] = STATUS_COOLING;
+  postBody("{\"index\":0,\"function\":3,\"fermenter\":1}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_UINT32(5000, s_lastCoolingStop[0]);
+  TEST_ASSERT_EQUAL_UINT32(5000, s_lastCoolingStop[1]);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[1]);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[2]);
+}
+
+// A plug that was OFF: no compressor has just stopped, so no delay
+static void test_smartplug_post_starts_no_delay_for_a_fridge_plug_that_was_off(void) {
+  configureRunningFridgePlug(0);
+  s_plugIsOn = false;
+  postBody("{\"index\":0,\"delay\":420}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_forceOffs);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, s_state[0]);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[0]);
+}
+
+// A heater that was ON: heating has no compressor delay
+static void test_smartplug_post_starts_no_delay_for_a_heater(void) {
+  configureRunningFridgePlug(0);
+  g_smartPlugs[0].function = PLUG_FN_F1_HOT;
+  postBody("{\"index\":0,\"delay\":420}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_forceOffs);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[0]);
+}
+
+// A save that changes nothing about switching leaves the fridge running
+static void test_smartplug_post_unchanged_save_starts_no_delay(void) {
+  configureRunningFridgePlug(0);
+  postBody("{\"index\":0,\"manufacturer\":\"Dial\"}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, s_state[0]);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[0]);
+}
+
 // A rejected value is not a change, so it must not switch the plug off either.
 static void test_smartplug_post_ignored_value_does_not_switch_the_plug_off(void) {
   configureHeaterPlug(0);
@@ -3465,6 +3539,11 @@ int main(int, char**) {
   RUN_TEST(test_smartplug_post_switches_a_plug_off_with_its_old_code);
   RUN_TEST(test_smartplug_post_switches_off_for_any_rf_setting_change);
   RUN_TEST(test_smartplug_post_leaves_the_plug_alone_when_switching_is_unchanged);
+  RUN_TEST(test_smartplug_post_starts_the_compressor_delay_for_a_running_fridge);
+  RUN_TEST(test_smartplug_post_starts_the_compressor_delay_where_a_running_fridge_moves);
+  RUN_TEST(test_smartplug_post_starts_no_delay_for_a_fridge_plug_that_was_off);
+  RUN_TEST(test_smartplug_post_starts_no_delay_for_a_heater);
+  RUN_TEST(test_smartplug_post_unchanged_save_starts_no_delay);
   RUN_TEST(test_smartplug_post_ignored_value_does_not_switch_the_plug_off);
   RUN_TEST(test_smartplug_post_refuses_a_pulse_length_that_would_trip_the_watchdog);
   RUN_TEST(test_smartplug_post_refuses_an_unknown_protocol);

@@ -258,6 +258,55 @@ void test_compressor_delay_holds_after_switchOffAll(void) {
   assertCoolingWaitsForTheDelay();
 }
 
+// A fridge plug changed in the WebUI while ON is forced off. The fermenter
+// was still cooling and used to switch it straight back on at the next pass.
+void test_compressor_delay_holds_after_a_cooling_plug_is_changed(void) {
+  startCooling();
+  fermenterCompressorStopped(F);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[F]);
+  assertCoolingWaitsForTheDelay();
+}
+
+// A fridge plug that was ON moved to a fermenter that isn't cooling yet: the
+// fridge has just stopped, so that fermenter waits out the delay too
+void test_compressor_delay_holds_for_a_fermenter_a_running_fridge_moves_to(void) {
+  g_fermenters[F].floorTemp       = 18.0f;
+  g_fermenters[F].ceilingTemp     = 22.0f;
+  g_fermenters[F].hysteresis      = 0.5f;
+  g_fermenters[F].compressorDelay = 10;
+  test_setMillis(COOL_STOP_AT);
+  fermenterCompressorStopped(F);
+  TEST_ASSERT_EQUAL_UINT32(COOL_STOP_AT / 1000, s_lastCoolingStop[F]);
+  assertCoolingWaitsForTheDelay();
+}
+
+void test_out_of_range_fermenter_compressor_stop_is_ignored(void) {
+  fermenterCompressorStopped(MAX_FERMENTERS);   // must not write past the arrays
+  for (int i = 0; i < MAX_FERMENTERS; i++) TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[i]);
+}
+
+// plugCoolsFermenter() follows setFermenterPlugs(): the cooling function for
+// the fermenter AND the matching fermenter field
+void test_plug_cools_fermenter_needs_the_cooling_function_and_fermenter(void) {
+  SmartPlugConfig plug{};
+  for (uint8_t f = 0; f < MAX_FERMENTERS; f++) {
+    plug.function  = PLUG_FN_F1_COLD + f * 2;
+    plug.fermenter = f;
+    TEST_ASSERT_EQUAL_INT(f, plugCoolsFermenter(plug));
+
+    plug.function  = PLUG_FN_F1_HOT + f * 2;   // a heater
+    TEST_ASSERT_EQUAL_INT(-1, plugCoolsFermenter(plug));
+  }
+  plug.function  = PLUG_FN_F2_COLD;   // F2's cooling, but saved against F1
+  plug.fermenter = 0;
+  TEST_ASSERT_EQUAL_INT(-1, plugCoolsFermenter(plug));
+  plug.function  = PLUG_FN_UNASSIGNED;
+  plug.fermenter = PROBE_UNASSIGNED;
+  TEST_ASSERT_EQUAL_INT(-1, plugCoolsFermenter(plug));
+  plug.function  = PLUG_FN_AUX1;
+  TEST_ASSERT_EQUAL_INT(-1, plugCoolsFermenter(plug));
+}
+
 // Stopping when NOT cooling must not start a compressor delay: a heater
 // switched off would otherwise block cooling for no reason.
 void test_stopping_while_heating_does_not_start_a_compressor_delay(void) {
@@ -1091,6 +1140,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_compressor_delay_holds_after_setFermenterPower_off);
   RUN_TEST(test_compressor_delay_holds_after_temp_control_off);
   RUN_TEST(test_compressor_delay_holds_after_switchOffAll);
+  RUN_TEST(test_compressor_delay_holds_after_a_cooling_plug_is_changed);
+  RUN_TEST(test_compressor_delay_holds_for_a_fermenter_a_running_fridge_moves_to);
+  RUN_TEST(test_out_of_range_fermenter_compressor_stop_is_ignored);
+  RUN_TEST(test_plug_cools_fermenter_needs_the_cooling_function_and_fermenter);
   RUN_TEST(test_stopping_while_heating_does_not_start_a_compressor_delay);
   RUN_TEST(test_compressor_delay_holds_for_the_first_minutes_after_boot);
   RUN_TEST(test_compressor_delay_does_not_hold_after_the_millis_wrap);

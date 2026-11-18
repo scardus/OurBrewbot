@@ -219,6 +219,29 @@ void idleAllFermenters() {
   }
 }
 
+void fermenterCompressorStopped(uint8_t i) {
+  if (i >= MAX_FERMENTERS) return;
+  if (s_state[i] == STATUS_COOLING) {
+    // Back to idle, so the next pass waits out the delay instead of
+    // switching the plug straight back on
+    g_fermenters[i].status = STATUS_IDLE;
+    goIdle(i);
+  } else {
+    // Not cooling: a fridge plug that was on has just moved here from
+    // another fermenter. Its compressor has just stopped all the same.
+    s_lastCoolingStop[i] = uptimeSeconds();
+  }
+}
+
+int plugCoolsFermenter(const SmartPlugConfig& plug) {
+  // The same rule setFermenterPlugs() uses: the plug's function is the
+  // fermenter's cooling function, and its fermenter matches
+  for (uint8_t f = 0; f < MAX_FERMENTERS; f++) {
+    if (plug.function == PLUG_FN_F1_COLD + f * 2 && plug.fermenter == f) return f;
+  }
+  return -1;
+}
+
 // ============================================================
 // ALARM CHECKING
 // ============================================================

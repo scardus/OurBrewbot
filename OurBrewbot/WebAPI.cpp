@@ -1344,7 +1344,19 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
                           plug.bits        != old.bits        ||
                           plug.delayLength != old.delayLength;
   if (switchingChanged) {
+    bool wasOn = getPlugState(idx);
     smartPlugForceOff(idx);
+
+    // A fridge plug that was ON has just been switched off. Its fermenter
+    // is still cooling and would switch it straight back on at the next pass,
+    // and so would a fermenter it moves to that is cooling. Start the
+    // compressor delay for both, as the fridge has just stopped.
+    if (wasOn) {
+      int oldFerm = plugCoolsFermenter(old);
+      int newFerm = plugCoolsFermenter(plug);
+      if (oldFerm >= 0) fermenterCompressorStopped(oldFerm);
+      if (newFerm >= 0 && newFerm != oldFerm) fermenterCompressorStopped(newFerm);
+    }
   }
 
   g_smartPlugs[idx] = plug;
