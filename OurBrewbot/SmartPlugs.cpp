@@ -116,6 +116,12 @@ void smartPlugSwitch(uint8_t plugIndex, bool on) {
   // cooling and then stayed on for good, as there was no OFF code to send.
   if (on && plug.offCode == 0) return;
 
+  // A plug whose ON and OFF codes send the same signal (see rfCodesClash())
+  // is sent nothing at all: that one signal may be its ON, so even an OFF
+  // could switch it on. The WebUI refuses these codes; this covers an
+  // imported or hand-edited file, and the boot config check logs the reason.
+  if (rfCodesClash(plug.onCode, plug.offCode, plug.bits)) return;
+
   uint32_t code = on ? plug.onCode : plug.offCode;
 
   if (code == 0) return;
@@ -193,6 +199,7 @@ void smartPlugForceOff(uint8_t plugIndex) {
 
   SmartPlugConfig& plug = g_smartPlugs[plugIndex];
   if (plug.offCode == 0) return;   // no OFF code learnt - nothing to send
+  if (rfCodesClash(plug.onCode, plug.offCode, plug.bits)) return;   // its OFF may be its ON - see smartPlugSwitch()
 
   if (!rfTransmit(plug.offCode, plug.bits, plug.delayLength, plug.protocol)) return;
 

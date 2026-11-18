@@ -2049,7 +2049,7 @@ static void test_smartplug_post_switches_off_for_any_rf_setting_change(void) {
   const char* bodies[] = {
     "{\"index\":0,\"onCode\":1}",
     "{\"index\":0,\"protocol\":2}",
-    "{\"index\":0,\"bits\":12}",
+    "{\"index\":0,\"bits\":32}",   // the codes still fit (fewer bits is refused)
   };
   for (const char* body : bodies) {
     configureHeaterPlug(0);
@@ -2163,6 +2163,59 @@ static void test_smartplug_post_refuses_a_pulse_length_that_would_trip_the_watch
   TEST_ASSERT_TRUE(bodyContains("pulse length too long"));
   TEST_ASSERT_EQUAL_UINT16(410, g_smartPlugs[0].delayLength);
   TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+}
+
+// ---- ON and OFF codes must send different signals ----
+
+// One remote button learnt twice: every OFF would switch the plug ON
+static void test_smartplug_post_refuses_the_same_on_and_off_code(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"offCode\":1193046}");   // = the ON code, 0x123456
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("ON and OFF codes send the same signal"));
+  TEST_ASSERT_EQUAL_HEX32(0xABCDEF, g_smartPlugs[0].offCode);   // unchanged
+  TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+}
+
+// The bits above the bit count are never sent, so a code that needs them is
+// refused (0x01123456 at 24 bits would send 0x123456, the ON code)
+static void test_smartplug_post_refuses_a_code_longer_than_the_bit_count(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"offCode\":17970262}");   // 0x01123456
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("more bits than the plug's bit count"));
+  TEST_ASSERT_EQUAL_HEX32(0xABCDEF, g_smartPlugs[0].offCode);
+
+  httpRespReset();
+  postBody("{\"index\":0,\"bits\":20}");             // the saved codes need 24
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(24, g_smartPlugs[0].bits);
+}
+
+// Real 32-bit codes use every bit, and are accepted
+static void test_smartplug_post_accepts_32_bit_codes(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"bits\":32,\"onCode\":4294967294,\"offCode\":4294967295}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFF, g_smartPlugs[0].offCode);
+}
+
+// While learning, a plug is saved with only one code so far
+static void test_smartplug_post_accepts_a_plug_with_one_code_learnt(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"offCode\":0}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+
+  configureHeaterPlug(1);
+  httpRespReset();
+  postBody("{\"index\":1,\"onCode\":0}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
 }
 
 // rc-switch only knows protocols 1-12 (it quietly sent anything else as 1)
@@ -3547,6 +3600,10 @@ int main(int, char**) {
   RUN_TEST(test_smartplug_post_ignored_value_does_not_switch_the_plug_off);
   RUN_TEST(test_smartplug_post_refuses_a_pulse_length_that_would_trip_the_watchdog);
   RUN_TEST(test_smartplug_post_refuses_an_unknown_protocol);
+  RUN_TEST(test_smartplug_post_refuses_the_same_on_and_off_code);
+  RUN_TEST(test_smartplug_post_refuses_a_code_longer_than_the_bit_count);
+  RUN_TEST(test_smartplug_post_accepts_32_bit_codes);
+  RUN_TEST(test_smartplug_post_accepts_a_plug_with_one_code_learnt);
   RUN_TEST(test_smartplug_test_transmits_the_selected_code);
   RUN_TEST(test_smartplug_test_refuses_when_no_code_is_configured);
   RUN_TEST(test_smartplug_test_reports_refused_rf_settings);

@@ -1330,6 +1330,19 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
     return;
   }
 
+  // A code must fit in the bit count: the bits above it are never sent.
+  // And ON and OFF must send different signals, or every OFF would switch
+  // the plug ON. A plug with only one code learnt so far can still be saved.
+  if (rfSentCode(plug.onCode, plug.bits) != plug.onCode ||
+      rfSentCode(plug.offCode, plug.bits) != plug.offCode) {
+    sendErr(server, 400, F("ON or OFF code has more bits than the plug's bit count"));
+    return;
+  }
+  if (rfCodesClash(plug.onCode, plug.offCode, plug.bits)) {
+    sendErr(server, 400, F("ON and OFF codes send the same signal"));
+    return;
+  }
+
   // If the change affects how, or whether, the plug is switched, send it OFF
   // first while its old settings are still in place. Otherwise a plug that was
   // ON would stay on for good: the control loop only switches a plug by its NEW

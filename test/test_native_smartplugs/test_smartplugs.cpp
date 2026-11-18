@@ -165,6 +165,49 @@ static void test_missing_on_code_blocks_only_the_on_direction(void) {
   TEST_ASSERT_EQUAL_HEX32(0xABCDEF, g_rfTest.lastCode);
 }
 
+// ON and OFF codes that send the same signal: that signal may be the
+// plug's ON, so even an OFF could switch it on. It is sent nothing at all.
+static void test_a_plug_whose_codes_send_the_same_signal_is_sent_nothing(void) {
+  configurePlug(P);
+  g_smartPlugs[P].offCode = g_smartPlugs[P].onCode;   // one button learnt twice
+
+  smartPlugSwitch(P, true);
+  smartPlugSwitch(P, false);
+  smartPlugForceOff(P);
+  TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
+  TEST_ASSERT_FALSE(getPlugState(P));
+}
+
+// rc-switch only sends the low `bits` bits, so these two are the same signal
+static void test_codes_that_differ_only_above_the_bit_count_are_sent_nothing(void) {
+  configurePlug(P);
+  g_smartPlugs[P].onCode  = 0x123456;
+  g_smartPlugs[P].offCode = 0x01123456;   // the same low 24 bits
+
+  smartPlugSwitch(P, true);
+  smartPlugSwitch(P, false);
+  smartPlugForceOff(P);
+  TEST_ASSERT_EQUAL_INT(0, g_rfTest.sendCount);
+}
+
+static void test_rf_sent_code_keeps_only_the_bits_that_are_sent(void) {
+  TEST_ASSERT_EQUAL_HEX32(0x123456,   rfSentCode(0x01123456, 24));
+  TEST_ASSERT_EQUAL_HEX32(0x01123456, rfSentCode(0x01123456, 25));
+  TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFF, rfSentCode(0xFFFFFFFF, 32));   // no shift by 32
+  TEST_ASSERT_EQUAL_HEX32(0x1,        rfSentCode(0xFF, 1));
+}
+
+static void test_rf_codes_clash_only_when_both_are_set_and_send_the_same(void) {
+  TEST_ASSERT_TRUE(rfCodesClash(0x123456, 0x123456, 24));
+  TEST_ASSERT_TRUE(rfCodesClash(0x123456, 0x01123456, 24));
+  TEST_ASSERT_FALSE(rfCodesClash(0x123456, 0x01123456, 32));        // sent whole: different
+  TEST_ASSERT_FALSE(rfCodesClash(0x123456, 0xABCDEF, 24));
+  TEST_ASSERT_FALSE(rfCodesClash(0x123456, 0, 24));                 // only one code learnt
+  TEST_ASSERT_FALSE(rfCodesClash(0, 0x123456, 24));
+  TEST_ASSERT_FALSE(rfCodesClash(0, 0, 24));
+  TEST_ASSERT_FALSE(rfCodesClash(0xFFFFFFFE, 0xFFFFFFFF, 32));
+}
+
 // ============================================================
 // CODE SELECTION AND RF PARAMETER PASS-THROUGH
 // ============================================================
@@ -625,6 +668,10 @@ int main(int, char**) {
   RUN_TEST(test_unassigned_function_never_transmits);
   RUN_TEST(test_a_plug_without_an_off_code_is_never_switched_on);
   RUN_TEST(test_missing_on_code_blocks_only_the_on_direction);
+  RUN_TEST(test_a_plug_whose_codes_send_the_same_signal_is_sent_nothing);
+  RUN_TEST(test_codes_that_differ_only_above_the_bit_count_are_sent_nothing);
+  RUN_TEST(test_rf_sent_code_keeps_only_the_bits_that_are_sent);
+  RUN_TEST(test_rf_codes_clash_only_when_both_are_set_and_send_the_same);
 
   RUN_TEST(test_on_and_off_select_their_own_codes);
   RUN_TEST(test_rf_parameters_reach_the_transmitter_unmodified);
