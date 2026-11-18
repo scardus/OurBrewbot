@@ -914,6 +914,43 @@ void test_a_flapping_alarm_keeps_one_alert_id(void) {
   }
 }
 
+// A banner closed while the alarm was mild must not hide it once it turns
+// severe: the severe stage has an id of its own
+void test_a_severe_alarm_has_its_own_alert_id(void) {
+  alarmOn(0);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  char mildId[sizeof(alert.id)];
+  strlcpy(mildId, alert.id, sizeof(mildId));
+  TEST_ASSERT_EQUAL_STRING("0BADF00D-0-1000", mildId);
+
+  s_uptimeSec += 10;
+  alarmOn(0, true);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  TEST_ASSERT_EQUAL_STRING("0BADF00D-0-1000-s", alert.id);
+
+  // The same id at every severe check, so a closed severe banner stays closed
+  for (int n = 0; n < 5; n++) {
+    s_uptimeSec += 10;
+    alarmOn(0, true);
+    TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+    TEST_ASSERT_EQUAL_STRING("0BADF00D-0-1000-s", alert.id);
+  }
+
+  // Eased back to mild: the mild id again
+  s_uptimeSec += 10;
+  alarmOn(0);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
+  TEST_ASSERT_EQUAL_STRING(mildId, alert.id);
+}
+
+// Only alarms have a severe stage: a sensor's id has no suffix
+void test_a_lost_sensor_alert_id_has_no_severe_suffix(void) {
+  alarmOn(0, true);   // fermenter 0 severe must not leak into another slot
+  notifySensorState(NOTIFY_SENSOR_PROBE, 0, true);
+  TEST_ASSERT_TRUE(getAlert(TRACK_PROBES));
+  TEST_ASSERT_NULL(strstr(alert.id, "-s"));
+}
+
 void test_an_alarm_after_ten_quiet_minutes_is_a_new_alert(void) {
   alarmOn(0);
   TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS));
@@ -1109,6 +1146,12 @@ void test_the_longest_alert_ids_fit(void) {
   notifySensorState(NOTIFY_SENSOR_TILT, MAX_TILTS - 1, true, 20.0f);
   TEST_ASSERT_TRUE(getAlert(TRACK_TILTS + MAX_TILTS - 1));
   TEST_ASSERT_EQUAL_STRING("FFFFFFFF-23-4294967295", alert.id);
+
+  // The longest alarm id: the last fermenter, severe
+  notifyAlarmState(MAX_FERMENTERS - 1, true, true, true, 30.0f, 22.0f);
+  TEST_ASSERT_TRUE(getAlert(TRACK_ALARMS + MAX_FERMENTERS - 1));
+  TEST_ASSERT_EQUAL_STRING("FFFFFFFF-3-4294967295-s", alert.id);
+  TEST_ASSERT_TRUE(strlen(alert.id) < sizeof(alert.id) - 1);
 
   memset(g_updateStatus.latestVersion, '9', sizeof(g_updateStatus.latestVersion) - 1);
   g_updateStatus.updateAvailable = true;
@@ -1371,6 +1414,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_an_alarm_gives_an_alert_with_the_notification_text);
   RUN_TEST(test_an_alarm_alert_shows_the_latest_reading);
   RUN_TEST(test_a_flapping_alarm_keeps_one_alert_id);
+  RUN_TEST(test_a_severe_alarm_has_its_own_alert_id);
+  RUN_TEST(test_a_lost_sensor_alert_id_has_no_severe_suffix);
   RUN_TEST(test_an_alarm_after_ten_quiet_minutes_is_a_new_alert);
   RUN_TEST(test_alerts_are_kept_with_notifications_off);
   RUN_TEST(test_changing_the_notification_settings_leaves_alerts_alone);

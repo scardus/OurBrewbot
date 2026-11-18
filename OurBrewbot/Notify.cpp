@@ -802,8 +802,13 @@ bool notifyGetAlert(uint8_t slot, NotifyAlert& alert) {
   if (alert.kind == ALERT_UPDATE) {
     snprintf_P(alert.id, sizeof(alert.id), PSTR("update-%s"), g_updateStatus.latestVersion);
   } else {
-    snprintf_P(alert.id, sizeof(alert.id), PSTR("%08lX-%u-%lu"),
-               (unsigned long)logBootId(), (unsigned)slot, (unsigned long)since);
+    // A severe alarm gets an id of its own ("-s" on the end), so its banner
+    // shows again even if the mild one was closed. It keeps that id while it
+    // stays severe, and goes back to the mild id if it eases.
+    bool severe = (alert.kind == ALERT_ALARM) && s_alarmReading[slot - TRACK_ALARMS].severe;
+    snprintf_P(alert.id, sizeof(alert.id), PSTR("%08lX-%u-%lu%s"),
+               (unsigned long)logBootId(), (unsigned)slot, (unsigned long)since,
+               severe ? "-s" : "");
   }
   return true;
 }
