@@ -47,11 +47,14 @@ GlobalConfig     g_globalConfig;
 bool g_fermenterDebugMode = false;
 FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
 
-// ---- millis(), settable per test (not used by the functions under test,
-// kept for consistency with the other native test files) ----
+// ---- millis(), settable per test (temperaturesLoop() is timed by it) ----
 static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
+
+// temperaturesLoop() drops a checkpoint for each phase (Crash.cpp isn't
+// compiled here)
+void checkpoint(uint8_t) {}
 
 // ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
 uint32_t uptimeSeconds() { return s_millis / 1000; }
@@ -737,6 +740,147 @@ void test_read_now_waits_the_conversion_time(void) {
 }
 
 // ============================================================
+// temperaturesLoop - the read / scan / request cycle loop() runs every pass
+// ============================================================
+
+// Puts temperaturesLoop()'s timers back to how they are at boot
+static void resetTemperaturesLoop() {
+  s_lastRequestMs     = 0;
+  s_requestedAtMs     = 0;
+  s_lastProbeScanMs   = 0;
+  s_conversionPending = false;
+}
+
+// One pass of loop() at the given millis()
+static void loopPassAt(uint32_t ms) {
+  s_millis = ms;
+  temperaturesLoop();
+}
+
+// The bug this order fixes: with passes 5 s or more apart (the loop held up
+// by a network wait), a new conversion was started every pass before the
+// pending one was read, so no reading ever arrived
+void test_loop_reads_every_conversion_when_passes_are_5_s_apart(void) {
+  resetTemperaturesLoop();
+  configureProbe(0, ADDR_A, "Beer", 1);
+  g_sensors1.testAddDevice(ADDR_A, 16.0f);
+
+  for (uint32_t t = 5000; t <= 120000; t += 5000) {
+    if (t == 60000) g_sensors1.testSetTemp(ADDR_A, 23.0f);
+    loopPassAt(t);
+  }
+
+  // 24 passes: a conversion started on every one, and every one but the
+  // last read on the pass after it
+  TEST_ASSERT_EQUAL_INT(24, g_sensors1.testRequestCount());
+  TEST_ASSERT_EQUAL_INT(23, g_sensors1.testReadCount());
+  TEST_ASSERT_EQUAL_FLOAT(23.0f, g_probes[0].temperature);   // the new temperature arrived
+}
+
+// The probe scan must not be skipped for good by slow passes either (it
+// waits while a conversion is pending, and one used to be pending on every
+// pass)
+void test_loop_still_scans_for_probes_when_passes_are_5_s_apart(void) {
+  resetTemperaturesLoop();
+  for (uint32_t t = 5000; t <= 120000; t += 5000) loopPassAt(t);
+  // 30, 60, 90 and 120 s - begin() is called once per bus per scan
+  TEST_ASSERT_EQUAL_INT(4, g_sensors1.testBeginCount());
+}
+
+// Normal running: passes milliseconds apart
+void test_loop_starts_a_conversion_every_5_s(void) {
+  resetTemperaturesLoop();
+  configureProbe(0, ADDR_A, "Beer", 1);
+  g_sensors1.testAddDevice(ADDR_A, 20.0f);
+
+  for (uint32_t t = 0; t <= 20000; t += 100) loopPassAt(t);
+
+  // Started at 5, 10, 15 and 20 s; the 20 s one hasn't had its time yet
+  TEST_ASSERT_EQUAL_INT(4, g_sensors1.testRequestCount());
+  TEST_ASSERT_EQUAL_INT(3, g_sensors1.testReadCount());
+  TEST_ASSERT_FALSE(g_sensors1.testLastRequestBlocking());   // never waits for a conversion
+}
+
+// A conversion is read once its time is up, not before
+void test_loop_reads_once_the_conversion_time_is_up(void) {
+  resetTemperaturesLoop();
+  configureProbe(0, ADDR_A, "Beer", 1);
+  g_sensors1.testAddDevice(ADDR_A, 20.0f);
+
+  loopPassAt(5000);                                  // 11-bit: 376 ms
+  loopPassAt(5375);
+  TEST_ASSERT_EQUAL_INT(0, g_sensors1.testReadCount());
+  loopPassAt(5376);
+  TEST_ASSERT_EQUAL_INT(1, g_sensors1.testReadCount());
+  TEST_ASSERT_EQUAL_FLOAT(20.0f, g_probes[0].temperature);
+}
+
+// Each resolution waits its own conversion time
+void test_loop_waits_the_conversion_time_for_each_resolution(void) {
+  const uint8_t  res[]  = { 9, 10, 11, 12 };
+  const uint32_t wait[] = { 94, 188, 376, 752 };
+  configureProbe(0, ADDR_A, "Beer", 1);
+  g_sensors1.testAddDevice(ADDR_A, 20.0f);
+
+  for (int i = 0; i < 4; i++) {
+    resetTemperaturesLoop();
+    g_globalConfig.resolution = res[i];
+    int readsBefore = g_sensors1.testReadCount();
+
+    loopPassAt(5000);
+    loopPassAt(5000 + wait[i] - 1);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(readsBefore, g_sensors1.testReadCount(), "read too early");
+    loopPassAt(5000 + wait[i]);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(readsBefore + 1, g_sensors1.testReadCount(), "not read on time");
+  }
+}
+
+// The scan calls begin(), which would cancel a conversion in progress
+void test_loop_never_scans_while_a_conversion_is_pending(void) {
+  resetTemperaturesLoop();
+  g_globalConfig.resolution = 12;
+  loopPassAt(29500);                  // conversion started, due at 30,252
+  loopPassAt(30000);                  // scan due, but the conversion is pending
+  TEST_ASSERT_EQUAL_INT(0, g_sensors1.testBeginCount());
+  loopPassAt(30252);                  // read, then the scan runs
+  TEST_ASSERT_EQUAL_INT(1, g_sensors1.testBeginCount());
+}
+
+// When the read and the next conversion are both due on one pass, the read
+// comes first, then the new conversion starts and is timed from now
+void test_loop_reads_before_starting_the_next_conversion(void) {
+  resetTemperaturesLoop();
+  configureProbe(0, ADDR_A, "Beer", 1);
+  g_sensors1.testAddDevice(ADDR_A, 20.0f);
+  g_globalConfig.resolution = 12;
+
+  loopPassAt(5000);
+  TEST_ASSERT_EQUAL_INT(1, g_sensors1.testRequestCount());
+  TEST_ASSERT_EQUAL_INT(0, g_sensors1.testReadCount());
+
+  loopPassAt(10000);
+  TEST_ASSERT_EQUAL_INT(1, g_sensors1.testReadCount());
+  TEST_ASSERT_EQUAL_INT(2, g_sensors1.testRequestCount());
+  TEST_ASSERT_TRUE(s_conversionPending);
+  TEST_ASSERT_EQUAL_UINT32(10000, s_requestedAtMs);
+}
+
+// The conversion time still counts correctly across the millis() wrap
+void test_loop_conversion_time_survives_the_millis_wrap(void) {
+  resetTemperaturesLoop();
+  configureProbe(0, ADDR_A, "Beer", 1);
+  g_sensors1.testAddDevice(ADDR_A, 20.0f);
+  s_lastRequestMs = 0xFFFFFF00u - 5000u;
+
+  loopPassAt(0xFFFFFF00u);                       // 256 ms before the wrap
+  TEST_ASSERT_EQUAL_INT(1, g_sensors1.testRequestCount());
+  loopPassAt(0xFFFFFF00u + 375u);                // wrapped, 375 ms later
+  TEST_ASSERT_EQUAL_INT(0, g_sensors1.testReadCount());
+  loopPassAt(0xFFFFFF00u + 376u);
+  TEST_ASSERT_EQUAL_INT(1, g_sensors1.testReadCount());
+}
+
+// ============================================================
 // cleanupDuplicateProbes
 // ============================================================
 
@@ -1116,6 +1260,15 @@ int main(int argc, char** argv) {
   RUN_TEST(test_read_now_gives_a_present_probe_its_reading);
   RUN_TEST(test_read_now_leaves_a_missing_probe_with_no_reading);
   RUN_TEST(test_read_now_waits_the_conversion_time);
+
+  RUN_TEST(test_loop_reads_every_conversion_when_passes_are_5_s_apart);
+  RUN_TEST(test_loop_still_scans_for_probes_when_passes_are_5_s_apart);
+  RUN_TEST(test_loop_starts_a_conversion_every_5_s);
+  RUN_TEST(test_loop_reads_once_the_conversion_time_is_up);
+  RUN_TEST(test_loop_waits_the_conversion_time_for_each_resolution);
+  RUN_TEST(test_loop_never_scans_while_a_conversion_is_pending);
+  RUN_TEST(test_loop_reads_before_starting_the_next_conversion);
+  RUN_TEST(test_loop_conversion_time_survives_the_millis_wrap);
 
   RUN_TEST(test_cleanup_removes_an_exact_duplicate);
   RUN_TEST(test_cleanup_keeps_the_full_address_over_the_truncated_one);

@@ -54,6 +54,8 @@
 // backoff window reads as already elapsed. Same trap as s_lastCoolingStop.
 static uint32_t s_millis = 1000000;
 uint32_t millis() { return s_millis; }
+// Temperatures.cpp drops a checkpoint for each phase (Crash.cpp isn't compiled here)
+void checkpoint(uint8_t) {}
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
 // ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----

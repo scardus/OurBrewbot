@@ -71,14 +71,12 @@
 // ============================================================
 // TIMING CONSTANTS (milliseconds)
 // ============================================================
-#define INTERVAL_TEMPS_MS       5000    // Temperature polling
 #define INTERVAL_FERMENTER_MS   10000   // Fermenter control loop
 #define INTERVAL_TILT_MS        5000   // Tilt BLE scan interval
 #define INTERVAL_CLOUD_MS       900000  // Cloud/service reporting (15 min)
 #define INTERVAL_MQTT_MS        60000   // MQTT publish interval (60s)
 #define INTERVAL_TEN_MIN_MS     600000  // 10-minute periodic tasks
 #define INTERVAL_UPTIME_MS      60000   // Uptime counter increment
-#define INTERVAL_PROBE_SCAN_MS  30000   // Probe hot-plug scanning
 
 // WiFi at boot and while offline (see setupWiFi() and wifiLoop())
 #define WIFI_BOOT_WAIT_MS       10000   // wait this long for the saved network at boot
@@ -90,18 +88,12 @@
 // ============================================================
 // GLOBAL STATE
 // ============================================================
-unsigned long g_lastTempTime    = 0;
 unsigned long g_lastFermTime    = 0;
 unsigned long g_lastCloudTime   = 0;
 unsigned long g_lastMqttTime    = 0;
 unsigned long g_lastTenMinTime  = 0;
 unsigned long g_lastUptimeTime  = 0;
-unsigned long g_lastProbeScanTime = 0;
 unsigned long g_lastTiltTime    = 0;
-
-// Async temperature conversion state
-bool          g_tempConversionPending = false;
-unsigned long g_tempRequestTime       = 0;
 bool g_wifiConnected = false;
 String g_rebootReason = ESP.getResetReason();
 
@@ -280,42 +272,10 @@ void loop() {
     digitalWrite(PIN_LED, (now / 500) & 1);  // toggle every 500ms
   }
 
-  // Temperature processing — async two-phase to avoid blocking the loop.
-  // Phase 1: fire conversion request and return immediately.
-  if (now - g_lastTempTime >= INTERVAL_TEMPS_MS) {
-    g_lastTempTime = now;
-    checkpoint(CP_TEMP_REQ);
-    requestTempConversion();
-    g_tempConversionPending = true;
-    g_tempRequestTime = now;
-  }
-
-  // Phase 2: read results once the conversion time has elapsed.
-  // Resolution 9=94ms, 10=188ms, 11=375ms, 12=750ms
-  if (g_tempConversionPending &&
-      now - g_tempRequestTime >= (94u << (g_globalConfig.resolution - 9))) {
-    g_tempConversionPending = false;
-    checkpoint(CP_TEMP_READ);
-    readTempResults();
-
-    // Print probe temperatures to serial console
-    for (int i = 0; i < MAX_PROBES; i++) {
-      if (strlen(g_probes[i].address) == 0) continue;
-      logMsg("[TEMP] %s (%s): %.1fC (raw %.1f, adj %.1f)",
-        g_probes[i].probeName, g_probes[i].address,
-        g_probes[i].temperature, g_probes[i].rawTemperature,
-        g_probes[i].tempAdjust);
-    }
-  }
-
-  // Periodic probe scanning (hot-plug support).
-  // Guard: never run while a conversion is pending — scanBuses() calls begin()
-  // which sends a OneWire reset that cancels the in-progress conversion.
-  if (!g_tempConversionPending && now - g_lastProbeScanTime >= INTERVAL_PROBE_SCAN_MS) {
-    g_lastProbeScanTime = now;
-    checkpoint(CP_PROBE_SCAN);
-    periodicProbeScan();
-  }
+  // Temperature probes: read a finished conversion, scan for new probes and
+  // start the next conversion, each when it is due (see Temperatures.cpp).
+  // A conversion runs in the background, so this never waits for one.
+  temperaturesLoop();
 
   // Tilt BLE scanning — the tick only STARTS a scan; serviceTilt() at the
   // top of loop() drains it across passes (was a 4 s busy-wait here).

@@ -48,6 +48,10 @@ bool scanBuses();
 // Periodic scan: discover new probes and report inactive ones
 void periodicProbeScan();
 
+// Called on every pass of loop(): reads a finished conversion, runs the
+// periodic probe scan and starts the next conversion, each when it is due
+void temperaturesLoop();
+
 // Clean up duplicate probes caused by old truncated addresses
 void cleanupDuplicateProbes();
 
