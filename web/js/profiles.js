@@ -108,7 +108,10 @@ function profileStepCondition(step) {
   if (type.usesDays) conditions.push('After '+step.days+(step.days===1?' day':' days'));
   if (type.target && !(step.trigger>0)) {
     const target=type.target==='gravity'?'gravity':'attenuation';
-    const prompt=type.usesDays?target+' target not set':'Set '+(target==='gravity'?'a':'an')+' '+target+' target';
+    let prompt=type.usesDays?target+' target not set':'Set '+(target==='gravity'?'a':'an')+' '+target+' target';
+    // Without a gravity target the step waits (SG never reaches 0), but the
+    // runner counts any attenuation as reaching a target of 0 or less
+    if (target==='attenuation') prompt+=type.usesDays?' - the step ends when the days are up':' - without one the step ends at once';
     return (type.usesDays?esc(conditions[0])+' <strong>and</strong> ':'')+
       '<span class="profile-condition-unset">'+esc(prompt)+'</span>';
   }
