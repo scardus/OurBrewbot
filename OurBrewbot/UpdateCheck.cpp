@@ -222,6 +222,10 @@ bool updateCheckLoop() {
   }
 
   checkpoint(CP_UPDATE);   // so a crash during the check is logged against it
+  // Without WiFi runUpdateCheck() returns at once and makes no request, so
+  // the internet jobs after this one in loop() needn't wait for the next pass.
+  // It still counts as a failed try below, as before.
+  bool online = WiFi.isConnected();
   if (runUpdateCheck()) {
     s_waitMs      = UPDATE_INTERVAL_MS;
     s_retriesLeft = UPDATE_MAX_RETRIES;
@@ -232,5 +236,5 @@ bool updateCheckLoop() {
     s_waitMs      = UPDATE_INTERVAL_MS;   // out of retries - try again tomorrow
     s_retriesLeft = UPDATE_MAX_RETRIES;
   }
-  return true;
+  return online;
 }

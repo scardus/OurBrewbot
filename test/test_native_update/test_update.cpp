@@ -403,6 +403,23 @@ static void test_switched_off_skips_the_check(void) {
   TEST_ASSERT_TRUE(loopAt(t + UPDATE_INTERVAL_MS));
 }
 
+// A check due while WiFi is down makes no request, so it must not say it did
+// (loopAt() checks that) - the jobs after it in loop() would wait a pass for
+// nothing. It still counts as a failed try: the retry comes an hour later.
+static void test_a_check_due_while_offline_is_not_a_request(void) {
+  httpTestSetReply(200, replyFor(OLDER));
+  uint32_t t = 1000;
+  loopAt(t);
+  t += firstCheckDelay();
+  WiFi.connected = false;
+  TEST_ASSERT_FALSE(loopAt(t));
+  TEST_ASSERT_EQUAL_STRING("WiFi not connected", g_updateStatus.lastError);
+
+  WiFi.connected = true;
+  TEST_ASSERT_FALSE(loopAt(t + UPDATE_RETRY_MS - 1));
+  TEST_ASSERT_TRUE (loopAt(t + UPDATE_RETRY_MS));
+}
+
 // millis() wraps every ~49.7 days; the unsigned subtraction must cope
 static void test_schedule_survives_the_millis_wrap(void) {
   httpTestSetReply(200, replyFor(OLDER));
@@ -445,6 +462,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_after_a_success_the_next_check_is_a_day_later);
   RUN_TEST(test_failures_retry_hourly_three_times_then_wait_a_day);
   RUN_TEST(test_switched_off_skips_the_check);
+  RUN_TEST(test_a_check_due_while_offline_is_not_a_request);
   RUN_TEST(test_schedule_survives_the_millis_wrap);
 
   return UNITY_END();
