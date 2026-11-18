@@ -231,6 +231,84 @@ void test_known_ispindel_keeps_its_assignment(void) {
   TEST_ASSERT_TRUE(g_iSpindels[0].collectData);
 }
 
+// ---- matching a report to its slot: ID first, name only without an ID ----
+
+// Two iSpindels left on the default name: the second one is a new device,
+// not a new ID for the first one's slot
+void test_same_name_with_another_id_registers_as_a_new_ispindel(void) {
+  seedSlot0("iSpindel000", "AAA111");
+  g_iSpindels[0].fermenter = 1;
+  g_iSpindels[0].function  = PROBE_FN_BEER;
+  test_setUptime(100);
+  handleiSpindelPost(makeBody("iSpindel000", "AAA111", 22.0f, "C"));
+  uint32_t firstSeen = g_iSpindels[0].lastSeen;
+  s_saveCalls = 0;
+
+  test_setUptime(200);
+  handleiSpindelPost(makeBody("iSpindel000", "BBB222", 10.0f, "C"));
+
+  // Slot 0 is untouched: same device, reading and freshness
+  TEST_ASSERT_EQUAL_STRING("AAA111", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_FLOAT(22.0f, g_iSpindels[0].temperature);
+  TEST_ASSERT_EQUAL_UINT32(firstSeen, g_iSpindels[0].lastSeen);
+  TEST_ASSERT_EQUAL_UINT8(1, g_iSpindels[0].fermenter);
+  // The second device registered unassigned in the next slot
+  TEST_ASSERT_EQUAL_STRING("BBB222", g_iSpindels[1].id);
+  TEST_ASSERT_EQUAL_FLOAT(10.0f, g_iSpindels[1].temperature);
+  TEST_ASSERT_EQUAL_UINT8(PROBE_UNASSIGNED, g_iSpindels[1].fermenter);
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // the registration only
+}
+
+// Reports from both, one after the other: each stays in its own slot, and
+// nothing is saved again (each report used to swap the slot's ID and save)
+void test_two_ispindels_with_the_same_name_keep_their_own_slots(void) {
+  seedSlot0("iSpindel000", "AAA111");
+  handleiSpindelPost(makeBody("iSpindel000", "BBB222", 10.0f, "C"));   // registers slot 1
+  s_saveCalls = 0;
+
+  for (int i = 0; i < 3; i++) {
+    handleiSpindelPost(makeBody("iSpindel000", "AAA111", 22.0f, "C"));
+    handleiSpindelPost(makeBody("iSpindel000", "BBB222", 10.0f, "C"));
+  }
+
+  TEST_ASSERT_EQUAL_STRING("AAA111", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_FLOAT(22.0f, g_iSpindels[0].temperature);
+  TEST_ASSERT_EQUAL_STRING("BBB222", g_iSpindels[1].id);
+  TEST_ASSERT_EQUAL_FLOAT(10.0f, g_iSpindels[1].temperature);
+  TEST_ASSERT_EQUAL_STRING("None", g_iSpindels[2].name);
+  TEST_ASSERT_EQUAL_INT(0, s_saveCalls);
+}
+
+// A report with no ID is still matched by its name
+void test_report_without_an_id_still_matches_by_name(void) {
+  seedSlot0("ispindel-1", "C2A080");
+  handleiSpindelPost(makeBody("ispindel-1", "", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_FLOAT(20.0f, g_iSpindels[0].temperature);
+  TEST_ASSERT_EQUAL_STRING("C2A080", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_STRING("None", g_iSpindels[1].name);   // nothing new registered
+}
+
+// A slot saved with no ID is still matched by name, and learns the ID
+void test_slot_without_an_id_matches_by_name_and_learns_it(void) {
+  seedSlot0("ispindel-1", "");
+  handleiSpindelPost(makeBody("ispindel-1", "C2A080", 20.0f, "C"));
+  TEST_ASSERT_EQUAL_STRING("C2A080", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_FLOAT(20.0f, g_iSpindels[0].temperature);
+  TEST_ASSERT_EQUAL_STRING("None", g_iSpindels[1].name);
+  TEST_ASSERT_EQUAL_INT(1, s_saveCalls);   // the learnt ID is saved
+}
+
+// The ID wins over another slot that has the same name
+void test_id_match_wins_over_a_slot_with_the_same_name(void) {
+  seedSlot0("brew-a", "AAA111");
+  strcpy(g_iSpindels[1].name, "brew-b");
+  strcpy(g_iSpindels[1].id, "BBB222");
+  handleiSpindelPost(makeBody("brew-a", "BBB222", 10.0f, "C"));
+  TEST_ASSERT_EQUAL_FLOAT(10.0f, g_iSpindels[1].temperature);
+  TEST_ASSERT_EQUAL_STRING("AAA111", g_iSpindels[0].id);
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, g_iSpindels[0].temperature);   // slot 0 not used
+}
+
 // ---- validateiSpindelValues: gravity range ----
 
 void test_validate_keeps_sg_in_range(void) {
@@ -985,6 +1063,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_a_report_in_the_first_second_after_boot_counts);
   RUN_TEST(test_new_ispindel_registers_unassigned);
   RUN_TEST(test_known_ispindel_keeps_its_assignment);
+  RUN_TEST(test_same_name_with_another_id_registers_as_a_new_ispindel);
+  RUN_TEST(test_two_ispindels_with_the_same_name_keep_their_own_slots);
+  RUN_TEST(test_report_without_an_id_still_matches_by_name);
+  RUN_TEST(test_slot_without_an_id_matches_by_name_and_learns_it);
+  RUN_TEST(test_id_match_wins_over_a_slot_with_the_same_name);
   RUN_TEST(test_freshness_check_says_nothing_about_a_slot_that_never_reported);
   RUN_TEST(test_freshness_check_reports_an_ispindel_that_stops_and_comes_back);
   RUN_TEST(test_freshness_check_says_nothing_about_an_ispindel_no_fermenter_uses);

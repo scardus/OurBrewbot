@@ -201,9 +201,13 @@ test('the preview explains every step completion condition, including both parts
     assert.equal(html.replace(/<[^>]+>/g,''),expected[type],'type '+type);
   }
   assert.equal(run('profileStepCondition({type:1,days:1})'),'After 1 day');
+  // Gravity steps wait without a target; attenuation steps don't (any
+  // attenuation reaches a target of 0), so they say what happens instead
   const unset={3:'After 3 days and gravity target not set',6:'Set a gravity target',
-    8:'After 3 days and gravity target not set',4:'After 3 days and attenuation target not set',
-    7:'Set an attenuation target',9:'After 3 days and attenuation target not set'};
+    8:'After 3 days and gravity target not set',
+    4:'After 3 days and attenuation target not set - the step ends when the days are up',
+    7:'Set an attenuation target - without one the step ends at once',
+    9:'After 3 days and attenuation target not set - the step ends when the days are up'};
   for (const [type,text] of Object.entries(unset)) {
     for (const trigger of [0,-1]) {
       const html=run(`profileStepCondition({type:${type},days:3,trigger:${trigger}})`);

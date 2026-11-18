@@ -54,6 +54,8 @@
 // backoff window reads as already elapsed. Same trap as s_lastCoolingStop.
 static uint32_t s_millis = 1000000;
 uint32_t millis() { return s_millis; }
+// Temperatures.cpp drops a checkpoint for each phase (Crash.cpp isn't compiled here)
+void checkpoint(uint8_t) {}
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
 // ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
@@ -123,6 +125,7 @@ const char* getTiltColourName(uint8_t colour) {
 
 // SmartPlugs.cpp - Fermenter.cpp drives the plugs; nothing here asserts on them.
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugsResendOne() {}
 void smartPlugForceOff(uint8_t) {}
 void allPlugsForceOff() { s_allPlugsOffs++; }
 bool getPlugState(uint8_t) { return false; }

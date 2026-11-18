@@ -83,9 +83,10 @@ void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minute
   sensor.minutes = minutes;
 }
 
-void notifyEvent(NotifyEvent type, uint8_t index, uint8_t detail, float a, float b) {
+bool notifyEvent(NotifyEvent type, uint8_t index, uint8_t detail, float a, float b) {
   g_notifyStubEvent.count++;
   g_notifyStubEvent.last = NotifyEventData{ type, index, detail, a, b };
+  return true;
 }
 
 // Recorded as the event it queues, so a test checks it the same way

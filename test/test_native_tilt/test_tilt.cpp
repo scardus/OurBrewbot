@@ -49,6 +49,14 @@ static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
+// ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
+// A test sets s_uptimeSec to stand in for an uptime past the 49.7-day wrap,
+// which the 32-bit millis() can't reach. 0 = follow millis().
+static uint32_t s_uptimeSec = 0;
+uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
+uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
+uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
+
 // ---- no-op stubs ----
 void logMsgImpl(uint8_t, PGM_P, ...) {}
 // reportsPending() gates startTiltScan() (a queued cloud POST can block the
@@ -75,7 +83,8 @@ void setUp(void) {
   for (int i = 0; i < MAX_TILTS; i++) s_missedReads[i] = 0;
   for (int i = 0; i < MAX_TILTS; i++) s_tiltHeard[i]   = false;
   notifyStubReset();
-  s_millis = 0;
+  s_millis    = 0;
+  s_uptimeSec = 0;
   // Scan-state file-statics, so each scan test starts from "idle, module ready".
   s_scanActive        = false;
   s_scanStart         = 0;
@@ -333,7 +342,7 @@ void test_processTiltReading_marks_active_and_stamps_lastSeen(void) {
   processTiltReading(C, 1.0500f, 20.0f, /*isPro=*/true);
   TEST_ASSERT_TRUE(g_tilts[C].active);
   TEST_ASSERT_TRUE(g_tilts[C].isPro);
-  TEST_ASSERT_EQUAL_UINT32(5000, g_tilts[C].lastSeen);
+  TEST_ASSERT_EQUAL_UINT32(5, g_tilts[C].lastSeen);   // uptime seconds
 }
 
 void test_processTiltReading_resets_missed_read_count(void) {
@@ -693,6 +702,7 @@ void test_serviceTilt_deregisters_a_tilt_after_300_misses(void) {
 // ---- what the end of a scan tells the notifications (see Notify.h) ----
 
 void test_scan_reports_a_tilt_in_use_as_lost_when_it_is_deregistered(void) {
+  s_uptimeSec = 10000;
   g_tilts[0].fermenter = 1;
   processTiltReading(0, 1.050f, 20.0f, false);   // heard once, so it counts as in use
   s_missedReads[0] = 299;
@@ -700,12 +710,31 @@ void test_scan_reports_a_tilt_in_use_as_lost_when_it_is_deregistered(void) {
 
   beginScan();
   expireScanWindow();
-  g_tilts[0].lastSeen = millis() - 25UL * 60000UL;   // last heard 25 minutes ago
+  g_tilts[0].lastSeen = uptimeStamp() - 25UL * 60UL;   // last heard 25 minutes ago
   serviceTilt();   // empty scan - the 300th miss
 
   TEST_ASSERT_FALSE(g_tilts[0].active);
   TEST_ASSERT_TRUE(sensor.lost);
   TEST_ASSERT_EQUAL_FLOAT(25.0f, sensor.minutes);
+}
+
+// The time a missing Tilt has been quiet is counted in uptime seconds. It
+// was counted with millis(), which wraps every 49.7 days, and a Tilt missing
+// for longer than that showed as quiet for 0 minutes again.
+void test_a_tilt_missing_for_50_days_is_reported_quiet_for_50_days(void) {
+  g_tilts[0].fermenter = 1;
+  s_millis    = 0xFFFF0000UL;   // just before the millis() wrap
+  s_uptimeSec = 100;
+  processTiltReading(0, 1.050f, 20.0f, false);
+  g_tilts[0].active = false;    // deregistered since
+
+  s_millis    = 1234;                       // wrapped
+  s_uptimeSec = 100 + 50UL * 86400UL;       // 50 days later
+  reportTiltsToNotify();
+
+  NotifyStubSensor& sensor = g_notifyStubSensor[NOTIFY_SENSOR_TILT][0];
+  TEST_ASSERT_TRUE(sensor.lost);
+  TEST_ASSERT_EQUAL_FLOAT(50.0f * 24.0f * 60.0f, sensor.minutes);   // 72,000
 }
 
 void test_scan_reports_a_tilt_in_use_as_reporting_while_it_is_active(void) {
@@ -837,6 +866,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_serviceTilt_abandons_scan_when_sniff_page_opens);
   RUN_TEST(test_serviceTilt_deregisters_a_tilt_after_300_misses);
   RUN_TEST(test_scan_reports_a_tilt_in_use_as_lost_when_it_is_deregistered);
+  RUN_TEST(test_a_tilt_missing_for_50_days_is_reported_quiet_for_50_days);
   RUN_TEST(test_scan_reports_a_tilt_in_use_as_reporting_while_it_is_active);
   RUN_TEST(test_scan_says_nothing_about_a_tilt_not_heard_since_boot);
   RUN_TEST(test_scan_says_nothing_about_a_tilt_no_fermenter_uses);

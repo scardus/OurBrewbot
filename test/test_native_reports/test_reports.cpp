@@ -48,6 +48,8 @@ FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
 // ---- millis(), settable per test ----
 static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
+// Temperatures.cpp drops a checkpoint for each phase (Crash.cpp isn't compiled here)
+void checkpoint(uint8_t) {}
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
 // ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
@@ -62,6 +64,7 @@ bool saveProbeConfig()     { return true; }
 // Referenced inside Fermenter.cpp's processFermenters()/setFermenterPlugs(),
 // neither of which these tests call - the symbols still have to resolve.
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugsResendOne() {}
 void smartPlugForceOff(uint8_t) {}
 void allPlugsForceOff() {}
 void processProfiles() {}
@@ -183,7 +186,7 @@ void test_queue_accepts_an_eligible_pair(void) {
 
 void test_queue_drains_exactly_one_post_per_pass(void) {
   // The whole point of the staggered dispatcher: each blocking POST can take
-  // up to the 5 s HTTP timeout, so only one may run per loop pass.
+  // about 15 s (three 5 s timeouts), so only one may run per loop pass.
   enableService(BF, "abc");
   enableService(BFR, "def");
   for (int i = 0; i < 3; i++) {
@@ -194,13 +197,13 @@ void test_queue_drains_exactly_one_post_per_pass(void) {
 
   int expected = 0;
   for (int pass = 0; pass < 6; pass++) {   // 3 fermenters x 2 services
-    processReportQueue();
+    TEST_ASSERT_TRUE(processReportQueue());   // tells the loop it sent one
     expected++;
     TEST_ASSERT_EQUAL_INT(expected, g_httpTest.postCount);
   }
   TEST_ASSERT_FALSE(reportsPending());     // queue emptied
 
-  processReportQueue();                    // nothing left to send
+  TEST_ASSERT_FALSE(processReportQueue()); // nothing left to send
   TEST_ASSERT_EQUAL_INT(6, g_httpTest.postCount);
 }
 
@@ -217,7 +220,8 @@ void test_a_failed_post_drops_the_rest_of_that_services_cycle(void) {
   queueReports();
   g_httpTest.nextStatus = -1;              // HTTPC_ERROR_CONNECTION_FAILED
 
-  processReportQueue();                    // Brewer's Friend F0 fails
+  // A failed request still took the pass's turn
+  TEST_ASSERT_TRUE(processReportQueue());  // Brewer's Friend F0 fails
   TEST_ASSERT_EQUAL_INT(1, g_httpTest.postCount);
   processReportQueue();                    // straight on to Brewfather F0
   TEST_ASSERT_EQUAL_INT(2, g_httpTest.postCount);
@@ -245,7 +249,7 @@ void test_queue_dropped_entirely_when_wifi_is_down(void) {
   queueReports();
   WiFi.connected = false;
 
-  processReportQueue();
+  TEST_ASSERT_FALSE(processReportQueue()); // no request, so the next job can run
 
   TEST_ASSERT_EQUAL_INT(0, g_httpTest.postCount);
   TEST_ASSERT_FALSE(reportsPending());

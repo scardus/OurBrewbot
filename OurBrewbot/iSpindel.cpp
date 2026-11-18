@@ -220,7 +220,12 @@ void handleiSpindelPost(const String& body) {
   }
   if (matched < 0) {
     for (int i = 0; i < MAX_ISPINDELS; i++) {
-      if (strlen(name) > 0 && strcmp(g_iSpindels[i].name, name) == 0
+      // The name is only used when the slot or the report has no ID. Two IDs
+      // that are both known (and so differ) are two different devices, even
+      // with the same name: two iSpindels left on the default "iSpindel000"
+      // would otherwise take the one slot from each other on every report.
+      bool bothHaveIds = strlen(id) > 0 && strlen(g_iSpindels[i].id) > 0;
+      if (!bothHaveIds && strlen(name) > 0 && strcmp(g_iSpindels[i].name, name) == 0
           && strcmp(g_iSpindels[i].name, "None") != 0) {
         matched = i;
         break;

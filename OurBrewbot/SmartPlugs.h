@@ -35,11 +35,19 @@ extern bool g_rfSniffActive;
 // Just under a minute: the control loop runs every 10 s and the send time is
 // taken after the ~0.5 s burst, so a full 60000 would only be passed on the
 // seventh pass, making it every 70 s. 55000 gives a resend every 60 s.
+// Only one plug is re-sent per pass, so with more than six plugs each one is
+// re-sent every (number of plugs x 10 s) instead.
 #define PLUG_RESEND_MS 55000
 
 // Set a plug on or off. Called by the control loop every 10 s: the RF code is
-// only transmitted when the state changes, or every PLUG_RESEND_MS otherwise.
+// transmitted straight away when the state changes. An unchanged state is
+// left to smartPlugsResendOne().
 void smartPlugSwitch(uint8_t plugIndex, bool on);
+
+// Call once at the end of each control pass. Re-sends ONE plug its current
+// state, if it was asked for that state this pass and is due (PLUG_RESEND_MS):
+// the one sent longest ago, so every plug gets its turn.
+void smartPlugsResendOne();
 
 // Send a plug its OFF code whatever its role, even when it has none. Used
 // before a plug's settings change, and by the emergency switch-off.

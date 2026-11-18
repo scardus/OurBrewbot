@@ -71,14 +71,12 @@
 // ============================================================
 // TIMING CONSTANTS (milliseconds)
 // ============================================================
-#define INTERVAL_TEMPS_MS       5000    // Temperature polling
 #define INTERVAL_FERMENTER_MS   10000   // Fermenter control loop
 #define INTERVAL_TILT_MS        5000   // Tilt BLE scan interval
 #define INTERVAL_CLOUD_MS       900000  // Cloud/service reporting (15 min)
 #define INTERVAL_MQTT_MS        60000   // MQTT publish interval (60s)
 #define INTERVAL_TEN_MIN_MS     600000  // 10-minute periodic tasks
 #define INTERVAL_UPTIME_MS      60000   // Uptime counter increment
-#define INTERVAL_PROBE_SCAN_MS  30000   // Probe hot-plug scanning
 
 // WiFi at boot and while offline (see setupWiFi() and wifiLoop())
 #define WIFI_BOOT_WAIT_MS       10000   // wait this long for the saved network at boot
@@ -90,18 +88,12 @@
 // ============================================================
 // GLOBAL STATE
 // ============================================================
-unsigned long g_lastTempTime    = 0;
 unsigned long g_lastFermTime    = 0;
 unsigned long g_lastCloudTime   = 0;
 unsigned long g_lastMqttTime    = 0;
 unsigned long g_lastTenMinTime  = 0;
 unsigned long g_lastUptimeTime  = 0;
-unsigned long g_lastProbeScanTime = 0;
 unsigned long g_lastTiltTime    = 0;
-
-// Async temperature conversion state
-bool          g_tempConversionPending = false;
-unsigned long g_tempRequestTime       = 0;
 bool g_wifiConnected = false;
 String g_rebootReason = ESP.getResetReason();
 
@@ -228,6 +220,9 @@ void setup() {
     // report (CrashReport.cpp) can send it
     crashLogPendingDeferred();
   }
+  // Save the crash record to flash now. It has just been cleared from RTC
+  // memory, and the crash report job may not get its turn for a while.
+  crashReportBootSave();
 
   // Push notification for a restart after a crash or a power cut. Queued
   // here and sent from loop() once WiFi is connected.
@@ -280,42 +275,10 @@ void loop() {
     digitalWrite(PIN_LED, (now / 500) & 1);  // toggle every 500ms
   }
 
-  // Temperature processing — async two-phase to avoid blocking the loop.
-  // Phase 1: fire conversion request and return immediately.
-  if (now - g_lastTempTime >= INTERVAL_TEMPS_MS) {
-    g_lastTempTime = now;
-    checkpoint(CP_TEMP_REQ);
-    requestTempConversion();
-    g_tempConversionPending = true;
-    g_tempRequestTime = now;
-  }
-
-  // Phase 2: read results once the conversion time has elapsed.
-  // Resolution 9=94ms, 10=188ms, 11=375ms, 12=750ms
-  if (g_tempConversionPending &&
-      now - g_tempRequestTime >= (94u << (g_globalConfig.resolution - 9))) {
-    g_tempConversionPending = false;
-    checkpoint(CP_TEMP_READ);
-    readTempResults();
-
-    // Print probe temperatures to serial console
-    for (int i = 0; i < MAX_PROBES; i++) {
-      if (strlen(g_probes[i].address) == 0) continue;
-      logMsg("[TEMP] %s (%s): %.1fC (raw %.1f, adj %.1f)",
-        g_probes[i].probeName, g_probes[i].address,
-        g_probes[i].temperature, g_probes[i].rawTemperature,
-        g_probes[i].tempAdjust);
-    }
-  }
-
-  // Periodic probe scanning (hot-plug support).
-  // Guard: never run while a conversion is pending — scanBuses() calls begin()
-  // which sends a OneWire reset that cancels the in-progress conversion.
-  if (!g_tempConversionPending && now - g_lastProbeScanTime >= INTERVAL_PROBE_SCAN_MS) {
-    g_lastProbeScanTime = now;
-    checkpoint(CP_PROBE_SCAN);
-    periodicProbeScan();
-  }
+  // Temperature probes: read a finished conversion, scan for new probes and
+  // start the next conversion, each when it is due (see Temperatures.cpp).
+  // A conversion runs in the background, so this never waits for one.
+  temperaturesLoop();
 
   // Tilt BLE scanning — the tick only STARTS a scan; serviceTilt() at the
   // top of loop() drains it across passes (was a 4 s busy-wait here).
@@ -340,22 +303,29 @@ void loop() {
   }
 
   // Cloud / service reporting (HTTP services only). The 15-min tick only
-  // queues work; ONE report is POSTed per loop pass so the loop never stalls
-  // longer than a single 5 s HTTP timeout (was: up to services × fermenters
-  // × 5 s in one pass).
+  // queues the reports; they are sent below, one at a time.
   if (now - g_lastCloudTime >= INTERVAL_CLOUD_MS) {
     g_lastCloudTime = now;
     queueReports();
   }
-  if (reportsPending()) {
-    checkpoint(CP_CLOUD);
-    processReportQueue();
-  }
 
-  // Push notifications: events are queued where they happen, and ONE is
-  // POSTed per loop pass, for the same reason as the reports above. Returns
-  // straight away when nothing is waiting.
-  notifyLoop();
+  // Internet jobs: at most ONE HTTP request per loop pass, so the controller
+  // gets back to temperature control between them. One request can still
+  // hold up the loop for about 15 s (DNS, connect and the reply each have a
+  // 5 s timeout), and before this four of them could follow each other.
+  // Each function returns true if it made a request; the jobs after it wait
+  // for the next pass. Notifications go first as they're the urgent ones
+  // (alarms), and they can't keep the others waiting for long: a failed one
+  // waits a minute before trying again, and at most 8 can be queued.
+  bool sentRequest = notifyLoop();
+  if (!sentRequest && reportsPending()) {
+    checkpoint(CP_CLOUD);
+    sentRequest = processReportQueue();
+  }
+  // Daily firmware update check - returns straight away until it's due
+  if (!sentRequest) sentRequest = updateCheckLoop();
+  // Send the crash report once after a crash - does nothing otherwise
+  if (!sentRequest) crashReportLoop();
 
   // MQTT publish (separate timer, more frequent)
   if (now - g_lastMqttTime >= INTERVAL_MQTT_MS) {
@@ -370,12 +340,6 @@ void loop() {
     checkpoint(CP_TEN_MIN);
     onTenMinuteTimer();
   }
-
-  // Daily firmware update check - returns straight away until it's due
-  updateCheckLoop();
-
-  // Send the crash report once after a crash - does nothing otherwise
-  crashReportLoop();
 
   // Uptime in minutes, saved with the global config for the reboot log.
   // Taken from the uptime clock rather than counted up here, so it can't

@@ -201,7 +201,7 @@ bool runUpdateCheck() {
 // SCHEDULER
 // ============================================================
 
-void updateCheckLoop() {
+bool updateCheckLoop() {
   uint32_t now = millis();
 
   // First call after boot: schedule the first check. The chip-ID spread
@@ -209,19 +209,23 @@ void updateCheckLoop() {
   if (s_waitMs == 0) {
     s_waitStartMs = now;
     s_waitMs = UPDATE_FIRST_CHECK_MS + (ESP.getChipId() % UPDATE_SPREAD_MIN) * 60000UL;
-    return;
+    return false;
   }
 
-  if (now - s_waitStartMs < s_waitMs) return;   // not due yet
+  if (now - s_waitStartMs < s_waitMs) return false;   // not due yet
   s_waitStartMs = now;
 
   // Switched off: skip this one and look again tomorrow
   if (!g_globalConfig.updateCheck) {
     s_waitMs = UPDATE_INTERVAL_MS;
-    return;
+    return false;
   }
 
   checkpoint(CP_UPDATE);   // so a crash during the check is logged against it
+  // Without WiFi runUpdateCheck() returns at once and makes no request, so
+  // the internet jobs after this one in loop() needn't wait for the next pass.
+  // It still counts as a failed try below, as before.
+  bool online = WiFi.isConnected();
   if (runUpdateCheck()) {
     s_waitMs      = UPDATE_INTERVAL_MS;
     s_retriesLeft = UPDATE_MAX_RETRIES;
@@ -232,4 +236,5 @@ void updateCheckLoop() {
     s_waitMs      = UPDATE_INTERVAL_MS;   // out of retries - try again tomorrow
     s_retriesLeft = UPDATE_MAX_RETRIES;
   }
+  return online;
 }
