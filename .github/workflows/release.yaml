@@ -117,6 +117,8 @@ jobs:
       # The .elf ships too: Crash.cpp's RTC register/stack dumps can only be
       # turned back into function names with the exact ELF that built the binary,
       # and it exists nowhere else once the runner is torn down.
+      # The WebUI's "Download" link is built from this .bin name
+      # (firmwareDownloadUrl() in web/js/system.js) - change both together.
       - name: Stage release assets
         run: |
           cp .pio/build/nodemcuv2/firmware.bin OurBrewbot_${{ github.ref_name }}.bin

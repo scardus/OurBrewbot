@@ -57,7 +57,7 @@ function bannerLinks(alert) {
   const link=bannerKinds[alert.kind].link;
   if (link) return `<a href="${link[0]}">${link[1]}</a>`;
   if (alert.kind!=='update') return '';
-  return `<a href="${esc(releaseNotesUrl(state.controller))}" target="_blank" rel="noopener noreferrer">Release notes</a>
+  return `${releaseLinks(state.controller,' ','Download')}
     <button type="button" class="banner-link" data-action="open-firmware">Firmware update</button>`;
 }
 

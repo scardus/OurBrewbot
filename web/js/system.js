@@ -181,17 +181,40 @@ function updateDescription(c) {
   return 'No newer release found. Last check age: '+orDash(c.LastUpdateCheck)+' min';
 }
 
-// The release notes for the latest release, or the releases page if the controller has no valid link.
-function releaseNotesUrl(controller) {
-  return /^https?:\/\//.test(controller.UpdateNotesUrl)?controller.UpdateNotesUrl:
-    'https://github.com/scardus/OurBrewbot/releases';
+// The release links are built here from the version number. The controller checks for updates over plain
+// HTTP, so a link in that reply could have been changed to point anywhere. A version is only digits and dots.
+const RELEASES_URL='https://github.com/scardus/OurBrewbot/releases';
+
+// The latest release's version, or '' if the controller has not reported a valid one.
+function latestVersion(controller) {
+  return /^\d+\.\d+\.\d+$/.test(controller.LatestVersion)?controller.LatestVersion:'';
 }
 
-// Build escaped release-check text and a validated release-notes link.
+// The news post for the latest release, or the releases page if the controller has no valid version.
+function releaseNotesUrl(controller) {
+  const version=latestVersion(controller);
+  return version?'https://ourbrewbot.com/news/#v'+version:RELEASES_URL;
+}
+
+// The latest release's firmware file, or '' if the controller has no valid version.
+// The file name must match the one attached by .github/workflows/release.yaml.
+function firmwareDownloadUrl(controller) {
+  const version=latestVersion(controller);
+  return version?`${RELEASES_URL}/download/v${version}/OurBrewbot_v${version}.bin`:'';
+}
+
+// Build the release-notes link and, when there is a valid version, the download link.
+function releaseLinks(controller,separator,downloadText) {
+  const download=firmwareDownloadUrl(controller);
+  return `<a href="${esc(releaseNotesUrl(controller))}" target="_blank" rel="noopener noreferrer">Release notes</a>`+
+    (download?`${separator}<a href="${esc(download)}" target="_blank" rel="noopener noreferrer">${downloadText}</a>`:'');
+}
+
+// Build escaped release-check text and the release links.
 function updateResult(controller) {
   const description=esc(updateDescription(controller));
   if (!controller.UpdateAvailable) return description;
-  return description+` · <a href="${esc(releaseNotesUrl(controller))}" target="_blank" rel="noopener noreferrer">Release notes</a>`;
+  return description+' · '+releaseLinks(controller,' · ','Download firmware');
 }
 
 const backupFiles=[['global','/jsonGlobal.txt'],['fermenter','/jsonFermenter.txt'],['probe','/jsonProbe.txt'],
