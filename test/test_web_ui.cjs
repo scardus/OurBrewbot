@@ -1009,18 +1009,37 @@ test('closing a banner still works on the page when browser storage is blocked',
 
 test('each kind of banner has its colour and its links',()=>{
   const {run}=bannerPage([]);
-  run("state.controller={UpdateNotesUrl:'https://ourbrewbot.com/news/#v0.11.0'}");
+  run("state.controller={LatestVersion:'0.11.0'}");
   const html=kind=>run(`bannerHtml(${JSON.stringify(sampleAlerts.find(alert=>alert.kind===kind))})`);
   assert.match(html('alarm'),/class="banner alarm"/);
   assert.match(html('sensor'),/class="banner warning"[\s\S]*href="#sensors">Open sensors</);
   assert.match(html('restart'),/class="banner warning"[\s\S]*href="#system">Open system</);
   assert.match(html('profile'),/class="banner success"/);
   assert.doesNotMatch(html('profile'),/<a /);
-  assert.match(html('update'),/class="banner success"[\s\S]*href="https:\/\/ourbrewbot.com\/news\/#v0.11.0"/);
+  assert.match(html('update'),/class="banner success"[\s\S]*href="https:\/\/ourbrewbot.com\/news\/#v0.11.0"[^>]*>Release notes</);
+  assert.match(html('update'),
+    /href="https:\/\/github.com\/scardus\/OurBrewbot\/releases\/download\/v0.11.0\/OurBrewbot_v0.11.0.bin"[^>]*>Download</);
   assert.match(html('update'),/data-action="open-firmware">Firmware update</);
-  // Without a valid link from the controller, the releases page
-  run("state.controller={UpdateNotesUrl:'javascript:alert(1)'}");
+  // Without a valid version from the controller, the releases page and no download
+  run("state.controller={LatestVersion:'0.11'}");
   assert.match(html('update'),/href="https:\/\/github.com\/scardus\/OurBrewbot\/releases"/);
+  assert.doesNotMatch(html('update'),/>Download</);
+});
+
+test('release links are built from the version, which must be three numbers',()=>{
+  const {run}=ui();
+  const links=version=>run(`JSON.stringify([releaseNotesUrl({LatestVersion:${JSON.stringify(version)}}),
+    firmwareDownloadUrl({LatestVersion:${JSON.stringify(version)}})])`);
+  assert.deepEqual(JSON.parse(links('0.10.2')),['https://ourbrewbot.com/news/#v0.10.2',
+    'https://github.com/scardus/OurBrewbot/releases/download/v0.10.2/OurBrewbot_v0.10.2.bin']);
+  for (const bad of ['','1.2','v1.2.3','1.2.3-beta','0.10.2/../x','1.2.3\n','<b>1.2.3</b>',null,123]) {
+    assert.deepEqual(JSON.parse(links(bad)),['https://github.com/scardus/OurBrewbot/releases',''],String(bad));
+  }
+  // The links only show once a newer release is available
+  assert.equal(run("updateResult({UpdateChecked:true,UpdateAvailable:false,LatestVersion:'0.10.2',LastUpdateCheck:5})"),
+    'No newer release found. Last check age: 5 min');
+  assert.match(run("updateResult({UpdateChecked:true,UpdateAvailable:true,LatestVersion:'0.10.2'})"),
+    /Available version: 0.10.2 · <a href="https:\/\/ourbrewbot.com\/news\/#v0.10.2"[^>]*>Release notes<\/a> · <a href="https:\/\/github.com\/scardus\/OurBrewbot\/releases\/download\/v0.10.2\/OurBrewbot_v0.10.2.bin"[^>]*>Download firmware<\/a>$/);
 });
 
 test('banner text and ids from the controller are escaped, and unknown kinds are left out',()=>{

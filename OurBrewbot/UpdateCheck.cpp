@@ -89,9 +89,7 @@ bool isNewerVersion(const char* candidate, const char* current) {
   return false;   // the same version
 }
 
-bool parseVersionJson(const String& body,
-                      char* version, size_t versionSize,
-                      char* notes, size_t notesSize) {
+bool parseVersionJson(const String& body, char* version, size_t versionSize) {
   JsonDocument doc;
   if (deserializeJson(doc, body) != DeserializationError::Ok) return false;
 
@@ -104,14 +102,6 @@ bool parseVersionJson(const String& body,
   if (*v == 'v' || *v == 'V') v++;   // store "0.4.16", not "v0.4.16"
   if (strlen(v) >= versionSize) return false;
   strlcpy(version, v, versionSize);
-
-  // Optional. Only keep a complete web link - a truncated URL would be broken.
-  notes[0] = '\0';
-  if (doc["notes"].is<const char*>()) {
-    const char* n = doc["notes"];
-    bool isLink = strncmp(n, "https://", 8) == 0 || strncmp(n, "http://", 7) == 0;
-    if (isLink && strlen(n) < notesSize) strlcpy(notes, n, notesSize);
-  }
   return true;
 }
 
@@ -165,8 +155,7 @@ bool runUpdateCheck() {
   if (body.length() > UPDATE_MAX_BODY) return checkFailed("reply too large");
 
   char version[sizeof(g_updateStatus.latestVersion)];
-  char notes[sizeof(g_updateStatus.notesUrl)];
-  if (!parseVersionJson(body, version, sizeof(version), notes, sizeof(notes))) {
+  if (!parseVersionJson(body, version, sizeof(version))) {
     return checkFailed("unreadable reply");
   }
 
@@ -175,7 +164,6 @@ bool runUpdateCheck() {
   g_updateStatus.lastError[0]    = '\0';
   g_updateStatus.updateAvailable = isNewerVersion(version, FW_VERSION);
   strlcpy(g_updateStatus.latestVersion, version, sizeof(g_updateStatus.latestVersion));
-  strlcpy(g_updateStatus.notesUrl,      notes,   sizeof(g_updateStatus.notesUrl));
 
   if (g_updateStatus.updateAvailable) {
     if (strcmp(version, s_announcedVersion) != 0) {

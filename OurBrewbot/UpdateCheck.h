@@ -21,9 +21,13 @@
  * Once a day the controller downloads UPDATE_CHECK_URL (see Version.h), a
  * tiny JSON file published by the ourbrewbot.com website:
  *
- *   {"version":"0.4.16","notes":"https://github.com/.../releases/tag/v0.4.16"}
+ *   {"version":"0.4.16","notes":"https://ourbrewbot.com/news/#v0.4.16"}
  *
- * and compares "version" with the running FW_VERSION. The request carries the
+ * and compares "version" with the running FW_VERSION. "notes" is ignored:
+ * the file comes over plain HTTP, so a link in it can't be trusted. The
+ * WebUI builds the release notes and download links from the version number
+ * instead (system.js). Older firmware still shows "notes", so the website
+ * keeps sending it. The request carries the
  * chip ID and firmware version (?id=2924fa&v=0.4.16) so the site can count
  * the controllers in use. It only REPORTS the
  * result - in syslog, over MQTT (Home Assistant "update" entity) and on the
@@ -39,7 +43,6 @@ struct UpdateStatus {
   bool     checked;            // true once any check has got a valid reply since boot
   bool     updateAvailable;    // the latest release is newer than this firmware
   char     latestVersion[16];  // e.g. "0.4.16" - empty until a check succeeds
-  char     notesUrl[96];       // release notes link - may be empty
   bool     attempted;          // true once any check has been tried since boot
   uint32_t lastCheckSec;       // uptimeSeconds() of the last attempt (valid when attempted)
   char     lastError[40];      // why the last attempt failed - empty if it worked
@@ -55,11 +58,9 @@ bool parseVersion(const char* text, uint16_t parts[3]);
 // than `current`. Anything unparseable counts as "not newer".
 bool isNewerVersion(const char* candidate, const char* current);
 
-// Read version.json. Copies "version" and (if present and a web link)
-// "notes" into the buffers. Returns false if the reply isn't usable.
-bool parseVersionJson(const String& body,
-                      char* version, size_t versionSize,
-                      char* notes, size_t notesSize);
+// Read version.json. Copies "version" (without a leading "v") into the
+// buffer. Returns false if the reply isn't usable.
+bool parseVersionJson(const String& body, char* version, size_t versionSize);
 
 // Check now. Blocks the loop for up to ~5 s (the HTTP timeout). Updates
 // g_updateStatus, logs the result and publishes it over MQTT.

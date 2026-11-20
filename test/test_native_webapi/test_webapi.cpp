@@ -3216,7 +3216,6 @@ static void test_controller_reports_the_update_status(void) {
   g_updateStatus.checked = true;
   g_updateStatus.updateAvailable = true;
   strlcpy(g_updateStatus.latestVersion, "0.4.17", sizeof(g_updateStatus.latestVersion));
-  strlcpy(g_updateStatus.notesUrl, "https://example.com/notes", sizeof(g_updateStatus.notesUrl));
   g_updateStatus.attempted = true;
   g_updateStatus.lastCheckSec = s_millis / 1000;   // uptime seconds
   s_millis += 5 * 60000UL;   // checked 5 minutes ago
@@ -3228,7 +3227,8 @@ static void test_controller_reports_the_update_status(void) {
   TEST_ASSERT_TRUE(doc["UpdateChecked"].as<bool>());
   TEST_ASSERT_TRUE(doc["UpdateAvailable"].as<bool>());
   TEST_ASSERT_EQUAL_STRING("0.4.17", doc["LatestVersion"].as<const char*>());
-  TEST_ASSERT_EQUAL_STRING("https://example.com/notes", doc["UpdateNotesUrl"].as<const char*>());
+  // The notes link came from plain HTTP, so it was dropped - the WebUI builds its own
+  TEST_ASSERT_FALSE(doc["UpdateNotesUrl"].is<const char*>());
   TEST_ASSERT_EQUAL_STRING("", doc["UpdateCheckError"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(5, doc["LastUpdateCheck"].as<int>());
 }

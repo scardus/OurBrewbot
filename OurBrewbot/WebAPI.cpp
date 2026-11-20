@@ -728,7 +728,6 @@ void buildUpdateStatusJson(JsonDocument& doc) {
   doc["UpdateChecked"]    = g_updateStatus.checked;          // a check has worked since boot
   doc["UpdateAvailable"]  = g_updateStatus.updateAvailable;
   doc["LatestVersion"]    = g_updateStatus.latestVersion;
-  doc["UpdateNotesUrl"]   = g_updateStatus.notesUrl;
   doc["UpdateCheckError"] = g_updateStatus.lastError;        // "" if the last check worked
   // Minutes since the last attempt, or -1 if there hasn't been one since boot
   doc["LastUpdateCheck"]  = g_updateStatus.attempted
