@@ -89,9 +89,7 @@ bool isNewerVersion(const char* candidate, const char* current) {
   return false;   // the same version
 }
 
-bool parseVersionJson(const String& body,
-                      char* version, size_t versionSize,
-                      char* notes, size_t notesSize) {
+bool parseVersionJson(const String& body, char* version, size_t versionSize) {
   JsonDocument doc;
   if (deserializeJson(doc, body) != DeserializationError::Ok) return false;
 
@@ -104,14 +102,6 @@ bool parseVersionJson(const String& body,
   if (*v == 'v' || *v == 'V') v++;   // store "0.4.16", not "v0.4.16"
   if (strlen(v) >= versionSize) return false;
   strlcpy(version, v, versionSize);
-
-  // Optional. Only keep a complete web link - a truncated URL would be broken.
-  notes[0] = '\0';
-  if (doc["notes"].is<const char*>()) {
-    const char* n = doc["notes"];
-    bool isLink = strncmp(n, "https://", 8) == 0 || strncmp(n, "http://", 7) == 0;
-    if (isLink && strlen(n) < notesSize) strlcpy(notes, n, notesSize);
-  }
   return true;
 }
 
@@ -165,8 +155,7 @@ bool runUpdateCheck() {
   if (body.length() > UPDATE_MAX_BODY) return checkFailed("reply too large");
 
   char version[sizeof(g_updateStatus.latestVersion)];
-  char notes[sizeof(g_updateStatus.notesUrl)];
-  if (!parseVersionJson(body, version, sizeof(version), notes, sizeof(notes))) {
+  if (!parseVersionJson(body, version, sizeof(version))) {
     return checkFailed("unreadable reply");
   }
 
@@ -175,7 +164,6 @@ bool runUpdateCheck() {
   g_updateStatus.lastError[0]    = '\0';
   g_updateStatus.updateAvailable = isNewerVersion(version, FW_VERSION);
   strlcpy(g_updateStatus.latestVersion, version, sizeof(g_updateStatus.latestVersion));
-  strlcpy(g_updateStatus.notesUrl,      notes,   sizeof(g_updateStatus.notesUrl));
 
   if (g_updateStatus.updateAvailable) {
     if (strcmp(version, s_announcedVersion) != 0) {
@@ -201,7 +189,7 @@ bool runUpdateCheck() {
 // SCHEDULER
 // ============================================================
 
-void updateCheckLoop() {
+bool updateCheckLoop() {
   uint32_t now = millis();
 
   // First call after boot: schedule the first check. The chip-ID spread
@@ -209,19 +197,23 @@ void updateCheckLoop() {
   if (s_waitMs == 0) {
     s_waitStartMs = now;
     s_waitMs = UPDATE_FIRST_CHECK_MS + (ESP.getChipId() % UPDATE_SPREAD_MIN) * 60000UL;
-    return;
+    return false;
   }
 
-  if (now - s_waitStartMs < s_waitMs) return;   // not due yet
+  if (now - s_waitStartMs < s_waitMs) return false;   // not due yet
   s_waitStartMs = now;
 
   // Switched off: skip this one and look again tomorrow
   if (!g_globalConfig.updateCheck) {
     s_waitMs = UPDATE_INTERVAL_MS;
-    return;
+    return false;
   }
 
   checkpoint(CP_UPDATE);   // so a crash during the check is logged against it
+  // Without WiFi runUpdateCheck() returns at once and makes no request, so
+  // the internet jobs after this one in loop() needn't wait for the next pass.
+  // It still counts as a failed try below, as before.
+  bool online = WiFi.isConnected();
   if (runUpdateCheck()) {
     s_waitMs      = UPDATE_INTERVAL_MS;
     s_retriesLeft = UPDATE_MAX_RETRIES;
@@ -232,4 +224,5 @@ void updateCheckLoop() {
     s_waitMs      = UPDATE_INTERVAL_MS;   // out of retries - try again tomorrow
     s_retriesLeft = UPDATE_MAX_RETRIES;
   }
+  return online;
 }

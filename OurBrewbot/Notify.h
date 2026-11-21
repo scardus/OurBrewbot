@@ -91,16 +91,18 @@ struct NotifyMessage {
 };
 
 // Queue a notification. Returns straight away without sending anything.
-// Nothing is queued when notifications are off, or when the event's kind is
-// not ticked in the settings (NotifyConfig.events).
-void notifyEvent(NotifyEvent type, uint8_t index = 0, uint8_t detail = 0,
+// Nothing is queued when notifications are off, when the event's kind is not
+// ticked in the settings (NotifyConfig.events), or when the queue is full.
+// Returns true if it was queued.
+bool notifyEvent(NotifyEvent type, uint8_t index = 0, uint8_t detail = 0,
                  float a = 0.0f, float b = 0.0f);
 
 // Call every loop pass. Sends AT MOST one waiting notification, then returns;
 // with nothing to send it returns straight away. The POST blocks for up to
 // about 15 s if the server does not answer (see NOTIFY_TIMEOUT_MS). A failed
 // one is tried again a minute later, three times in all.
-void notifyLoop();
+// Returns true if it made an HTTP request (see the main loop).
+bool notifyLoop();
 
 // Tell the notifications what a fermenter's temperature alarm is doing. Call
 // it on every alarm check, whether or not anything changed; this works out

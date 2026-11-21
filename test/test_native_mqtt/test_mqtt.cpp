@@ -51,6 +51,8 @@ FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
 // ---- millis(), unused here but referenced by the included sources ----
 static uint32_t s_millis = 0;
 uint32_t millis() { return s_millis; }
+// Temperatures.cpp drops a checkpoint for each phase (Crash.cpp isn't compiled here)
+void checkpoint(uint8_t) {}
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
 // ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
@@ -63,6 +65,7 @@ void logMsgImpl(uint8_t, PGM_P, ...) {}
 bool saveFermenterConfig() { return true; }
 bool saveProbeConfig()     { return true; }
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugsResendOne() {}
 void smartPlugForceOff(uint8_t) {}
 void allPlugsForceOff() {}
 void processProfiles() {}

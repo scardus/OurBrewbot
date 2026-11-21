@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <cstdarg>
 
 #include "../../OurBrewbot/Config.h"
 #include "../../OurBrewbot/Pins.h"
@@ -53,6 +54,8 @@
 // backoff window reads as already elapsed. Same trap as s_lastCoolingStop.
 static uint32_t s_millis = 1000000;
 uint32_t millis() { return s_millis; }
+// Temperatures.cpp drops a checkpoint for each phase (Crash.cpp isn't compiled here)
+void checkpoint(uint8_t) {}
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
 // ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
@@ -63,9 +66,44 @@ uint32_t uptimeSeconds() { return s_uptimeSec ? s_uptimeSec : s_millis / 1000; }
 uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
 uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
 
-// ---- doubles for the modules not compiled in ----
-void logMsgImpl(uint8_t, PGM_P, ...) {}
+// ---- logMsg(), recorded ----
+// Log.cpp is not compiled in. Its logMsg() lines are kept here instead, so a
+// test can check what Mqtt.cpp logged and at what level. Natively PGM_P is a
+// plain const char*, so the format string is used as it is. Lines past the
+// 64th are not kept; no test logs that many after a logTestReset().
+#define LOG_TEST_MAX_LINES 64
+static char    s_logLines[LOG_TEST_MAX_LINES][200];
+static uint8_t s_logLevels[LOG_TEST_MAX_LINES];
+static int     s_logCount = 0;
+
+void logMsgImpl(uint8_t level, PGM_P fmt, ...) {
+  if (s_logCount >= LOG_TEST_MAX_LINES) return;
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(s_logLines[s_logCount], sizeof(s_logLines[0]), fmt, args);
+  va_end(args);
+  s_logLevels[s_logCount++] = level;
+}
 void logInit() {}
+
+static void logTestReset() { s_logCount = 0; }
+
+// Index of the first logged line containing `needle`, or -1
+static int logTestIndexOf(const char* needle) {
+  for (int i = 0; i < s_logCount; i++) {
+    if (strstr(s_logLines[i], needle) != nullptr) return i;
+  }
+  return -1;
+}
+
+// Number of logged lines containing `needle`
+static int logTestCount(const char* needle) {
+  int n = 0;
+  for (int i = 0; i < s_logCount; i++) {
+    if (strstr(s_logLines[i], needle) != nullptr) n++;
+  }
+  return n;
+}
 
 // OurBrewbot.cpp - the MQTT "reboot" command calls this; nothing here restarts.
 // Recorded with how many all-plugs-off calls came before it.
@@ -87,6 +125,7 @@ const char* getTiltColourName(uint8_t colour) {
 
 // SmartPlugs.cpp - Fermenter.cpp drives the plugs; nothing here asserts on them.
 void smartPlugSwitch(uint8_t, bool) {}
+void smartPlugsResendOne() {}
 void smartPlugForceOff(uint8_t) {}
 void allPlugsForceOff() { s_allPlugsOffs++; }
 bool getPlugState(uint8_t) { return false; }
@@ -188,7 +227,15 @@ void setUp(void) {
     g_fermenterDebugOverrides[i] = FermenterDebugOverride{};
   }
 
+  // Mqtt.cpp's own state carries over between tests: a dropped connection's
+  // warning may not have been logged yet, and the last connect attempt's time
+  // decides whether the next report may retry. Start each test fresh, as a
+  // boot does.
+  s_dropLogPending  = false;
+  g_mqttLastAttempt = 0;
+
   connectFixture();
+  logTestReset();   // the fixture's own connect lines are not what a test checks
 }
 
 void tearDown(void) {}
@@ -930,16 +977,23 @@ void test_discovery_update_entity_links_the_version_topics(void) {
   TEST_ASSERT_TRUE(d["cmd_t"].isNull());
 }
 
-void test_discovery_publish_failure_does_not_abort_the_burst(void) {
-  // A broker dropping one publish mid-discovery must not cost the rest of the
-  // entities - the failure is logged and the loop carries on.
+void test_a_failed_discovery_publish_drops_the_connection_and_stops_the_burst(void) {
+  // A QoS 0 publish cannot be dropped by the broker while the socket write
+  // works, so a failure means this end's write timed out: the connection is
+  // dead. Carrying on cost 5 s per entity (240 of them) - the 2026-11-17
+  // stall. Nothing is lost: the reconnect re-publishes every config.
   g_mqttConfig.haDiscovery = true;
-  mqttTestSetPublishFailTopic("firmware_version");
+  mqttTestSetPublishFailTopic(F0_ID "/beer_temperature");
   publishAllHaDiscovery();
 
-  TEST_ASSERT_FALSE(mqttTestPublished(DISC("sensor", DEV_ID, "firmware_version")));
-  TEST_ASSERT_TRUE (mqttTestPublished(DISC("sensor", DEV_ID, "ip_address")));
-  TEST_ASSERT_TRUE (mqttTestPublished(DISC("sensor", F0_ID, "beer_temperature")));
+  TEST_ASSERT_EQUAL_INT(1, mqttTestAbortCount());
+  // Entities before the failure went out; none after it was even tried
+  TEST_ASSERT_TRUE (mqttTestPublished(DISC("sensor", DEV_ID, "firmware_version")));
+  TEST_ASSERT_FALSE(mqttTestPublished(DISC("sensor", F0_ID, "beer_temperature")));
+  TEST_ASSERT_EQUAL_INT(mqttTestPublishCount() + 1, g_mqttTest.publishAttempts);
+  // Only the device's "published" line is true; F0's would not be
+  TEST_ASSERT_EQUAL_INT(1, logTestCount("HA discovery published for device"));
+  TEST_ASSERT_EQUAL_INT(0, logTestCount("HA discovery published for F0"));
 }
 
 // ============================================================
@@ -1608,6 +1662,136 @@ void test_a_settings_change_while_disconnected_publishes_nothing(void) {
 }
 
 // ============================================================
+// F. A dead connection
+// ============================================================
+//
+// A half-open connection still reports itself as connected, but every write
+// times out after 5 s. On 2026-11-17 that froze the main loop for 6.5 minutes
+// while a report and the log mirror waited on message after message. The
+// stub's "connected, but every publish fails" is that state: the first
+// failure must drop the connection, and nothing after it may wait again.
+
+void test_a_failed_publish_drops_the_connection_and_skips_the_rest_of_the_report(void) {
+  mqttTestSetPublishFail(true);
+  reportMqtt();
+
+  TEST_ASSERT_EQUAL_INT(1, g_mqttTest.publishAttempts);   // one wait, not ~80
+  TEST_ASSERT_EQUAL_INT(1, mqttTestAbortCount());
+  TEST_ASSERT_FALSE(g_mqtt.connected());
+  TEST_ASSERT_EQUAL_INT(-3, g_mqtt.state());               // MQTT_CONNECTION_LOST
+  // Nothing was sent, so no "Published" line may say otherwise
+  TEST_ASSERT_EQUAL_INT(0, logTestCount("[MQTT] Published"));
+}
+
+void test_the_drop_warning_is_logged_once_from_the_loop(void) {
+  mqttTestSetPublishFail(true);
+  reportMqtt();
+  // Not from inside the failed publish, which can be deep in the call stack
+  TEST_ASSERT_EQUAL_INT(0, logTestCount("Publish failed"));
+
+  mqttLoop();
+  const int i = logTestIndexOf("[MQTT] Publish failed: " F0_BASE "/name - closing the connection");
+  TEST_ASSERT_TRUE(i >= 0);
+  TEST_ASSERT_EQUAL_UINT8(SYSLOG_WARNING, s_logLevels[i]);
+
+  mqttLoop();
+  TEST_ASSERT_EQUAL_INT(1, logTestCount("Publish failed"));
+}
+
+void test_after_a_drop_the_next_report_reconnects_and_publishes_everything(void) {
+  mqttTestSetPublishFail(true);
+  reportMqtt();
+
+  mqttTestSetPublishFail(false);   // the broker is reachable again
+  mqttTestResetRecords();
+  const int before = g_mqttTest.lastConnect.attempts;
+  s_millis += 60000;               // the next report, past the 5 s backoff
+  reportMqtt();
+
+  TEST_ASSERT_EQUAL_INT(before + 1, g_mqttTest.lastConnect.attempts);
+  TEST_ASSERT_TRUE(g_mqtt.connected());
+  TEST_ASSERT_EQUAL_STRING("online", mqttTestPayloadFor(BASE "/availability"));
+  TEST_ASSERT_TRUE(mqttTestPublished(F0_BASE "/name"));
+  TEST_ASSERT_TRUE(mqttTestPublished(BASE "/Device/firmware_version"));
+  // The warning comes first, then the reconnect, so the log reads in order
+  const int warning = logTestIndexOf("Publish failed");
+  const int lost    = logTestIndexOf("Connection lost (rc=-3)");
+  TEST_ASSERT_TRUE(warning >= 0);
+  TEST_ASSERT_TRUE(lost > warning);
+}
+
+void test_a_failed_log_mirror_publish_drops_the_connection(void) {
+  // Every log line is mirrored, so this is usually the first publish to fail
+  g_mqttConfig.logEnabled = true;
+  mqttTestSetPublishFail(true);
+  mqttPublishLog(SYSLOG_INFO, "[000:00:01] ", "first line");
+  mqttPublishLog(SYSLOG_INFO, "[000:00:02] ", "second line");
+
+  TEST_ASSERT_EQUAL_INT(1, g_mqttTest.publishAttempts);   // the second line did not wait
+  TEST_ASSERT_EQUAL_INT(1, mqttTestAbortCount());
+  // Nothing is logged from inside the log call itself
+  TEST_ASSERT_EQUAL_INT(0, logTestCount("Publish failed"));
+  mqttLoop();
+  TEST_ASSERT_EQUAL_INT(1, logTestCount("Publish failed: " BASE "/Device/log"));
+}
+
+void test_a_failed_online_publish_skips_the_discovery_that_follows(void) {
+  g_mqttConfig.haDiscovery = true;
+  mqttTestSetConnected(false);
+  mqttTestSetPublishFail(true);
+  s_millis += 60000;
+  reportMqtt();   // connects, then "online" is the first publish
+
+  TEST_ASSERT_EQUAL_INT(1, g_mqttTest.publishAttempts);   // not "online" + 240 discovery
+  TEST_ASSERT_EQUAL_INT(1, mqttTestAbortCount());
+  TEST_ASSERT_EQUAL_INT(0, logTestCount("HA discovery published"));
+  TEST_ASSERT_EQUAL_INT(0, logTestCount("[MQTT] Published"));
+}
+
+void test_the_mqtt_test_reports_fail_on_a_dead_connection(void) {
+  mqttTestSetPublishFail(true);
+  TEST_ASSERT_FALSE(testMqtt());
+  TEST_ASSERT_EQUAL_INT(1, mqttTestAbortCount());
+  const int warning = logTestIndexOf("Publish failed: " BASE "/test");
+  const int fail    = logTestIndexOf("Test publish to " BASE "/test: FAIL");
+  TEST_ASSERT_TRUE(warning >= 0);
+  TEST_ASSERT_TRUE(fail > warning);
+}
+
+void test_a_settings_change_on_a_dead_connection_aborts_instead_of_disconnecting(void) {
+  mqttTestSetPublishFail(true);
+  mqttSettingsChanged();
+
+  TEST_ASSERT_EQUAL_INT(1, g_mqttTest.publishAttempts);   // only "offline"
+  TEST_ASSERT_EQUAL_INT(1, mqttTestAbortCount());
+  // disconnect() would write and wait on the dead link again
+  TEST_ASSERT_EQUAL_INT(0, g_mqttTest.disconnectCount);
+  TEST_ASSERT_FALSE(g_mqtt.connected());
+
+  // The settings reset still applies: the next report connects at once
+  mqttTestSetPublishFail(false);
+  const int before = g_mqttTest.lastConnect.attempts;
+  reportMqtt();
+  TEST_ASSERT_EQUAL_INT(before + 1, g_mqttTest.lastConnect.attempts);
+  TEST_ASSERT_TRUE(g_mqtt.connected());
+}
+
+void test_publishing_while_disconnected_is_skipped_quietly(void) {
+  // Already known to be down and the broker unreachable: no publish is tried,
+  // nothing is aborted and no warning is logged
+  mqttTestSetConnected(false);
+  mqttTestSetConnectOk(false);
+  g_updateStatus.checked = true;   // so the update-status publish gets as far as connected()
+  reportMqtt();
+  mqttPublishUpdateStatus();
+  mqttLoop();
+
+  TEST_ASSERT_EQUAL_INT(0, g_mqttTest.publishAttempts);
+  TEST_ASSERT_EQUAL_INT(0, mqttTestAbortCount());
+  TEST_ASSERT_EQUAL_INT(0, logTestCount("Publish failed"));
+}
+
+// ============================================================
 
 int main(int, char**) {
   UNITY_BEGIN();
@@ -1665,7 +1849,7 @@ int main(int, char**) {
   RUN_TEST(test_no_discovery_payload_exceeds_the_client_buffer);
   RUN_TEST(test_discovery_publishes_every_row_of_every_table);
   RUN_TEST(test_discovery_update_entity_links_the_version_topics);
-  RUN_TEST(test_discovery_publish_failure_does_not_abort_the_burst);
+  RUN_TEST(test_a_failed_discovery_publish_drops_the_connection_and_stops_the_burst);
 
   // C. removal
   RUN_TEST(test_removal_publishes_empty_retained_payloads);
@@ -1728,6 +1912,16 @@ int main(int, char**) {
   RUN_TEST(test_a_settings_change_marks_the_old_topic_offline_and_disconnects);
   RUN_TEST(test_after_a_settings_change_the_next_report_uses_the_new_settings);
   RUN_TEST(test_a_settings_change_while_disconnected_publishes_nothing);
+
+  // A dead connection
+  RUN_TEST(test_a_failed_publish_drops_the_connection_and_skips_the_rest_of_the_report);
+  RUN_TEST(test_the_drop_warning_is_logged_once_from_the_loop);
+  RUN_TEST(test_after_a_drop_the_next_report_reconnects_and_publishes_everything);
+  RUN_TEST(test_a_failed_log_mirror_publish_drops_the_connection);
+  RUN_TEST(test_a_failed_online_publish_skips_the_discovery_that_follows);
+  RUN_TEST(test_the_mqtt_test_reports_fail_on_a_dead_connection);
+  RUN_TEST(test_a_settings_change_on_a_dead_connection_aborts_instead_of_disconnecting);
+  RUN_TEST(test_publishing_while_disconnected_is_skipped_quietly);
 
   return UNITY_END();
 }

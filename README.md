@@ -236,7 +236,7 @@ The admin page shows the same events as banners under its top bar, on every tab,
 - An alarm or sensor banner shows while the problem is there, with the latest reading.
 - A restart banner stays until the controller restarts again; a finished profile's until the next profile starts on that fermenter.
 - At most three banners are shown, most serious first. The rest are behind a **+N more alerts** row.
-- Close a banner with its **×**. It stays closed in that browser, but something new - another alarm, a later release - gets a banner of its own. An alarm that comes and goes at its limit counts as the same one until it has stayed away for 10 minutes, as with the notifications. After a restart, anything still wrong shows again.
+- Close a banner with its **×**. It stays closed in that browser, but something new - another alarm, a later release - gets a banner of its own. An alarm that turns severe shows again, even if its banner was closed while it was mild. An alarm that comes and goes at its limit counts as the same one until it has stayed away for 10 minutes, as with the notifications. After a restart, anything still wrong shows again.
 
 ---
 

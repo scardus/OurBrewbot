@@ -56,6 +56,8 @@
 // ---- millis(), settable per test ----
 static uint32_t s_millis = 1000000;   // large, so dwell-timer sentinels of 0 read as "never"
 uint32_t millis() { return s_millis; }
+// Temperatures.cpp drops a checkpoint for each phase (Crash.cpp isn't compiled here)
+void checkpoint(uint8_t) {}
 void test_setMillis(uint32_t ms) { s_millis = ms; }
 
 // ---- the uptime clock (Uptime.cpp), driven by the same settable millis() ----
@@ -155,7 +157,10 @@ void restartDevice(bool forgetWiFi) {
   s_lastForgetWiFi = forgetWiFi;
 }
 void smartPlugSwitch(uint8_t, bool) {}
-bool getPlugState(uint8_t) { return false; }
+void smartPlugsResendOne() {}
+// What getPlugState() answers: true = the plug was last switched ON
+static bool s_plugIsOn = false;
+bool getPlugState(uint8_t) { return s_plugIsOn; }
 
 // A forced OFF is recorded together with the plug's settings AT THE TIME of
 // the call, so a test can prove the OFF went out with the old code, not the
@@ -245,6 +250,7 @@ void setUp(void) {
   s_rfTransmits = 0;
   s_rfRefuses   = false;
   s_forceOffs   = 0;
+  s_plugIsOn    = false;
   s_allPlugsOffs = 0;
   s_offCodeAtAllPlugsOff = 0;
   s_plugsHeldOff = false;
@@ -2060,7 +2066,7 @@ static void test_smartplug_post_switches_off_for_any_rf_setting_change(void) {
   const char* bodies[] = {
     "{\"index\":0,\"onCode\":1}",
     "{\"index\":0,\"protocol\":2}",
-    "{\"index\":0,\"bits\":12}",
+    "{\"index\":0,\"bits\":32}",   // the codes still fit (fewer bits is refused)
   };
   for (const char* body : bodies) {
     configureHeaterPlug(0);
@@ -2085,6 +2091,77 @@ static void test_smartplug_post_leaves_the_plug_alone_when_switching_is_unchange
   TEST_ASSERT_EQUAL_STRING("Dial", g_smartPlugs[0].manufacturer);
 }
 
+// ---- the compressor delay after a fridge plug is changed while ON ----
+
+// Fermenter 1's fridge plug, ON, with Fermenter 1 cooling. The compressor
+// last stopped long ago, at uptime 0.
+static void configureRunningFridgePlug(uint8_t idx) {
+  configureHeaterPlug(idx);
+  g_smartPlugs[idx].function = PLUG_FN_F1_COLD;
+  s_plugIsOn  = true;
+  s_uptimeSec = 5000;
+  for (int i = 0; i < MAX_FERMENTERS; i++) {
+    s_state[i]           = STATUS_IDLE;
+    s_lastCoolingStop[i] = 0;
+  }
+  s_state[0] = STATUS_COOLING;
+}
+
+// A small change to the pulse length: the plug is switched OFF, and the
+// compressor delay starts, so the next pass can't switch it back on
+static void test_smartplug_post_starts_the_compressor_delay_for_a_running_fridge(void) {
+  configureRunningFridgePlug(0);
+  postBody("{\"index\":0,\"delay\":420}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, s_forceOffs);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[0]);
+  TEST_ASSERT_EQUAL_UINT32(5000, s_lastCoolingStop[0]);
+}
+
+// Moved to Fermenter 2's cooling: both fermenters wait out the delay
+static void test_smartplug_post_starts_the_compressor_delay_where_a_running_fridge_moves(void) {
+  configureRunningFridgePlug(0);
+  s_state[1] = STATUS_COOLING;
+  postBody("{\"index\":0,\"function\":3,\"fermenter\":1}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_UINT32(5000, s_lastCoolingStop[0]);
+  TEST_ASSERT_EQUAL_UINT32(5000, s_lastCoolingStop[1]);
+  TEST_ASSERT_EQUAL(STATUS_IDLE, s_state[1]);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[2]);
+}
+
+// A plug that was OFF: no compressor has just stopped, so no delay
+static void test_smartplug_post_starts_no_delay_for_a_fridge_plug_that_was_off(void) {
+  configureRunningFridgePlug(0);
+  s_plugIsOn = false;
+  postBody("{\"index\":0,\"delay\":420}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_forceOffs);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, s_state[0]);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[0]);
+}
+
+// A heater that was ON: heating has no compressor delay
+static void test_smartplug_post_starts_no_delay_for_a_heater(void) {
+  configureRunningFridgePlug(0);
+  g_smartPlugs[0].function = PLUG_FN_F1_HOT;
+  postBody("{\"index\":0,\"delay\":420}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(1, s_forceOffs);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[0]);
+}
+
+// A save that changes nothing about switching leaves the fridge running
+static void test_smartplug_post_unchanged_save_starts_no_delay(void) {
+  configureRunningFridgePlug(0);
+  postBody("{\"index\":0,\"manufacturer\":\"Dial\"}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+  TEST_ASSERT_EQUAL(STATUS_COOLING, s_state[0]);
+  TEST_ASSERT_EQUAL_UINT32(0, s_lastCoolingStop[0]);
+}
+
 // A rejected value is not a change, so it must not switch the plug off either.
 static void test_smartplug_post_ignored_value_does_not_switch_the_plug_off(void) {
   configureHeaterPlug(0);
@@ -2103,6 +2180,59 @@ static void test_smartplug_post_refuses_a_pulse_length_that_would_trip_the_watch
   TEST_ASSERT_TRUE(bodyContains("pulse length too long"));
   TEST_ASSERT_EQUAL_UINT16(410, g_smartPlugs[0].delayLength);
   TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+}
+
+// ---- ON and OFF codes must send different signals ----
+
+// One remote button learnt twice: every OFF would switch the plug ON
+static void test_smartplug_post_refuses_the_same_on_and_off_code(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"offCode\":1193046}");   // = the ON code, 0x123456
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("ON and OFF codes send the same signal"));
+  TEST_ASSERT_EQUAL_HEX32(0xABCDEF, g_smartPlugs[0].offCode);   // unchanged
+  TEST_ASSERT_EQUAL_INT(0, s_forceOffs);
+}
+
+// The bits above the bit count are never sent, so a code that needs them is
+// refused (0x01123456 at 24 bits would send 0x123456, the ON code)
+static void test_smartplug_post_refuses_a_code_longer_than_the_bit_count(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"offCode\":17970262}");   // 0x01123456
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("more bits than the plug's bit count"));
+  TEST_ASSERT_EQUAL_HEX32(0xABCDEF, g_smartPlugs[0].offCode);
+
+  httpRespReset();
+  postBody("{\"index\":0,\"bits\":20}");             // the saved codes need 24
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(24, g_smartPlugs[0].bits);
+}
+
+// Real 32-bit codes use every bit, and are accepted
+static void test_smartplug_post_accepts_32_bit_codes(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"bits\":32,\"onCode\":4294967294,\"offCode\":4294967295}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_HEX32(0xFFFFFFFF, g_smartPlugs[0].offCode);
+}
+
+// While learning, a plug is saved with only one code so far
+static void test_smartplug_post_accepts_a_plug_with_one_code_learnt(void) {
+  configureHeaterPlug(0);
+  postBody("{\"index\":0,\"offCode\":0}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+
+  configureHeaterPlug(1);
+  httpRespReset();
+  postBody("{\"index\":1,\"onCode\":0}");
+  handleSmartPlugPost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
 }
 
 // rc-switch only knows protocols 1-12 (it quietly sent anything else as 1)
@@ -3103,7 +3233,6 @@ static void test_controller_reports_the_update_status(void) {
   g_updateStatus.checked = true;
   g_updateStatus.updateAvailable = true;
   strlcpy(g_updateStatus.latestVersion, "0.4.17", sizeof(g_updateStatus.latestVersion));
-  strlcpy(g_updateStatus.notesUrl, "https://example.com/notes", sizeof(g_updateStatus.notesUrl));
   g_updateStatus.attempted = true;
   g_updateStatus.lastCheckSec = s_millis / 1000;   // uptime seconds
   s_millis += 5 * 60000UL;   // checked 5 minutes ago
@@ -3115,7 +3244,8 @@ static void test_controller_reports_the_update_status(void) {
   TEST_ASSERT_TRUE(doc["UpdateChecked"].as<bool>());
   TEST_ASSERT_TRUE(doc["UpdateAvailable"].as<bool>());
   TEST_ASSERT_EQUAL_STRING("0.4.17", doc["LatestVersion"].as<const char*>());
-  TEST_ASSERT_EQUAL_STRING("https://example.com/notes", doc["UpdateNotesUrl"].as<const char*>());
+  // The notes link came from plain HTTP, so it was dropped - the WebUI builds its own
+  TEST_ASSERT_FALSE(doc["UpdateNotesUrl"].is<const char*>());
   TEST_ASSERT_EQUAL_STRING("", doc["UpdateCheckError"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(5, doc["LastUpdateCheck"].as<int>());
 }
@@ -3812,9 +3942,18 @@ int main(int, char**) {
   RUN_TEST(test_smartplug_post_switches_a_plug_off_with_its_old_code);
   RUN_TEST(test_smartplug_post_switches_off_for_any_rf_setting_change);
   RUN_TEST(test_smartplug_post_leaves_the_plug_alone_when_switching_is_unchanged);
+  RUN_TEST(test_smartplug_post_starts_the_compressor_delay_for_a_running_fridge);
+  RUN_TEST(test_smartplug_post_starts_the_compressor_delay_where_a_running_fridge_moves);
+  RUN_TEST(test_smartplug_post_starts_no_delay_for_a_fridge_plug_that_was_off);
+  RUN_TEST(test_smartplug_post_starts_no_delay_for_a_heater);
+  RUN_TEST(test_smartplug_post_unchanged_save_starts_no_delay);
   RUN_TEST(test_smartplug_post_ignored_value_does_not_switch_the_plug_off);
   RUN_TEST(test_smartplug_post_refuses_a_pulse_length_that_would_trip_the_watchdog);
   RUN_TEST(test_smartplug_post_refuses_an_unknown_protocol);
+  RUN_TEST(test_smartplug_post_refuses_the_same_on_and_off_code);
+  RUN_TEST(test_smartplug_post_refuses_a_code_longer_than_the_bit_count);
+  RUN_TEST(test_smartplug_post_accepts_32_bit_codes);
+  RUN_TEST(test_smartplug_post_accepts_a_plug_with_one_code_learnt);
   RUN_TEST(test_smartplug_test_transmits_the_selected_code);
   RUN_TEST(test_smartplug_test_refuses_when_no_code_is_configured);
   RUN_TEST(test_smartplug_test_reports_refused_rf_settings);

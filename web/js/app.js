@@ -28,6 +28,9 @@ function render() {
   // Replacing the view must not move a horizontal list the user has scrolled.
   const profileScroll=sameView?$('.profile-list',main)?.scrollLeft:0;
   const tabScroll=sameView?$('.tabs',main)?.scrollLeft:0;
+  // The selected slot may already have changed, so compare it with the last rendered slot.
+  const sameProfile=sameView && main.dataset.profile===String(state.selectedProfile);
+  const previewScroll=sameProfile?$('.profile-preview-content',main)?.scrollLeft:0;
   $('#navigation').innerHTML=navItems.map(([key,label])=>`
     <a href="#${key}" class="nav-item ${state.route===key?'active':''}" ${state.route===key?'aria-current="page"':''}>
       ${icon(key)}<span>${label}</span>
@@ -41,9 +44,11 @@ function render() {
     ${btn('Try reconnecting','reconnect','small ghost')}</div></div>`:'';
   main.innerHTML=offline+renderers[state.route]();
   main.dataset.route=state.route;
-  const profileList=$('.profile-list',main),tabs=$('.tabs',main);
+  main.dataset.profile=String(state.selectedProfile);
+  const profileList=$('.profile-list',main),tabs=$('.tabs',main),preview=$('.profile-preview-content',main);
   if (profileList && profileScroll) profileList.scrollLeft=profileScroll;
   if (tabs && tabScroll) tabs.scrollLeft=tabScroll;
+  if (preview && previewScroll) preview.scrollLeft=previewScroll;
   mountForms(main);
   if (state.route==='sensors' && state.sensorTab==='pressure') updatePressureReadings();
   markProfileDraft();

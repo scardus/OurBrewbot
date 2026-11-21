@@ -73,7 +73,7 @@ static const char* OLDER = "0.0.1";    // always older than FW_VERSION
 static const char* replyFor(const char* version) {
   static char body[160];
   snprintf(body, sizeof(body),
-           "{\"version\":\"%s\",\"notes\":\"https://github.com/scardus/OurBrewbot/releases/tag/v%s\"}",
+           "{\"version\":\"%s\",\"notes\":\"https://ourbrewbot.com/news/#v%s\"}",
            version, version);
   return body;
 }
@@ -154,50 +154,33 @@ static void test_newer_is_false_when_either_version_is_invalid(void) {
 // parseVersionJson
 // ============================================================
 
-static void test_json_reads_version_and_notes(void) {
-  char v[16], n[96];
-  TEST_ASSERT_TRUE(parseVersionJson(String("{\"version\":\"0.4.17\",\"notes\":\"https://example.com/n\"}"),
-                                    v, sizeof(v), n, sizeof(n)));
+// The website still sends "notes" for older firmware - it must not stop the version being read
+static void test_json_reads_the_version_and_ignores_notes(void) {
+  char v[16];
+  TEST_ASSERT_TRUE(parseVersionJson(String("{\"version\":\"0.4.17\",\"notes\":\"javascript:alert(1)\"}"),
+                                    v, sizeof(v)));
   TEST_ASSERT_EQUAL_STRING("0.4.17", v);
-  TEST_ASSERT_EQUAL_STRING("https://example.com/n", n);
 }
 
 static void test_json_strips_a_leading_v(void) {
-  char v[16], n[96];
-  TEST_ASSERT_TRUE(parseVersionJson(String("{\"version\":\"v0.4.17\"}"), v, sizeof(v), n, sizeof(n)));
+  char v[16];
+  TEST_ASSERT_TRUE(parseVersionJson(String("{\"version\":\"v0.4.17\"}"), v, sizeof(v)));
   TEST_ASSERT_EQUAL_STRING("0.4.17", v);
 }
 
-static void test_json_notes_are_optional_and_must_be_a_whole_link(void) {
-  char v[16], n[96];
-  TEST_ASSERT_TRUE(parseVersionJson(String("{\"version\":\"0.4.17\"}"), v, sizeof(v), n, sizeof(n)));
-  TEST_ASSERT_EQUAL_STRING("", n);
-
-  TEST_ASSERT_TRUE(parseVersionJson(String("{\"version\":\"0.4.17\",\"notes\":\"javascript:alert(1)\"}"),
-                                    v, sizeof(v), n, sizeof(n)));
-  TEST_ASSERT_EQUAL_STRING("", n);
-
-  // Too long for the buffer: dropped rather than cut short into a broken link
-  char small[16];
-  TEST_ASSERT_TRUE(parseVersionJson(String("{\"version\":\"0.4.17\",\"notes\":\"https://example.com/a/long/path\"}"),
-                                    v, sizeof(v), small, sizeof(small)));
-  TEST_ASSERT_EQUAL_STRING("", small);
-}
-
 static void test_json_ignores_extra_fields(void) {
-  char v[16], n[96];
-  TEST_ASSERT_TRUE(parseVersionJson(String("{\"version\":\"0.4.17\",\"future\":[1,2,3]}"),
-                                    v, sizeof(v), n, sizeof(n)));
+  char v[16];
+  TEST_ASSERT_TRUE(parseVersionJson(String("{\"version\":\"0.4.17\",\"future\":[1,2,3]}"), v, sizeof(v)));
   TEST_ASSERT_EQUAL_STRING("0.4.17", v);
 }
 
 static void test_json_rejects_a_missing_or_bad_version(void) {
-  char v[16], n[96];
-  TEST_ASSERT_FALSE(parseVersionJson(String("{\"notes\":\"https://example.com\"}"), v, sizeof(v), n, sizeof(n)));
-  TEST_ASSERT_FALSE(parseVersionJson(String("{\"version\":417}"),           v, sizeof(v), n, sizeof(n)));
-  TEST_ASSERT_FALSE(parseVersionJson(String("{\"version\":\"latest\"}"),    v, sizeof(v), n, sizeof(n)));
-  TEST_ASSERT_FALSE(parseVersionJson(String("<html>Moved</html>"),          v, sizeof(v), n, sizeof(n)));
-  TEST_ASSERT_FALSE(parseVersionJson(String(""),                            v, sizeof(v), n, sizeof(n)));
+  char v[16];
+  TEST_ASSERT_FALSE(parseVersionJson(String("{\"notes\":\"https://example.com\"}"), v, sizeof(v)));
+  TEST_ASSERT_FALSE(parseVersionJson(String("{\"version\":417}"),           v, sizeof(v)));
+  TEST_ASSERT_FALSE(parseVersionJson(String("{\"version\":\"latest\"}"),    v, sizeof(v)));
+  TEST_ASSERT_FALSE(parseVersionJson(String("<html>Moved</html>"),          v, sizeof(v)));
+  TEST_ASSERT_FALSE(parseVersionJson(String(""),                            v, sizeof(v)));
 }
 
 // ============================================================
@@ -218,7 +201,6 @@ static void test_check_reports_a_newer_release(void) {
   TEST_ASSERT_TRUE(g_updateStatus.checked);
   TEST_ASSERT_TRUE(g_updateStatus.updateAvailable);
   TEST_ASSERT_EQUAL_STRING(NEWER, g_updateStatus.latestVersion);
-  TEST_ASSERT_EQUAL_STRING("https://github.com/scardus/OurBrewbot/releases/tag/v99.0.0", g_updateStatus.notesUrl);
   TEST_ASSERT_EQUAL_STRING("", g_updateStatus.lastError);
   TEST_ASSERT_EQUAL_INT(1, s_logCount[SYSLOG_NOTICE]);
   TEST_ASSERT_EQUAL_INT(1, s_mqttPublishes);
@@ -339,12 +321,16 @@ static void test_failure_keeps_the_last_good_result(void) {
 // updateCheckLoop (scheduler)
 // ============================================================
 
-// Run the loop at a given time and report whether a check happened
+// Run the loop at a given time and report whether a check happened. The
+// main loop sends one HTTP request per pass, so updateCheckLoop() must
+// return true exactly when it made one.
 static bool loopAt(uint32_t ms) {
   int before = g_httpTest.getCount;
   s_millis = ms;
-  updateCheckLoop();
-  return g_httpTest.getCount != before;
+  bool saidSent = updateCheckLoop();
+  bool sent = g_httpTest.getCount != before;
+  TEST_ASSERT_EQUAL_MESSAGE(sent, saidSent, "updateCheckLoop() return value");
+  return sent;
 }
 
 static uint32_t firstCheckDelay() {
@@ -399,6 +385,23 @@ static void test_switched_off_skips_the_check(void) {
   TEST_ASSERT_TRUE(loopAt(t + UPDATE_INTERVAL_MS));
 }
 
+// A check due while WiFi is down makes no request, so it must not say it did
+// (loopAt() checks that) - the jobs after it in loop() would wait a pass for
+// nothing. It still counts as a failed try: the retry comes an hour later.
+static void test_a_check_due_while_offline_is_not_a_request(void) {
+  httpTestSetReply(200, replyFor(OLDER));
+  uint32_t t = 1000;
+  loopAt(t);
+  t += firstCheckDelay();
+  WiFi.connected = false;
+  TEST_ASSERT_FALSE(loopAt(t));
+  TEST_ASSERT_EQUAL_STRING("WiFi not connected", g_updateStatus.lastError);
+
+  WiFi.connected = true;
+  TEST_ASSERT_FALSE(loopAt(t + UPDATE_RETRY_MS - 1));
+  TEST_ASSERT_TRUE (loopAt(t + UPDATE_RETRY_MS));
+}
+
 // millis() wraps every ~49.7 days; the unsigned subtraction must cope
 static void test_schedule_survives_the_millis_wrap(void) {
   httpTestSetReply(200, replyFor(OLDER));
@@ -417,9 +420,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_newer_compares_each_part_numerically);
   RUN_TEST(test_newer_is_false_when_either_version_is_invalid);
 
-  RUN_TEST(test_json_reads_version_and_notes);
+  RUN_TEST(test_json_reads_the_version_and_ignores_notes);
   RUN_TEST(test_json_strips_a_leading_v);
-  RUN_TEST(test_json_notes_are_optional_and_must_be_a_whole_link);
   RUN_TEST(test_json_ignores_extra_fields);
   RUN_TEST(test_json_rejects_a_missing_or_bad_version);
 
@@ -441,6 +443,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_after_a_success_the_next_check_is_a_day_later);
   RUN_TEST(test_failures_retry_hourly_three_times_then_wait_a_day);
   RUN_TEST(test_switched_off_skips_the_check);
+  RUN_TEST(test_a_check_due_while_offline_is_not_a_request);
   RUN_TEST(test_schedule_survives_the_millis_wrap);
 
   return UNITY_END();

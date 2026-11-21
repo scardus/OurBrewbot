@@ -749,6 +749,10 @@ bool loadSmartPlugConfig() {
       why[sizeof(why) - 1] = '\0';
       logMsg("[CFG] Plug %d: %s - it won't be sent until this is corrected", i, why);
     }
+    // Only logged too: such a plug isn't sent anything (see smartPlugSwitch())
+    if (rfCodesClash(p.onCode, p.offCode, p.bits)) {
+      logMsg("[CFG] Plug %d: ON and OFF codes send the same signal - it won't be switched until this is corrected", i);
+    }
   }
   return true;
 }

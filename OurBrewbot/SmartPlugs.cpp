@@ -39,6 +39,11 @@ static bool s_plugState[MAX_SMART_PLUGS] = {false};
 static bool     s_plugSent[MAX_SMART_PLUGS]   = {false};
 static uint32_t s_plugSentAt[MAX_SMART_PLUGS] = {0};
 
+// Set by smartPlugSwitch() when the control loop asks for a state a plug
+// already has. At the end of the control pass smartPlugsResendOne() re-sends
+// one of these plugs, if it's due, and clears them all.
+static bool s_resendAsked[MAX_SMART_PLUGS] = {false};
+
 // While true, smartPlugSwitch() sends nothing, so the control loop can't
 // switch a plug back on (set for a firmware upload - see holdPlugsOff()).
 static bool s_plugsHeldOff = false;
@@ -111,15 +116,24 @@ void smartPlugSwitch(uint8_t plugIndex, bool on) {
   // cooling and then stayed on for good, as there was no OFF code to send.
   if (on && plug.offCode == 0) return;
 
+  // A plug whose ON and OFF codes send the same signal (see rfCodesClash())
+  // is sent nothing at all: that one signal may be its ON, so even an OFF
+  // could switch it on. The WebUI refuses these codes; this covers an
+  // imported or hand-edited file, and the boot config check logs the reason.
+  if (rfCodesClash(plug.onCode, plug.offCode, plug.bits)) return;
+
   uint32_t code = on ? plug.onCode : plug.offCode;
 
   if (code == 0) return;
 
-  // Each transmit blocks the loop for ~0.5 s, so a plug already in the wanted
-  // state is only re-sent once a minute. Before 0.6.4 every plug was re-sent
-  // every 10 s, which kept the loop blocked ~10% of the time with two plugs.
+  // A plug already in the wanted state is not sent anything here. It is
+  // re-sent about once a minute by smartPlugsResendOne(), one plug per control
+  // pass, as each transmit blocks the loop for ~0.5 s.
   bool changed = !s_plugSent[plugIndex] || on != s_plugState[plugIndex];
-  if (!changed && millis() - s_plugSentAt[plugIndex] < PLUG_RESEND_MS) return;
+  if (!changed) {
+    s_resendAsked[plugIndex] = true;
+    return;
+  }
 
   if (!rfTransmit(code, plug.bits, plug.delayLength, plug.protocol)) return;
 
@@ -129,6 +143,47 @@ void smartPlugSwitch(uint8_t plugIndex, bool on) {
   s_plugState[plugIndex]  = on;
   s_plugSent[plugIndex]   = true;
   s_plugSentAt[plugIndex] = millis();
+}
+
+// ============================================================
+// RESEND
+// ============================================================
+
+// Every plug used to be re-sent in the same control pass, because they were
+// all first sent at boot. With many plugs and slow RF settings that blocked
+// the loop for ~16 s every minute. Now only one plug is re-sent per pass: the
+// one that was sent longest ago, so with more plugs than passes in a minute
+// every plug still gets its turn.
+void smartPlugsResendOne() {
+  uint32_t now       = millis();
+  int      oldest    = -1;
+  uint32_t oldestAge = 0;
+  for (int p = 0; p < MAX_SMART_PLUGS; p++) {
+    if (!s_resendAsked[p]) continue;
+    s_resendAsked[p] = false;   // the next pass starts with no asks
+
+    uint32_t age = now - s_plugSentAt[p];
+    if (age < PLUG_RESEND_MS) continue;   // sent recently
+    if (oldest < 0 || age > oldestAge) {
+      oldest    = p;
+      oldestAge = age;
+    }
+  }
+  if (oldest < 0 || s_plugsHeldOff) return;
+
+  SmartPlugConfig& plug = g_smartPlugs[oldest];
+  bool     on   = s_plugState[oldest];
+  uint32_t code = on ? plug.onCode : plug.offCode;
+  bool     sent = rfTransmit(code, plug.bits, plug.delayLength, plug.protocol);
+
+  // Taken after the burst, as in smartPlugSwitch(). Also taken when the send
+  // was refused (RF settings over the limit), so that plug can't keep the
+  // other plugs from their turn - the refusal is already logged.
+  s_plugSentAt[oldest] = millis();
+  if (!sent) return;
+
+  logMsg("[PLUG] Plug %d %s (code 0x%06X, %d-bit, %dus)",
+    oldest, on ? "ON" : "OFF", code, plug.bits, plug.delayLength);
 }
 
 // ============================================================
@@ -144,6 +199,7 @@ void smartPlugForceOff(uint8_t plugIndex) {
 
   SmartPlugConfig& plug = g_smartPlugs[plugIndex];
   if (plug.offCode == 0) return;   // no OFF code learnt - nothing to send
+  if (rfCodesClash(plug.onCode, plug.offCode, plug.bits)) return;   // its OFF may be its ON - see smartPlugSwitch()
 
   if (!rfTransmit(plug.offCode, plug.bits, plug.delayLength, plug.protocol)) return;
 

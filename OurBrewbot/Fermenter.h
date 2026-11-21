@@ -56,6 +56,14 @@ void switchOffAll();
 // Unlike switchOffAll(), power and settings are left as they are.
 void idleAllFermenters();
 
+// A cooling plug that was ON has just been switched off by a settings change.
+// Starts the fermenter's compressor delay from now, so the next control pass
+// can't switch the fridge straight back on.
+void fermenterCompressorStopped(uint8_t index);
+
+// The fermenter a plug cools (0-3), or -1 if it isn't a cooling plug
+int plugCoolsFermenter(const SmartPlugConfig& plug);
+
 // Get attenuation percentage
 float getAttenuation(uint8_t index);
 

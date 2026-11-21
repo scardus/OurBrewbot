@@ -47,7 +47,14 @@
 // Build the JSON report for `crash` into `out`. Returns false if it doesn't fit.
 bool buildCrashReportJson(const CrashInfo& crash, char* out, size_t outSize);
 
-// Call every loop pass: saves this boot's crash (if any) to the queue, then
-// sends the saved reports when they are due. Does nothing once the queue is
-// empty.
-void crashReportLoop();
+// Call once in setup(), as soon as the crash record has been read: saves this
+// boot's crash (if any) to the queue in flash. The record has already been
+// cleared from RTC memory by then, so until it is saved another restart
+// would lose it.
+void crashReportBootSave();
+
+// Call every loop pass: sends the saved reports when they are due (and saves
+// this boot's crash first if crashReportBootSave() hasn't run). Does nothing
+// once the queue is empty. Returns true if it made an HTTP request (see the
+// main loop).
+bool crashReportLoop();

@@ -355,6 +355,21 @@ inline bool checkRfSettings(uint8_t protocol, uint8_t bits, uint16_t delayUs, co
   return err == nullptr;
 }
 
+// The part of a code rc-switch actually sends: its lowest `bits` bits. A
+// 32-bit code is sent whole (shifting a 32-bit value by 32 is undefined).
+inline uint32_t rfSentCode(uint32_t code, uint8_t bits) {
+  if (bits >= 32) return code;
+  return code & ((1UL << bits) - 1);
+}
+
+// True when a plug's ON and OFF codes would send the same signal, so every
+// OFF, emergency OFF included, would switch the plug ON. That happens when
+// the same remote button is learnt twice, or when the codes only differ in
+// bits above the plug's bit count (which are never sent).
+inline bool rfCodesClash(uint32_t onCode, uint32_t offCode, uint8_t bits) {
+  return onCode != 0 && offCode != 0 && rfSentCode(onCode, bits) == rfSentCode(offCode, bits);
+}
+
 // ============================================================
 // STRUCT: FermenterDebugOverride
 // Runtime-only — never persisted, resets on reboot.
@@ -442,7 +457,7 @@ struct TiltConfig {
   float   sg;                   // current specific gravity reading (with sgAdjust applied)
   float   temperature;          // Tilt temperature reading (with tempAdjust applied)
   bool    active;               // Tilt has been seen recently
-  uint32_t lastSeen;            // millis() of last reading
+  uint32_t lastSeen;            // uptimeStamp() of last reading (seconds since boot, so it never wraps)
   bool    isPro;                // true if auto-detected as Tilt Pro (raw minor > TILT_PRO_THRESHOLD)
 };
 

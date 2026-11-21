@@ -930,6 +930,18 @@ void test_load_corrects_an_out_of_range_plug_bit_count(void) {
   TEST_ASSERT_EQUAL_UINT8(32, g_smartPlugs[3].bits);
 }
 
+// A file with ON and OFF codes that send the same signal is loaded as it is
+// (so it can be seen and corrected), with the reason logged
+void test_load_logs_a_plug_whose_codes_send_the_same_signal(void) {
+  fsTestWrite(FILE_SMARTPLUGS,
+    "{\"OnCode\":[1193046,0,0,0,0,0,0,0,0,0],\"OffCode\":[17970262,0,0,0,0,0,0,0,0,0],"
+    "\"Bits\":[24,24,24,24,24,24,24,24,24,24],\"Protocol\":[1,1,1,1,1,1,1,1,1,1],"
+    "\"DelayLength\":[410,410,410,410,410,410,410,410,410,410]}");
+  TEST_ASSERT_TRUE(loadSmartPlugConfig());
+  TEST_ASSERT_EQUAL_UINT32(17970262, g_smartPlugs[0].offCode);   // kept
+  TEST_ASSERT_NOT_NULL(strstr(s_lastLog, "Plug 0: ON and OFF codes send the same signal"));
+}
+
 // The profile part-hour is saved, so it survives a reboot (0.6.4)
 void test_hour_ticks_are_saved_and_loaded(void) {
   g_fermenters[0].hourTicks = 4;
@@ -1602,6 +1614,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_load_stops_a_profile_that_does_not_exist);
   RUN_TEST(test_load_corrects_an_out_of_range_profile_step);
   RUN_TEST(test_load_corrects_an_out_of_range_plug_bit_count);
+  RUN_TEST(test_load_logs_a_plug_whose_codes_send_the_same_signal);
   RUN_TEST(test_hour_ticks_are_saved_and_loaded);
   RUN_TEST(test_load_corrects_out_of_range_hour_ticks);
   RUN_TEST(test_profile_steps_load_returns_false_without_touching_state);

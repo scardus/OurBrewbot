@@ -415,15 +415,23 @@ static void logFailure(const char* title, int code, PGM_P whatNext) {
   }
 }
 
-void notifyEvent(NotifyEvent type, uint8_t index, uint8_t detail, float a, float b) {
-  if (!g_notifyConfig.enabled) return;
-  if ((g_notifyConfig.events & eventGroup(type)) == 0) return;
+// Set once a full queue has been logged, so the warning isn't repeated at
+// every check of an alarm that is waiting for room (see notifyAlarmState())
+static bool s_queueFullLogged = false;
+
+bool notifyEvent(NotifyEvent type, uint8_t index, uint8_t detail, float a, float b) {
+  if (!g_notifyConfig.enabled) return false;
+  if ((g_notifyConfig.events & eventGroup(type)) == 0) return false;
 
   if (s_queueCount >= NOTIFY_QUEUE_SIZE) {
-    logMsgL(SYSLOG_WARNING, "[NOTIFY] %u notifications already waiting - a new one was dropped",
-            (unsigned)s_queueCount);
-    return;
+    if (!s_queueFullLogged) {
+      logMsgL(SYSLOG_WARNING, "[NOTIFY] %u notifications already waiting - new ones are dropped until there is room",
+              (unsigned)s_queueCount);
+      s_queueFullLogged = true;
+    }
+    return false;
   }
+  s_queueFullLogged = false;
 
   QueuedEvent& slot = s_queue[s_queueCount];
   slot.event.type   = type;
@@ -433,6 +441,7 @@ void notifyEvent(NotifyEvent type, uint8_t index, uint8_t detail, float a, float
   slot.event.b      = b;
   slot.queuedAt     = uptimeStamp();
   s_queueCount++;
+  return true;
 }
 
 // ============================================================
@@ -514,12 +523,45 @@ static bool problemThere(uint8_t tracker) {
   return s_problemSince[tracker] != 0 && s_problemOffSince[tracker] == 0;
 }
 
-// The problem is there. Returns true if "started" should be sent now: the
-// first time, and once more if it has become severe.
-static bool shouldSendStarted(uint8_t tracker, uint8_t level) {
-  if (level <= s_problemSent[tracker]) return false;
-  s_problemSent[tracker] = level;
-  return true;
+// The problem is there. Queues "started" when it is due: the first time, and
+// once more if it has become severe. It only counts as sent once it is in the
+// queue. When the queue is full it is tried again at the next check, so the
+// alarm or lost sensor is still reported once there is room.
+static void sendStartedIfDue(uint8_t tracker, uint8_t level, NotifyEvent type,
+                             uint8_t index, uint8_t detail, float a, float b = 0.0f) {
+  if (level <= s_problemSent[tracker]) return;
+  if (notifyEvent(type, index, detail, a, b)) s_problemSent[tracker] = level;
+}
+
+// The tracker a queued "started" event belongs to, or -1 for other events
+static int startedTracker(const NotifyEventData& event) {
+  switch (event.type) {
+    case NOTIFY_ALARM_OVER:
+    case NOTIFY_ALARM_UNDER:
+      return (event.index < MAX_FERMENTERS) ? TRACK_ALARMS + event.index : -1;
+    case NOTIFY_PROBE_LOST:
+      return (event.index < MAX_PROBES) ? TRACK_PROBES + event.index : -1;
+    case NOTIFY_ISPINDEL_LOST:
+      return (event.index < MAX_ISPINDELS) ? TRACK_ISPINDELS + event.index : -1;
+    case NOTIFY_TILT_LOST:
+      return (event.index < MAX_TILTS) ? TRACK_TILTS + event.index : -1;
+    default:
+      return -1;
+  }
+}
+
+// A queued "started" was dropped unsent because it waited over an hour (WiFi
+// or the server was down). Step its tracker back, so the next check queues it
+// again if the problem is still there. Nothing changes if its episode has
+// already ended, or a new one has begun since it was queued.
+static void startedDroppedUnsent(const NotifyEventData& event, uint32_t queuedAt) {
+  int tracker = startedTracker(event);
+  if (tracker < 0) return;
+  if (s_problemSince[tracker] == 0 || s_problemSince[tracker] > queuedAt) return;
+
+  bool    severe = (event.type == NOTIFY_ALARM_OVER || event.type == NOTIFY_ALARM_UNDER) && event.detail;
+  uint8_t level  = severe ? PROBLEM_SENT_SEVERE : PROBLEM_SENT;
+  if (s_problemSent[tracker] == level) s_problemSent[tracker] = level - 1;
 }
 
 // The episode has just ended. Returns true if "over" should be sent, which
@@ -551,9 +593,8 @@ void notifyAlarmState(uint8_t fermenter, bool active, bool overTemp, bool severe
   }
 
   if (active) {
-    if (shouldSendStarted(tracker, severe ? PROBLEM_SENT_SEVERE : PROBLEM_SENT)) {
-      notifyEvent(overTemp ? NOTIFY_ALARM_OVER : NOTIFY_ALARM_UNDER, fermenter, severe ? 1 : 0, temp, limit);
-    }
+    sendStartedIfDue(tracker, severe ? PROBLEM_SENT_SEVERE : PROBLEM_SENT,
+                     overTemp ? NOTIFY_ALARM_OVER : NOTIFY_ALARM_UNDER, fermenter, severe ? 1 : 0, temp, limit);
   } else if (episodeEnded && shouldSendOver(tracker)) {
     notifyEvent(NOTIFY_ALARM_ENDED, fermenter, 0, temp);
   }
@@ -609,7 +650,7 @@ void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minute
   // going from below zero to full scale) is the same episode: only its first
   // fault is sent, and the banner shows the latest one
   if (lost) {
-    if (shouldSendStarted(tracker, PROBLEM_SENT)) notifyEvent(lostEvent, index, detail, minutes);
+    sendStartedIfDue(tracker, PROBLEM_SENT, lostEvent, index, detail, minutes);
   } else if (episodeEnded && shouldSendOver(tracker)) {
     notifyEvent(backEvent, index);
   }
@@ -652,24 +693,25 @@ bool notifySendDue() {
   return true;
 }
 
-void notifyLoop() {
-  if (s_queueCount == 0) return;
+bool notifyLoop() {
+  if (s_queueCount == 0) return false;
 
   // Switched off while events were waiting: they are not wanted any more
   if (!g_notifyConfig.enabled) {
     s_queueCount = 0;
     s_tries      = 0;
-    return;
+    return false;
   }
 
   // Too old to be useful (WiFi was down, or the server kept failing)
   if (uptimeSince(s_queue[0].queuedAt) > NOTIFY_MAX_AGE_S) {
     logMsgL(SYSLOG_WARNING, "[NOTIFY] A notification waited over an hour - dropped unsent");
+    startedDroppedUnsent(s_queue[0].event, s_queue[0].queuedAt);   // an alarm still on is queued again
     removeFront();
-    return;
+    return false;
   }
 
-  if (!notifySendDue()) return;
+  if (!notifySendDue()) return false;
 
   checkpoint(CP_NOTIFY);   // so a crash while sending is logged against it
 
@@ -677,14 +719,14 @@ void notifyLoop() {
     // A fermenter or sensor number that doesn't exist. The callers never
     // pass one, so this is only here to stop a bad record blocking the queue.
     removeFront();
-    return;
+    return false;
   }
 
   int code = postMessage(s_message);
   if (isSuccess(code)) {
     logMsg("[NOTIFY] Sent: %s (HTTP %d)", s_message.title, code);
     removeFront();
-    return;
+    return true;
   }
 
   s_tries++;
@@ -695,6 +737,7 @@ void notifyLoop() {
   } else {
     logFailure(s_message.title, code, PSTR("trying again in a minute"));
   }
+  return true;
 }
 
 int notifySendTest() {
@@ -809,8 +852,13 @@ bool notifyGetAlert(uint8_t slot, NotifyAlert& alert) {
   if (alert.kind == ALERT_UPDATE) {
     snprintf_P(alert.id, sizeof(alert.id), PSTR("update-%s"), g_updateStatus.latestVersion);
   } else {
-    snprintf_P(alert.id, sizeof(alert.id), PSTR("%08lX-%u-%lu"),
-               (unsigned long)logBootId(), (unsigned)slot, (unsigned long)since);
+    // A severe alarm gets an id of its own ("-s" on the end), so its banner
+    // shows again even if the mild one was closed. It keeps that id while it
+    // stays severe, and goes back to the mild id if it eases.
+    bool severe = (alert.kind == ALERT_ALARM) && s_alarmReading[slot - TRACK_ALARMS].severe;
+    snprintf_P(alert.id, sizeof(alert.id), PSTR("%08lX-%u-%lu%s"),
+               (unsigned long)logBootId(), (unsigned)slot, (unsigned long)since,
+               severe ? "-s" : "");
   }
   return true;
 }

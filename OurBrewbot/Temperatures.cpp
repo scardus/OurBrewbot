@@ -20,6 +20,7 @@
 
 #include "Temperatures.h"
 #include "Config.h"
+#include "Crash.h"
 #include "Pins.h"
 #include "Log.h"
 #include "Notify.h"
@@ -312,6 +313,65 @@ void periodicProbeScan() {
   if (changed) {
     logMsg("[TEMP] Probe scan: config updated");
     saveProbeConfig();
+  }
+}
+
+// ============================================================
+// TEMPERATURE LOOP — called on every pass of loop()
+// ============================================================
+
+#define TEMPS_INTERVAL_MS       5000    // a new conversion every 5 s
+#define PROBE_SCAN_INTERVAL_MS  30000   // look for plugged/unplugged probes every 30 s
+
+static uint32_t s_lastRequestMs     = 0;   // when the last conversion was due
+static uint32_t s_requestedAtMs     = 0;   // millis() right at the last request
+static uint32_t s_lastProbeScanMs   = 0;
+static bool     s_conversionPending = false;
+
+// The order matters. A pending conversion is read FIRST, before a new one is
+// started: when it was the other way round, passes 5 s or more apart (the
+// loop held up by a network wait) started a new conversion every pass and
+// never read one, so control kept using the last reading. Each time is taken
+// with a fresh millis(), as a slow web request earlier in the same pass
+// would otherwise make a conversion look older than it is and read it early.
+void temperaturesLoop() {
+  // 1. Read the conversion once its time is up.
+  // Resolution 9=94ms, 10=188ms, 11=376ms, 12=752ms
+  if (s_conversionPending &&
+      millis() - s_requestedAtMs >= (94u << (g_globalConfig.resolution - 9))) {
+    s_conversionPending = false;
+    checkpoint(CP_TEMP_READ);
+    readTempResults();
+
+    // Print probe temperatures to serial console
+    for (int i = 0; i < MAX_PROBES; i++) {
+      if (strlen(g_probes[i].address) == 0) continue;
+      logMsg("[TEMP] %s (%s): %.1fC (raw %.1f, adj %.1f)",
+        g_probes[i].probeName, g_probes[i].address,
+        g_probes[i].temperature, g_probes[i].rawTemperature,
+        g_probes[i].tempAdjust);
+    }
+  }
+
+  uint32_t now = millis();
+
+  // 2. Probe scanning (hot-plug support). Never while a conversion is
+  // pending: scanBuses() calls begin(), which sends a OneWire reset that
+  // cancels the conversion in progress.
+  if (!s_conversionPending && now - s_lastProbeScanMs >= PROBE_SCAN_INTERVAL_MS) {
+    s_lastProbeScanMs = now;
+    checkpoint(CP_PROBE_SCAN);
+    periodicProbeScan();
+  }
+
+  // 3. Start the next conversion. It returns at once; step 1 reads it on a
+  // later pass.
+  if (!s_conversionPending && now - s_lastRequestMs >= TEMPS_INTERVAL_MS) {
+    s_lastRequestMs = now;
+    checkpoint(CP_TEMP_REQ);
+    requestTempConversion();
+    s_conversionPending = true;
+    s_requestedAtMs     = millis();
   }
 }
 

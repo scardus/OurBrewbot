@@ -102,11 +102,11 @@ bool reportsPending() {
   return false;
 }
 
-void processReportQueue() {
+bool processReportQueue() {
   if (!WiFi.isConnected()) {
     // Match the old behaviour: a cycle without WiFi is skipped, not retried
     memset(s_pendingReports, 0, sizeof(s_pendingReports));
-    return;
+    return false;
   }
   for (int s = 0; s < MAX_BREW_SERVICES; s++) {
     if (!s_pendingReports[s]) continue;
@@ -117,10 +117,11 @@ void processReportQueue() {
         // No answer (DNS, connection or reply failed): the service is out of
         // reach, so its other fermenters wait for the next cycle
         if (code < 0) s_pendingReports[s] = 0;
-        return;
+        return code != 0;   // 0 = nothing was sent (no service ID)
       }
     }
   }
+  return false;
 }
 
 // ============================================================

@@ -246,6 +246,7 @@ static bool readOldestReport(char* out, size_t outSize) {
 // What became of one try to send the oldest report
 enum SendResult {
   SEND_FINISHED,   // accepted, or refused for good - take it off the queue
+  SEND_DAMAGED,    // couldn't be read - take it off the queue (nothing was sent)
   SEND_LATER,      // failed (no connection, server error) - try again later
   SEND_BUSY,       // the website's daily limit is reached - try again in an hour
 };
@@ -254,7 +255,7 @@ static SendResult sendOldestReport() {
   char body[CRASH_REPORT_MAX_BYTES];
   if (!readOldestReport(body, sizeof(body))) {
     logMsgL(SYSLOG_WARNING, "[CRASH] A saved report was damaged - deleted it unsent");
-    return SEND_FINISHED;
+    return SEND_DAMAGED;
   }
 
   WiFiClient client;
@@ -296,17 +297,20 @@ static SendResult sendOldestReport() {
 // SCHEDULER
 // ============================================================
 
-void crashReportLoop() {
-  if (s_finished) return;
+void crashReportBootSave() {
+  if (s_started) return;
+  s_started = true;
+  // Count the reports earlier boots left waiting, then add this boot's crash
+  // (there is none after a normal boot or an intentional restart)
+  s_queued = countQueuedReports();
+  if (g_lastCrash.valid && g_globalConfig.crashReports) saveCrashToQueue(g_lastCrash);
+}
 
-  // First pass after boot: count the reports earlier boots left waiting, then
-  // add this boot's crash (there is none after a normal boot or an
-  // intentional restart)
-  if (!s_started) {
-    s_started = true;
-    s_queued  = countQueuedReports();
-    if (g_lastCrash.valid && g_globalConfig.crashReports) saveCrashToQueue(g_lastCrash);
-  }
+bool crashReportLoop() {
+  if (s_finished) return false;
+
+  // setup() has normally done this already; it only runs once either way
+  crashReportBootSave();
 
   // Switched off: nothing is sent, and nothing is kept to send later
   if (!g_globalConfig.crashReports) {
@@ -318,12 +322,12 @@ void crashReportLoop() {
       logMsg("[CRASH] Report not sent: crash reports are switched off");
     }
     s_finished = true;
-    return;
+    return false;
   }
 
   if (s_queued == 0) {
     s_finished = true;
-    return;
+    return false;
   }
 
   // Wait until WiFi has been up for 2 minutes. A lost connection doesn't
@@ -332,19 +336,22 @@ void crashReportLoop() {
   bool     wifiUp = WiFi.isConnected();
   if (wifiUp && !s_wifiWasUp) s_wifiUpSinceMs = now;
   s_wifiWasUp = wifiUp;
-  if (!wifiUp || now - s_wifiUpSinceMs < CRASH_REPORT_FIRST_MS) return;
+  if (!wifiUp || now - s_wifiUpSinceMs < CRASH_REPORT_FIRST_MS) return false;
 
-  if (now - s_lastAttemptMs < s_waitMs) return;   // not due yet
+  if (now - s_lastAttemptMs < s_waitMs) return false;   // not due yet
   s_lastAttemptMs = now;
   checkpoint(CP_CRASH_RPT);   // so a crash while sending is logged against it
 
-  switch (sendOldestReport()) {
+  SendResult result      = sendOldestReport();
+  bool       sentRequest = (result != SEND_DAMAGED);
+  switch (result) {
     case SEND_FINISHED:
+    case SEND_DAMAGED:
       if (!dropOldestReports(1)) {
         // Stop rather than send the same report again and again
         logMsgL(SYSLOG_ERR, "[CRASH] Cannot update the saved reports - trying again after the next boot");
         s_finished = true;
-        return;
+        return sentRequest;
       }
       s_waitMs = CRASH_REPORT_NEXT_MS;
       break;
@@ -364,4 +371,5 @@ void crashReportLoop() {
   }
 
   if (s_queued == 0) s_finished = true;
+  return sentRequest;
 }

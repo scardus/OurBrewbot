@@ -746,7 +746,6 @@ void buildUpdateStatusJson(JsonDocument& doc) {
   doc["UpdateChecked"]    = g_updateStatus.checked;          // a check has worked since boot
   doc["UpdateAvailable"]  = g_updateStatus.updateAvailable;
   doc["LatestVersion"]    = g_updateStatus.latestVersion;
-  doc["UpdateNotesUrl"]   = g_updateStatus.notesUrl;
   doc["UpdateCheckError"] = g_updateStatus.lastError;        // "" if the last check worked
   // Minutes since the last attempt, or -1 if there hasn't been one since boot
   doc["LastUpdateCheck"]  = g_updateStatus.attempted
@@ -1348,6 +1347,19 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
     return;
   }
 
+  // A code must fit in the bit count: the bits above it are never sent.
+  // And ON and OFF must send different signals, or every OFF would switch
+  // the plug ON. A plug with only one code learnt so far can still be saved.
+  if (rfSentCode(plug.onCode, plug.bits) != plug.onCode ||
+      rfSentCode(plug.offCode, plug.bits) != plug.offCode) {
+    sendErr(server, 400, F("ON or OFF code has more bits than the plug's bit count"));
+    return;
+  }
+  if (rfCodesClash(plug.onCode, plug.offCode, plug.bits)) {
+    sendErr(server, 400, F("ON and OFF codes send the same signal"));
+    return;
+  }
+
   // If the change affects how, or whether, the plug is switched, send it OFF
   // first while its old settings are still in place. Otherwise a plug that was
   // ON would stay on for good: the control loop only switches a plug by its NEW
@@ -1362,7 +1374,19 @@ void handleSmartPlugPost(ESP8266WebServer& server) {
                           plug.bits        != old.bits        ||
                           plug.delayLength != old.delayLength;
   if (switchingChanged) {
+    bool wasOn = getPlugState(idx);
     smartPlugForceOff(idx);
+
+    // A fridge plug that was ON has just been switched off. Its fermenter
+    // is still cooling and would switch it straight back on at the next pass,
+    // and so would a fermenter it moves to that is cooling. Start the
+    // compressor delay for both, as the fridge has just stopped.
+    if (wasOn) {
+      int oldFerm = plugCoolsFermenter(old);
+      int newFerm = plugCoolsFermenter(plug);
+      if (oldFerm >= 0) fermenterCompressorStopped(oldFerm);
+      if (newFerm >= 0 && newFerm != oldFerm) fermenterCompressorStopped(newFerm);
+    }
   }
 
   g_smartPlugs[idx] = plug;

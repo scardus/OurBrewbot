@@ -42,6 +42,7 @@
 #include "Log.h"
 #include "Reports.h"   // reportsPending() — Tilt scan defers to an in-flight cloud report
 #include "Notify.h"    // notifySendDue() — and to a push notification about to be sent
+#include "Uptime.h"
 
 // SoftwareSerial: RX = GPIO13 (D7, BLE TX), TX = GPIO12 (D6, BLE RX)
 SoftwareSerial g_bleSerial(PIN_BLE_RX, PIN_BLE_TX);
@@ -79,7 +80,9 @@ static bool s_tiltHeard[MAX_TILTS] = {false};
 static void reportTiltsToNotify() {
   for (int i = 0; i < MAX_TILTS; i++) {
     if (!s_tiltHeard[i] || g_tilts[i].fermenter >= MAX_FERMENTERS) continue;
-    float quietMinutes = (float)((millis() - g_tilts[i].lastSeen) / 60000UL);
+    // Uptime seconds, not millis(): millis() wraps every 49.7 days, which
+    // put the time shown for a long-missing Tilt back to 0
+    float quietMinutes = (float)(uptimeSince(g_tilts[i].lastSeen) / 60UL);
     notifySensorState(NOTIFY_SENSOR_TILT, i, !g_tilts[i].active, quietMinutes);
   }
 }
@@ -557,7 +560,7 @@ void processTiltReading(uint8_t colour, float sg, float tempC, bool isPro) {
   g_tilts[colour].temperature = tempC + g_tilts[colour].tempAdjust;
   g_tilts[colour].active      = true;
   s_tiltHeard[colour]         = true;
-  g_tilts[colour].lastSeen    = millis();
+  g_tilts[colour].lastSeen    = uptimeStamp();
   g_tilts[colour].isPro       = isPro;
   s_missedReads[colour]       = 0;
 
