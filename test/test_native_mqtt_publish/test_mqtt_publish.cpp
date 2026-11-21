@@ -139,6 +139,10 @@ String g_rebootReason = "Power on";
 #include "../../OurBrewbot/UpdateCheck.h"
 UpdateStatus g_updateStatus;
 
+// ---- the pressure sensor's A0 input, settable per test ----
+static int s_pressureAdc = 160;
+int analogRead(uint8_t) { return s_pressureAdc; }
+
 // The code under test, plus the modules its payloads genuinely depend on.
 #include "../../OurBrewbot/PressureCalc.cpp"
 #include "../../OurBrewbot/Config.cpp"
@@ -146,6 +150,7 @@ UpdateStatus g_updateStatus;
 #include "../../OurBrewbot/Temperatures.cpp"
 #include <NotifyStub.h>   // records what Fermenter.cpp reports to the notifications
 #include "../../OurBrewbot/Fermenter.cpp"
+#include "../../OurBrewbot/Pressure.cpp"
 #include "../../OurBrewbot/Profile.cpp"
 #include "../../OurBrewbot/MqttParse.cpp"
 #include "../../OurBrewbot/TextSafe.cpp"
@@ -221,6 +226,13 @@ void setUp(void) {
   g_mqttConfig.port = 1883;
   strlcpy(g_mqttConfig.baseTopic, BASE,           sizeof(g_mqttConfig.baseTopic));
   memset(&g_syslogConfig, 0, sizeof(g_syslogConfig));
+
+  // No pressure sensor unless a test fits one (configureFermenter() has
+  // already cleared every fermenter's assignment)
+  pressureResetRuntime();
+  g_pressureEnabled     = false;
+  g_pressureCalibration = {};
+  s_pressureAdc         = 160;
 
   g_fermenterDebugMode = false;
   for (int i = 0; i < MAX_FERMENTERS; i++) {
@@ -903,9 +915,9 @@ void test_no_discovery_payload_exceeds_the_client_buffer(void) {
     fillWorstDiscovery(unit);
     publishAllHaDiscovery();
 
-    // 13 device + 24 per fermenter x 4 + 5 per probe x 8 + 6 per tilt x 8
+    // 13 device + 26 per fermenter x 4 + 5 per probe x 8 + 6 per tilt x 8
     // + 11 per iSpindel x 4: if any count is short, one was skipped.
-    TEST_ASSERT_EQUAL_INT(13 + (24 * 4) + (5 * 8) + (6 * 8) + (11 * 4), mqttTestPublishCount());
+    TEST_ASSERT_EQUAL_INT(13 + (26 * 4) + (5 * 8) + (6 * 8) + (11 * 4), mqttTestPublishCount());
     TEST_ASSERT_EQUAL_INT(0, g_mqttTest.overflowCount);
     size_t longestPayload = 0;
     for (int i = 0; i < mqttTestPublishCount(); i++) {
@@ -958,8 +970,8 @@ void test_discovery_publishes_every_row_of_every_table(void) {
 
   publishAllHaDiscovery();
 
-  // 13 device + 24 per fermenter x 4 + 5 probe + 6 tilt + 11 iSpindel
-  TEST_ASSERT_EQUAL_INT(13 + (24 * 4) + 5 + 6 + 11, mqttTestPublishCount());
+  // 13 device + 26 per fermenter x 4 + 5 probe + 6 tilt + 11 iSpindel
+  TEST_ASSERT_EQUAL_INT(13 + (26 * 4) + 5 + 6 + 11, mqttTestPublishCount());
 }
 
 void test_discovery_update_entity_links_the_version_topics(void) {
@@ -1792,6 +1804,111 @@ void test_publishing_while_disconnected_is_skipped_quietly(void) {
 }
 
 // ============================================================
+// G. The local pressure sensor
+// ============================================================
+
+#define F1_BASE BASE "/Fermenter1"
+
+// Give fermenter `f` the pressure sensor, calibrated 0-20 PSI over 160-280,
+// and take one live reading of `adc` through the real sampling loop.
+static void readPressure(uint8_t f, int adc) {
+  g_pressureEnabled = true;
+  g_fermenters[f].psiCollect = true;
+  g_pressureCalibration = {2, {{0, 160}, {20, 280}}};
+  s_pressureAdc = adc;
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }
+}
+
+void test_discovery_pressure_is_a_psi_measurement_on_every_fermenter(void) {
+  g_mqttConfig.haDiscovery = true;
+  publishAllHaDiscovery();
+
+  JsonDocument& d = payloadJson(DISC("sensor", F0_ID, "pressure"));
+  TEST_ASSERT_EQUAL_STRING(F0_BASE "/pressure", d["stat_t"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("pressure",          d["dev_cla"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("psi",               d["unit_of_meas"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("measurement",       d["stat_cla"].as<const char*>());
+
+  // The status is plain text: a unit or state class would make HA expect a number
+  JsonDocument& s = payloadJson(DISC("sensor", F0_ID, "pressure_status"));
+  TEST_ASSERT_EQUAL_STRING(F0_BASE "/pressure_status", s["stat_t"].as<const char*>());
+  TEST_ASSERT_TRUE(s["unit_of_meas"].isNull());
+  TEST_ASSERT_TRUE(s["stat_cla"].isNull());
+
+  // Every fermenter has both, whether or not it has the sensor
+  TEST_ASSERT_TRUE(mqttTestPublished(DISC("sensor", DEV_ID "_f3", "pressure")));
+  TEST_ASSERT_TRUE(mqttTestPublished(DISC("sensor", DEV_ID "_f3", "pressure_status")));
+}
+
+void test_report_publishes_the_pressure_of_the_fermenter_with_the_sensor(void) {
+  readPressure(F0, 205);   // 45 counts above zero = 7.5 PSI
+  reportMqtt();
+  assertPayload(F0_BASE "/pressure",        "7.5");
+  assertPayload(F0_BASE "/pressure_status", "Calibrated");
+  TEST_ASSERT_TRUE(mqttTestRetainedFor(F0_BASE "/pressure"));
+}
+
+// Above the top point the reading is extrapolated; HA must be able to tell
+void test_report_marks_a_pressure_above_the_top_point_as_an_estimate(void) {
+  readPressure(F0, 340);   // 180 counts above zero = 30 PSI
+  reportMqtt();
+  assertPayload(F0_BASE "/pressure",        "30.0");
+  assertPayload(F0_BASE "/pressure_status", "Estimate");
+}
+
+// "None" makes HA show unknown. 0 would look like a safe, empty vessel, and
+// an empty payload is ignored by HA for a number, so the old value would stay.
+void test_report_publishes_none_for_a_pressure_fault(void) {
+  readPressure(F0, 100);   // well under the 0 PSI point: a pulled plug, say
+  reportMqtt();
+  assertPayload(F0_BASE "/pressure",        "None");
+  assertPayload(F0_BASE "/pressure_status", "Below zero");
+
+  pressureResetRuntime();
+  readPressure(F0, 1023);  // full scale: the true pressure is unknown
+  mqttTestResetRecords();
+  reportMqtt();
+  assertPayload(F0_BASE "/pressure",        "None");
+  assertPayload(F0_BASE "/pressure_status", "ADC limit");
+}
+
+void test_report_publishes_none_for_a_fermenter_without_the_sensor(void) {
+  readPressure(F0, 205);
+  reportMqtt();
+  assertPayload(F1_BASE "/pressure",        "None");
+  assertPayload(F1_BASE "/pressure_status", "Not assigned");
+}
+
+// Switching the sensor off keeps its assignment, so that fermenter says why
+void test_report_publishes_none_when_the_pressure_sensor_is_switched_off(void) {
+  readPressure(F0, 205);
+  g_pressureEnabled = false;
+  reportMqtt();
+  assertPayload(F0_BASE "/pressure",        "None");
+  assertPayload(F0_BASE "/pressure_status", "Disabled");
+  assertPayload(F1_BASE "/pressure_status", "Not assigned");
+}
+
+void test_report_publishes_none_before_the_pressure_sensor_is_calibrated(void) {
+  readPressure(F0, 205);
+  g_pressureCalibration = {};
+  pressureResetRuntime();
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }
+  reportMqtt();
+  assertPayload(F0_BASE "/pressure",        "None");
+  assertPayload(F0_BASE "/pressure_status", "Unavailable");
+}
+
+// A reading the sensor has stopped refreshing must not stay on show as current
+void test_report_publishes_none_once_the_pressure_reading_is_stale(void) {
+  readPressure(F0, 205);
+  s_millis += PRESSURE_STALE_MS + 1000;   // no pressureLoop() since the reading
+  reportMqtt();
+  assertPayload(F0_BASE "/pressure",        "None");
+  assertPayload(F0_BASE "/pressure_status", "Unavailable");
+}
+
+// ============================================================
 
 int main(int, char**) {
   UNITY_BEGIN();
@@ -1922,6 +2039,16 @@ int main(int, char**) {
   RUN_TEST(test_the_mqtt_test_reports_fail_on_a_dead_connection);
   RUN_TEST(test_a_settings_change_on_a_dead_connection_aborts_instead_of_disconnecting);
   RUN_TEST(test_publishing_while_disconnected_is_skipped_quietly);
+
+  // G. the local pressure sensor
+  RUN_TEST(test_discovery_pressure_is_a_psi_measurement_on_every_fermenter);
+  RUN_TEST(test_report_publishes_the_pressure_of_the_fermenter_with_the_sensor);
+  RUN_TEST(test_report_marks_a_pressure_above_the_top_point_as_an_estimate);
+  RUN_TEST(test_report_publishes_none_for_a_pressure_fault);
+  RUN_TEST(test_report_publishes_none_for_a_fermenter_without_the_sensor);
+  RUN_TEST(test_report_publishes_none_when_the_pressure_sensor_is_switched_off);
+  RUN_TEST(test_report_publishes_none_before_the_pressure_sensor_is_calibrated);
+  RUN_TEST(test_report_publishes_none_once_the_pressure_reading_is_stale);
 
   return UNITY_END();
 }

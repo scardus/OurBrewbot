@@ -199,7 +199,7 @@ The untouched original files are kept in the `orig` folder, and `orig/conversion
 
 In Sensors > Pressure, enable the sensor and save, then capture atmospheric zero and at least one higher pressure measured with a reference gauge. Each capture takes about 45 seconds; the countdown and sample count show progress, and the current calibration stays visible alongside the new points until you apply them. Check the calibrated reading before assigning a fermenter; disabling the sensor removes pressure from fermenter cards and reports while keeping the current calibration and assignment, but discards unfinished calibration points.
 
-Readings above the highest calibration point are labelled estimates. This monitor does not control a relief valve, and the original wiring and chosen sender must be checked before connection. An assigned sensor sends usable pressure readings to Brewfather or Brewer's Friend when enabled. A reading below the 0 PSI point, or an input at full scale, is shown as "Below zero" or "ADC limit". For an assigned sensor this also gives a [push notification](#push-notifications) and an [alert banner](#alert-banners), under Sensor problems.
+Readings above the highest calibration point are labelled estimates. This monitor does not control a relief valve, and the original wiring and chosen sender must be checked before connection. An assigned sensor sends usable pressure readings to Brewfather or Brewer's Friend when enabled. Over MQTT, each fermenter has a Pressure and a Pressure Status entity in Home Assistant. Pressure shows as unknown when that fermenter has no usable reading, and the status says why. A reading below the 0 PSI point, or an input at full scale, is shown as "Below zero" or "ADC limit". For an assigned sensor this also gives a [push notification](#push-notifications) and an [alert banner](#alert-banners), under Sensor problems.
 
 ---
 
@@ -338,7 +338,7 @@ Discovery creates one HA device for the controller, one for each fermenter, and 
 | `OurBrewbot` (controller) | `sensor` | firmware_version, ip_address, mdns_name, wifi_ssid, rssi, free_heap, uptime, chip_id, reboot_reason, reboot_code (all diagnostic) |
 | | `button` | reboot, all_off |
 | | `update` | firmware (installed vs latest release, from the daily update check; display-only) |
-| `OurBrewbot F0`–`F3` (fermenters) | `sensor` | beer_temperature, ambient_temperature, gravity, gravity_source, attenuation, status, beer_temperature_source, temperature_unit, profile_step, profile_steps |
+| `OurBrewbot F0`–`F3` (fermenters) | `sensor` | beer_temperature, ambient_temperature, gravity, gravity_source, attenuation, pressure, pressure_status, status, beer_temperature_source, temperature_unit, profile_step, profile_steps |
 | | `binary_sensor` | alarm |
 | | `switch` | power, temp_control, profile_running |
 | | `number` | ceiling_temperature, floor_temperature, hysteresis, compressor_delay, og, tg |
