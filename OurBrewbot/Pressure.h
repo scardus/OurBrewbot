@@ -23,6 +23,7 @@
  */
 
 #include "PressureCalc.h"
+#include <stddef.h>
 
 // Why pressureBeginPoint() did or didn't start a capture, so the API can tell
 // the user what to fix.
@@ -49,6 +50,12 @@ extern float g_pressureCapturePsi;
 
 // Return the assigned fermenter, or -1 when no fermenter has the sensor.
 int pressureFermenter();
+
+// Longest name: "F3 (" (4) + a 31-character fermenter name + ")" (1) + NUL = 37.
+#define PRESSURE_OWNER_NAME_SIZE 40
+// Name the sensor's fermenter for a log line as the [FERM] lines do,
+// "F0 (Fermenter 1)", or "Not assigned" when no fermenter has it.
+void pressureOwnerName(char* out, size_t size);
 // Service the ADC and calibration across loop passes without waiting.
 void pressureLoop();
 // Return the current reading, with NAN for unavailable or expired pressure.

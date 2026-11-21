@@ -2247,6 +2247,8 @@ void handlePressurePost(ESP8266WebServer& server) {
   if (!parseJsonBody(server, doc)) return;
   const char* action = doc["action"] | "";
   if (!strcmp(action, "cancel")) {
+    if (g_pressureCapture.active || g_pressureDraft.count)
+      logMsgL(SYSLOG_NOTICE, "[PSI] Calibration draft discarded");
     pressureResetRuntime();
     sendOk(server, F("Calibration draft discarded"));
     return;
@@ -2284,6 +2286,15 @@ void handlePressurePost(ESP8266WebServer& server) {
     // The sensor switch and calibration are stored separately from assignment.
     bool saved = savePressureConfig();
     saved &= saveFermenterConfig();
+    if (saved && !g_pressureEnabled) {
+      logMsgL(SYSLOG_NOTICE, "[PSI] Sensor disabled");
+    } else if (saved && pressureFermenter() < 0) {
+      logMsgL(SYSLOG_NOTICE, "[PSI] Sensor enabled - not assigned to a fermenter");
+    } else if (saved) {
+      char owner[PRESSURE_OWNER_NAME_SIZE];
+      pressureOwnerName(owner, sizeof(owner));
+      logMsgL(SYSLOG_NOTICE, "[PSI] Sensor enabled - assigned to %s", owner);
+    }
     sendSaveResult(server, saved, F("Pressure sensor settings saved"));
   } else if (!strcmp(action, "capture")) {
     PressureBeginResult result = doc["psi"].is<float>() ? pressureBeginPoint(doc["psi"].as<float>())
@@ -2315,7 +2326,14 @@ void handlePressurePost(ESP8266WebServer& server) {
     }
     g_pressureCalibration = g_pressureDraft;
     pressureResetRuntime();
-    sendSaveResult(server, savePressureConfig(), F("Pressure calibration saved"));
+    bool saved = savePressureConfig();
+    if (saved) {
+      const PressurePoint& zero = g_pressureCalibration.points[0];
+      const PressurePoint& top  = g_pressureCalibration.points[g_pressureCalibration.count - 1];
+      logMsgL(SYSLOG_NOTICE, "[PSI] Calibration applied: %u points, %.1f PSI = raw %u to %.1f PSI = raw %u",
+              (unsigned)g_pressureCalibration.count, zero.psi, (unsigned)zero.raw, top.psi, (unsigned)top.raw);
+    }
+    sendSaveResult(server, saved, F("Pressure calibration saved"));
   } else sendErr(server, 400, F("Unknown pressure action"));
 }
 

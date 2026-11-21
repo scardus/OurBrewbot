@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <cstdarg>
 
 #include "../../OurBrewbot/Config.h"
 #include "../../OurBrewbot/Pins.h"
@@ -69,9 +70,28 @@ uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
 uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
 
 // ---- no-op / recording doubles for the modules not compiled in ----
-// Counts log calls, so a test can check a route adds no "[API]" line
-static int s_logCalls = 0;
-void logMsgImpl(uint8_t, PGM_P, ...) { s_logCalls++; }
+// Counts log calls, so a test can check a route adds no "[API]" line, and
+// keeps every line since setUp as "<level> <text>\n" (4 = warning,
+// 5 = notice, 6 = info), so a test can check what was logged and how loudly.
+static int  s_logCalls = 0;
+static char s_logText[4096];
+void logMsgImpl(uint8_t level, PGM_P fmt, ...) {
+  s_logCalls++;
+  char line[192];   // the size of Log.cpp's message buffer
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(line, sizeof(line), fmt, args);
+  va_end(args);
+  size_t used = strlen(s_logText);
+  snprintf(s_logText + used, sizeof(s_logText) - used, "%u %s\n", (unsigned)level, line);
+}
+
+// How many logged lines contain this text, with the level if it starts the text.
+static int logCount(const char* text) {
+  int count = 0;
+  for (const char* at = strstr(s_logText, text); at; at = strstr(at + 1, text)) count++;
+  return count;
+}
 
 // Log.cpp's recent-lines ring (GET /logs). Scripted: a test says what the
 // ring holds and checks what the handler asked it for.
@@ -294,6 +314,7 @@ void setUp(void) {
   s_pressureAdc = 160;
   srv.clearArgs();
   s_logCalls        = 0;
+  s_logText[0]      = '\0';
   s_ringLastSeq     = 0;
   s_ringReadAfter   = 0;
   s_ringReadBufSize = 0;
@@ -3648,6 +3669,129 @@ static void test_switching_pressure_off_stops_capture_and_hides_fermenter_readin
   TEST_ASSERT_EQUAL_FLOAT(0, on["Pressure"].as<float>());
 }
 
+// ---- [PSI] log lines ----
+
+// Run the loop until the next once-a-minute reading is complete.
+static void takePressureReading() {
+  s_millis += 60000;
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+}
+
+static void test_pressure_readings_are_logged_once_a_minute_while_enabled(void) {
+  strcpy(g_fermenters[0].fermenterName, "Fermenter 1");
+  g_fermenters[0].psiCollect = true;
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  s_pressureAdc = 220;
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] F0 (Fermenter 1): 10.0 PSI (raw 220)\n"));
+  // Nothing more until the minute is up.
+  for (int i = 0; i < 10; i++) { s_millis += 1000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(1, logCount("[PSI]"));
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(2, logCount("6 [PSI] F0 (Fermenter 1): 10.0 PSI (raw 220)\n"));
+  // A disabled sensor logs nothing.
+  g_pressureEnabled = false;
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(2, logCount("[PSI]"));
+}
+
+static void test_pressure_log_line_names_each_reading_state(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  s_pressureAdc = 400;
+  takePressureReading();
+  s_pressureAdc = 100;
+  takePressureReading();
+  s_pressureAdc = 1023;
+  takePressureReading();
+  g_pressureCalibration = {};
+  s_pressureAdc = 173;
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] Not assigned: 40.0 PSI, estimated above the top calibration point (raw 400)\n"));
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] Not assigned: below zero (raw 100)\n"));
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] Not assigned: at full scale, pressure unknown (raw 1023)\n"));
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] Not assigned: no calibration yet (raw 173)\n"));
+}
+
+static void test_pressure_fault_is_warned_once_and_its_end_noted(void) {
+  strcpy(g_fermenters[0].fermenterName, "Fermenter 1");
+  g_fermenters[0].psiCollect = true;
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  s_pressureAdc = 220;
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(0, logCount("4 [PSI]"));
+  s_pressureAdc = 100;
+  takePressureReading();
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("4 [PSI] F0 (Fermenter 1): pressure sensor needs checking - reading below zero (raw 100)\n"));
+  // A different fault is a new warning.
+  s_pressureAdc = 1023;
+  takePressureReading();
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("4 [PSI] F0 (Fermenter 1): pressure sensor needs checking - input at full scale (raw 1023)\n"));
+  s_pressureAdc = 220;
+  takePressureReading();
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] F0 (Fermenter 1): pressure sensor reading normally again (10.0 PSI)\n"));
+  TEST_ASSERT_EQUAL_INT(2, logCount("4 [PSI]"));
+  // After a settings change, a fault in the first reading is warned again.
+  s_pressureAdc = 100;
+  takePressureReading();
+  pressureResetRuntime();
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(3, logCount("4 [PSI] F0 (Fermenter 1): pressure sensor needs checking - reading below zero (raw 100)\n"));
+}
+
+static void test_pressure_calibration_steps_are_logged(void) {
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration: capturing point 1 at 0.0 PSI (45 s)\n"));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration: point 1 captured - 0.0 PSI = raw 160\n"));
+  // The input didn't rise.
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(1, logCount("4 [PSI] Calibration: point 2 at 15.0 PSI failed - raw 160 is not above the previous point (raw 160)\n"));
+  // The input reached full scale during the capture.
+  s_pressureAdc = 250;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  s_pressureAdc = 1023;
+  s_millis += 5000;
+  pressureLoop();
+  TEST_ASSERT_EQUAL_INT(1, logCount("4 [PSI] Calibration: point 2 at 15.0 PSI failed - the input reached full scale\n"));
+  s_pressureAdc = 250;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration: point 2 captured - 15.0 PSI = raw 250\n"));
+  postBody("{\"action\":\"apply\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration applied: 2 points, 0.0 PSI = raw 160 to 15.0 PSI = raw 250\n"));
+  // Discarding is only logged when there was something to discard.
+  postBody("{\"action\":\"cancel\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(0, logCount("[PSI] Calibration draft discarded"));
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  postBody("{\"action\":\"cancel\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration draft discarded\n"));
+}
+
+static void test_pressure_settings_changes_are_logged(void) {
+  strcpy(g_fermenters[2].fermenterName, "Garage");
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  postBody("{\"action\":\"assign\",\"fermenter\":2,\"enabled\":true}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Sensor enabled - assigned to F2 (Garage)\n"));
+  postBody("{\"action\":\"assign\",\"fermenter\":99}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Sensor enabled - not assigned to a fermenter\n"));
+  postBody("{\"action\":\"assign\",\"fermenter\":99,\"enabled\":false}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Sensor disabled\n"));
+}
+
 static void test_pressure_assignment_requires_applied_calibration(void) {
   g_pressureDraft = {2, {{0,160}, {20,280}}};
   postBody("{\"action\":\"assign\",\"fermenter\":0}");
@@ -4067,6 +4211,11 @@ int main(int, char**) {
   RUN_TEST(test_pressure_progress_survives_wrap_and_waits_for_actual_samples);
   RUN_TEST(test_failed_pressure_point_keeps_completed_points_and_can_be_retried);
   RUN_TEST(test_switching_pressure_off_stops_capture_and_hides_fermenter_readings);
+  RUN_TEST(test_pressure_readings_are_logged_once_a_minute_while_enabled);
+  RUN_TEST(test_pressure_log_line_names_each_reading_state);
+  RUN_TEST(test_pressure_fault_is_warned_once_and_its_end_noted);
+  RUN_TEST(test_pressure_calibration_steps_are_logged);
+  RUN_TEST(test_pressure_settings_changes_are_logged);
   RUN_TEST(test_live_pressure_reading_averages_without_blocking_across_wrap);
   RUN_TEST(test_live_pressure_reading_does_not_average_away_saturation);
   RUN_TEST(test_cancelling_a_live_pressure_reading_starts_the_average_again);

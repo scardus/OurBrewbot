@@ -16,9 +16,11 @@
 
 #include "Pressure.h"
 #include "Config.h"
+#include "Log.h"
 #include "Notify.h"
 #include "Pins.h"
 #include <math.h>
+#include <stdio.h>
 
 PressureCalibration g_pressureDraft = {};
 PressureCapture g_pressureCapture = {};
@@ -29,6 +31,9 @@ static PressureReading s_reading = {PRESSURE_UNAVAILABLE, 0, NAN};
 static uint32_t s_readingAt = 0;
 static bool s_haveReading = false;
 static const uint32_t PRESSURE_READ_INTERVAL_MS = 60000UL;
+// The state the last fault warning or recovery line described, so each is
+// logged once when the reading changes instead of every minute.
+static PressureReadingState s_loggedState = PRESSURE_UNAVAILABLE;
 
 // ============================================================
 // LIVE READING - a short average of the A0 input
@@ -84,6 +89,58 @@ int pressureFermenter() {
   return -1;
 }
 
+// ============================================================
+// LOG LINES - [PSI], in the same style as the [TEMP] and [TILT] lines
+// ============================================================
+
+void pressureOwnerName(char* out, size_t size) {
+  int fermenter = pressureFermenter();
+  if (fermenter < 0) snprintf_P(out, size, PSTR("Not assigned"));
+  else snprintf_P(out, size, PSTR("F%d (%s)"), fermenter, g_fermenters[fermenter].fermenterName);
+}
+
+static bool pressureIsFault(PressureReadingState state) {
+  return state == PRESSURE_BELOW_ZERO || state == PRESSURE_ADC_LIMIT;
+}
+
+// Log each new reading. A fault is also logged once as a warning when it
+// starts, and once more when the reading is back to normal.
+static void pressureLogReading() {
+  char owner[PRESSURE_OWNER_NAME_SIZE];
+  pressureOwnerName(owner, sizeof(owner));
+  unsigned raw = s_reading.raw;
+  switch (s_reading.state) {
+    case PRESSURE_CALIBRATED:
+      logMsg("[PSI] %s: %.1f PSI (raw %u)", owner, s_reading.psi, raw);
+      break;
+    case PRESSURE_ESTIMATE:
+      logMsg("[PSI] %s: %.1f PSI, estimated above the top calibration point (raw %u)",
+             owner, s_reading.psi, raw);
+      break;
+    case PRESSURE_BELOW_ZERO:
+      logMsg("[PSI] %s: below zero (raw %u)", owner, raw);
+      break;
+    case PRESSURE_ADC_LIMIT:
+      logMsg("[PSI] %s: at full scale, pressure unknown (raw %u)", owner, raw);
+      break;
+    default:
+      logMsg("[PSI] %s: no calibration yet (raw %u)", owner, raw);
+      break;
+  }
+
+  if (s_reading.state == s_loggedState) return;
+  if (s_reading.state == PRESSURE_BELOW_ZERO)
+    logMsgL(SYSLOG_WARNING, "[PSI] %s: pressure sensor needs checking - reading below zero (raw %u)",
+            owner, raw);
+  else if (s_reading.state == PRESSURE_ADC_LIMIT)
+    logMsgL(SYSLOG_WARNING, "[PSI] %s: pressure sensor needs checking - input at full scale (raw %u)",
+            owner, raw);
+  else if (pressureIsFault(s_loggedState))
+    logMsgL(SYSLOG_NOTICE, "[PSI] %s: pressure sensor reading normally again (%.1f PSI)",
+            owner, s_reading.psi);
+  s_loggedState = s_reading.state;
+}
+
 // Tell the notifications (see Notify.h) whether the latest reading shows a
 // fault. Called after every new reading, and only while a fermenter uses the
 // sensor, as for the other sensors. With no calibration there is no reading
@@ -106,6 +163,7 @@ void pressureResetRuntime() {
   g_pressureDraft = {};
   g_pressureCaptureFailure = PRESSURE_CAPTURE_NO_FAILURE;
   s_haveReading = false;
+  s_loggedState = PRESSURE_UNAVAILABLE;
 }
 
 PressureBeginResult pressureBeginPoint(float psi) {
@@ -125,6 +183,9 @@ PressureBeginResult pressureBeginPoint(float psi) {
     return PRESSURE_BEGIN_ADC_LIMIT;
   g_pressureCapturePsi = psi;
   g_pressureCaptureFailure = PRESSURE_CAPTURE_NO_FAILURE;
+  logMsgL(SYSLOG_NOTICE, "[PSI] Calibration: capturing point %u at %.1f PSI (%u s)",
+          (unsigned)(g_pressureDraft.count + 1), psi,
+          (unsigned)((PRESSURE_CAPTURE_SAMPLES - 1) * PRESSURE_CAPTURE_INTERVAL_MS / 1000));
   return PRESSURE_BEGIN_OK;
 }
 
@@ -136,13 +197,26 @@ void pressureLoop() {
     uint16_t average;
     PressureCaptureResult result = pressureCaptureSample(g_pressureCapture, now,
                                                          analogRead(PIN_PRESSURE), average);
-    if (result == PRESSURE_CAPTURE_CANCELLED) g_pressureCaptureFailure = PRESSURE_CAPTURE_ADC_LIMIT;
+    unsigned point = g_pressureDraft.count + 1;
+    if (result == PRESSURE_CAPTURE_CANCELLED) {
+      g_pressureCaptureFailure = PRESSURE_CAPTURE_ADC_LIMIT;
+      logMsgL(SYSLOG_WARNING, "[PSI] Calibration: point %u at %.1f PSI failed - the input reached full scale",
+              point, g_pressureCapturePsi);
+    }
     if (result == PRESSURE_CAPTURE_DONE) {
       // Refuse a point that would reverse the calibration slope. The previous
       // completed draft points remain available so this point can be retried.
-      if (g_pressureDraft.count && average <= g_pressureDraft.points[g_pressureDraft.count - 1].raw)
+      if (g_pressureDraft.count && average <= g_pressureDraft.points[g_pressureDraft.count - 1].raw) {
         g_pressureCaptureFailure = PRESSURE_CAPTURE_NOT_INCREASING;
-      else g_pressureDraft.points[g_pressureDraft.count++] = {g_pressureCapturePsi, average};
+        logMsgL(SYSLOG_WARNING,
+                "[PSI] Calibration: point %u at %.1f PSI failed - raw %u is not above the previous point (raw %u)",
+                point, g_pressureCapturePsi, (unsigned)average,
+                (unsigned)g_pressureDraft.points[g_pressureDraft.count - 1].raw);
+      } else {
+        g_pressureDraft.points[g_pressureDraft.count++] = {g_pressureCapturePsi, average};
+        logMsgL(SYSLOG_NOTICE, "[PSI] Calibration: point %u captured - %.1f PSI = raw %u",
+                point, g_pressureCapturePsi, (unsigned)average);
+      }
     }
   }
   if (!s_haveReading || (uint32_t)(now - s_readingAt) >= PRESSURE_READ_INTERVAL_MS) {
@@ -151,6 +225,7 @@ void pressureLoop() {
       s_reading = pressureConvert(g_pressureCalibration, raw);
       s_readingAt = now;
       s_haveReading = true;
+      pressureLogReading();
       pressureReportToNotify();
     }
   }
