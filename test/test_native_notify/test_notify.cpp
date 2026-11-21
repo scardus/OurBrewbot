@@ -558,6 +558,19 @@ void test_a_lost_sensor_that_waited_over_an_hour_is_queued_again(void) {
   TEST_ASSERT_EQUAL_INT(1, queued(NOTIFY_TILT_LOST));
 }
 
+// The same for a pressure sensor fault, with the latest fault's detail
+void test_a_pressure_fault_that_waited_over_an_hour_is_queued_again(void) {
+  WiFi.connected = false;
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_BELOW_ZERO);
+  s_uptimeSec += NOTIFY_MAX_AGE_S + 1;
+  notifyLoop();
+  TEST_ASSERT_EQUAL_UINT8(0, s_queueCount);   // dropped unsent
+
+  notifySensorState(NOTIFY_SENSOR_PRESSURE, 0, true, 0.0f, PRESSURE_ADC_LIMIT);
+  TEST_ASSERT_EQUAL_INT(1, queued(NOTIFY_PRESSURE_FAULT));
+  TEST_ASSERT_EQUAL_UINT8(PRESSURE_ADC_LIMIT, s_queue[0].event.detail);
+}
+
 // An alarm that has ended while its message waited isn't queued again
 void test_an_alarm_that_waited_over_an_hour_is_not_queued_again_once_ended(void) {
   WiFi.connected = false;
@@ -1565,6 +1578,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_an_alarm_that_waited_over_an_hour_is_queued_again_while_it_is_on);
   RUN_TEST(test_a_severe_alarm_that_waited_over_an_hour_is_queued_again);
   RUN_TEST(test_a_lost_sensor_that_waited_over_an_hour_is_queued_again);
+  RUN_TEST(test_a_pressure_fault_that_waited_over_an_hour_is_queued_again);
   RUN_TEST(test_an_alarm_that_waited_over_an_hour_is_not_queued_again_once_ended);
   RUN_TEST(test_a_new_alarm_is_not_reported_twice_when_an_old_one_expires);
   RUN_TEST(test_an_alarm_given_up_on_after_three_tries_is_not_queued_again);

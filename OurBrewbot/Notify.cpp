@@ -545,6 +545,8 @@ static int startedTracker(const NotifyEventData& event) {
       return (event.index < MAX_ISPINDELS) ? TRACK_ISPINDELS + event.index : -1;
     case NOTIFY_TILT_LOST:
       return (event.index < MAX_TILTS) ? TRACK_TILTS + event.index : -1;
+    case NOTIFY_PRESSURE_FAULT:
+      return TRACK_PRESSURE;
     default:
       return -1;
   }
