@@ -74,6 +74,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pio-
 
+      # cppcheck's results from an earlier run, as in platformio-ci.yaml. A tag
+      # can use the caches that runs on main saved, so a release normally only
+      # re-analyses the files changed since main's last CI run.
+      - uses: actions/cache@v6
+        with:
+          path: .pio/cppcheck-cache
+          key: ${{ runner.os }}-cppcheck-${{ hashFiles('platformio.ini') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cppcheck-${{ hashFiles('platformio.ini') }}-
+
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
