@@ -50,6 +50,18 @@ jobs:
           key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
           restore-keys: |
             ${{ runner.os }}-pio-
+      # cppcheck's results from an earlier run (see test/cppcheck_cache.py), so
+      # pio check only analyses the files that have changed since. The key is new
+      # for every commit, because a cache is never overwritten once saved;
+      # restore-keys then picks the newest earlier one. platformio.ini is in the
+      # key, so a change to the check flags starts again from an empty cache.
+      # cppcheck re-checks every file by itself if its own version changes.
+      - uses: actions/cache@v6
+        with:
+          path: .pio/cppcheck-cache
+          key: ${{ runner.os }}-cppcheck-${{ hashFiles('platformio.ini') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cppcheck-${{ hashFiles('platformio.ini') }}-
       - name: Install PlatformIO Core
         run: pip install --upgrade platformio
       - name: Check web assets
