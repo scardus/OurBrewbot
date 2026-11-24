@@ -37,11 +37,11 @@ New/Updated Features:
 - Crash reports — after a crash or watchdog reset, the crash details are sent to ourbrewbot.com to help fix bugs
 - Push notifications — temperature alarms, sensor problems, unexpected restarts, profile progress and new releases sent to your phone through [ntfy](https://ntfy.sh), or to any address that accepts a plain HTTP POST — see [Push notifications](#push-notifications)
 - Alert banners — the same alarms, sensor problems, restarts, finished profiles and new releases shown as a banner at the top of every admin page, whether or not push notifications are set up — see [Alert banners](#alert-banners)
+- Local pressure sensor — reads a pressure sender on the pink jack, with two-to-five-point calibration; the pressure is shown on the fermenter's card and sent to Brewfather, Brewer's Friend and MQTT — see [Local Pressure Sensor](#local-pressure-sensor)
 
 The update check and crash reports can each be switched off — see [Contacting ourbrewbot.com](#contacting-ourbrewbotcom).
 
 Not yet implemented / tested:
-- Local pressure sensor - readings and two-to-five-point calibration; __not yet verified with sensor hardware__ - see [Local Pressure Sensor](#local-pressure-sensor)
 - Aux 1 / Aux 2 smart plug roles - __Not implemented__ - from the original firmware; a plug can be given the role, but nothing switches it
 
 ---
@@ -189,7 +189,7 @@ The original firmware keeps its settings in the LittleFS partition, and they sur
 - **Brew service** - Brewfather or Brewer's Friend keeps its ID, and is switched on for the fermenters that sent to it. Press the service's **Test** button to check it still works.
 - **WiFi** - your network name and password are moved into the controller's own WiFi store, so it joins your WiFi as before. The original's WiFi settings file, which held the password in plain text, is then deleted. If your WiFi has changed since, set it up through the `OurBrewbot-XXXXXX` access point as described above.
 
-Not carried across: your probe names (OurBrewbot names probes by their position), Plaato, MyBrewBuddy, monitor.beer, and the Blynk token.
+Not carried across: your probe names (OurBrewbot names probes by their position), the pressure sensor's calibration and fermenter (the original's default calibration doesn't fit the sender, so the sensor starts switched off - see [Local Pressure Sensor](#local-pressure-sensor)), Plaato, MyBrewBuddy, monitor.beer, and the Blynk token.
 
 The untouched original files are kept in the `orig` folder, and `orig/conversion.txt` lists every change that was made. You can read both in the admin page's file browser on the **System Settings** tab. Check your plugs and fermenters there before you start a brew.
 
@@ -199,7 +199,11 @@ The untouched original files are kept in the `orig` folder, and `orig/conversion
 
 In Sensors > Pressure, enable the sensor and save, then capture atmospheric zero and at least one higher pressure measured with a reference gauge. Each capture takes about 45 seconds; the countdown and sample count show progress, and the current calibration stays visible alongside the new points until you apply them. Check the calibrated reading before assigning a fermenter; disabling the sensor removes pressure from fermenter cards and reports while keeping the current calibration and assignment, but discards unfinished calibration points.
 
-Readings above the highest calibration point are labelled estimates. This monitor does not control a relief valve, and the original wiring and chosen sender must be checked before connection. An assigned sensor sends usable pressure readings to Brewfather or Brewer's Friend when enabled. Over MQTT, each fermenter has a Pressure and a Pressure Status entity in Home Assistant. Pressure shows as unknown when that fermenter has no usable reading, and the status says why. A reading below the 0 PSI point, or an input at full scale, is shown as "Below zero" or "ADC limit". For an assigned sensor this also gives a [push notification](#push-notifications) and an [alert banner](#alert-banners), under Sensor problems.
+The reading is updated once a minute, and readings above the highest calibration point are labelled estimates. There is one pressure jack, so only one fermenter can have a pressure reading. This is a monitor only: it does not control a relief valve, so keep your spunding or pressure relief valve.
+
+The pink jack is wired tip = GND, ring = signal (to A0), sleeve = 5 V. Check your sender's datasheet against this before plugging it in. The original board has no divider of its own, so the NodeMCU's built-in divider limits the input to about 3.2 V: a 0.5-4.5 V, 100 PSI sender (the type listed in the original instructions) reaches full scale at about 67 PSI.
+
+An assigned sensor sends usable pressure readings to Brewfather or Brewer's Friend when enabled. Over MQTT, each fermenter has a Pressure and a Pressure Status entity in Home Assistant. Pressure shows as unknown when that fermenter has no usable reading, and the status says why. A reading below the 0 PSI point, or an input at full scale, is shown as "Below zero" or "ADC limit". For an assigned sensor this also gives a [push notification](#push-notifications) and an [alert banner](#alert-banners), under Sensor problems.
 
 ---
 
@@ -331,7 +335,9 @@ The broker password is never shown once it is saved: `GET /mqtt` returns `******
 
 ### Entity types
 
-Discovery creates one HA device for the controller, one for each fermenter, and one for each configured probe, Tilt and iSpindel. Empty or unassigned slots are skipped.
+Discovery creates one HA device for the controller, one for each fermenter that has MQTT turned on under **Send readings to**, and one for each configured probe, Tilt and iSpindel. Empty or unassigned slots are skipped.
+
+Every fermenter's device has a pressure and a pressure_status entity, but only the fermenter with the pressure sensor assigned has a reading. Pressure is published in PSI; if Home Assistant uses metric units it shows it in kPa, which can be changed in the entity's settings.
 
 | HA device | Entity type | Fields |
 |-----------|-------------|--------|
@@ -368,6 +374,8 @@ A ready-made Lovelace dashboard is provided in `HomeAssistant/dashboard.yaml`. I
 - [lovelace-plotly-graph-card](https://github.com/dbuezas/lovelace-plotly-graph-card)
 - [lovelace-mushroom](https://github.com/piitaya/lovelace-mushroom)
 - [card-mod](https://github.com/thomasloven/lovelace-card-mod)
+
+The dashboard has a section for each of the four fermenters. Remove the sections for fermenters that don't send to MQTT, or Home Assistant will report their entities as missing.
 
 ---
 
