@@ -220,7 +220,8 @@ function updateResult(controller) {
 const backupFiles=[['global','/jsonGlobal.txt'],['fermenter','/jsonFermenter.txt'],['probe','/jsonProbe.txt'],
   ['smartplugs','/jsonSmartPlugs.txt'],['profile','/jsonProfile.txt'],['profileSteps','/jsonProfileSteps.txt'],
   ['tilt','/jsonTilt.txt'],['ispindel','/jsoniSpindel.txt'],['brewservices','/jsonBrewServices.txt'],
-  ['mqtt','/jsonMqtt.txt'],['syslog','/jsonSyslog.txt'],['notify','/jsonNotify.txt']];
+  ['mqtt','/jsonMqtt.txt'],['syslog','/jsonSyslog.txt'],['notify','/jsonNotify.txt'],
+  ['pressure','/jsonLocalPressure.txt']];
 
 // Download a complete backup only after every supported saved file has been read.
 async function exportConfig() {

@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <cstdarg>
 
 #include "../../OurBrewbot/Config.h"
 #include "../../OurBrewbot/Pins.h"
@@ -69,9 +70,28 @@ uint32_t uptimeStamp()   { uint32_t s = uptimeSeconds(); return s ? s : 1; }
 uint32_t uptimeSince(uint32_t stamp) { uint32_t now = uptimeSeconds(); return (now > stamp) ? now - stamp : 0; }
 
 // ---- no-op / recording doubles for the modules not compiled in ----
-// Counts log calls, so a test can check a route adds no "[API]" line
-static int s_logCalls = 0;
-void logMsgImpl(uint8_t, PGM_P, ...) { s_logCalls++; }
+// Counts log calls, so a test can check a route adds no "[API]" line, and
+// keeps every line since setUp as "<level> <text>\n" (4 = warning,
+// 5 = notice, 6 = info), so a test can check what was logged and how loudly.
+static int  s_logCalls = 0;
+static char s_logText[4096];
+void logMsgImpl(uint8_t level, PGM_P fmt, ...) {
+  s_logCalls++;
+  char line[192];   // the size of Log.cpp's message buffer
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(line, sizeof(line), fmt, args);
+  va_end(args);
+  size_t used = strlen(s_logText);
+  snprintf(s_logText + used, sizeof(s_logText) - used, "%u %s\n", (unsigned)level, line);
+}
+
+// How many logged lines contain this text, with the level if it starts the text.
+static int logCount(const char* text) {
+  int count = 0;
+  for (const char* at = strstr(s_logText, text); at; at = strstr(at + 1, text)) count++;
+  return count;
+}
 
 // Log.cpp's recent-lines ring (GET /logs). Scripted: a test says what the
 // ring holds and checks what the handler asked it for.
@@ -192,6 +212,7 @@ FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
 ESP8266WebServer g_webServer;
 
 // The code under test, plus the modules its payloads genuinely depend on.
+#include "../../OurBrewbot/PressureCalc.cpp"
 #include "../../OurBrewbot/Config.cpp"
 #include "../../OurBrewbot/OriginalConfig.cpp"
 #include "../../OurBrewbot/Temperatures.cpp"
@@ -204,6 +225,11 @@ ESP8266WebServer g_webServer;
 // ---- stack depth check: reads the ESP8266 loop stack, nothing to do here ----
 void stackCheck(uint8_t, const char*) {}
 
+// ---- the pressure sensor's A0 input, settable per test, counting reads ----
+static int s_pressureAdc = 160;
+static unsigned s_pressureReads = 0;
+int analogRead(uint8_t) { s_pressureReads++; return s_pressureAdc; }
+#include "../../OurBrewbot/Pressure.cpp"
 #include "../../OurBrewbot/WebAPI.cpp"
 #include "../../OurBrewbot/WebAdmin.cpp"
 
@@ -282,8 +308,13 @@ void setUp(void) {
     g_fermenterDebugOverrides[i] = FermenterDebugOverride{};
   }
 
+  pressureResetRuntime();
+  g_pressureEnabled = true;
+  g_pressureCalibration = {};
+  s_pressureAdc = 160;
   srv.clearArgs();
   s_logCalls        = 0;
+  s_logText[0]      = '\0';
   s_ringLastSeq     = 0;
   s_ringReadAfter   = 0;
   s_ringReadBufSize = 0;
@@ -839,17 +870,24 @@ static void fillWorstFermenters(void) {
     g_fermenterDebugOverrides[i].sg          = 1.0123457f;
   }
   for (int p = 0; p < MAX_PROFILES; p++) FILL_WORST(g_profiles[p].profileName);
+  // Only one fermenter can have the pressure sensor; give it the longest
+  // reading text. No real conversion prints 13 characters, so set it directly.
+  g_fermenters[0].psiCollect = true;
+  s_reading     = {PRESSURE_ESTIMATE, 1022, LONG_FLOAT};
+  s_readingAt   = s_millis;
+  s_haveReading = true;
 }
 
 static void test_fermenters_get_sends_worst_case_names_whole(void) {
   fillWorstFermenters();
-  // The data above reaches 940 bytes per fermenter, close to the 979-byte
-  // ceiling the handler's buffer is sized for. If it drops well below that
-  // (a field was shortened or the fill stopped working), this test no longer
-  // proves the buffer is big enough - fix the fill, not this number.
+  // The data above reaches 1007 bytes for fermenter 0, which has the pressure
+  // sensor, close to the 1047-byte ceiling the handler's buffer is sized for.
+  // If it drops well below that (a field was shortened or the fill stopped
+  // working), this test no longer proves the buffer is big enough - fix the
+  // fill, not this number.
   JsonDocument one;
   buildFermenterJson(one, 0);
-  TEST_ASSERT_GREATER_OR_EQUAL_UINT(900, measureJson(one));
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT(1000, measureJson(one));
   handleFermenters(srv);
 
   JsonDocument doc;
@@ -3431,6 +3469,462 @@ static void test_logs_nothing_new_is_an_empty_200(void) {
   TEST_ASSERT_EQUAL_STRING("0", httpRespHeader("X-Log-More"));
 }
 
+// ---- Local pressure API and runtime ----
+
+static void test_pressure_api_never_reports_unavailable_as_zero(void) {
+  httpRespReset();
+  handlePressure(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["psi"].isNull());
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_FALSE(doc["psi"].isNull());
+  TEST_ASSERT_EQUAL_FLOAT(0, doc["psi"].as<float>());
+  s_millis += 120000;
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["psi"].isNull());
+  s_pressureAdc = 1023;
+  pressureLoop();
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["psi"].isNull());
+  TEST_ASSERT_EQUAL(PRESSURE_ADC_LIMIT, doc["state"].as<int>());
+}
+
+static void test_pressure_capture_apply_and_cancel_preserve_working_calibration(void) {
+  TEST_ASSERT_EQUAL(-1, pressureFermenter());
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_BUSY, pressureBeginPoint(5));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  s_pressureAdc = 280;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(20));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_UINT8(0, g_pressureCalibration.count);
+  postBody("{\"action\":\"apply\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureCalibration.count);
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+  TEST_ASSERT_EQUAL_FLOAT(20, pressureCurrentReading().psi);
+  JsonDocument unassigned;
+  buildFermenterJson(unassigned, 0);
+  TEST_ASSERT_FALSE(unassigned["PressureAssigned"].as<bool>());
+  TEST_ASSERT_TRUE(unassigned["Pressure"].isNull());
+  postBody("{\"action\":\"assign\",\"fermenter\":0}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL(0, pressureFermenter());
+  s_pressureAdc = 220;
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  // A replacement zero at a different raw value must not affect live pressure.
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_FLOAT(10, pressureCurrentReading().psi);
+  postBody("{\"action\":\"cancel\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_FALSE(g_pressureCapture.active);
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureCalibration.count);
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_EQUAL_UINT16(280, g_pressureCalibration.points[1].raw);
+}
+
+static void test_only_the_assigned_fermenter_reports_pressure(void) {
+  g_fermenters[0].psiCollect = true;
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+  JsonDocument assigned;
+  buildFermenterJson(assigned, 0);
+  TEST_ASSERT_TRUE(assigned["PressureAssigned"].as<bool>());
+  TEST_ASSERT_EQUAL(PRESSURE_CALIBRATED, assigned["PressureState"].as<int>());
+  TEST_ASSERT_EQUAL_FLOAT(0, assigned["Pressure"].as<float>());
+  JsonDocument other;
+  buildFermenterJson(other, 1);
+  TEST_ASSERT_FALSE(other["PressureAssigned"].as<bool>());
+  TEST_ASSERT_FALSE(other["PressureState"].is<int>());
+  TEST_ASSERT_FALSE(other["Pressure"].is<float>());
+}
+
+static void test_pressure_api_uses_the_unassigned_value_for_no_fermenter(void) {
+  handlePressure(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_INT(PROBE_UNASSIGNED, doc["fermenter"].as<int>());
+  TEST_ASSERT_EQUAL_INT(PRESSURE_CAPTURE_SAMPLES, doc["samplesNeeded"].as<int>());
+  g_fermenters[2].psiCollect = true;
+  httpRespReset();
+  postBody("{\"action\":\"assign\",\"fermenter\":99}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_fermenters[2].psiCollect);
+  httpRespReset();
+  postBody("{\"action\":\"assign\",\"fermenter\":-1}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+}
+
+static void test_pressure_progress_survives_wrap_and_waits_for_actual_samples(void) {
+  s_millis = 0xfffff000u;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  s_millis += 2000;
+  handlePressure(srv);
+  JsonDocument doc;
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["active"].as<bool>());
+  TEST_ASSERT_EQUAL_UINT32(45000, doc["durationMs"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_UINT32(43000, doc["remainingMs"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_UINT(1, doc["samples"].as<unsigned>());
+  // Even a long delay hasn't taken any more samples until the loop runs.
+  s_millis += 60000;
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_UINT32(40000, doc["remainingMs"].as<uint32_t>());
+  pressureLoop();
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_EQUAL_UINT(2, doc["samples"].as<unsigned>());
+  for (int i = 0; i < 8; i++) { s_millis += 5000; pressureLoop(); }
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_FALSE(doc["active"].as<bool>());
+  TEST_ASSERT_EQUAL_UINT32(0, doc["remainingMs"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_UINT(1, doc["draft"].size());
+}
+
+static void test_failed_pressure_point_keeps_completed_points_and_can_be_retried(void) {
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  JsonDocument doc;
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_TRUE(doc["failed"].as<bool>());
+  TEST_ASSERT_EQUAL(PRESSURE_CAPTURE_NOT_INCREASING, doc["failure"].as<unsigned>());
+  TEST_ASSERT_EQUAL_FLOAT(15, doc["capturePsi"].as<float>());
+  TEST_ASSERT_EQUAL_UINT(1, doc["draft"].size());
+  s_pressureAdc = 250;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  s_pressureAdc = 1023;
+  s_millis += 5000;
+  pressureLoop();
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_FALSE(doc["active"].as<bool>());
+  TEST_ASSERT_EQUAL(PRESSURE_CAPTURE_ADC_LIMIT, doc["failure"].as<unsigned>());
+  TEST_ASSERT_EQUAL_UINT(1, doc["draft"].size());
+  s_pressureAdc = 250;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  httpRespReset();
+  handlePressure(srv);
+  parseResponse(doc);
+  TEST_ASSERT_FALSE(doc["failed"].as<bool>());
+  TEST_ASSERT_EQUAL_UINT(2, doc["draft"].size());
+  TEST_ASSERT_EQUAL_UINT8(0, g_pressureCalibration.count);
+}
+
+static void test_switching_pressure_off_stops_capture_and_hides_fermenter_readings(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  g_fermenters[0].psiCollect = true;
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  postBody("{\"action\":\"assign\",\"fermenter\":0,\"enabled\":false}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_pressureEnabled);
+  TEST_ASSERT_FALSE(g_pressureCapture.active);
+  TEST_ASSERT_EQUAL(0, pressureFermenter());
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureCalibration.count);
+  TEST_ASSERT_EQUAL(PRESSURE_UNAVAILABLE, pressureCurrentReading().state);
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_DISABLED, pressureBeginPoint(0));
+  s_pressureReads = 0;
+  s_millis += 60000;
+  pressureLoop();
+  TEST_ASSERT_EQUAL_UINT(0, s_pressureReads);
+  JsonDocument off;
+  buildFermenterJson(off, 0);
+  TEST_ASSERT_FALSE(off["PressureAssigned"].as<bool>());
+  TEST_ASSERT_TRUE(off["Pressure"].isNull());
+  TEST_ASSERT_TRUE(off["PressureState"].isNull());
+  TEST_ASSERT_TRUE(loadPressureConfig());
+  TEST_ASSERT_FALSE(g_pressureEnabled);
+  postBody("{\"action\":\"assign\",\"fermenter\":0,\"enabled\":true}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+  JsonDocument on;
+  buildFermenterJson(on, 0);
+  TEST_ASSERT_TRUE(on["PressureAssigned"].as<bool>());
+  TEST_ASSERT_EQUAL_FLOAT(0, on["Pressure"].as<float>());
+}
+
+// ---- [PSI] log lines ----
+
+// Run the loop until the next once-a-minute reading is complete.
+static void takePressureReading() {
+  s_millis += 60000;
+  for (int i = 0; i < 10; i++) { s_millis += 10; pressureLoop(); }
+}
+
+static void test_pressure_readings_are_logged_once_a_minute_while_enabled(void) {
+  strcpy(g_fermenters[0].fermenterName, "Fermenter 1");
+  g_fermenters[0].psiCollect = true;
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  s_pressureAdc = 220;
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] F0 (Fermenter 1): 10.0 PSI (raw 220)\n"));
+  // Nothing more until the minute is up.
+  for (int i = 0; i < 10; i++) { s_millis += 1000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(1, logCount("[PSI]"));
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(2, logCount("6 [PSI] F0 (Fermenter 1): 10.0 PSI (raw 220)\n"));
+  // A disabled sensor logs nothing.
+  g_pressureEnabled = false;
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(2, logCount("[PSI]"));
+}
+
+static void test_pressure_log_line_names_each_reading_state(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  s_pressureAdc = 400;
+  takePressureReading();
+  s_pressureAdc = 100;
+  takePressureReading();
+  s_pressureAdc = 1023;
+  takePressureReading();
+  g_pressureCalibration = {};
+  s_pressureAdc = 173;
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] Not assigned: 40.0 PSI, estimated above the top calibration point (raw 400)\n"));
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] Not assigned: below zero (raw 100)\n"));
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] Not assigned: at full scale, pressure unknown (raw 1023)\n"));
+  TEST_ASSERT_EQUAL_INT(1, logCount("6 [PSI] Not assigned: no calibration yet (raw 173)\n"));
+}
+
+static void test_pressure_fault_is_warned_once_and_its_end_noted(void) {
+  strcpy(g_fermenters[0].fermenterName, "Fermenter 1");
+  g_fermenters[0].psiCollect = true;
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  s_pressureAdc = 220;
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(0, logCount("4 [PSI]"));
+  s_pressureAdc = 100;
+  takePressureReading();
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("4 [PSI] F0 (Fermenter 1): pressure sensor needs checking - reading below zero (raw 100)\n"));
+  // A different fault is a new warning.
+  s_pressureAdc = 1023;
+  takePressureReading();
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("4 [PSI] F0 (Fermenter 1): pressure sensor needs checking - input at full scale (raw 1023)\n"));
+  s_pressureAdc = 220;
+  takePressureReading();
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] F0 (Fermenter 1): pressure sensor reading normally again (10.0 PSI)\n"));
+  TEST_ASSERT_EQUAL_INT(2, logCount("4 [PSI]"));
+  // After a settings change, a fault in the first reading is warned again.
+  s_pressureAdc = 100;
+  takePressureReading();
+  pressureResetRuntime();
+  takePressureReading();
+  TEST_ASSERT_EQUAL_INT(3, logCount("4 [PSI] F0 (Fermenter 1): pressure sensor needs checking - reading below zero (raw 100)\n"));
+}
+
+static void test_pressure_calibration_steps_are_logged(void) {
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration: capturing point 1 at 0.0 PSI (45 s)\n"));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration: point 1 captured - 0.0 PSI = raw 160\n"));
+  // The input didn't rise.
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(1, logCount("4 [PSI] Calibration: point 2 at 15.0 PSI failed - raw 160 is not above the previous point (raw 160)\n"));
+  // The input reached full scale during the capture.
+  s_pressureAdc = 250;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  s_pressureAdc = 1023;
+  s_millis += 5000;
+  pressureLoop();
+  TEST_ASSERT_EQUAL_INT(1, logCount("4 [PSI] Calibration: point 2 at 15.0 PSI failed - the input reached full scale\n"));
+  s_pressureAdc = 250;
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(15));
+  for (int i = 0; i < 9; i++) { s_millis += 5000; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration: point 2 captured - 15.0 PSI = raw 250\n"));
+  postBody("{\"action\":\"apply\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration applied: 2 points, 0.0 PSI = raw 160 to 15.0 PSI = raw 250\n"));
+  // Discarding is only logged when there was something to discard.
+  postBody("{\"action\":\"cancel\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(0, logCount("[PSI] Calibration draft discarded"));
+  TEST_ASSERT_EQUAL(PRESSURE_BEGIN_OK, pressureBeginPoint(0));
+  postBody("{\"action\":\"cancel\"}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Calibration draft discarded\n"));
+}
+
+static void test_pressure_settings_changes_are_logged(void) {
+  strcpy(g_fermenters[2].fermenterName, "Garage");
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  postBody("{\"action\":\"assign\",\"fermenter\":2,\"enabled\":true}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Sensor enabled - assigned to F2 (Garage)\n"));
+  postBody("{\"action\":\"assign\",\"fermenter\":99}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Sensor enabled - not assigned to a fermenter\n"));
+  postBody("{\"action\":\"assign\",\"fermenter\":99,\"enabled\":false}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_EQUAL_INT(1, logCount("5 [PSI] Sensor disabled\n"));
+}
+
+static void test_pressure_assignment_requires_applied_calibration(void) {
+  g_pressureDraft = {2, {{0,160}, {20,280}}};
+  postBody("{\"action\":\"assign\",\"fermenter\":0}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Apply a valid pressure calibration"));
+  TEST_ASSERT_EQUAL(-1, pressureFermenter());
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureDraft.count);
+}
+
+static void test_pressure_assignment_keeps_unapplied_points_and_writes_nothing(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  g_pressureDraft = {2, {{0,165}, {20,285}}};
+  g_fermenters[0].psiCollect = true;
+  const char* requests[] = {
+    "{\"action\":\"assign\",\"fermenter\":1,\"enabled\":true}",
+    "{\"action\":\"assign\",\"fermenter\":99}"
+  };
+  int writes = g_fsWriteCount;
+  for (const char* body : requests) {
+    httpRespReset();
+    postBody(body);
+    handlePressurePost(srv);
+    TEST_ASSERT_EQUAL_INT(409, g_httpResp.code);
+    TEST_ASSERT_TRUE(bodyContains("Apply or discard new calibration points"));
+    TEST_ASSERT_EQUAL_INT(writes, g_fsWriteCount);
+    httpRespReset();
+    handlePressure(srv);
+    JsonDocument doc;
+    parseResponse(doc);
+    TEST_ASSERT_TRUE(doc["enabled"].as<bool>());
+    TEST_ASSERT_EQUAL_INT(0, doc["fermenter"].as<int>());
+    TEST_ASSERT_EQUAL_UINT(2, doc["points"].size());
+    TEST_ASSERT_EQUAL_UINT(2, doc["draft"].size());
+    TEST_ASSERT_EQUAL_UINT16(160, doc["points"][0]["raw"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_UINT16(280, doc["points"][1]["raw"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_UINT16(165, doc["draft"][0]["raw"].as<uint16_t>());
+    TEST_ASSERT_EQUAL_UINT16(285, doc["draft"][1]["raw"].as<uint16_t>());
+  }
+}
+
+static void test_pressure_assignment_succeeds_after_applying_or_discarding_points(void) {
+  const char* actions[] = { "{\"action\":\"apply\"}", "{\"action\":\"cancel\"}" };
+  for (const char* action : actions) {
+    g_pressureCalibration = {2, {{0,160}, {20,280}}};
+    g_pressureDraft = {2, {{0,165}, {20,285}}};
+    httpRespReset();
+    postBody(action);
+    handlePressurePost(srv);
+    TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+    TEST_ASSERT_EQUAL_UINT8(0, g_pressureDraft.count);
+    httpRespReset();
+    postBody("{\"action\":\"assign\",\"fermenter\":1,\"enabled\":true}");
+    handlePressurePost(srv);
+    TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+    TEST_ASSERT_EQUAL_INT(1, pressureFermenter());
+  }
+}
+
+static void test_switching_pressure_off_discards_completed_draft_points(void) {
+  g_pressureCalibration = {2, {{0,160}, {20,280}}};
+  g_pressureDraft = {2, {{0,165}, {20,285}}};
+  g_fermenters[0].psiCollect = true;
+  postBody("{\"action\":\"assign\",\"fermenter\":0,\"enabled\":false}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(200, g_httpResp.code);
+  TEST_ASSERT_FALSE(g_pressureEnabled);
+  TEST_ASSERT_EQUAL_UINT8(0, g_pressureDraft.count);
+  TEST_ASSERT_EQUAL_INT(0, pressureFermenter());
+  TEST_ASSERT_EQUAL_UINT8(2, g_pressureCalibration.count);
+  TEST_ASSERT_EQUAL_UINT16(160, g_pressureCalibration.points[0].raw);
+  TEST_ASSERT_EQUAL_UINT16(280, g_pressureCalibration.points[1].raw);
+}
+
+static void test_pressure_capture_refusals_say_what_to_fix(void) {
+  postBody("{\"action\":\"capture\",\"psi\":5}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("Start at 0 PSI"));
+  s_pressureAdc = 1023;
+  httpRespReset();
+  postBody("{\"action\":\"capture\",\"psi\":0}");
+  handlePressurePost(srv);
+  TEST_ASSERT_EQUAL_INT(400, g_httpResp.code);
+  TEST_ASSERT_TRUE(bodyContains("The sensor input is at its limit"));
+  TEST_ASSERT_FALSE(g_pressureCapture.active);
+}
+
+static void test_live_pressure_reading_averages_without_blocking_across_wrap(void) {
+  uint16_t raw = 999;
+  uint32_t start = 0xfffffff0u;
+  s_pressureReads = 0;
+  for (int i = 0; i < 10; i++) {
+    s_millis = start + i * 10;
+    s_pressureAdc = 160 + i;
+    TEST_ASSERT_EQUAL(i == 9, pressureReadRaw(raw));
+    if (i < 9) {
+      TEST_ASSERT_FALSE(pressureReadRaw(raw));
+      TEST_ASSERT_EQUAL_UINT16(999, raw);
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT16(165, raw);
+  TEST_ASSERT_EQUAL_UINT(10, s_pressureReads);
+}
+
+static void test_live_pressure_reading_does_not_average_away_saturation(void) {
+  uint16_t raw = 999;
+  TEST_ASSERT_FALSE(pressureReadRaw(raw));
+  s_millis += 10;
+  s_pressureAdc = 1023;
+  TEST_ASSERT_TRUE(pressureReadRaw(raw));
+  TEST_ASSERT_EQUAL_UINT16(1023, raw);
+  s_pressureAdc = 200;
+  for (int i = 0; i < 10; i++) {
+    s_millis += 10;
+    TEST_ASSERT_EQUAL(i == 9, pressureReadRaw(raw));
+  }
+  TEST_ASSERT_EQUAL_UINT16(200, raw);
+}
+
+static void test_cancelling_a_live_pressure_reading_starts_the_average_again(void) {
+  uint16_t raw = 999;
+  s_pressureAdc = 500;
+  for (int i = 0; i < 5; i++) { s_millis += 10; pressureReadRaw(raw); }
+  pressureCancelReading();
+  s_pressureAdc = 200;
+  for (int i = 0; i < 10; i++) {
+    s_millis += 10;
+    TEST_ASSERT_EQUAL(i == 9, pressureReadRaw(raw));
+  }
+  TEST_ASSERT_EQUAL_UINT16(200, raw);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -3704,5 +4198,26 @@ int main(int, char**) {
   RUN_TEST(test_logs_reply_uses_the_whole_response_buffer);
   RUN_TEST(test_logs_nothing_new_is_an_empty_200);
 
+  // Local pressure API and runtime
+  RUN_TEST(test_pressure_api_never_reports_unavailable_as_zero);
+  RUN_TEST(test_pressure_capture_apply_and_cancel_preserve_working_calibration);
+  RUN_TEST(test_only_the_assigned_fermenter_reports_pressure);
+  RUN_TEST(test_pressure_api_uses_the_unassigned_value_for_no_fermenter);
+  RUN_TEST(test_pressure_capture_refusals_say_what_to_fix);
+  RUN_TEST(test_pressure_assignment_requires_applied_calibration);
+  RUN_TEST(test_pressure_assignment_keeps_unapplied_points_and_writes_nothing);
+  RUN_TEST(test_pressure_assignment_succeeds_after_applying_or_discarding_points);
+  RUN_TEST(test_switching_pressure_off_discards_completed_draft_points);
+  RUN_TEST(test_pressure_progress_survives_wrap_and_waits_for_actual_samples);
+  RUN_TEST(test_failed_pressure_point_keeps_completed_points_and_can_be_retried);
+  RUN_TEST(test_switching_pressure_off_stops_capture_and_hides_fermenter_readings);
+  RUN_TEST(test_pressure_readings_are_logged_once_a_minute_while_enabled);
+  RUN_TEST(test_pressure_log_line_names_each_reading_state);
+  RUN_TEST(test_pressure_fault_is_warned_once_and_its_end_noted);
+  RUN_TEST(test_pressure_calibration_steps_are_logged);
+  RUN_TEST(test_pressure_settings_changes_are_logged);
+  RUN_TEST(test_live_pressure_reading_averages_without_blocking_across_wrap);
+  RUN_TEST(test_live_pressure_reading_does_not_average_away_saturation);
+  RUN_TEST(test_cancelling_a_live_pressure_reading_starts_the_average_again);
   return UNITY_END();
 }

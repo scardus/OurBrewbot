@@ -19,6 +19,7 @@
  */
 
 #include "WebAPI.h"
+#include "Pressure.h"
 #include "WebUI.h"
 #include "WebUIAssets.h"
 #include "Log.h"
@@ -61,18 +62,20 @@ static void otaUploadClear();
 // chunk is written here and sent before the next one is built.
 //
 // It is static rather than on the stack because the loop stack is only 4 KB
-// and one /fermenters chunk can be 979 bytes. Sharing it is safe because the
+// and one /fermenters chunk can be 1047 bytes. Sharing it is safe because the
 // web server runs one handler at a time, start to finish, from loop() - so
 // only use it inside those handlers, never from MQTT, logging or iSpindel code.
 //
 // Largest chunk each handler can send (every name char escaped to 2 bytes,
 // every number at its longest - ArduinoJson prints a float in at most 13):
-//   /fermenters  one fermenter  979    /ispindels  one iSpindel  445
+//   /fermenters  one fermenter 1047    /ispindels  one iSpindel  445
 //   /status      one fermenter  271    /smartplugs one plug      272
 //   /profiles    one step       114    /debug      one override  103
-// +1 for the NUL, rounded up to 16. Too small a buffer cuts the JSON off
+// +1 for the NUL. Too small a buffer cuts the JSON off
 // silently, so the WebAPI tests send the worst case through every handler.
-static char s_chunkBuf[992];
+// Pressure adds 18 bytes for state, 25 for a 13-character value and
+// 25 for assignment: 979 + 68 + 1 terminating NUL = 1048.
+static char s_chunkBuf[1048];
 
 // ============================================================
 // SERVER SETUP — register all routes
@@ -118,7 +121,7 @@ static void handleWebJS(ESP8266WebServer& server) {
 }
 
 static const ApiRoute kRoutes[] PROGMEM = {
-  { WEB_CSS_PATH,         HTTP_GET,  handleWebCSS,             false },
+  { WEB_CSS_PATH,        HTTP_GET,  handleWebCSS,             false },
   { WEB_JS_PATH,          HTTP_GET,  handleWebJS,              false },
   { "/",                 HTTP_GET,  handleRoot,               true  },
   { "/controller",       HTTP_GET,  handleController,         true  },
@@ -142,6 +145,8 @@ static const ApiRoute kRoutes[] PROGMEM = {
   { "/status",           HTTP_GET,  handleStatus,             true  },
   { "/probes",           HTTP_GET,  handleProbes,             true  },
   { "/probes",           HTTP_POST, handleProbePost,          true  },
+  { "/pressure",         HTTP_GET,  handlePressure,           false },
+  { "/pressure",         HTTP_POST, handlePressurePost,       true  },
   { "/health",           HTTP_GET,  handleHealth,             true  },
   { "/alerts",           HTTP_GET,  handleAlerts,             false },   // polled by every WebUI page
   { "/logs",             HTTP_GET,  handleLogs,               false },
@@ -435,6 +440,19 @@ void buildFermenterJson(JsonDocument& doc, uint8_t i) {
   doc["TempUnit"]       = (g_globalConfig.unit == UNIT_CELSIUS) ? "C" : "F";
   doc["BeerTempSource"] = getBeerTempSource(i);
   doc["GravitySource"]  = getGravitySource(i);
+
+  // Only the fermenter with the pressure sensor reports its state and reading.
+  // PressureState is a PressureReadingState number (see PressureCalc.h), and
+  // Pressure is null whenever there's no usable value - never 0.
+  bool pressureAssigned = g_pressureEnabled && g_fermenters[i].psiCollect;
+  doc["PressureAssigned"] = pressureAssigned;
+  if (pressureAssigned) {
+    PressureReading reading = pressureCurrentReading();
+    doc["PressureState"] = (unsigned)reading.state;
+    doc["Pressure"]      = nullptr;
+    if (reading.state == PRESSURE_CALIBRATED || reading.state == PRESSURE_ESTIMATE)
+      doc["Pressure"] = reading.psi;
+  }
 }
 
 // One step of a profile, as it appears in the "steps" array.
@@ -475,8 +493,8 @@ void handleFermenters(ESP8266WebServer& server) {
     if (i > 0) server.sendContent(",");
     JsonDocument doc;
     buildFermenterJson(doc, i);
-    // 979 bytes at most: four 31-char names with every char escaped, the
-    // longest status and source strings, and all 12 floats at 13 chars.
+    // 1047 bytes at most: four 31-char names with every char escaped, the
+    // longest status and source strings, floats at 13 chars, and pressure fields.
     size_t n = serializeJson(doc, s_chunkBuf, sizeof(s_chunkBuf));
     server.sendContent(s_chunkBuf, n);
   }
@@ -1918,7 +1936,7 @@ void handleFsFileSave(ESP8266WebServer& server) {
     "/jsonSmartPlugs.txt", "/jsonProfile.txt", "/jsonProfileSteps.txt",
     "/jsonTilt.txt", "/jsoniSpindel.txt",
     "/jsonBrewServices.txt", "/jsonMqtt.txt", "/jsonSyslog.txt",
-    "/jsonNotify.txt"
+    "/jsonNotify.txt", FILE_PRESSURE
   };
   String name = server.arg("name");
   bool ok = false;
@@ -2173,6 +2191,150 @@ void handleNotifyTest(ESP8266WebServer& server) {
                delivered ? "ok" : "error", httpCode, delivered ? "OK" : "Failed", httpCode);
   }
   sendJsonResponse(server, resp);
+}
+
+// ============================================================
+// LOCAL PRESSURE SENSOR
+// ============================================================
+
+// Local pressure readings and calibration. No unusable state becomes zero PSI.
+// "fermenter" is PROBE_UNASSIGNED when no fermenter has the sensor, as for
+// probes, Tilts and iSpindels. "state" is a PressureReadingState number (see
+// PressureCalc.h).
+void handlePressure(ESP8266WebServer& server) {
+  JsonDocument doc;
+  PressureReading reading = pressureCurrentReading();
+  int fermenter = pressureFermenter();
+  doc["fermenter"] = (fermenter < 0) ? PROBE_UNASSIGNED : fermenter;
+  doc["state"] = (unsigned)reading.state;
+  doc["raw"] = reading.raw;
+  doc["psi"] = nullptr;
+  if (reading.state == PRESSURE_CALIBRATED || reading.state == PRESSURE_ESTIMATE)
+    doc["psi"] = reading.psi;
+  doc["enabled"] = g_pressureEnabled;
+  doc["active"] = g_pressureCapture.active;
+  doc["samples"] = g_pressureCapture.samples;
+  doc["samplesNeeded"] = PRESSURE_CAPTURE_SAMPLES;
+  doc["failed"] = g_pressureCaptureFailure != PRESSURE_CAPTURE_NO_FAILURE;
+  doc["failure"] = (unsigned)g_pressureCaptureFailure;
+  doc["capturePsi"] = g_pressureCapturePsi;
+  doc["durationMs"] = (PRESSURE_CAPTURE_SAMPLES - 1) * PRESSURE_CAPTURE_INTERVAL_MS;
+  uint32_t remainingMs = 0;
+  if (g_pressureCapture.active) {
+    uint32_t elapsed = (uint32_t)(millis() - g_pressureCapture.lastSampleMs);
+    // A delayed loop still needs the later samples; don't count them as taken.
+    if (elapsed > PRESSURE_CAPTURE_INTERVAL_MS) elapsed = PRESSURE_CAPTURE_INTERVAL_MS;
+    remainingMs = (PRESSURE_CAPTURE_SAMPLES - g_pressureCapture.samples) * PRESSURE_CAPTURE_INTERVAL_MS - elapsed;
+  }
+  doc["remainingMs"] = remainingMs;
+  JsonArray points = doc["points"].to<JsonArray>();
+  for (uint8_t i = 0; i < g_pressureCalibration.count; i++) {
+    JsonObject point = points.add<JsonObject>();
+    point["psi"] = g_pressureCalibration.points[i].psi;
+    point["raw"] = g_pressureCalibration.points[i].raw;
+  }
+  JsonArray draft = doc["draft"].to<JsonArray>();
+  for (uint8_t i = 0; i < g_pressureDraft.count; i++) {
+    JsonObject point = draft.add<JsonObject>();
+    point["psi"] = g_pressureDraft.points[i].psi;
+    point["raw"] = g_pressureDraft.points[i].raw;
+  }
+  sendJsonDoc(server, doc);
+}
+
+void handlePressurePost(ESP8266WebServer& server) {
+  JsonDocument doc;
+  if (!parseJsonBody(server, doc)) return;
+  const char* action = doc["action"] | "";
+  if (!strcmp(action, "cancel")) {
+    if (g_pressureCapture.active || g_pressureDraft.count)
+      logMsgL(SYSLOG_NOTICE, "[PSI] Calibration draft discarded");
+    pressureResetRuntime();
+    sendOk(server, F("Calibration draft discarded"));
+    return;
+  }
+  // Switching off also discards the unfinished calibration, as cancellation does.
+  bool switchingOff = !strcmp(action, "assign") && doc["enabled"].is<bool>() && !doc["enabled"].as<bool>();
+  if (g_pressureCapture.active && !switchingOff) {
+    sendErr(server, 409, F("Calibration is running - cancel it first"));
+    return;
+  }
+  if (!strcmp(action, "assign")) {
+    if (!doc["fermenter"].is<int>()) { sendErr(server, 400, F("Invalid fermenter")); return; }
+    // A fermenter number, or PROBE_UNASSIGNED for local readings only.
+    int index = doc["fermenter"];
+    if (index != PROBE_UNASSIGNED && (index < 0 || index >= MAX_FERMENTERS)) {
+      sendErr(server, 400, F("Invalid fermenter"));
+      return;
+    }
+    if (!doc["enabled"].isNull() && !doc["enabled"].is<bool>()) {
+      sendErr(server, 400, F("Invalid pressure sensor switch"));
+      return;
+    }
+    if (index != PROBE_UNASSIGNED && !pressureCalibrationValid(g_pressureCalibration)) {
+      sendErr(server, 400, F("Apply a valid pressure calibration before assigning a fermenter"));
+      return;
+    }
+    // Changing the assignment would clear the draft, so ask the user to resolve it first.
+    if (g_pressureDraft.count && !switchingOff) {
+      sendErr(server, 409, F("Apply or discard new calibration points before changing the assignment"));
+      return;
+    }
+    g_pressureEnabled = doc["enabled"] | g_pressureEnabled;
+    for (int i = 0; i < MAX_FERMENTERS; i++) g_fermenters[i].psiCollect = (i == index);
+    pressureResetRuntime();
+    // The sensor switch and calibration are stored separately from assignment.
+    bool saved = savePressureConfig();
+    saved &= saveFermenterConfig();
+    if (saved && !g_pressureEnabled) {
+      logMsgL(SYSLOG_NOTICE, "[PSI] Sensor disabled");
+    } else if (saved && pressureFermenter() < 0) {
+      logMsgL(SYSLOG_NOTICE, "[PSI] Sensor enabled - not assigned to a fermenter");
+    } else if (saved) {
+      char owner[PRESSURE_OWNER_NAME_SIZE];
+      pressureOwnerName(owner, sizeof(owner));
+      logMsgL(SYSLOG_NOTICE, "[PSI] Sensor enabled - assigned to %s", owner);
+    }
+    sendSaveResult(server, saved, F("Pressure sensor settings saved"));
+  } else if (!strcmp(action, "capture")) {
+    PressureBeginResult result = doc["psi"].is<float>() ? pressureBeginPoint(doc["psi"].as<float>())
+                                                        : PRESSURE_BEGIN_BAD_PSI;
+    switch (result) {
+      case PRESSURE_BEGIN_OK:
+        sendOk(server, F("Calibration capture started"));
+        break;
+      case PRESSURE_BEGIN_DISABLED:
+        sendErr(server, 400, F("Enable the pressure sensor before capturing a point"));
+        break;
+      case PRESSURE_BEGIN_BUSY:
+        sendErr(server, 409, F("Calibration is running - cancel it first"));
+        break;
+      case PRESSURE_BEGIN_DRAFT_FULL:
+        sendErr(server, 400, F("The draft already has five points - apply or discard it"));
+        break;
+      case PRESSURE_BEGIN_ADC_LIMIT:
+        sendErr(server, 400, F("The sensor input is at its limit - check the wiring and the pressure"));
+        break;
+      default:
+        sendErr(server, 400, F("Start at 0 PSI, then use higher pressures up to 100 PSI"));
+        break;
+    }
+  } else if (!strcmp(action, "apply")) {
+    if (!pressureCalibrationValid(g_pressureDraft)) {
+      sendErr(server, 400, F("Capture two to five increasing points, starting at zero"));
+      return;
+    }
+    g_pressureCalibration = g_pressureDraft;
+    pressureResetRuntime();
+    bool saved = savePressureConfig();
+    if (saved) {
+      const PressurePoint& zero = g_pressureCalibration.points[0];
+      const PressurePoint& top  = g_pressureCalibration.points[g_pressureCalibration.count - 1];
+      logMsgL(SYSLOG_NOTICE, "[PSI] Calibration applied: %u points, %.1f PSI = raw %u to %.1f PSI = raw %u",
+              (unsigned)g_pressureCalibration.count, zero.psi, (unsigned)zero.raw, top.psi, (unsigned)top.raw);
+    }
+    sendSaveResult(server, saved, F("Pressure calibration saved"));
+  } else sendErr(server, 400, F("Unknown pressure action"));
 }
 
 // ============================================================

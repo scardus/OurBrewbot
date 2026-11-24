@@ -51,6 +51,8 @@ BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 MqttConfig        g_mqttConfig;
 SyslogConfig      g_syslogConfig;
 NotifyConfig      g_notifyConfig;
+PressureCalibration g_pressureCalibration = {};
+bool g_pressureEnabled = false;
 
 // ============================================================
 // FILE UTILITIES
@@ -1012,6 +1014,63 @@ bool saveMqttConfig() {
 // SYSLOG CONFIG
 // ============================================================
 
+// Pressure calibration is independent of the original two-source pressure file.
+// A missing or invalid new file leaves the sensor disabled; historical source
+// numbers or old copies under /orig/ are never taken as a new assignment.
+bool loadPressureConfig() {
+  g_pressureCalibration = {};
+  g_pressureEnabled = false;
+  JsonDocument doc;
+  bool loaded = loadConfigDoc(CFG_FILE_PRESSURE, doc, FILE_PRESSURE, FILE_PRESSURE_BKP);
+  JsonArrayConst points = doc["points"].as<JsonArrayConst>();
+  bool valid = loaded && !points.isNull() && points.size() <= PRESSURE_MAX_POINTS;
+  if (valid) {
+    g_pressureCalibration.count = points.size();
+    for (uint8_t i = 0; i < g_pressureCalibration.count; i++) {
+      JsonVariantConst point = points[i];
+      if (!point["psi"].is<float>() || !point["raw"].is<uint16_t>()) { valid = false; break; }
+      g_pressureCalibration.points[i] = {point["psi"].as<float>(), point["raw"].as<uint16_t>()};
+    }
+    if (g_pressureCalibration.count && !pressureCalibrationValid(g_pressureCalibration)) valid = false;
+  }
+  // Older files have no switch: retain operation for a calibrated sensor.
+  g_pressureEnabled = valid && (doc["enabled"] | pressureCalibrationValid(g_pressureCalibration));
+  bool calibrated = valid && pressureCalibrationValid(g_pressureCalibration);
+  bool assigned = false;
+  for (uint8_t i = 0; i < MAX_FERMENTERS; i++) {
+    if (!g_fermenters[i].psiCollect) continue;
+    if (!calibrated || assigned) {
+      g_fermenters[i].psiCollect = false;
+      configMarkUnsaved(CFG_FILE_FERMENTER);
+      // One call per reason keeps each whole message in flash, not RAM.
+      if (!loaded)
+        logMsgL(SYSLOG_WARNING, "[CFG] Fermenter %d: pressure sensor unassigned - no usable pressure settings file", i + 1);
+      else if (!calibrated)
+        logMsgL(SYSLOG_WARNING, "[CFG] Fermenter %d: pressure sensor unassigned - the pressure calibration is invalid", i + 1);
+      else
+        logMsgL(SYSLOG_WARNING, "[CFG] Fermenter %d: pressure sensor unassigned - only one fermenter can have it", i + 1);
+    } else assigned = true;
+  }
+  if (!valid) {
+    g_pressureCalibration = {};
+    g_pressureEnabled = false;
+    configMarkUnsaved(CFG_FILE_PRESSURE);
+  }
+  return valid;
+}
+
+bool savePressureConfig() {
+  JsonDocument doc;
+  doc["enabled"] = g_pressureEnabled;
+  JsonArray points = doc["points"].to<JsonArray>();
+  for (uint8_t i = 0; i < g_pressureCalibration.count; i++) {
+    JsonObject point = points.add<JsonObject>();
+    point["psi"] = g_pressureCalibration.points[i].psi;
+    point["raw"] = g_pressureCalibration.points[i].raw;
+  }
+  return saveConfigDoc(CFG_FILE_PRESSURE, doc, FILE_PRESSURE, FILE_PRESSURE_BKP);
+}
+
 bool loadSyslogConfig() {
   JsonDocument doc;
   if (!loadConfigDoc(CFG_FILE_SYSLOG, doc, FILE_SYSLOG, FILE_SYSLOG_BKP)) {
@@ -1146,6 +1205,7 @@ void loadAllConfig() {
     loadMqttConfig();
     loadSyslogConfig();
     loadNotifyConfig();
+    loadPressureConfig();
   }
 
   // One-shot migration: bump any AlarmTolerance==0 to 3.0 (the new default
@@ -1182,6 +1242,7 @@ void saveAllConfig() {
   ok &= saveMqttConfig();
   ok &= saveSyslogConfig();
   ok &= saveNotifyConfig();
+  ok &= savePressureConfig();
   if (!ok)
     logMsgL(SYSLOG_ERR, "[CFG] One or more config saves failed");
 }
@@ -1249,6 +1310,7 @@ static void saveUnsavedConfig() {
   if (isUnsaved(CFG_FILE_MQTT))       ok &= saveMqttConfig();
   if (isUnsaved(CFG_FILE_SYSLOG))     ok &= saveSyslogConfig();
   if (isUnsaved(CFG_FILE_NOTIFY))     ok &= saveNotifyConfig();
+  if (isUnsaved(CFG_FILE_PRESSURE))   ok &= savePressureConfig();
   if (!ok)
     logMsgL(SYSLOG_ERR, "[CFG] One or more config saves failed - trying again in 10 minutes");
 }
@@ -1429,6 +1491,8 @@ void resetWiFiConfig() {
 
 // Every setting back to its default, in memory only
 static void initAllDefaultConfig() {
+  g_pressureCalibration = {};
+  g_pressureEnabled = false;
   initDefaultGlobalConfig();
   initDefaultFermenterConfig();
   initDefaultProbeConfig();

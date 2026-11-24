@@ -54,7 +54,7 @@ function fermCard(f) {
         <div><div class="slot-label">${esc(f.name)}</div><h2 class="batch-name">${esc(f.beer)}</h2>
           <p class="batch-sub">${esc(f.yeast)}</p></div>${badge(status,kind)}
       </div>
-      <div class="readings">
+      <div class="readings${f.pressureAssigned?' with-pressure':''}">
         <div><div class="reading-label">Beer temperature</div>
           <div class="reading-number primary">${formatTemp(f.beerTemp)}<small>°${state.unit}</small></div>
           <div class="reading-source">${esc(f.source)}</div></div>
@@ -64,6 +64,9 @@ function fermCard(f) {
         <div><div class="reading-label">Ambient</div>
           <div class="reading-number">${formatTemp(f.ambient)}<small>°${state.unit}</small></div>
           <div class="reading-source">${f.ambient==null?'No reading':'Ambient temperature'}</div></div>
+        ${f.pressureAssigned?`<div><div class="reading-label">Pressure</div>
+          <div class="reading-number">${formatPressure(f.pressure)}<small>PSI</small></div>
+          <div class="reading-source">${esc(describePressureState(f.pressureState).name)}</div></div>`:''}
       </div>
       <div class="band"><span>Target band</span><strong>${formatTemp(f.floor)} – ${formatTemp(f.ceiling)} °${state.unit}</strong>
         <span>Temp control ${f.tempControl?'on':'off'}</span></div>

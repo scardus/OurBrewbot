@@ -362,6 +362,29 @@ views:
               {%- endif -%}
             grid_options:
               columns: 6
+          - type: custom:mushroom-template-card
+            entity: sensor.ourbrewbot_f0_pressure
+            primary: Pressure
+            secondary: >-
+              {%- set v = states('sensor.ourbrewbot_f0_pressure') -%}
+              {%- set s = states('sensor.ourbrewbot_f0_pressure_status') -%}
+              {%- if is_number(v) -%} {{ v | float | round(1) }} {{ state_attr('sensor.ourbrewbot_f0_pressure', 'unit_of_measurement') }}{{ ' · estimate' if s == 'Estimate' else '' }}
+              {%- else -%} {{ s if s not in ['unknown', 'unavailable'] else '–' }}
+              {%- endif -%}
+            icon: mdi:gauge
+            color: >-
+              {%- set s = states('sensor.ourbrewbot_f0_pressure_status') -%}
+              {%- if s in ['Below zero', 'ADC limit'] -%} red
+              {%- elif s == 'Estimate' -%} amber
+              {%- elif s == 'Calibrated' -%} blue
+              {%- else -%} grey
+              {%- endif -%}
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 12
           - type: tile
             entity: switch.ourbrewbot_f0_power
             name: Power
@@ -706,6 +729,29 @@ views:
               {%- endif -%}
             grid_options:
               columns: 6
+          - type: custom:mushroom-template-card
+            entity: sensor.ourbrewbot_f1_pressure
+            primary: Pressure
+            secondary: >-
+              {%- set v = states('sensor.ourbrewbot_f1_pressure') -%}
+              {%- set s = states('sensor.ourbrewbot_f1_pressure_status') -%}
+              {%- if is_number(v) -%} {{ v | float | round(1) }} {{ state_attr('sensor.ourbrewbot_f1_pressure', 'unit_of_measurement') }}{{ ' · estimate' if s == 'Estimate' else '' }}
+              {%- else -%} {{ s if s not in ['unknown', 'unavailable'] else '–' }}
+              {%- endif -%}
+            icon: mdi:gauge
+            color: >-
+              {%- set s = states('sensor.ourbrewbot_f1_pressure_status') -%}
+              {%- if s in ['Below zero', 'ADC limit'] -%} red
+              {%- elif s == 'Estimate' -%} amber
+              {%- elif s == 'Calibrated' -%} blue
+              {%- else -%} grey
+              {%- endif -%}
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 12
           - type: tile
             entity: switch.ourbrewbot_f1_power
             name: Power
@@ -1050,6 +1096,29 @@ views:
               {%- endif -%}
             grid_options:
               columns: 6
+          - type: custom:mushroom-template-card
+            entity: sensor.ourbrewbot_f2_pressure
+            primary: Pressure
+            secondary: >-
+              {%- set v = states('sensor.ourbrewbot_f2_pressure') -%}
+              {%- set s = states('sensor.ourbrewbot_f2_pressure_status') -%}
+              {%- if is_number(v) -%} {{ v | float | round(1) }} {{ state_attr('sensor.ourbrewbot_f2_pressure', 'unit_of_measurement') }}{{ ' · estimate' if s == 'Estimate' else '' }}
+              {%- else -%} {{ s if s not in ['unknown', 'unavailable'] else '–' }}
+              {%- endif -%}
+            icon: mdi:gauge
+            color: >-
+              {%- set s = states('sensor.ourbrewbot_f2_pressure_status') -%}
+              {%- if s in ['Below zero', 'ADC limit'] -%} red
+              {%- elif s == 'Estimate' -%} amber
+              {%- elif s == 'Calibrated' -%} blue
+              {%- else -%} grey
+              {%- endif -%}
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 12
           - type: tile
             entity: switch.ourbrewbot_f2_power
             name: Power
@@ -1394,6 +1463,29 @@ views:
               {%- endif -%}
             grid_options:
               columns: 6
+          - type: custom:mushroom-template-card
+            entity: sensor.ourbrewbot_f3_pressure
+            primary: Pressure
+            secondary: >-
+              {%- set v = states('sensor.ourbrewbot_f3_pressure') -%}
+              {%- set s = states('sensor.ourbrewbot_f3_pressure_status') -%}
+              {%- if is_number(v) -%} {{ v | float | round(1) }} {{ state_attr('sensor.ourbrewbot_f3_pressure', 'unit_of_measurement') }}{{ ' · estimate' if s == 'Estimate' else '' }}
+              {%- else -%} {{ s if s not in ['unknown', 'unavailable'] else '–' }}
+              {%- endif -%}
+            icon: mdi:gauge
+            color: >-
+              {%- set s = states('sensor.ourbrewbot_f3_pressure_status') -%}
+              {%- if s in ['Below zero', 'ADC limit'] -%} red
+              {%- elif s == 'Estimate' -%} amber
+              {%- elif s == 'Calibrated' -%} blue
+              {%- else -%} grey
+              {%- endif -%}
+            tap_action:
+              action: more-info
+            icon_tap_action:
+              action: more-info
+            grid_options:
+              columns: 12
           - type: tile
             entity: switch.ourbrewbot_f3_power
             name: Power

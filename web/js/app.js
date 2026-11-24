@@ -50,6 +50,7 @@ function render() {
   if (tabs && tabScroll) tabs.scrollLeft=tabScroll;
   if (preview && previewScroll) preview.scrollLeft=previewScroll;
   mountForms(main);
+  if (state.route==='sensors' && state.sensorTab==='pressure') updatePressureReadings();
   markProfileDraft();
   closeNav();
   updateAge();
@@ -58,6 +59,7 @@ function render() {
 
 // Update live text and status badges without replacing editing forms.
 function updateLiveReadings() {
+  updatePressureReadings();
   $$('.nav-count').forEach(node=>{
     node.textContent=activeFermenterCount();
   });
@@ -143,6 +145,8 @@ const actionHandlers = {
   'step-down':index=>editProfileStep('step-down',index),
   'step-delete':index=>editProfileStep('step-delete',index),
   // Sensors.
+  'pressure-apply':()=>pressureCommand('apply'),
+  'pressure-cancel':()=>pressureCommand('cancel'),
   'sensor-tab':(index,value)=>selectTab('sensorTab',value),
   'clear-sensor':(index,value,button)=>clearSensor(button.dataset.kind,index),
   // Smart plugs.

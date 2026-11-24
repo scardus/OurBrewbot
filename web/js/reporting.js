@@ -48,7 +48,7 @@ function notifyCard(n) {
         </div>
         <h3 style="margin-top:20px">Send a notification for</h3>
         ${toggle('Temperature alarms','alarms',n.alarms,'When an alarm starts and when it ends.')}
-        ${toggle('Sensor problems','sensors',n.sensors,'A probe, Tilt or iSpindel stops or resumes reporting.')}
+        ${toggle('Sensor problems','sensors',n.sensors,'A probe, Tilt or iSpindel stops or resumes reporting, or the pressure sensor needs checking.')}
         ${toggle('Unexpected restarts','restarts',n.restarts,'After a crash or power cut.')}
         ${toggle('Profile progress','profile',n.profile,'A step completes or a profile finishes.')}
         ${toggle('Firmware updates','updates',n.updates,'Once when a new release is available.')}

@@ -59,6 +59,8 @@ enum NotifyEvent : uint8_t {
   NOTIFY_ISPINDEL_BACK,     // index = iSpindel slot
   NOTIFY_TILT_LOST,         // index = Tilt colour, a = minutes without a reading
   NOTIFY_TILT_BACK,         // index = Tilt colour
+  NOTIFY_PRESSURE_FAULT,    // detail = the PressureReadingState: PRESSURE_BELOW_ZERO or PRESSURE_ADC_LIMIT
+  NOTIFY_PRESSURE_BACK,     // the pressure sensor is reading again
   NOTIFY_RESTART,           // detail = the reset reason code (REASON_xxx in user_interface.h)
   NOTIFY_STEP_COMPLETE,     // index = fermenter, detail = the step that finished, a = the step now running
   NOTIFY_PROFILE_FINISHED,  // index = fermenter
@@ -120,14 +122,18 @@ enum NotifySensor : uint8_t {
   NOTIFY_SENSOR_PROBE,      // index = probe
   NOTIFY_SENSOR_ISPINDEL,   // index = iSpindel slot
   NOTIFY_SENSOR_TILT,       // index = Tilt colour
+  NOTIFY_SENSOR_PRESSURE,   // index = 0: there is only one pressure sensor
 };
 
 // Tell the notifications whether a sensor is reporting. Like
 // notifyAlarmState(), call it on every check: "stopped reporting" is sent at
 // once, and "reporting again" only once the sensor has kept reporting for 10
 // minutes, so a loose connection is one message and not dozens. `minutes` is
-// how long the sensor has been quiet (not used for probes).
-void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minutes = 0.0f);
+// how long the sensor has been quiet (not used for probes or the pressure
+// sensor). `detail` is only for the pressure sensor: while `lost`, it is the
+// PressureReadingState that shows the fault, so the text can say what it is.
+void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minutes = 0.0f,
+                       uint8_t detail = 0);
 
 // Call once at boot, after the crash record has been read. Queues "controller
 // restarted" for a restart nobody asked for:
@@ -177,7 +183,7 @@ bool notifyBuildMessage(const NotifyEventData& event, NotifyMessage& msg);
 // What an alert is about. The WebUI picks the banner's colour from this.
 enum NotifyAlertKind : uint8_t {
   ALERT_ALARM,      // a temperature alarm
-  ALERT_SENSOR,     // a probe, iSpindel or Tilt that stopped reporting
+  ALERT_SENSOR,     // a probe, iSpindel or Tilt that stopped reporting, or a pressure sensor fault
   ALERT_RESTART,    // the controller restarted after a crash or a power cut
   ALERT_PROFILE,    // a profile finished
   ALERT_UPDATE,     // a newer firmware release is available

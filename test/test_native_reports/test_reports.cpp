@@ -44,6 +44,8 @@ BrewServiceConfig g_brewServices[MAX_BREW_SERVICES];
 GlobalConfig      g_globalConfig;
 bool g_fermenterDebugMode = false;
 FermenterDebugOverride g_fermenterDebugOverrides[MAX_FERMENTERS];
+PressureCalibration g_pressureCalibration = {};
+bool g_pressureEnabled = false;
 
 // ---- millis(), settable per test ----
 static uint32_t s_millis = 0;
@@ -69,10 +71,16 @@ void smartPlugForceOff(uint8_t) {}
 void allPlugsForceOff() {}
 void processProfiles() {}
 
+// ---- the pressure sensor's A0 input, settable per test ----
+static int s_pressureAdc = 160;
+int analogRead(uint8_t) { return s_pressureAdc; }
+
 // The code under test, plus the reading/conversion sources its payload uses.
 #include "../../OurBrewbot/Temperatures.cpp"
 #include <NotifyStub.h>   // records what Fermenter.cpp reports to the notifications
 #include "../../OurBrewbot/Fermenter.cpp"
+#include "../../OurBrewbot/PressureCalc.cpp"
+#include "../../OurBrewbot/Pressure.cpp"
 #include "../../OurBrewbot/Reports.cpp"
 
 // ---- test fixture ----
@@ -98,6 +106,11 @@ void setUp(void) {
   WiFi.rssi      = -60;
   httpTestReset();
   s_millis = 0;
+  pressureResetRuntime();
+  g_pressureEnabled = true;
+  g_pressureCalibration = {};
+  s_pressureAdc = 160;
+  notifyStubReset();
 }
 
 void tearDown(void) {}
@@ -376,6 +389,131 @@ void test_payload_sends_og_only_to_brewers_friend(void) {
   TEST_ASSERT_FALSE(bodyHas("\"og\":"));
 }
 
+// Give fermenter `f` the pressure sensor, calibrated 0-20 PSI over 160-280,
+// and take one live reading of `adc` through the real sampling loop.
+static void readPressure(uint8_t f, int adc) {
+  g_fermenters[f].psiCollect = true;
+  g_pressureCalibration = {2, {{0, 160}, {20, 280}}};
+  s_pressureAdc = adc;
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }
+}
+
+void test_payload_sends_pressure_to_brewers_friend_as_psi(void) {
+  enableService(BF, "abc");
+  readPressure(F, 205);   // 45 counts above zero = 7.5 PSI
+
+  reportBrewService(F, BF);
+  TEST_ASSERT_TRUE(bodyHas("\"psi\":7.5"));
+}
+
+void test_payload_sends_pressure_to_brewfather_with_its_unit(void) {
+  enableService(BF, "abc");
+  enableService(BFR, "def");
+  readPressure(F, 205);
+
+  reportBrewService(F, BFR);
+  TEST_ASSERT_TRUE(bodyHas("\"pressure\":7.5"));
+  TEST_ASSERT_TRUE(bodyHas("\"pressure_unit\":\"PSI\""));
+  TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+
+  // Brewer's Friend takes PSI only, so it gets no unit field.
+  reportBrewService(F, BF);
+  TEST_ASSERT_TRUE(bodyHas("\"psi\":7.5"));
+  TEST_ASSERT_FALSE(bodyHas("\"pressure_unit\":"));
+}
+
+void test_switching_pressure_off_omits_it_from_both_services(void) {
+  enableService(BF, "abc");
+  enableService(BFR, "def");
+  readPressure(F, 205);
+  g_pressureEnabled = false;
+  for (uint8_t service = BF; service <= BFR; service++) {
+    reportBrewService(F, service);
+    TEST_ASSERT_TRUE(bodyHas("\"name\":"));
+    TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+    TEST_ASSERT_FALSE(bodyHas("\"pressure\":"));
+    TEST_ASSERT_FALSE(bodyHas("\"pressure_unit\":"));
+  }
+}
+
+void test_payload_sends_pressure_only_for_the_fermenter_with_the_sensor(void) {
+  enableService(BF, "abc");
+  readPressure(F, 205);
+
+  reportBrewService(1, BF);
+  TEST_ASSERT_TRUE(bodyHas("\"heat_state\":"));   // body really was built
+  TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+}
+
+void test_payload_leaves_out_pressure_without_a_usable_reading(void) {
+  enableService(BF, "abc");
+  readPressure(F, 1023);  // input at the ADC limit: the true pressure is unknown
+  reportBrewService(F, BF);
+  TEST_ASSERT_TRUE(bodyHas("\"heat_state\":"));
+  TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+
+  pressureResetRuntime();
+  g_pressureEnabled = true;
+  g_pressureCalibration = {};
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }   // not calibrated
+  reportBrewService(F, BF);
+  TEST_ASSERT_FALSE(bodyHas("\"psi\":"));
+}
+
+// ---- what pressureLoop() tells the notifications (see Notify.h) ----
+
+// The last notifySensorState() call for the pressure sensor
+static NotifyStubSensor& pressureNotify() {
+  return g_notifyStubSensor[NOTIFY_SENSOR_PRESSURE][0];
+}
+
+void test_a_reading_below_zero_is_reported_as_a_pressure_fault(void) {
+  readPressure(F, 150);   // more than two counts below the 0 PSI point (160)
+  TEST_ASSERT_EQUAL_INT(1, pressureNotify().count);
+  TEST_ASSERT_TRUE(pressureNotify().lost);
+  TEST_ASSERT_EQUAL_UINT8(PRESSURE_BELOW_ZERO, pressureNotify().detail);
+}
+
+void test_an_input_at_full_scale_is_reported_as_a_pressure_fault(void) {
+  readPressure(F, 1023);
+  TEST_ASSERT_EQUAL_INT(1, pressureNotify().count);
+  TEST_ASSERT_TRUE(pressureNotify().lost);
+  TEST_ASSERT_EQUAL_UINT8(PRESSURE_ADC_LIMIT, pressureNotify().detail);
+}
+
+void test_calibrated_and_estimated_readings_are_not_pressure_faults(void) {
+  readPressure(F, 205);   // between the calibration points
+  TEST_ASSERT_EQUAL_INT(1, pressureNotify().count);
+  TEST_ASSERT_FALSE(pressureNotify().lost);
+
+  s_millis += 60000;      // the next reading is a minute later
+  readPressure(F, 400);   // above the top point: an estimate
+  TEST_ASSERT_EQUAL_INT(2, pressureNotify().count);
+  TEST_ASSERT_FALSE(pressureNotify().lost);
+}
+
+// As for the other sensors, only a sensor a fermenter uses is reported
+void test_an_unassigned_pressure_sensor_is_not_reported(void) {
+  g_pressureCalibration = {2, {{0, 160}, {20, 280}}};
+  s_pressureAdc = 1023;
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(0, pressureNotify().count);
+}
+
+void test_a_switched_off_pressure_sensor_is_not_reported(void) {
+  g_pressureEnabled = false;
+  readPressure(F, 1023);
+  TEST_ASSERT_EQUAL_INT(0, pressureNotify().count);
+}
+
+// With no calibration there is no reading to judge
+void test_an_uncalibrated_pressure_sensor_is_not_reported(void) {
+  g_fermenters[F].psiCollect = true;
+  s_pressureAdc = 1023;
+  for (int n = 0; n < 10; n++) { s_millis += 10; pressureLoop(); }
+  TEST_ASSERT_EQUAL_INT(0, pressureNotify().count);
+}
+
 void test_payload_names_the_fermenter_not_the_device(void) {
   // The service rate-limits per "name", so each fermenter reports under its
   // own name and the device name goes in device_source.
@@ -432,6 +570,17 @@ int main(int argc, char** argv) {
   RUN_TEST(test_payload_idle_state_differs_per_service);
   RUN_TEST(test_payload_uses_per_service_key_names);
   RUN_TEST(test_payload_sends_og_only_to_brewers_friend);
+  RUN_TEST(test_payload_sends_pressure_to_brewers_friend_as_psi);
+  RUN_TEST(test_payload_sends_pressure_to_brewfather_with_its_unit);
+  RUN_TEST(test_payload_sends_pressure_only_for_the_fermenter_with_the_sensor);
+  RUN_TEST(test_switching_pressure_off_omits_it_from_both_services);
+  RUN_TEST(test_payload_leaves_out_pressure_without_a_usable_reading);
+  RUN_TEST(test_a_reading_below_zero_is_reported_as_a_pressure_fault);
+  RUN_TEST(test_an_input_at_full_scale_is_reported_as_a_pressure_fault);
+  RUN_TEST(test_calibrated_and_estimated_readings_are_not_pressure_faults);
+  RUN_TEST(test_an_unassigned_pressure_sensor_is_not_reported);
+  RUN_TEST(test_a_switched_off_pressure_sensor_is_not_reported);
+  RUN_TEST(test_an_uncalibrated_pressure_sensor_is_not_reported);
   RUN_TEST(test_payload_names_the_fermenter_not_the_device);
   RUN_TEST(test_payload_url_is_built_per_service);
   RUN_TEST(test_report_skipped_for_unconfigured_or_bad_slot);

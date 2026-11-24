@@ -36,6 +36,7 @@
 #include "TextSafe.h"
 #include "Fermenter.h"
 #include "Temperatures.h"
+#include "Pressure.h"
 #include "Profile.h"
 #include "Tilt.h"
 #include "Version.h"
@@ -55,6 +56,19 @@ static const char* probeFunctionName(uint8_t fn) {
     case PROBE_FN_AIR:      return "air";
     case PROBE_FN_CONTROL:  return "control";
     default:                return "unassigned";
+  }
+}
+
+// The pressure_status text for a reading state. These are the WebUI's names
+// for the same states (pressureStates in web/js/sensors.js), so HA and the
+// WebUI say the same thing.
+static const char* pressureStateName(uint8_t state) {
+  switch (state) {
+    case PRESSURE_BELOW_ZERO: return "Below zero";
+    case PRESSURE_CALIBRATED: return "Calibrated";
+    case PRESSURE_ESTIMATE:   return "Estimate";
+    case PRESSURE_ADC_LIMIT:  return "ADC limit";
+    default:                  return "Unavailable";
   }
 }
 
@@ -471,6 +485,9 @@ static const HaEntityDesc kFermenterEntities[] PROGMEM = {
   { HA_NUMBER, 0, "og",             "OG",             nullptr, "SG",    "mdi:test-tube",           nullptr, nullptr, 0.990f, 1.200f, 0.001f },
   { HA_NUMBER, 0, "tg",             "TG",             nullptr, "SG",    "mdi:test-tube",           nullptr, nullptr, 0.990f, 1.200f, 0.001f },
   { HA_SENSOR, 0, "attenuation",    "Attenuation",    nullptr, "%",     "mdi:percent",             nullptr, "measurement" },
+  // Pressure — every fermenter has both; only the one with the sensor has a reading
+  { HA_SENSOR, 0, "pressure",        "Pressure",        "pressure", "psi", nullptr,     nullptr, "measurement" },
+  { HA_SENSOR, 0, "pressure_status", "Pressure Status", nullptr,    nullptr, "mdi:gauge", nullptr, nullptr },
   // Status — read-only text sensor
   { HA_SENSOR, 0, "status", "Status", nullptr, nullptr, "mdi:thermometer", nullptr, nullptr },
   // Alarm — over/under temperature beyond tolerance
@@ -1394,6 +1411,24 @@ void reportMqtt() {
     publishFloat(base, "og", g_fermenters[i].og, 4);
     publishFloat(base, "tg", g_fermenters[i].tg, 4);
     publishFloat(base, "attenuation", getAttenuation(i));
+
+    // Pressure - published for every fermenter, so one that no longer has the
+    // sensor shows unknown instead of its last reading. "None" is what makes
+    // HA show unknown. It is never 0, which would look safe, and never an
+    // empty payload, which HA ignores for a number and keeps the old value.
+    bool pressureAssigned = g_pressureEnabled && g_fermenters[i].psiCollect;
+    PressureReading pressure = pressureCurrentReading();
+    if (pressureAssigned &&
+        (pressure.state == PRESSURE_CALIBRATED || pressure.state == PRESSURE_ESTIMATE))
+      publishFloat(base, "pressure", pressure.psi);
+    else
+      publishValue(base, "pressure", "None");
+    if (pressureAssigned)
+      publishValue(base, "pressure_status", pressureStateName(pressure.state));
+    else if (g_fermenters[i].psiCollect)   // assigned, but the sensor is switched off
+      publishValue(base, "pressure_status", "Disabled");
+    else
+      publishValue(base, "pressure_status", "Not assigned");
 
     // State
     publishBool(base, "power", g_fermenters[i].power);

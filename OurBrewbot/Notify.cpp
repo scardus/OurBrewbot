@@ -21,6 +21,7 @@
 #include "Notify.h"
 #include "Config.h"
 #include "Crash.h"
+#include "Pressure.h"
 #include "Temperatures.h"
 #include "Tilt.h"
 #include "UpdateCheck.h"
@@ -94,7 +95,9 @@ static uint8_t eventGroup(NotifyEvent type) {
     case NOTIFY_ISPINDEL_LOST:
     case NOTIFY_ISPINDEL_BACK:
     case NOTIFY_TILT_LOST:
-    case NOTIFY_TILT_BACK:         return NOTIFY_EVT_SENSORS;
+    case NOTIFY_TILT_BACK:
+    case NOTIFY_PRESSURE_FAULT:
+    case NOTIFY_PRESSURE_BACK:     return NOTIFY_EVT_SENSORS;
     case NOTIFY_RESTART:           return NOTIFY_EVT_RESTARTS;
     case NOTIFY_STEP_COMPLETE:
     case NOTIFY_PROFILE_FINISHED:  return NOTIFY_EVT_PROFILE;
@@ -148,6 +151,12 @@ static void setHeadingFor(const NotifyEventData& event, NotifyMessage& msg) {
       break;
     case NOTIFY_TILT_BACK:
       setHeading(msg, PSTR("Tilt reporting again"), PSTR("white_check_mark"), PRIORITY_NORMAL);
+      break;
+    case NOTIFY_PRESSURE_FAULT:
+      setHeading(msg, PSTR("Pressure sensor needs checking"), PSTR("warning"), PRIORITY_HIGH);
+      break;
+    case NOTIFY_PRESSURE_BACK:
+      setHeading(msg, PSTR("Pressure sensor reading again"), PSTR("white_check_mark"), PRIORITY_NORMAL);
       break;
     case NOTIFY_RESTART:
       setHeading(msg, PSTR("Controller restarted"), PSTR("warning"), PRIORITY_HIGH);
@@ -311,6 +320,25 @@ bool notifyBuildMessage(const NotifyEventData& event, NotifyMessage& msg) {
                      getTiltColourName(i));
       break;
 
+    // A reading far below the 0 PSI point might be a disconnected sensor,
+    // but could also be a wiring fault or a vacuum, so the text says what was
+    // measured rather than guessing the cause
+    case NOTIFY_PRESSURE_FAULT:
+      if (event.detail == PRESSURE_BELOW_ZERO) {
+        n = snprintf_P(body, size, PSTR("The pressure sensor reads below its 0 PSI point. "
+                                        "Check the sensor and its wiring. Its readings are no longer used."));
+      } else if (event.detail == PRESSURE_ADC_LIMIT) {
+        n = snprintf_P(body, size, PSTR("The pressure sensor input is at full scale. "
+                                        "Check the sensor and its wiring. Its readings are no longer used."));
+      } else {
+        return false;   // not a fault state
+      }
+      break;
+
+    case NOTIFY_PRESSURE_BACK:
+      n = snprintf_P(body, size, PSTR("The pressure sensor is reading again. Its readings are used."));
+      break;
+
     case NOTIFY_RESTART: {
       char reason[20];   // the longest is "hardware watchdog", 17 characters
       strncpy_P(reason, restartReasonText(event.detail), sizeof(reason) - 1);
@@ -443,12 +471,13 @@ enum : uint8_t {
 };
 
 // One tracker for each thing that can have a problem: every fermenter's
-// alarm, then every probe, iSpindel and Tilt
+// alarm, then every probe, iSpindel and Tilt, then the pressure sensor
 #define TRACK_ALARMS     0
 #define TRACK_PROBES     (TRACK_ALARMS    + MAX_FERMENTERS)
 #define TRACK_ISPINDELS  (TRACK_PROBES    + MAX_PROBES)
 #define TRACK_TILTS      (TRACK_ISPINDELS + MAX_ISPINDELS)
-#define TRACK_COUNT      (TRACK_TILTS     + MAX_TILTS)
+#define TRACK_PRESSURE   (TRACK_TILTS     + MAX_TILTS)
+#define TRACK_COUNT      (TRACK_PRESSURE  + 1)
 
 static uint32_t s_problemSince[TRACK_COUNT]    = {0};   // uptimeStamp() the episode started; 0 = no episode
 static uint32_t s_problemOffSince[TRACK_COUNT] = {0};   // uptimeStamp() it went away; 0 = it is there
@@ -467,6 +496,10 @@ static AlarmReading s_alarmReading[MAX_FERMENTERS];
 // How long each sensor had been quiet at its last check, for the banner's
 // text. Kept to 65535 minutes (45 days) so it fits in two bytes.
 static uint16_t s_problemMinutes[TRACK_COUNT] = {0};
+
+// The PressureReadingState at the pressure sensor's last check with a fault,
+// for the banner's text
+static uint8_t s_pressureFault = PRESSURE_BELOW_ZERO;
 
 // Record one check of a problem. Returns true when its episode has just
 // ended, which is when the "over" notification is due.
@@ -512,6 +545,8 @@ static int startedTracker(const NotifyEventData& event) {
       return (event.index < MAX_ISPINDELS) ? TRACK_ISPINDELS + event.index : -1;
     case NOTIFY_TILT_LOST:
       return (event.index < MAX_TILTS) ? TRACK_TILTS + event.index : -1;
+    case NOTIFY_PRESSURE_FAULT:
+      return TRACK_PRESSURE;
     default:
       return -1;
   }
@@ -567,7 +602,7 @@ void notifyAlarmState(uint8_t fermenter, bool active, bool overTemp, bool severe
   }
 }
 
-void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minutes) {
+void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minutes, uint8_t detail) {
   uint8_t     tracker   = 0;
   NotifyEvent lostEvent = NOTIFY_PROBE_LOST;
   NotifyEvent backEvent = NOTIFY_PROBE_BACK;
@@ -589,6 +624,14 @@ void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minute
       lostEvent = NOTIFY_TILT_LOST;
       backEvent = NOTIFY_TILT_BACK;
       break;
+    case NOTIFY_SENSOR_PRESSURE:
+      if (index != 0) return;
+      tracker   = TRACK_PRESSURE;
+      lostEvent = NOTIFY_PRESSURE_FAULT;
+      backEvent = NOTIFY_PRESSURE_BACK;
+      break;
+    default:
+      return;
   }
 
   bool episodeEnded = trackProblem(tracker, lost);
@@ -597,6 +640,7 @@ void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minute
     if (shown < 0.0f)     shown = 0.0f;
     if (shown > 65535.0f) shown = 65535.0f;
     s_problemMinutes[tracker] = (uint16_t)shown;
+    if (kind == NOTIFY_SENSOR_PRESSURE) s_pressureFault = detail;
   }
 
   if (!eventsWanted(NOTIFY_EVT_SENSORS)) {
@@ -604,8 +648,11 @@ void notifySensorState(NotifySensor kind, uint8_t index, bool lost, float minute
     return;
   }
 
+  // A sensor that keeps failing in a different way (the pressure sensor
+  // going from below zero to full scale) is the same episode: only its first
+  // fault is sent, and the banner shows the latest one
   if (lost) {
-    sendStartedIfDue(tracker, PROBLEM_SENT, lostEvent, index, 0, minutes);
+    sendStartedIfDue(tracker, PROBLEM_SENT, lostEvent, index, detail, minutes);
   } else if (episodeEnded && shouldSendOver(tracker)) {
     notifyEvent(backEvent, index);
   }
@@ -728,7 +775,9 @@ static bool sensorStillUsed(uint8_t tracker) {
   if (tracker < TRACK_PROBES)    return true;   // a fermenter alarm, not a sensor
   if (tracker < TRACK_ISPINDELS) return g_probes[tracker - TRACK_PROBES].fermenter < MAX_FERMENTERS;
   if (tracker < TRACK_TILTS)     return g_iSpindels[tracker - TRACK_ISPINDELS].fermenter < MAX_FERMENTERS;
-  return g_tilts[tracker - TRACK_TILTS].fermenter < MAX_FERMENTERS;
+  if (tracker < TRACK_PRESSURE)  return g_tilts[tracker - TRACK_TILTS].fermenter < MAX_FERMENTERS;
+  // pressureLoop() stops checking the pressure sensor when it is switched off
+  return g_pressureEnabled && pressureFermenter() >= 0;
 }
 
 // The "started" event for a problem, with its latest values, so the banner
@@ -752,10 +801,13 @@ static NotifyEventData problemEvent(uint8_t tracker) {
     event.type  = NOTIFY_ISPINDEL_LOST;
     event.index = tracker - TRACK_ISPINDELS;
     event.a     = minutes;
-  } else {
+  } else if (tracker < TRACK_PRESSURE) {
     event.type  = NOTIFY_TILT_LOST;
     event.index = tracker - TRACK_TILTS;
     event.a     = minutes;
+  } else {
+    event.type   = NOTIFY_PRESSURE_FAULT;
+    event.detail = s_pressureFault;
   }
   return event;
 }
